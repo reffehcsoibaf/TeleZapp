@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+venv*/
+.venv/
+
+# NUNCA versionar: sessões e credenciais dos testes (dão acesso às contas)
+sessao*/
+*.session
+*.session-journal
+senha*.txt
+configuracao*.txt
+
+# Saídas geradas pelos testes
+logs/
+empacotado/
+build-pyinstaller/
