@@ -18,7 +18,7 @@ ARQ_SENHA = os.path.join(BASE, "senha-telegram.txt")
 MODELO_CONF = (
     "# Preencha depois do sinal de igual, salve com Control S e feche.\n"
     "# API_ID e API_HASH: crie em my.telegram.org, em API development tools.\n"
-    "# TELEFONE: com sinal de mais e codigo do pais, exemplo +5551999999999\n"
+    "# TELEFONE: com sinal de mais e codigo do pais, exemplo +5511999999999\n"
     "API_ID=\n"
     "API_HASH=\n"
     "TELEFONE=\n")
