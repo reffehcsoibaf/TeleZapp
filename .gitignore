@@ -1,17 +1,37 @@
-# Python
+# --- Python ---
 __pycache__/
 *.py[cod]
-venv*/
 .venv/
+venv*/
 
-# NUNCA versionar: sessões e credenciais dos testes (dão acesso às contas)
+# --- SEGREDOS E SESSOES: nunca entram no repositorio ---
+# Sessoes do WhatsApp e do Telegram dao acesso as contas.
 sessao*/
 *.session
 *.session-journal
-senha*.txt
+*.db
+*.sqlite
+*.sqlite3
+# Dados que os experimentos pedem ao usuario (api_hash, telefone, codigos, senhas)
 configuracao*.txt
+codigo*.txt
+senha*.txt
+credenciais*.txt
+.env
+*.pem
+*.key
 
-# Saídas geradas pelos testes
+# --- Saidas e arquivos gerados pelos experimentos ---
 logs/
 empacotado/
 build-pyinstaller/
+dist/
+build/
+*.spec
+gravacoes-teste/
+amostras-*/
+arquivos-grandes/
+downloads-*/
+cache-*-teste*/
+repo-wppconnect/
+teste-wpp/

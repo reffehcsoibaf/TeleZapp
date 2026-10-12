@@ -1,6 +1,12 @@
-# Auto detect text files and perform LF normalization
+# Normaliza o fim de linha dos arquivos de texto
 * text=auto
 
-# Scripts do Windows precisam de CRLF mesmo que o Git normalize para LF
-*.bat text eol=crlf
-*.cmd text eol=crlf
+# Scripts do Windows: guardados exatamente como estao (CRLF). Rotulos e goto
+# do cmd podem falhar com fim de linha LF, inclusive em downloads avulsos do
+# arquivo pelo site do GitHub (o que a regra "eol=crlf" nao cobre).
+*.bat -text
+*.cmd -text
+
+# Codigo e documentacao sempre em LF
+*.py text eol=lf
+*.md text eol=lf
