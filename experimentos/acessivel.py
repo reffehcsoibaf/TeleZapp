@@ -57,6 +57,23 @@ def aviso(texto, titulo="Teste TeleZapp", bloquear=False):
                          daemon=True).start()
 
 
+MB_YESNO = 0x4
+MB_ICONQUESTION = 0x20
+IDYES = 6
+
+
+def perguntar_sim_nao(texto, titulo="Teste TeleZapp"):
+    """Pergunta sim ou nao numa caixa de mensagem. Devolve True para Sim."""
+    sinal()
+    try:
+        resposta = ctypes.windll.user32.MessageBoxW(
+            0, texto, titulo,
+            MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND | MB_TOPMOST)
+    except Exception:
+        return False
+    return resposta == IDYES
+
+
 def ler_chaves(caminho):
     """Le linhas CHAVE=valor, ignorando linhas vazias e as que comecam com #."""
     dados = {}
@@ -121,6 +138,15 @@ def _mensagem_final(nome):
             "Telegram apaga a mensagem de teste sozinho. Não envie as "
             "pastas sessao-telegram ou sessao-whatsapp nem os arquivos de "
             "configuração." % nome)
+    if nome == "gravacao-voz":
+        return (
+            "O teste de gravação de voz terminou. A pasta com o arquivo de "
+            "log foi aberta: envie o arquivo resultado-teste-gravacao-voz."
+            "log e me diga qual versão você preferiu, se ouviu diferença "
+            "entre elas, e, se enviou ao Telegram, como as notas de voz "
+            "apareceram no celular.\n\n"
+            "As gravações ficaram na pasta gravacoes-teste. Pode apagá-la "
+            "quando quiser.")
     if nome == "empacotamento":
         return (
             "O teste de empacotamento terminou. A pasta com o arquivo de log "

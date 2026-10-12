@@ -66,7 +66,7 @@ EMBRULHOS = ("deviceSentMessage", "ephemeralMessage", "viewOnceMessage",
 
 MODELO_CONF = (
     "# Digite o numero do WhatsApp depois do sinal de igual, com codigo do\n"
-    "# pais e DDD, so digitos. Exemplo: NUMERO=5551999999999\n"
+    "# pais e DDD, so digitos. Exemplo: NUMERO=5511999999999\n"
     "# Se a conta ja foi pareada neste computador, escreva NUMERO=nenhum\n"
     "# Salve com Control S.\n"
     "NUMERO=\n")

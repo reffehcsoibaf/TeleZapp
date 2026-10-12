@@ -131,6 +131,12 @@ def rotulo_conversa(c):
     return base
 
 
+def texto_marcador(n):
+    """Texto do item que marca onde comecam as mensagens nao lidas."""
+    return "Início das mensagens não lidas: %d %s" % (
+        n, "mensagem" if n == 1 else "mensagens")
+
+
 def classificar_arquivo(caminho):
     ext = os.path.splitext(caminho)[1].lower()
     if ext in EXT_FOTO:
@@ -191,11 +197,12 @@ def dados_de_exemplo():
     c2 = Conversa("Grupo da família", "Telegram", [
         Mensagem("Mãe", "07:30", "texto", "Café da manhã pronto!"),
         Mensagem("Pai", "07:32", "foto", "Bolo de ontem"),
+        Mensagem("", "07:35", "texto", "Chego mais tarde, pode começar sem "
+                 "mim.", minha=True, estado="enviada"),
         Mensagem("Carlos", "07:40", "video", "Aniversário da Júlia",
                  segundos=25, tamanho=3355443),
         Mensagem("Mãe", "07:41", "voz", segundos=95),
-        Mensagem("", "07:45", "texto", "Chego mais tarde, pode começar sem "
-                 "mim.", minha=True, estado="enviada"),
+        Mensagem("Pai", "07:42", "texto", "Já estamos à mesa."),
     ])
     c3 = Conversa("Trabalho: projeto", "WhatsApp", [
         Mensagem("Marta", "09:00", "texto", TEXTO_LONGO),

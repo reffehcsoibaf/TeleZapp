@@ -18,6 +18,7 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 LOG = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
     BASE, "logs", "resultado-teste-interface.log")
 INTERVALO_AUTOMATICO_MS = 20000
+MARCADOR = "marcador"  # chave do item que marca as nao lidas
 TEXTO_SEM_CONVERSA = "Nenhuma conversa aberta. Aperte Enter numa conversa."
 TEXTO_SEM_MENSAGENS = "Esta conversa ainda não tem mensagens."
 
@@ -68,10 +69,12 @@ Tecla Aplicativos ou Shift F10: menu da mensagem selecionada
 
 NA LISTA DE CONVERSAS
 Setas: percorrem as conversas (cada uma é lida com o número de não lidas).
-Enter: abre a conversa e leva o foco para as mensagens. Se o Enter não
-funcionar, use o menu Conversa, Abrir a conversa selecionada.
+Enter: abre a conversa e leva o foco para as mensagens: para o item "Início
+das mensagens não lidas", se houver não lidas, ou para a última mensagem.
+Se o Enter não funcionar, use o menu Conversa, Abrir a conversa selecionada.
 
 NA LISTA DE MENSAGENS
+Esc: volta para a lista de conversas (também funciona na caixa de digitação).
 Setas: percorrem as mensagens.
 Enter: abre ou baixa a mídia (simulado) ou mostra os detalhes de um texto.
 
@@ -105,6 +108,9 @@ class Janela(wx.Frame):
         self.estilo = mc.ESTILO_AUTOR_PRIMEIRO
         self.resposta_a = None
         self.contador_sim = 0
+        self.marcador = None      # indice da 1a mensagem nao lida ao abrir
+        self.marcador_n = 0       # quantas eram as nao lidas ao abrir
+        self.mapa = [None]        # mensagem (indice), MARCADOR ou None por item
         self.opcoes = {"som": True, "falar_novas": True, "confirmar_envio": True}
 
         self._criar_menus()
@@ -277,6 +283,12 @@ class Janela(wx.Frame):
         foco = self.FindFocus()
         sem_modificador = not (evt.AltDown() or evt.ControlDown()
                                or evt.ShiftDown())
+        if k == wx.WXK_ESCAPE and sem_modificador and foco in (
+                self.lista_msgs, self.caixa, self.botao_enviar,
+                self.botao_anexar):
+            log("tecla: Esc (foco: %s)" % self._nome_do_foco())
+            self._voltar_para_conversas()
+            return
         if k in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) and sem_modificador:
             log("tecla: Enter (foco: %s)" % self._nome_do_foco())
             if foco is self.lista_conv:
@@ -330,36 +342,81 @@ class Janela(wx.Frame):
         conv = self.conversas[i]
         lidas = conv.nao_lidas
         conv.nao_lidas = 0
+        if 0 < lidas <= len(conv.mensagens):
+            self.marcador = len(conv.mensagens) - lidas
+            self.marcador_n = lidas
+        else:
+            self.marcador = None
+            self.marcador_n = 0
         self._atualizar_rotulo(i)
         self.rot_msgs.SetLabel("Mensagens de " + conv.nome)
         self.SetTitle("TeleZapp, protótipo: " + conv.nome)
-        self._preencher_mensagens(selecionar_ultima=True)
+        self._preencher_mensagens(
+            destino="marcador" if self.marcador is not None else "ultima")
         self.SetStatusText("Conversa aberta: %s, %s" % (conv.nome, conv.provedor))
-        log("acao: conversa aberta (indice %d, %d mensagens, %d nao lidas)" % (
-            i, len(conv.mensagens), lidas))
+        log("acao: conversa aberta (indice %d, %d mensagens, %d nao lidas, "
+            "foco em: %s)" % (i, len(conv.mensagens), lidas,
+                              "marcador" if self.marcador is not None
+                              else "ultima mensagem"))
         self.lista_msgs.SetFocus()
 
-    def _preencher_mensagens(self, selecionar_ultima=False):
+    @seguro
+    def _voltar_para_conversas(self):
+        """Esc: volta para a lista de conversas, na conversa que estava aberta."""
+        if self.atual is not None:
+            self.lista_conv.SetSelection(self.atual)
+            if self.marcador is not None:
+                self.marcador = None
+                self.marcador_n = 0
+                self._preencher_mensagens()
+        log("acao: voltou para a lista de conversas")
+        self.lista_conv.SetFocus()
+
+    def _chave_selecionada(self):
+        """Indice da mensagem selecionada, MARCADOR, ou None."""
+        i = self.lista_msgs.GetSelection()
+        return self.mapa[i] if 0 <= i < len(self.mapa) else None
+
+    def _preencher_mensagens(self, destino=None):
+        """Refaz a lista de mensagens.
+
+        destino: "marcador" (item das nao lidas), "ultima" (ultimo item) ou
+        None (mantem a mensagem que estava selecionada).
+        """
         conv = self.conversas[self.atual]
+        antes = self._chave_selecionada()
         linhas = mc.formatar_lista(conv.mensagens, self.estilo)
-        antes = self.lista_msgs.GetSelection()
-        if not linhas:
-            self.lista_msgs.Set([TEXTO_SEM_MENSAGENS])
-            self.lista_msgs.SetSelection(0)
-            return
-        self.lista_msgs.Set(linhas)
-        if linhas:
-            if selecionar_ultima or antes < 0:
-                self.lista_msgs.SetSelection(len(linhas) - 1)
-            else:
-                self.lista_msgs.SetSelection(min(antes, len(linhas) - 1))
+        itens, mapa = [], []
+        pos_marcador = None
+        for k, linha in enumerate(linhas):
+            if self.marcador is not None and k == self.marcador:
+                pos_marcador = len(itens)
+                itens.append(mc.texto_marcador(self.marcador_n))
+                mapa.append(MARCADOR)
+            itens.append(linha)
+            mapa.append(k)
+        if not itens:
+            itens, mapa = [TEXTO_SEM_MENSAGENS], [None]
+        self.mapa = mapa
+        self.lista_msgs.Set(itens)
+        sel = len(itens) - 1
+        if destino == "marcador" and pos_marcador is not None:
+            sel = pos_marcador
+        elif destino is None:
+            if antes == MARCADOR and pos_marcador is not None:
+                sel = pos_marcador
+            elif isinstance(antes, int) and antes in mapa:
+                sel = mapa.index(antes)
+        self.lista_msgs.SetSelection(sel)
 
     def _mensagem_selecionada(self):
         if self.atual is None:
             return None
-        i = self.lista_msgs.GetSelection()
+        chave = self._chave_selecionada()
         msgs = self.conversas[self.atual].mensagens
-        return msgs[i] if 0 <= i < len(msgs) else None
+        if isinstance(chave, int) and 0 <= chave < len(msgs):
+            return msgs[chave]
+        return None
 
     # --------------------------------------------------------------- atalhos
     @seguro
@@ -446,6 +503,9 @@ class Janela(wx.Frame):
     def _abrir_selecionada(self):
         m = self._mensagem_selecionada()
         if m is None:
+            if self._chave_selecionada() == MARCADOR:
+                self.fala.falar("Marcador. As mensagens não lidas começam na "
+                                "próxima.")
             return
         if m.tipo == "texto":
             log("acao: Enter em mensagem de texto -> detalhes")
@@ -566,7 +626,9 @@ class Janela(wx.Frame):
     def _anexar_mensagem(self, m):
         conv = self.conversas[self.atual]
         conv.mensagens.append(m)
-        self._preencher_mensagens()
+        self.marcador = None
+        self.marcador_n = 0
+        self._preencher_mensagens(destino="ultima")
 
     @seguro
     def _enviar_texto(self):
