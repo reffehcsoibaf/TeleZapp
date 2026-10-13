@@ -6,6 +6,8 @@ Cada campo tem um rotulo (StaticText antes do controle, que o NVDA le ao
 focar) e o mesmo texto como nome do controle. Erros aparecem numa caixa de
 mensagem do Windows antes de pedir de novo, que o NVDA le sozinho.
 """
+import time
+
 import wx
 
 from telezapp.provedores.base import PEDIR_CODIGO, PEDIR_SENHA, PEDIR_TELEFONE
@@ -126,3 +128,168 @@ def mostrar_texto(pai, titulo, texto, rotulo):
     caixa.SetFocus()
     dlg.ShowModal()
     dlg.Destroy()
+
+
+# ------------------------------------------------------- pareamento WhatsApp
+INSTRUCOES_CODIGO = (
+    "No celular, abra o WhatsApp, vá em Configurações, Dispositivos "
+    "conectados, Conectar dispositivo, e escolha Conectar com número de "
+    "telefone. Depois digite lá o código que aparecer aqui.")
+INSTRUCOES_QR = (
+    "No celular, abra o WhatsApp, vá em Configurações, Dispositivos "
+    "conectados, Conectar dispositivo, e aponte a câmera para o QR Code "
+    "desta janela. O QR Code é trocado sozinho a cada 20 segundos, mais ou "
+    "menos.")
+
+
+def imagem_qr(codigo, escala=6, borda=4):
+    """wx.Bitmap com o QR Code (segno, sem Pillow)."""
+    import segno
+    linhas = list(segno.make_qr(codigo, error="l").matrix_iter(border=borda))
+    n = len(linhas)
+    lado = n * escala
+    dados = bytearray()
+    for linha in linhas:
+        faixa = bytearray()
+        for escuro in linha:
+            faixa += (b"\x00\x00\x00" if escuro else b"\xff\xff\xff") * escala
+        dados += bytes(faixa) * escala
+    return wx.Bitmap(wx.Image(lado, lado, bytes(dados)))
+
+
+class DialogoPareamento(wx.Dialog):
+    """Janela sem bloqueio: o QR Code e o codigo chegam enquanto ela esta
+    aberta. `gerar_codigo(telefone)` pede o codigo ao provedor;
+    `ao_cancelar()` e chamado se a pessoa fechar antes de concluir."""
+
+    def __init__(self, pai, falar, gerar_codigo, ao_cancelar, telefone=""):
+        super().__init__(pai, title="Conectar conta do WhatsApp",
+                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+        self.falar = falar
+        self.gerar_codigo = gerar_codigo
+        self.ao_cancelar = ao_cancelar
+        self.concluido = False
+        self.qr_atual = ""
+        lay = wx.BoxSizer(wx.VERTICAL)
+
+        self.modo = wx.RadioBox(
+            self, label="Como conectar",
+            choices=["Código digitado no celular", "QR Code"],
+            majorDimension=1, style=wx.RA_SPECIFY_COLS)
+        lay.Add(self.modo, 0, wx.EXPAND | wx.ALL, 10)
+
+        # --- codigo
+        self.painel_codigo = wx.Panel(self)
+        pc = wx.BoxSizer(wx.VERTICAL)
+        t = wx.StaticText(self.painel_codigo, label=INSTRUCOES_CODIGO)
+        t.Wrap(460)
+        pc.Add(t, 0, wx.BOTTOM, 8)
+        pc.Add(wx.StaticText(self.painel_codigo,
+                             label="Número do WhatsApp com DDD"), 0)
+        self.telefone = wx.TextCtrl(self.painel_codigo, value=telefone,
+                                    style=wx.TE_PROCESS_ENTER,
+                                    name="Número do WhatsApp com DDD")
+        pc.Add(self.telefone, 0, wx.EXPAND)
+        self.botao_gerar = wx.Button(self.painel_codigo, label="&Gerar código")
+        pc.Add(self.botao_gerar, 0, wx.TOP, 6)
+        pc.Add(wx.StaticText(self.painel_codigo,
+                             label="Código para digitar no celular"), 0,
+               wx.TOP, 8)
+        self.codigo = wx.TextCtrl(self.painel_codigo, value="",
+                                  style=wx.TE_READONLY,
+                                  name="Código para digitar no celular")
+        pc.Add(self.codigo, 0, wx.EXPAND)
+        self.painel_codigo.SetSizer(pc)
+        lay.Add(self.painel_codigo, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+
+        # --- QR
+        self.painel_qr = wx.Panel(self)
+        pq = wx.BoxSizer(wx.VERTICAL)
+        t = wx.StaticText(self.painel_qr, label=INSTRUCOES_QR)
+        t.Wrap(460)
+        pq.Add(t, 0, wx.BOTTOM, 8)
+        self.situacao_qr = wx.TextCtrl(
+            self.painel_qr, value="Aguardando o QR Code do WhatsApp...",
+            style=wx.TE_READONLY, name="Situação do QR Code")
+        pq.Add(self.situacao_qr, 0, wx.EXPAND)
+        self.imagem = wx.StaticBitmap(self.painel_qr, name="QR Code",
+                                      size=(270, 270))
+        pq.Add(self.imagem, 0, wx.TOP | wx.ALIGN_CENTER, 8)
+        self.painel_qr.SetSizer(pq)
+        lay.Add(self.painel_qr, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+
+        cancelar = wx.Button(self, wx.ID_CANCEL, "&Cancelar")
+        lay.Add(cancelar, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+        self.SetSizer(lay)
+        self.SetEscapeId(wx.ID_CANCEL)
+
+        self.modo.Bind(wx.EVT_RADIOBOX, lambda e: self._trocar_modo())
+        self.botao_gerar.Bind(wx.EVT_BUTTON, lambda e: self._gerar())
+        self.telefone.Bind(wx.EVT_TEXT_ENTER, lambda e: self._gerar())
+        self.Bind(wx.EVT_BUTTON, lambda e: self.Close(), id=wx.ID_CANCEL)
+        self.Bind(wx.EVT_CLOSE, self._ao_fechar)
+        self._trocar_modo()
+        self.Fit()
+        self.CentreOnParent()
+
+    def _trocar_modo(self):
+        codigo = self.modo.GetSelection() == 0
+        self.painel_codigo.Show(codigo)
+        self.painel_qr.Show(not codigo)
+        self.Layout()
+        self.Fit()
+        if codigo:
+            self.telefone.SetFocus()
+        else:
+            self.situacao_qr.SetFocus()
+
+    def _gerar(self):
+        from telezapp.nucleo.modelos import normalizar_telefone
+        numero = normalizar_telefone(self.telefone.GetValue())
+        if numero is None:
+            wx.MessageBox("Número inválido. Use DDD e número, por exemplo "
+                          "51 99999 8888.", self.GetTitle(),
+                          wx.OK | wx.ICON_WARNING, self)
+            self.telefone.SetFocus()
+            return
+        self.botao_gerar.Disable()
+        self.codigo.SetValue("Gerando o código...")
+        self.falar("Gerando o código. Aguarde.")
+        self.gerar_codigo(numero)
+
+    def mostrar_codigo(self, codigo, erro=""):
+        self.botao_gerar.Enable()
+        if erro:
+            self.codigo.SetValue("")
+            wx.MessageBox(erro, self.GetTitle(), wx.OK | wx.ICON_WARNING,
+                          self)
+            self.telefone.SetFocus()
+            return
+        self.codigo.SetValue(codigo)
+        self.codigo.SetFocus()
+        self.codigo.SetInsertionPoint(0)
+        self.falar("Código para digitar no celular: %s" % " ".join(
+            c for c in codigo if c != "-"), interromper=True)
+
+    def mostrar_qr(self, codigo):
+        if codigo == self.qr_atual:
+            return
+        primeiro = not self.qr_atual
+        self.qr_atual = codigo
+        self.imagem.SetBitmap(imagem_qr(codigo))
+        self.situacao_qr.SetValue("QR Code pronto. Atualizado às %s." %
+                                  time.strftime("%H:%M:%S"))
+        self.painel_qr.Layout()
+        self.Fit()
+        if self.modo.GetSelection() == 1:
+            self.falar("QR Code pronto." if primeiro
+                       else "QR Code atualizado.")
+
+    def concluir(self):
+        self.concluido = True
+        self.Destroy()
+
+    def _ao_fechar(self, evt):
+        if not self.concluido:
+            self.ao_cancelar()
+        self.Destroy()

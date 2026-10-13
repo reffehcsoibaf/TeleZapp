@@ -69,6 +69,31 @@ class LeituraConfirmada:
 
 
 @dataclass
+class EstadosMensagens:
+    """WhatsApp: as minhas mensagens `ids` foram entregues ou lidas."""
+    conta_id: str
+    conversa_id: str
+    ids: list
+    estado: str
+
+
+@dataclass
+class QrPareamento:
+    """WhatsApp: um novo QR Code para parear (troca a cada ~20 s)."""
+    conta_id: str
+    codigo: str
+
+
+@dataclass
+class CodigoPareamento:
+    """WhatsApp: o codigo de 8 caracteres para digitar no celular, ou o
+    motivo de nao ter conseguido gerar."""
+    conta_id: str
+    codigo: str = ""
+    erro: str = ""
+
+
+@dataclass
 class Aviso:
     """Algo que a pessoa precisa saber (erro de rede, limite do servico)."""
     conta_id: str

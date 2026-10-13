@@ -20,6 +20,12 @@ def caixa_de_erro(texto):
 
 
 def main():
+    # Sem terminal (pythonw), stdout e stderr nao existem: bibliotecas que
+    # escrevem neles nao podem falhar por isso.
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")
     from telezapp import NOME, config
     arquivo_log = config.configurar_registro()
     log = logging.getLogger("telezapp")
@@ -62,7 +68,10 @@ def main():
     app.MainLoop()
     banco.fechar()
     log.info("encerrado normalmente")
-    return 0
+    # Garante o fim do processo mesmo se alguma biblioteca deixar uma
+    # thread presa (tudo ja foi gravado e fechado acima).
+    logging.shutdown()
+    os._exit(0)
 
 
 if __name__ == "__main__":

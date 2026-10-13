@@ -6,7 +6,8 @@ rem  INICIAR O TELEZAPP
 rem  Na primeira vez (ou quando os componentes mudarem) cria o
 rem  ambiente na pasta venv e instala o necessario. Depois abre o
 rem  TeleZapp sem janela de terminal.
-rem  Log: %APPDATA%\TeleZapp\logs\iniciar.log
+rem  Log: %APPDATA%\TeleZapp\logs\iniciar.log (e o da vez anterior
+rem  em iniciar-anterior.log)
 rem ============================================================
 
 set "BASE=%~dp0"
@@ -17,6 +18,7 @@ set "LOG=%LOGDIR%\iniciar.log"
 set "PYCMD="
 
 if not exist "%LOGDIR%" mkdir "%LOGDIR%"
+if exist "%LOG%" move /y "%LOG%" "%LOGDIR%\iniciar-anterior.log" >nul
 >"%LOG%" echo ==== iniciar-telezapp %DATE% %TIME% ====
 cd /d "%RAIZ%"
 

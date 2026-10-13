@@ -35,11 +35,27 @@ class ProvedorFalso:
     def atualizar_conversas(self):
         self.pedidos.append(("atualizar",))
 
+    def pedir_codigo_pareamento(self, telefone):
+        self.pedidos.append(("codigo", telefone))
+
 
 class ContasFalsas:
     def __init__(self):
         self.p = ProvedorFalso()
         self.iniciadas = False
+        self.provedores = {"t1": self.p}
+        self.canceladas = []
+
+    def adicionar(self, servico, telefone=""):
+        self.provedores["w-nova"] = self.p
+        return True
+
+    def cancelar_nova(self, conta_id):
+        self.canceladas.append(conta_id)
+        return conta_id == "w-nova"
+
+    def servico(self, conta_id):
+        return "whatsapp" if conta_id.startswith("w") else "telegram"
 
     def provedor(self, conta_id):
         return self.p
@@ -244,3 +260,55 @@ def test_primeira_vez_sem_contas(tmp_path, monkeypatch):
     assert janela.lista_conv.itens == [jm.TEXTO_SEM_CONTAS]
     janela._char_hook(Tecla(wx_falso.WXK_RETURN))   # nao quebra
     banco.fechar()
+
+
+def test_pareamento_do_whatsapp(j):
+    j.adicionar_conta("whatsapp")
+    dlg = j.pareamentos["w-nova"]
+    assert dlg.mostrado and dlg.modo.GetSelection() == 0
+    # codigo: numero invalido nao pede nada; valido pede ao provedor
+    dlg.telefone.SetValue("123")
+    dlg._gerar()
+    assert not [p for p in j.contas.p.pedidos if p[0] == "codigo"]
+    dlg.telefone.SetValue("51 99999 8888")
+    dlg._gerar()
+    assert ("codigo", "+5551999998888") in j.contas.p.pedidos
+    j.b.publicar(ev.CodigoPareamento("w-nova", "ABCD-EFGH"))
+    assert dlg.codigo.GetValue() == "ABCD-EFGH"
+    assert wx_falso._foco[0] is dlg.codigo
+    # QR: a imagem e trocada quando chega um novo
+    j.b.publicar(ev.QrPareamento("w-nova", "2@qr1"))
+    assert dlg.imagem.bitmap.img.w == dlg.imagem.bitmap.img.h > 100
+    assert dlg.situacao_qr.GetValue().startswith("QR Code pronto")
+    # pareou: a janela fecha sozinha
+    j.b.publicar(ev.ContaPronta("w-nova", "Fábio", "+5551999998888"))
+    assert "w-nova" not in j.pareamentos and not dlg.vivo
+
+
+def test_cancelar_pareamento(j):
+    j.adicionar_conta("whatsapp")
+    dlg = j.pareamentos["w-nova"]
+    dlg._ao_fechar(None)
+    assert j.contas.canceladas == ["w-nova"] and not j.pareamentos
+
+
+def test_conta_salva_que_recusou_parear_nao_reabre_sozinha(j):
+    j.b.publicar(ev.QrPareamento("w-salva", "2@a"))
+    dlg = j.pareamentos["w-salva"]
+    dlg._ao_fechar(None)
+    j.b.publicar(ev.QrPareamento("w-salva", "2@b"))
+    assert "w-salva" not in j.pareamentos
+    j._reconectar()
+    j.b.publicar(ev.QrPareamento("w-salva", "2@c"))
+    assert "w-salva" in j.pareamentos
+
+
+def test_entregue_e_lida_no_whatsapp(j):
+    j._abrir_conversa(j.indice[("t1", "20")])
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", [
+        msg("3", "a", minha=True, conversa="20")]))
+    j.b.publicar(ev.EstadosMensagens("t1", "20", ["3"], m.ENTREGUE))
+    assert j.lista_msgs.itens[0].endswith("a, entregue")
+    j.b.publicar(ev.EstadosMensagens("t1", "20", ["3"], m.LIDA))
+    j.b.publicar(ev.EstadosMensagens("t1", "20", ["3"], m.ENTREGUE))
+    assert j.lista_msgs.itens[0].endswith("a, lida")

@@ -20,7 +20,10 @@ NOMES_TIPOS = {
 }
 
 # Estados de uma mensagem enviada
-ENVIANDO, ENVIADA, LIDA, FALHOU = "enviando", "enviada", "lida", "falhou"
+ENVIANDO, ENVIADA, ENTREGUE, LIDA, FALHOU = (
+    "enviando", "enviada", "entregue", "lida", "falhou")
+# ordem de avanco: um estado nunca volta para um anterior
+ORDEM_ESTADOS = {ENVIANDO: 0, ENVIADA: 1, ENTREGUE: 2, LIDA: 3}
 
 # Estilos de leitura da lista de mensagens
 ESTILO_AUTOR_PRIMEIRO = 1

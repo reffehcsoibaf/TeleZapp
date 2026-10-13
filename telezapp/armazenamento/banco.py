@@ -12,7 +12,7 @@ import sqlite3
 import threading
 from dataclasses import astuple, fields
 
-from telezapp.nucleo.modelos import Conversa, Mensagem
+from telezapp.nucleo.modelos import ORDEM_ESTADOS, Conversa, Mensagem
 
 log = logging.getLogger("telezapp.banco")
 
@@ -117,6 +117,26 @@ class Banco:
                 % ", ".join(_CAMPOS_MSG),
                 (conta_id, conversa_id, limite)).fetchall()
         return [_msg(l) for l in reversed(linhas)]
+
+    def mudar_estado(self, conta_id, conversa_id, ids, estado):
+        """WhatsApp: muda o estado das minhas mensagens com esses ids, sem
+        voltar atras (lida nao vira entregue). Devolve os ids que mudaram."""
+        nivel = ORDEM_ESTADOS.get(estado, 0)
+        mudaram = []
+        with self._trava, self._con:
+            for i in ids:
+                linha = self._con.execute(
+                    "SELECT estado FROM mensagens WHERE conta_id=? AND "
+                    "conversa_id=? AND id=? AND minha=1",
+                    (conta_id, conversa_id, i)).fetchone()
+                if linha is None or ORDEM_ESTADOS.get(linha[0], 0) >= nivel:
+                    continue
+                self._con.execute(
+                    "UPDATE mensagens SET estado=? WHERE conta_id=? AND "
+                    "conversa_id=? AND id=?", (estado, conta_id, conversa_id,
+                                               i))
+                mudaram.append(i)
+        return mudaram
 
     def marcar_lidas_pelo_outro(self, conta_id, conversa_id, ate_id, estado):
         """Telegram: muda o estado das minhas mensagens com id <= ate_id."""

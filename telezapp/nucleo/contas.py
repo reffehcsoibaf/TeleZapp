@@ -41,6 +41,9 @@ class Contas:
                 conta, self.barramento, self.banco,
                 lambda etapa, erro: self.pedir(conta, etapa, erro), cred,
                 perguntar_telefone=conta.id in self._novas)
+        if conta.servico == "whatsapp":
+            from telezapp.provedores.whatsapp import ProvedorWhatsApp
+            return ProvedorWhatsApp(conta, self.barramento, self.banco)
         log.warning("serviço ainda sem suporte: %s", conta.servico)
         return None
 
@@ -72,6 +75,26 @@ class Contas:
             return False
         log.info("adicionando conta %s", conta.id)
         return True
+
+    def cancelar_nova(self, conta_id):
+        """A pessoa desistiu de adicionar a conta (ex.: fechou o
+        pareamento): desliga e esquece. Contas salvas nao sao apagadas."""
+        if conta_id not in self._novas:
+            return False
+        self._novas.discard(conta_id)
+        p = self.provedores.pop(conta_id, None)
+        self.contas.pop(conta_id, None)
+        if p is not None:
+            p.parar()
+        log.info("conta nova cancelada")
+        return True
+
+    def eh_nova(self, conta_id):
+        return conta_id in self._novas
+
+    def servico(self, conta_id):
+        c = self.contas.get(conta_id)
+        return c.servico if c else ""
 
     def reconectar(self, conta_id):
         """Recria o provedor de uma conta salva (depois de um login

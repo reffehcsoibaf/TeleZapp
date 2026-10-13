@@ -27,8 +27,8 @@ MARCADOR = "marcador"
 TEXTO_SEM_CONVERSA = "Nenhuma conversa aberta. Aperte Enter numa conversa."
 TEXTO_SEM_MENSAGENS = "Esta conversa ainda não tem mensagens."
 TEXTO_CARREGANDO = "Carregando mensagens..."
-TEXTO_SEM_CONTAS = "Nenhuma conversa ainda. Use o menu Arquivo, Adicionar " \
-                   "conta do Telegram."
+TEXTO_SEM_CONTAS = "Nenhuma conversa ainda. Use o menu Arquivo para " \
+                   "adicionar uma conta do Telegram ou do WhatsApp."
 LIMITE_CACHE = 100
 
 AJUDA = """\
@@ -100,6 +100,8 @@ class Janela(wx.Frame):
         self.resposta_a = None
         self.locais = 0               # contador de mensagens "enviando"
         self.estados = {}             # conta_id -> estado
+        self.pareamentos = {}         # conta_id -> DialogoPareamento
+        self.pareamento_recusado = set()
         self.estilo = cfg.get("estilo")
         self._criar_menus()
         self._criar_controles()
@@ -127,6 +129,7 @@ class Janela(wx.Frame):
 
         m_arq = wx.Menu()
         item(m_arq, "add_tg", "Adicionar conta do &Telegram...")
+        item(m_arq, "add_wa", "Adicionar conta do &WhatsApp...")
         item(m_arq, "reconectar", "&Conectar as contas de novo")
         m_arq.AppendSeparator()
         item(m_arq, "logs", "Abrir a pasta de &logs")
@@ -170,6 +173,7 @@ class Janela(wx.Frame):
 
         ligacoes = {
             "add_tg": lambda e: self.adicionar_conta("telegram"),
+            "add_wa": lambda e: self.adicionar_conta("whatsapp"),
             "reconectar": lambda e: self._reconectar(),
             "logs": lambda e: self._abrir_logs(),
             "sair": lambda e: self.Close(),
@@ -250,8 +254,8 @@ class Janela(wx.Frame):
     def _oferecer_primeira_conta(self):
         r = wx.MessageBox(
             "Bem-vindo ao %s. Ainda não há nenhuma conta. Quer adicionar uma "
-            "conta do Telegram agora?" % NOME, NOME,
-            wx.YES_NO | wx.ICON_QUESTION, self)
+            "conta do Telegram agora? Para o WhatsApp, use o menu Arquivo."
+            % NOME, NOME, wx.YES_NO | wx.ICON_QUESTION, self)
         if r == wx.YES:
             self.adicionar_conta("telegram")
 
@@ -259,12 +263,54 @@ class Janela(wx.Frame):
     def adicionar_conta(self, servico):
         sugestao = config.telefone_dos_testes() if servico == "telegram" \
             else ""
+        antes = set(self.contas.provedores)
         if not self.contas.adicionar(servico, sugestao):
             wx.MessageBox("Não foi possível adicionar a conta. Sem as "
                           "credenciais do aplicativo, o Telegram não deixa "
                           "conectar.", NOME, wx.OK | wx.ICON_WARNING, self)
             return
-        self.SetStatusText("Conectando ao Telegram...")
+        self.SetStatusText("Conectando ao %s..." % m.SERVICOS[servico])
+        if servico == "whatsapp":
+            for conta_id in set(self.contas.provedores) - antes:
+                self._abrir_pareamento(conta_id)
+
+    # --------------------------------------------------- pareamento WhatsApp
+    def _abrir_pareamento(self, conta_id):
+        dlg = self.pareamentos.get(conta_id)
+        if dlg:
+            return dlg
+
+        def gerar(telefone):
+            p = self.contas.provedor(conta_id)
+            if p is not None:
+                p.pedir_codigo_pareamento(telefone)
+        dlg = dialogos.DialogoPareamento(
+            self, self.fala.falar, gerar,
+            lambda: self._pareamento_cancelado(conta_id))
+        self.pareamentos[conta_id] = dlg
+        dlg.Show()
+        dlg.Raise()
+        log.info("janela de pareamento aberta")
+        return dlg
+
+    def _pareamento_cancelado(self, conta_id):
+        self.pareamentos.pop(conta_id, None)
+        if self.contas.cancelar_nova(conta_id):
+            self.fala.falar("Conexão do WhatsApp cancelada.")
+        else:
+            # conta salva desconectada: nao reabrir sozinho
+            self.pareamento_recusado.add(conta_id)
+        log.info("pareamento fechado sem concluir")
+
+    def _ev_qr(self, e):
+        if e.conta_id in self.pareamento_recusado:
+            return
+        self._abrir_pareamento(e.conta_id).mostrar_qr(e.codigo)
+
+    def _ev_codigo(self, e):
+        dlg = self.pareamentos.get(e.conta_id)
+        if dlg:
+            dlg.mostrar_codigo(e.codigo, e.erro)
 
     def obter_credenciais_telegram(self):
         """Usada pelo gerenciador de contas (na thread da janela)."""
@@ -313,6 +359,9 @@ class Janela(wx.Frame):
             ev.EnvioFalhou: self._ev_falha,
             ev.LeituraConfirmada: self._ev_leitura,
             ev.Aviso: self._ev_aviso,
+            ev.EstadosMensagens: self._ev_estados_mensagens,
+            ev.QrPareamento: self._ev_qr,
+            ev.CodigoPareamento: self._ev_codigo,
         }.get(type(e))
         if tratador is not None and self:
             tratador(e)
@@ -322,13 +371,23 @@ class Janela(wx.Frame):
         self.estados[e.conta_id] = e.estado
         nome = self.contas.nome(e.conta_id) if self.contas else e.conta_id
         self.SetStatusText("%s: %s" % (nome, e.estado))
+        servico = m.SERVICOS.get(self.contas.servico(e.conta_id), "") \
+            if self.contas else ""
         if e.estado == ev.CONECTADA and antes != ev.CONECTADA:
-            self.fala.falar("Telegram conectado.")
+            self.fala.falar("%s conectado." % servico)
         elif e.estado == ev.PRECISA_LOGIN:
-            self.fala.falar("Login do Telegram cancelado.")
+            self.fala.falar("%s: %s." % (servico, e.detalhe or e.estado))
 
     def _ev_conta_pronta(self, e):
         self.SetStatusText("Conta pronta: %s" % e.nome)
+        self.pareamento_recusado.discard(e.conta_id)
+        dlg = self.pareamentos.pop(e.conta_id, None)
+        if dlg:
+            dlg.concluir()
+            self.fala.falar("WhatsApp conectado. As conversas aparecem na "
+                            "lista conforme as mensagens chegam.",
+                            interromper=True)
+            self.lista_conv.SetFocus()
 
     def _ev_conversas(self, e):
         self._juntar_conversas(e.conta_id, e.conversas)
@@ -458,6 +517,19 @@ class Janela(wx.Frame):
         if mudou and chave == self.atual:
             self._preencher_mensagens()
 
+    def _ev_estados_mensagens(self, e):
+        chave = (e.conta_id, e.conversa_id)
+        ids = set(e.ids)
+        nivel = m.ORDEM_ESTADOS.get(e.estado, 0)
+        mudou = False
+        for x in self.cache.get(chave, []):
+            if x.minha and x.id in ids and \
+                    m.ORDEM_ESTADOS.get(x.estado, 0) < nivel:
+                x.estado = e.estado
+                mudou = True
+        if mudou and chave == self.atual:
+            self._preencher_mensagens()
+
     def _ev_aviso(self, e):
         self.SetStatusText(e.texto)
         self.fala.falar(e.texto)
@@ -575,6 +647,7 @@ class Janela(wx.Frame):
         self.fala.falar("Atualizando as conversas.")
 
     def _reconectar(self):
+        self.pareamento_recusado.clear()
         for dados in self.cfg.contas():
             if self.estados.get(dados["id"]) != ev.CONECTADA:
                 self.contas.reconectar(dados["id"])
