@@ -8,6 +8,7 @@ Uma conta nova so e gravada na configuracao depois que o login termina
 import glob
 import logging
 import os
+import time
 import uuid
 
 from telezapp import config
@@ -190,7 +191,13 @@ def apagar_sessao(conta_id, pasta=None):
         nome = os.path.basename(caminho)
         if nome == conta_id + ".db" or nome.startswith(conta_id + ".db-") \
                 or nome.startswith(conta_id + ".session"):
-            try:
-                os.remove(caminho)
-            except OSError:
-                log.warning("não consegui apagar um arquivo de sessão")
+            for tentativa in range(3):
+                try:
+                    os.remove(caminho)
+                    break
+                except OSError:
+                    time.sleep(0.5)
+            else:
+                # no WhatsApp, a sessao desconectada ja foi limpa pela
+                # propria biblioteca: o arquivo em uso nao atrapalha
+                log.info("arquivo de sessão em uso, mantido: %s", nome)

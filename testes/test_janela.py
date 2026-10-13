@@ -397,3 +397,13 @@ def test_qr_gerado_e_lido_por_um_leitor_de_qr():
         img = np.frombuffer(px, dtype=np.uint8).reshape(lado, lado, 3)
         texto, _, _ = cv2.QRCodeDetector().detectAndDecode(img)
         assert texto == codigo
+
+
+def test_mensagens_da_sincronia_sem_aviso_e_resumo(j):
+    j.status = ""
+    c = j.indice[("t1", "20")]
+    j.b.publicar(ev.MensagemNova(msg("40", "offline", conversa="20"), c,
+                                 silenciosa=True))
+    assert not j.status.startswith("Nova mensagem")
+    j.b.publicar(ev.SincronizacaoConcluida("t1", 10))
+    assert j.status.startswith("10 mensagens novas chegaram no WhatsApp")

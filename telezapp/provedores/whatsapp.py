@@ -36,6 +36,8 @@ SO_CONTROLE = {"senderKeyDistributionMessage", "messageContextInfo",
 # Tipos de recibo do neonize (Receipt.Type)
 RECIBO_ENTREGUE, RECIBO_LIDO, RECIBO_LIDO_POR_MIM, RECIBO_OUVIDO = 1, 4, 5, 6
 MAX_GUARDADAS = 2000
+# Sem o aviso de fim da sincronia, os avisos voltam depois deste tempo
+TEMPO_MAX_SINCRONIA = 45
 # Status de mensagem no historico (WebMessageInfo.Status)
 HIST_ENTREGUE, HIST_LIDA, HIST_OUVIDA = 3, 4, 5
 # Conversas que nao sao conversas para a pessoa
@@ -162,8 +164,9 @@ def converter(evento, conta_id, conversa_id, autor=""):
         nome_arquivo=arquivo or "", tamanho=int(tamanho or 0),
         estado=m.ENVIADA if minha else "",
         resposta_a=(ctx.stanzaID if ctx is not None and ctx.stanzaID
-                    else ""))
-    return msg, jid_texto(origem.Sender)
+                    else ""),
+        remetente="" if minha else jid_texto(origem.Sender))
+    return msg, msg.remetente
 
 
 def jid_de_texto(texto):
@@ -198,7 +201,14 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
         nome_arquivo=arquivo or "", tamanho=int(tamanho or 0),
         estado=estado,
         resposta_a=(ctx.stanzaID if ctx is not None and ctx.stanzaID
-                    else "")), remetente
+                    else ""),
+        remetente="" if minha else _sem_aparelho(remetente)), remetente
+
+
+def _sem_aparelho(jid):
+    """'5551...:12@s.whatsapp.net' -> '5551...@s.whatsapp.net'."""
+    usuario, servidor = jid_de_texto(jid)
+    return "%s@%s" % (usuario, servidor) if usuario else ""
 
 
 def props_do_aparelho(historico):
@@ -256,6 +266,8 @@ class ProvedorWhatsApp(Provedor):
         self._vistas = set()
         self._nomes_grupo_pedidos = set()
         self._conectada = False
+        self._sincronizando = False
+        self._recebidas_na_sincronia = 0
         self._trava = threading.RLock()
 
     # ----------------------------------------------------------- execucao
@@ -298,6 +310,7 @@ class ProvedorWhatsApp(Provedor):
                 "StreamReplacedEv": self._ao_substituida,
                 "ConnectFailureEv": self._ao_falha_conexao,
                 "ClientOutdatedEv": self._ao_desatualizado,
+                "OfflineSyncCompletedEv": self._ao_fim_sincronia,
             }
             for nome, funcao in registros.items():
                 classe = getattr(nev, nome, None)
@@ -389,6 +402,15 @@ class ProvedorWhatsApp(Provedor):
         log.info("conectado em %.2fs", time.perf_counter() - getattr(
             self, "_inicio", time.perf_counter()))
         self._conectada = True
+        # as mensagens que chegaram com o app fechado vem agora: sem avisos
+        # uma a uma ate o fim da sincronia
+        with self._trava:
+            self._sincronizando = True
+            self._recebidas_na_sincronia = 0
+        relogio = threading.Timer(TEMPO_MAX_SINCRONIA,
+                                  lambda: self._ao_fim_sincronia(None, None))
+        relogio.daemon = True
+        relogio.start()
         nome, telefone = self.conta.nome, self.conta.telefone
         try:
             eu = self.cliente.get_me()
@@ -401,6 +423,17 @@ class ProvedorWhatsApp(Provedor):
                                                 telefone))
         self._estado(ev.CONECTADA)
         self._publicar_conversas()
+
+    def _ao_fim_sincronia(self, cliente, e):
+        with self._trava:
+            if not self._sincronizando:
+                return
+            self._sincronizando = False
+            quantas = self._recebidas_na_sincronia
+        log.info("sincronia inicial concluída (%d mensagens recebidas)",
+                 quantas)
+        self.barramento.publicar(ev.SincronizacaoConcluida(self.conta.id,
+                                                           quantas))
 
     def _ao_sair(self, cliente, e):
         self._conectada = False
@@ -522,13 +555,17 @@ class ProvedorWhatsApp(Provedor):
             with self._trava:
                 conv.data = max(conv.data, msg.data)
                 self._remetentes[msg.id] = (remetente, msg.texto)
+                silenciosa = self._sincronizando
                 if not msg.minha:
                     conv.nao_lidas += 1
                     self._nao_lidas.setdefault(cid, []).append(
                         (msg.id, origem.Sender))
+                    if silenciosa:
+                        self._recebidas_na_sincronia += 1
             self.banco.salvar_conversas([conv])
             self.banco.salvar_mensagens([msg])
-            self.barramento.publicar(ev.MensagemNova(msg, conv))
+            self.barramento.publicar(ev.MensagemNova(msg, conv,
+                                                     silenciosa=silenciosa))
         except Exception:
             log.exception("erro ao tratar mensagem recebida")
 
@@ -554,13 +591,14 @@ class ProvedorWhatsApp(Provedor):
         remetente, citado = self._remetentes.get(resposta_a, ("", ""))
         if not remetente or not citado:
             # mensagem de antes desta abertura do app: busca no banco
-            for x in self.banco.mensagens(self.conta.id, conversa_id, 500):
+            for x in self.banco.mensagens(self.conta.id, conversa_id, 1000):
                 if x.id == resposta_a:
                     citado = citado or x.texto or m.conteudo(x)
-                    if not remetente and not conversa_id.endswith("@g.us"):
-                        remetente = (
-                            self.conta.telefone.lstrip("+")
-                            + "@s.whatsapp.net") if x.minha else conversa_id
+                    if not remetente:
+                        remetente = (self.conta.telefone.lstrip("+") +
+                                     "@s.whatsapp.net") if x.minha else (
+                            x.remetente or ("" if conversa_id.endswith(
+                                "@g.us") else conversa_id))
                     break
         ctx = ContextInfo(stanzaID=resposta_a,
                           quotedMessage=Message(conversation=citado or ""))
@@ -602,20 +640,24 @@ class ProvedorWhatsApp(Provedor):
 
     def marcar_como_lida(self, conversa_id):
         with self._trava:
-            pendentes = self._nao_lidas.pop(conversa_id, [])
+            ao_vivo = self._nao_lidas.pop(conversa_id, [])
             conv = self._conversas.get(conversa_id)
             antes = conv.nao_lidas if conv is not None else 0
             if conv is not None:
                 conv.nao_lidas = 0
-        if not pendentes and antes and not conversa_id.endswith("@g.us"):
-            # nao lidas que vieram do historico: as ultimas recebidas
-            from neonize.utils.jid import build_jid
+        pendentes = {mid: jid for mid, jid in ao_vivo}
+        if antes > len(pendentes):
+            # nao lidas que vieram do historico: as ultimas recebidas, com o
+            # remetente guardado no banco (nos grupos, quem enviou cada uma)
+            individual = not conversa_id.endswith("@g.us")
             recebidas = [x for x in self.banco.mensagens(
-                self.conta.id, conversa_id, max(antes, 1) * 3)
+                self.conta.id, conversa_id, min(antes * 3, 3000))
                 if not x.minha][-antes:]
-            usuario, servidor = jid_de_texto(conversa_id)
-            pendentes = [(x.id, build_jid(usuario, servidor))
-                         for x in recebidas]
+            for x in recebidas:
+                rem = x.remetente or (conversa_id if individual else "")
+                if x.id not in pendentes and rem:
+                    pendentes[x.id] = _jid_obj(*jid_de_texto(rem))
+        pendentes = list(pendentes.items())
         self.banco.atualizar_conversa(self.conta.id, conversa_id, nao_lidas=0)
         if pendentes:
             self._fila.put(lambda: self._enviar_leitura(conversa_id,

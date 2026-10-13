@@ -183,3 +183,29 @@ def test_credenciais_do_arquivo_de_testes(tmp_path, monkeypatch):
 def test_mascarar_telefone():
     assert config.mascarar_telefone("+5551999998888") == "+55...8888"
     assert "9999" not in config.mascarar_telefone("+5551999998888")
+
+
+def test_banco_antigo_ganha_a_coluna_remetente(tmp_path):
+    import sqlite3
+    caminho = str(tmp_path / "antigo.db")
+    con = sqlite3.connect(caminho)
+    con.executescript("""
+        CREATE TABLE mensagens (conta_id TEXT NOT NULL, conversa_id TEXT NOT
+        NULL, id TEXT NOT NULL, autor TEXT NOT NULL DEFAULT '', minha INTEGER
+        NOT NULL DEFAULT 0, data REAL NOT NULL DEFAULT 0, tipo TEXT NOT NULL
+        DEFAULT 'texto', texto TEXT NOT NULL DEFAULT '', segundos INTEGER NOT
+        NULL DEFAULT 0, nome_arquivo TEXT NOT NULL DEFAULT '', tamanho INTEGER
+        NOT NULL DEFAULT 0, estado TEXT NOT NULL DEFAULT '', resposta_a TEXT
+        NOT NULL DEFAULT '', PRIMARY KEY (conta_id, conversa_id, id));
+        INSERT INTO mensagens (conta_id, conversa_id, id, texto)
+            VALUES ('w1', 'c', '1', 'velha');
+    """)
+    con.commit()
+    con.close()
+    b = Banco(caminho)
+    velha = b.mensagens("w1", "c")[0]
+    assert velha.texto == "velha" and velha.remetente == ""
+    b.salvar_mensagens([msg(conta_id="w1", conversa_id="c", id="2",
+                            remetente="555@s.whatsapp.net")])
+    assert b.mensagens("w1", "c")[-1].remetente == "555@s.whatsapp.net"
+    b.fechar()

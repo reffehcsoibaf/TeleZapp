@@ -29,7 +29,8 @@ TEXTO_SEM_MENSAGENS = "Esta conversa ainda não tem mensagens."
 TEXTO_CARREGANDO = "Carregando mensagens..."
 TEXTO_SEM_CONTAS = "Nenhuma conversa ainda. Use o menu Arquivo para " \
                    "adicionar uma conta do Telegram ou do WhatsApp."
-LIMITE_CACHE = 100
+LIMITE_CACHE = 100        # mensagens lidas do banco ao abrir a conversa
+LIMITE_MEMORIA = 1200     # mensagens mantidas na memoria por conversa
 
 AJUDA = """\
 ESTRUTURA DA JANELA
@@ -428,6 +429,7 @@ class Janela(wx.Frame):
             ev.EstadosMensagens: self._ev_estados_mensagens,
             ev.QrPareamento: self._ev_qr,
             ev.CodigoPareamento: self._ev_codigo,
+            ev.SincronizacaoConcluida: self._ev_sincronia,
         }.get(type(e))
         if tratador is not None and self:
             tratador(e)
@@ -524,7 +526,7 @@ class Janela(wx.Frame):
         for x in novas:
             atuais[x.id] = x
         lista = sorted(atuais.values(), key=_ordem)
-        self.cache[chave] = lista[-LIMITE_CACHE * 3:]
+        self.cache[chave] = lista[-LIMITE_MEMORIA:]
         return self.cache[chave]
 
     def _ev_nova(self, e):
@@ -552,8 +554,8 @@ class Janela(wx.Frame):
                 p = self.contas.provedor(msg.conta_id)
                 if p is not None:
                     p.marcar_como_lida(msg.conversa_id)
-        if msg.minha:
-            return  # enviada daqui ou por outro aparelho: sem aviso
+        if msg.minha or e.silenciosa:
+            return  # minha, ou chegou na sincronia inicial: sem aviso
         log.info("mensagem nova (tipo %s, conversa aberta=%s)", msg.tipo,
                  aberta)
         resumo = m.formatar(msg, m.ESTILO_AUTOR_PRIMEIRO)
@@ -564,6 +566,19 @@ class Janela(wx.Frame):
         if self.cfg.get("falar_novas"):
             self.fala.falar(aviso)
         self.SetStatusText(aviso[:150])
+
+    def _ev_sincronia(self, e):
+        if not e.quantas:
+            return
+        texto = ("1 mensagem nova chegou" if e.quantas == 1 else
+                 "%d mensagens novas chegaram" % e.quantas) + \
+            " no WhatsApp enquanto o TeleZapp estava fechado."
+        log.info("sincronia: %d mensagens novas", e.quantas)
+        if self.cfg.get("som"):
+            bipe("nova")
+        if self.cfg.get("falar_novas"):
+            self.fala.falar(texto)
+        self.SetStatusText(texto)
 
     def _ev_falha(self, e):
         chave = (e.conta_id, e.conversa_id)
@@ -684,8 +699,12 @@ class Janela(wx.Frame):
         self.SetTitle("%s: %s" % (NOME, conv.nome))
         p = self.contas.provedor(conv.conta_id)
         if p is not None:
-            p.carregar_mensagens(conv.id, min(200, max(50, conv.nao_lidas
-                                                       + 10)))
+            # no WhatsApp o historico e local e rapido: carrega todas as nao
+            # lidas para o marcador ficar no lugar certo
+            teto = 1000 if self.contas.servico(conv.conta_id) == \
+                "whatsapp" else 200
+            p.carregar_mensagens(conv.id, min(teto, max(50, conv.nao_lidas
+                                                        + 10)))
             if conv.nao_lidas:
                 p.marcar_como_lida(conv.id)
         conv.nao_lidas = 0

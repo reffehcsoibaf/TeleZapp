@@ -75,6 +75,7 @@ class Mensagem:
     tamanho: int = 0
     estado: str = ""
     resposta_a: str = ""       # id da mensagem respondida
+    remetente: str = ""        # WhatsApp: jid de quem enviou (para "lida")
 
     @property
     def chave(self):

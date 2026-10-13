@@ -366,3 +366,44 @@ def test_depois_de_desconectada_ignora_qr(amb):
         while True:
             x = amb.fila.get(timeout=0.3)
             assert not isinstance(x, ev.QrPareamento)
+
+
+def test_sincronia_inicial_sem_avisos_e_resumo(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    amb.f["Message"](amb.c, evento("S1", E.Message(conversation="a")))
+    amb.f["Message"](amb.c, evento("S2", E.Message(conversation="b")))
+    assert esperar(amb.fila, ev.MensagemNova).silenciosa
+    assert esperar(amb.fila, ev.MensagemNova).silenciosa
+    amb.f["OfflineSyncCompleted"](amb.c, N.OfflineSyncCompleted(Count=2))
+    assert esperar(amb.fila, ev.SincronizacaoConcluida).quantas == 2
+    amb.f["Message"](amb.c, evento("S3", E.Message(conversation="c")))
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert not nova.silenciosa
+    assert amb.banco.mensagens("w1", nova.mensagem.conversa_id)[-1] \
+        .remetente == "5551988887777@s.whatsapp.net"
+
+
+def test_grupo_do_historico_marca_lida_com_cada_remetente(amb):
+    from neonize.proto.waWeb import WAWebProtobufsWeb_pb2 as W
+    from neonize.proto.waCommon import WACommon_pb2 as C
+    import time as t
+    agora = int(t.time())
+
+    def do_grupo(id, quem, ts):
+        return W.WebMessageInfo(
+            key=C.MessageKey(remoteJID="123@g.us", ID=id,
+                             participant=quem + ":3@s.whatsapp.net"),
+            message=E.Message(conversation="oi"), messageTimestamp=ts)
+    h = H.HistorySync(syncType=0, conversations=[H.Conversation(
+        ID="123@g.us", name="Família", unreadCount=2, messages=[
+            H.HistorySyncMsg(message=do_grupo("G1", "5551", agora - 30)),
+            H.HistorySyncMsg(message=do_grupo("G2", "5552", agora - 20)),
+            H.HistorySyncMsg(message=do_grupo("G3", "5553", agora - 10))])])
+    amb.p.guardar_historico(h)
+    amb.f["Connected"](amb.c, N.Connected())
+    amb.p.marcar_como_lida("123@g.us")
+    amb.p.enviar_texto("123@g.us", "x")
+    esperar(amb.fila, ev.MensagemNova)
+    lidas = sorted(amb.c.lidas)
+    assert lidas == [(["G2"], "123@g.us", "5552"), (["G3"], "123@g.us",
+                                                    "5553")]

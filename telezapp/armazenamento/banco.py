@@ -16,7 +16,7 @@ from telezapp.nucleo.modelos import ORDEM_ESTADOS, Conversa, Mensagem
 
 log = logging.getLogger("telezapp.banco")
 
-VERSAO_ESQUEMA = 1
+VERSAO_ESQUEMA = 2
 
 ESQUEMA = """
 CREATE TABLE IF NOT EXISTS conversas (
@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS mensagens (
     tamanho INTEGER NOT NULL DEFAULT 0,
     estado TEXT NOT NULL DEFAULT '',
     resposta_a TEXT NOT NULL DEFAULT '',
+    remetente TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (conta_id, conversa_id, id)
 );
 CREATE INDEX IF NOT EXISTS mensagens_por_data
@@ -63,7 +64,17 @@ class Banco:
         self._con.execute("PRAGMA synchronous=NORMAL")
         with self._con:
             self._con.executescript(ESQUEMA)
+            self._atualizar_esquema()
             self._con.execute("PRAGMA user_version=%d" % VERSAO_ESQUEMA)
+
+    def _atualizar_esquema(self):
+        """Bancos de versoes anteriores ganham as colunas novas."""
+        colunas = {linha[1] for linha in self._con.execute(
+            "PRAGMA table_info(mensagens)")}
+        if "remetente" not in colunas:
+            self._con.execute("ALTER TABLE mensagens ADD COLUMN remetente "
+                              "TEXT NOT NULL DEFAULT ''")
+            log.info("banco atualizado para a versão %d", VERSAO_ESQUEMA)
 
     def fechar(self):
         with self._trava:

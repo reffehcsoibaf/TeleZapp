@@ -50,6 +50,15 @@ class MensagemNova:
     mensagem: object
     conversa: object = None        # Conversa ja atualizada (nome, data...)
     enviada_daqui: bool = False    # enviada por este app: nao anunciar
+    silenciosa: bool = False       # chegou na sincronia inicial: sem aviso
+
+
+@dataclass
+class SincronizacaoConcluida:
+    """WhatsApp: terminou a entrega das mensagens que chegaram com o app
+    fechado; `quantas` recebidas nesse lote (para um aviso so)."""
+    conta_id: str
+    quantas: int = 0
 
 
 @dataclass
