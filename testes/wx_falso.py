@@ -14,7 +14,12 @@ ICON_WARNING = ICON_QUESTION = ICON_INFORMATION = 0
 DEFAULT_DIALOG_STYLE = RESIZE_BORDER = 0
 LB_SINGLE = LB_HSCROLL = TE_MULTILINE = TE_PASSWORD = TE_READONLY = 0
 VERTICAL = HORIZONTAL = EXPAND = ALL = BOTTOM = TOP = LEFT = RIGHT = 0
-ALIGN_RIGHT = 0
+ALIGN_RIGHT = ALIGN_CENTER = RA_SPECIFY_COLS = TE_PROCESS_ENTER = 0
+EVT_RADIOBOX = EVT_TEXT_ENTER = EVT_SIZE = object()
+TE_CENTER = 0
+WHITE = (255, 255, 255)
+escolha_lista = [0]       # o que o SingleChoiceDialog "escolhe"
+resposta_lista = [ID_OK]
 WXK_ESCAPE, WXK_RETURN, WXK_NUMPAD_ENTER = 27, 13, 370
 WXK_UP, WXK_DOWN, WXK_HOME, WXK_END, WXK_PAGEUP, WXK_PAGEDOWN = range(
     315, 321)
@@ -87,16 +92,117 @@ class Frame(Janela):
     def IsActive(self):
         return True
 
+    def SetBackgroundColour(self, c):
+        pass
+
+    def ShowFullScreen(self, v):
+        self.cheia = v
+
+    def GetClientSize(self):
+        return (1920, 1080)
+
     def FindFocus(self):
         return _foco[0]
 
 
+class Fonte:
+    def GetPointSize(self):
+        return 9
+
+    def SetPointSize(self, n):
+        pass
+
+
+class SingleChoiceDialog:
+    def __init__(self, pai, texto, titulo, opcoes):
+        self.opcoes = opcoes
+
+    def ShowModal(self):
+        return resposta_lista[0]
+
+    def GetSelection(self):
+        return escolha_lista[0]
+
+    def Destroy(self):
+        pass
+
+
 class Dialog(Frame):
-    pass
+    def SetSizer(self, s):
+        pass
+
+    def SetEscapeId(self, i):
+        pass
+
+    def Fit(self):
+        pass
+
+    def Layout(self):
+        pass
+
+    def CentreOnParent(self):
+        pass
+
+    def GetTitle(self):
+        return getattr(self, "titulo", "")
+
+    def __init__(self, pai=None, title="", **k):
+        super().__init__()
+        self.titulo = title
+        self.mostrado = False
+
+    def Show(self, v=True):
+        self.mostrado = v
+
+    def SetSizerAndFit(self, s):
+        pass
+
+
+class RadioBox(Janela):
+    def __init__(self, *a, **k):
+        super().__init__()
+        self.sel = 0
+
+    def GetSelection(self):
+        return self.sel
+
+    def SetSelection(self, i):
+        self.sel = i
+
+
+class StaticBitmap(Janela):
+    def SetBitmap(self, b):
+        self.bitmap = b
+
+    def SetPosition(self, p):
+        self.posicao = p
+
+
+class Image:
+    def __init__(self, w, h, dados):
+        assert len(dados) == w * h * 3
+        self.w, self.h = w, h
+
+
+class Bitmap:
+    def __init__(self, img):
+        self.img = img
 
 
 class Panel(Janela):
     def SetSizer(self, s):
+        pass
+
+    def SetSize(self, t):
+        self.tamanho = t
+
+    def SetBackgroundColour(self, c):
+        pass
+
+    def Show(self, v=True):
+        self.visivel = v
+
+    def Layout(self):
         pass
 
 
@@ -151,9 +257,22 @@ class TextCtrl(Janela):
     def Clear(self):
         self.valor = ""
 
+    def SetInsertionPoint(self, i):
+        pass
+
+    def GetFont(self):
+        return Fonte()
+
+    def SetFont(self, f):
+        pass
+
 
 class Button(Janela):
-    pass
+    def Enable(self, v=True):
+        self.ativo = v
+
+    def Disable(self):
+        self.ativo = False
 
 
 class BoxSizer:

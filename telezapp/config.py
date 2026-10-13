@@ -47,10 +47,16 @@ def configurar_registro():
         "%(asctime)s %(levelname)s %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S"))
     raiz.addHandler(h)
     raiz.setLevel(logging.INFO)
-    # Avisos do Telethon (reconexao, limites) ajudam a investigar problemas
-    tl = logging.getLogger("telethon")
-    tl.addHandler(h)
-    tl.setLevel(logging.WARNING)
+    raiz.propagate = False
+    # Avisos das bibliotecas (reconexao, limites) ajudam a investigar
+    # problemas. O neonize configura o log raiz ao ser importado; os dele
+    # ficam so em avisos, aqui, e o nivel tambem vale para o lado em Go.
+    for nome in ("telethon", "whatsmeow", "Whatsmeow", "neonize",
+                 "neonize.utils.log"):
+        lib = logging.getLogger(nome)
+        lib.addHandler(h)
+        lib.setLevel(logging.WARNING)
+        lib.propagate = False
     raiz.info("==== %s %s iniciado ====", NOME, VERSAO)
     return arquivo
 

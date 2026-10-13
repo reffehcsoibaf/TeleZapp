@@ -1,3 +1,5 @@
 wxPython>=4.3.1
 Telethon>=1.45,<2
 cryptg>=0.6
+neonize==0.5.2
+segno>=1.6

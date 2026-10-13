@@ -70,7 +70,8 @@ class Fala:
 
 
 def bipe(tipo="nova"):
-    """Sons curtos: nova (mensagem recebida), enviada, erro. Tocam numa
+    """Sons curtos: nova (mensagem recebida), enviada, erro, pronto
+    (codigo ou QR pronto), atualizado (QR trocado) e conectado. Tocam numa
     thread a parte para nao travar a janela."""
     if winsound is None:
         return
@@ -84,6 +85,15 @@ def _tocar(tipo):
             winsound.Beep(1175, 120)
         elif tipo == "enviada":
             winsound.Beep(660, 80)
+        elif tipo == "pronto":
+            for f in (660, 880, 1100):
+                winsound.Beep(f, 90)
+        elif tipo == "atualizado":
+            winsound.Beep(990, 70)
+            winsound.Beep(990, 70)
+        elif tipo == "conectado":
+            for f in (523, 659, 784, 1047):
+                winsound.Beep(f, 110)
         else:
             winsound.Beep(300, 200)
     except Exception:

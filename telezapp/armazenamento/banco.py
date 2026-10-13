@@ -12,11 +12,11 @@ import sqlite3
 import threading
 from dataclasses import astuple, fields
 
-from telezapp.nucleo.modelos import Conversa, Mensagem
+from telezapp.nucleo.modelos import ORDEM_ESTADOS, Conversa, Mensagem
 
 log = logging.getLogger("telezapp.banco")
 
-VERSAO_ESQUEMA = 1
+VERSAO_ESQUEMA = 2
 
 ESQUEMA = """
 CREATE TABLE IF NOT EXISTS conversas (
@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS mensagens (
     tamanho INTEGER NOT NULL DEFAULT 0,
     estado TEXT NOT NULL DEFAULT '',
     resposta_a TEXT NOT NULL DEFAULT '',
+    remetente TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (conta_id, conversa_id, id)
 );
 CREATE INDEX IF NOT EXISTS mensagens_por_data
@@ -63,7 +64,17 @@ class Banco:
         self._con.execute("PRAGMA synchronous=NORMAL")
         with self._con:
             self._con.executescript(ESQUEMA)
+            self._atualizar_esquema()
             self._con.execute("PRAGMA user_version=%d" % VERSAO_ESQUEMA)
+
+    def _atualizar_esquema(self):
+        """Bancos de versoes anteriores ganham as colunas novas."""
+        colunas = {linha[1] for linha in self._con.execute(
+            "PRAGMA table_info(mensagens)")}
+        if "remetente" not in colunas:
+            self._con.execute("ALTER TABLE mensagens ADD COLUMN remetente "
+                              "TEXT NOT NULL DEFAULT ''")
+            log.info("banco atualizado para a versão %d", VERSAO_ESQUEMA)
 
     def fechar(self):
         with self._trava:
@@ -117,6 +128,26 @@ class Banco:
                 % ", ".join(_CAMPOS_MSG),
                 (conta_id, conversa_id, limite)).fetchall()
         return [_msg(l) for l in reversed(linhas)]
+
+    def mudar_estado(self, conta_id, conversa_id, ids, estado):
+        """WhatsApp: muda o estado das minhas mensagens com esses ids, sem
+        voltar atras (lida nao vira entregue). Devolve os ids que mudaram."""
+        nivel = ORDEM_ESTADOS.get(estado, 0)
+        mudaram = []
+        with self._trava, self._con:
+            for i in ids:
+                linha = self._con.execute(
+                    "SELECT estado FROM mensagens WHERE conta_id=? AND "
+                    "conversa_id=? AND id=? AND minha=1",
+                    (conta_id, conversa_id, i)).fetchone()
+                if linha is None or ORDEM_ESTADOS.get(linha[0], 0) >= nivel:
+                    continue
+                self._con.execute(
+                    "UPDATE mensagens SET estado=? WHERE conta_id=? AND "
+                    "conversa_id=? AND id=?", (estado, conta_id, conversa_id,
+                                               i))
+                mudaram.append(i)
+        return mudaram
 
     def marcar_lidas_pelo_outro(self, conta_id, conversa_id, ate_id, estado):
         """Telegram: muda o estado das minhas mensagens com id <= ate_id."""

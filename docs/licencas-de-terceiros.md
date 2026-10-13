@@ -9,6 +9,7 @@ cabeçalhos dos arquivos. Não é parecer jurídico. O TeleZapp usa a
 | Biblioteca | Para quê | Licença | Combina com a GPL-3.0? |
 |---|---|---|---|
 | neonize 0.5.2 | WhatsApp (ligação Python) | Apache-2.0 | Sim (Apache-2.0 pode entrar em projeto GPL-3.0) |
+| segno 1.6 | Desenho do QR Code do pareamento (já vem com o neonize) | BSD (classificação do pacote) | Sim |
 | whatsmeow (embutida na DLL do neonize) | Protocolo do WhatsApp | MPL-2.0 (cabeçalho dos arquivos) | Sim, pela cláusula de "licença secundária" da MPL-2.0, salvo aviso em contrário nos arquivos; os cabeçalhos vistos não trazem esse aviso |
 | Telethon 1.45.0 | Telegram | MIT | Sim |
 | rsa, pyaes (do Telethon) | Criptografia em Python | Apache-2.0, MIT | Sim |

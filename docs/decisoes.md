@@ -47,6 +47,26 @@ partir dos experimentos, ainda a confirmar.
   arquivo dos experimentos ou são pedidas uma vez.
 - **Etapas**: 1) Telegram com texto; 2) WhatsApp; 3) mídias; 4) várias contas,
   avisos e configurações.
+- **WhatsApp (etapa 2a)**: neonize fixado na versão testada (0.5.2), com
+  `connect()` numa thread própria e os envios numa fila; o aparelho aparece no
+  celular como "TeleZapp". Encerrar usa `stop()` (o `disconnect()` não termina
+  a conexão). As conversas vêm do banco local e das mensagens que chegam.
+  Conversas com endereço LID são trocadas pelo número quando o WhatsApp
+  informa. O QR Code é desenhado com o `segno`, que já vem com o neonize.
+- **Histórico do WhatsApp (etapa 2b)**: o celular só manda histórico logo
+  depois do pareamento. Antes de parear, a pessoa escolhe até onde trazer
+  (recentes, 30 dias, 6 meses, 1 ano ou tudo); o pedido vai ao celular
+  (`requireFullSync` e `fullSyncDaysLimit`) e o app guarda o que vier dentro
+  do período. Medido no 1º pareamento real (padrão do WhatsApp): 145
+  conversas, 585 não lidas, 2.000 nomes de perfil e ~30.500 mensagens.
+  Conversas de status e canais ficam de fora.
+- **Pareamento acessível**: modo código primeiro, com o número já preenchido;
+  o código abre numa janela só dele, com o foco no código (como no WinZapp);
+  sons de pronto, atualizado e conectado. QR com margem de 6 módulos, preto
+  puro sobre branco, ampliado só por números inteiros, e opção de tela cheia
+  (verificado com um leitor de QR nos testes). Conta desconectada pelo
+  celular: o app oferece parear de novo na mesma conta, mantendo as
+  conversas. Menu Arquivo, Remover uma conta.
 - **Testes automáticos** rodam fora do Windows (núcleo, banco, leitura de MP4,
   provedor do Telegram com cliente simulado e lógica da janela com um wx
   simulado). O que depende de tela, NVDA e conta real é testado no Windows.
@@ -75,8 +95,9 @@ partir dos experimentos, ainda a confirmar.
 
 ## Próximos passos sugeridos
 
-1. Etapa 1 (Telegram com texto): testar no Windows.
-2. Etapa 2: WhatsApp com neonize, pareamento por código ou QR Code.
+1. Etapa 2b (histórico do WhatsApp e pareamento acessível): testar no
+   Windows, com um pareamento novo.
+2. Etapa 3: mídias (foto, vídeo, documento e nota de voz).
 3. Adicionar o aviso de licença nos arquivos e conferir as licenças pendentes.
 4. Instalador, atualização (trocar só o que mudou) e assinatura.
 5. Testes de estabilidade e de arquivos maiores.

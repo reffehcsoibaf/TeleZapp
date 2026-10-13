@@ -4,8 +4,8 @@ Cliente desktop para Windows que reúne contas de **WhatsApp** e **Telegram** nu
 só janela, pensado desde o início para ser usado com **leitores de tela**
 (NVDA).
 
-> **Estado:** etapa 1 do aplicativo: o Telegram com mensagens de texto.
-> Ainda não é um produto pronto. Etapas: 1) base com o Telegram; 2) WhatsApp
+> **Estado:** etapa 2: Telegram e WhatsApp com mensagens de texto na mesma
+> janela, com o histórico do WhatsApp. Ainda não é um produto pronto. Etapas: 1) base com o Telegram; 2) WhatsApp
 > na mesma janela, com pareamento por código ou QR Code; 3) mídias (foto,
 > vídeo, documento e nota de voz); 4) várias contas, avisos e configurações.
 
@@ -44,6 +44,10 @@ Escolhas técnicas, riscos e pendências: [`docs/decisoes.md`](docs/decisoes.md)
 3. Na primeira abertura, o TeleZapp oferece adicionar uma conta do Telegram.
    O login é feito em janelas próprias: número, código recebido e, se a conta
    tiver, senha de duas etapas.
+4. Para o WhatsApp, use o menu Arquivo, Adicionar conta do WhatsApp:
+   escolha até onde trazer as mensagens antigas e depois conecte pelo código
+   digitado no celular ou pelo QR Code (que pode ser mostrado em tela
+   cheia).
 
 Nesta fase o TeleZapp ainda não tem as credenciais próprias no Telegram
 (*api id* e *api hash*, que identificam o aplicativo, não a pessoa). Se

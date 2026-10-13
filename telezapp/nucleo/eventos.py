@@ -50,6 +50,15 @@ class MensagemNova:
     mensagem: object
     conversa: object = None        # Conversa ja atualizada (nome, data...)
     enviada_daqui: bool = False    # enviada por este app: nao anunciar
+    silenciosa: bool = False       # chegou na sincronia inicial: sem aviso
+
+
+@dataclass
+class SincronizacaoConcluida:
+    """WhatsApp: terminou a entrega das mensagens que chegaram com o app
+    fechado; `quantas` recebidas nesse lote (para um aviso so)."""
+    conta_id: str
+    quantas: int = 0
 
 
 @dataclass
@@ -66,6 +75,31 @@ class LeituraConfirmada:
     conta_id: str
     conversa_id: str
     ate_id: int
+
+
+@dataclass
+class EstadosMensagens:
+    """WhatsApp: as minhas mensagens `ids` foram entregues ou lidas."""
+    conta_id: str
+    conversa_id: str
+    ids: list
+    estado: str
+
+
+@dataclass
+class QrPareamento:
+    """WhatsApp: um novo QR Code para parear (troca a cada ~20 s)."""
+    conta_id: str
+    codigo: str
+
+
+@dataclass
+class CodigoPareamento:
+    """WhatsApp: o codigo de 8 caracteres para digitar no celular, ou o
+    motivo de nao ter conseguido gerar."""
+    conta_id: str
+    codigo: str = ""
+    erro: str = ""
 
 
 @dataclass
