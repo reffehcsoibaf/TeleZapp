@@ -29,6 +29,27 @@ partir dos experimentos, ainda a confirmar.
 - Três estilos de leitura da mensagem (autor primeiro, conteúdo primeiro, autor
   só quando muda), escolhidos num menu.
 - Avisos de mensagem nova: fala pelo NVDA mais som, ambos desligáveis.
+- **Login em janelas próprias** (adotado): campos rotulados e erros em caixa de
+  mensagem do Windows. Nada de Bloco de Notas nem terminal no aplicativo (o
+  Bloco de Notas era só um recurso dos experimentos).
+- **WhatsApp** (etapa 2, adotado): pareamento por código numérico **ou** QR
+  Code, na mesma janela; o QR se renova sozinho e a troca é anunciada.
+- Esc na caixa de digitação cancela a resposta em andamento, se houver; senão
+  volta para a lista de conversas.
+
+## Aplicativo (etapa 1)
+
+- **Dados fora do programa**: sessões, banco (`telezapp.db`), configuração e
+  logs em `%APPDATA%\TeleZapp`. Nada que dê acesso às contas fica na pasta do
+  repositório.
+- **Credenciais do Telegram** (`api_id`/`api_hash`) identificam o aplicativo;
+  o projeto vai registrar as suas e embuti-las (`config.py`). Até lá, vêm do
+  arquivo dos experimentos ou são pedidas uma vez.
+- **Etapas**: 1) Telegram com texto; 2) WhatsApp; 3) mídias; 4) várias contas,
+  avisos e configurações.
+- **Testes automáticos** rodam fora do Windows (núcleo, banco, leitura de MP4,
+  provedor do Telegram com cliente simulado e lógica da janela com um wx
+  simulado). O que depende de tela, NVDA e conta real é testado no Windows.
 
 ## Riscos e pendências
 
@@ -54,7 +75,8 @@ partir dos experimentos, ainda a confirmar.
 
 ## Próximos passos sugeridos
 
-1. Esqueleto do aplicativo: camada de provedores, banco local, interface.
-2. Adicionar o aviso de licença nos arquivos e conferir as licenças pendentes.
-3. Instalador, atualização (trocar só o que mudou) e assinatura.
-4. Testes de estabilidade e de arquivos maiores.
+1. Etapa 1 (Telegram com texto): testar no Windows.
+2. Etapa 2: WhatsApp com neonize, pareamento por código ou QR Code.
+3. Adicionar o aviso de licença nos arquivos e conferir as licenças pendentes.
+4. Instalador, atualização (trocar só o que mudou) e assinatura.
+5. Testes de estabilidade e de arquivos maiores.

@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Contribuidores do TeleZapp
+"""O contrato comum dos servicos.
+
+A interface so conhece estes metodos. Todos voltam na hora: o trabalho roda
+na thread do provedor, e os resultados chegam como eventos (nucleo.eventos).
+
+Para pedir algo a pessoa durante o login (telefone, codigo, senha), o
+provedor chama `pedir(etapa, erro)`, que bloqueia so a thread do provedor e
+devolve o texto digitado, ou None se a pessoa cancelar.
+"""
+from abc import ABC, abstractmethod
+
+# Etapas de login que o provedor pode pedir a interface
+PEDIR_TELEFONE = "telefone"
+PEDIR_CODIGO = "codigo"
+PEDIR_SENHA = "senha"
+
+
+class Provedor(ABC):
+    servico = ""
+
+    def __init__(self, conta, barramento, banco, pedir):
+        self.conta = conta
+        self.barramento = barramento
+        self.banco = banco
+        self.pedir = pedir
+
+    @abstractmethod
+    def iniciar(self):
+        """Conecta (fazendo login se preciso) e passa a receber mensagens."""
+
+    @abstractmethod
+    def parar(self):
+        """Desconecta e encerra a thread. Pode demorar ate alguns segundos."""
+
+    @abstractmethod
+    def atualizar_conversas(self):
+        """Busca a lista de conversas -> ConversasAtualizadas."""
+
+    @abstractmethod
+    def carregar_mensagens(self, conversa_id, limite=50):
+        """Busca as ultimas mensagens -> MensagensCarregadas."""
+
+    @abstractmethod
+    def enviar_texto(self, conversa_id, texto, resposta_a=""):
+        """Envia -> MensagemNova(enviada_daqui=True) ou EnvioFalhou."""
+
+    @abstractmethod
+    def marcar_como_lida(self, conversa_id):
+        """Avisa o servico que a pessoa leu a conversa."""
