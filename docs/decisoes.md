@@ -12,7 +12,7 @@ partir dos experimentos, ainda a confirmar.
 | 3 | WhatsApp | Proposta | **neonize** (ligação Python da whatsmeow) | Sem navegador, Node nem `npm`; transferências de 7 a 18 MB/s |
 | 4 | Telegram | Proposta | **Telethon + `cryptg`**, partes de 512 KB, 4 a 8 transferências paralelas | De 0,6 para ~10 MB/s |
 | 5 | Mídia sem FFmpeg | Proposta | Montar vídeo e nota de voz no próprio app (duração lida do arquivo) | O FFmpeg só serve ao neonize para ler duração e fazer miniatura |
-| 6 | Nota de voz | Proposta | **Ogg/Opus**, com qualidade ajustável | Exigência dos dois serviços para aparecer como mensagem de voz |
+| 6 | Nota de voz | Adotada | **Ogg/Opus mono 48 kHz, nível padrão do `soundfile` (~62 kbit/s)**, ajustável nas configurações | Exigência dos dois serviços para aparecer como mensagem de voz; no teste de microfone, nenhuma diferença perceptível entre ~260 e ~62 kbit/s, com um quarto do tamanho |
 | 7 | Fala | Proposta | DLL do controlador do NVDA, carregada por `ctypes` | Fala direta funcionou (código 0) |
 | 8 | Empacotamento | Proposta | **PyInstaller `--onedir`** | 95 MB; todos os componentes carregam |
 | 9 | Provedores | Proposta | Uma interface comum (conectar, listar, ler, enviar, baixar, eventos), uma implementação por serviço, cada uma em sua thread | Telethon usa `asyncio`; o neonize bloqueia ao conectar |
@@ -46,16 +46,17 @@ partir dos experimentos, ainda a confirmar.
    whatsmeow; mudanças do WhatsApp podem quebrá-lo.
 4. **Distribuição**: executáveis sem assinatura costumam gerar alerta do
    SmartScreen e de antivírus em outros computadores (não testado aqui).
-5. **Notas de voz gravadas no app**: falta o resultado do teste de microfone e
-   a escolha da qualidade padrão.
+5. **Notas de voz gravadas no app**: qualidade padrão definida (decisão 6).
+   Falta enviar uma nota gravada pelo WhatsApp. O app deve medir o nível e
+   avisar quando a gravação saturar (aconteceu no teste) e listar microfones
+   pela WASAPI; microfones Bluetooth limitam a voz a 8 kHz.
 6. **Vídeo sem miniatura** e arquivos acima de 20 MB: ainda não avaliados.
 7. **Chamadas**: fora do escopo. O neonize só avisa e recusa; uma biblioteca
    separada (meowcaller) existe, mas é jovem e não está exposta ao Python.
 
 ## Próximos passos sugeridos
 
-1. Resultado do teste de gravação de voz e escolha da qualidade padrão.
-2. Esqueleto do aplicativo: camada de provedores, banco local, interface.
-3. Substituir o `hachoir`, adicionar o aviso de licença nos arquivos e conferir as licenças pendentes.
-4. Instalador, atualização (trocar só o que mudou) e assinatura.
-5. Testes de estabilidade e de arquivos maiores.
+1. Esqueleto do aplicativo: camada de provedores, banco local, interface.
+2. Substituir o `hachoir`, adicionar o aviso de licença nos arquivos e conferir as licenças pendentes.
+3. Instalador, atualização (trocar só o que mudou) e assinatura.
+4. Testes de estabilidade e de arquivos maiores.
