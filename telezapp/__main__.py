@@ -1,0 +1,73 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Contribuidores do TeleZapp
+"""Ponto de entrada: python -m telezapp (ou pythonw, sem terminal).
+
+Qualquer erro grave vai para o log e aparece numa caixa de mensagem do
+Windows, porque o app roda sem janela de terminal.
+"""
+import logging
+import os
+import sys
+import traceback
+
+
+def caixa_de_erro(texto):
+    try:
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(None, texto, "TeleZapp", 0x10)
+    except Exception:
+        print(texto, file=sys.stderr)
+
+
+def main():
+    from telezapp import NOME, config
+    arquivo_log = config.configurar_registro()
+    log = logging.getLogger("telezapp")
+
+    def erro_nao_tratado(tipo, valor, tb):
+        log.error("ERRO NÃO TRATADO:\n%s",
+                  "".join(traceback.format_exception(tipo, valor, tb)))
+    sys.excepthook = erro_nao_tratado
+
+    try:
+        import wx
+        from telezapp.armazenamento.banco import Banco
+        from telezapp.interface.janela import Janela
+        from telezapp.nucleo.contas import Contas
+        from telezapp.nucleo.eventos import Barramento
+    except Exception:
+        log.error("falha ao carregar os componentes:\n%s",
+                  traceback.format_exc())
+        caixa_de_erro("O %s não conseguiu carregar os componentes. Rode o "
+                      "iniciar-telezapp.bat de novo. Detalhes no log:\n%s"
+                      % (NOME, arquivo_log))
+        return 1
+
+    app = wx.App(False)
+    unico = wx.SingleInstanceChecker("TeleZapp-" + os.environ.get(
+        "USERNAME", ""), config.pasta())
+    if unico.IsAnotherRunning():
+        wx.MessageBox("O %s já está aberto." % NOME, NOME,
+                      wx.OK | wx.ICON_INFORMATION)
+        return 0
+
+    cfg = config.Config()
+    banco = Banco(os.path.join(config.pasta(), "telezapp.db"))
+    barramento = Barramento(wx.CallAfter)
+    janela = Janela(cfg, banco, barramento)
+    janela.contas = Contas(cfg, banco, barramento, janela.pedir,
+                           janela.obter_credenciais_telegram)
+    janela.Show()
+    wx.CallAfter(janela.comecar)
+    app.MainLoop()
+    banco.fechar()
+    log.info("encerrado normalmente")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception:
+        caixa_de_erro("Erro ao iniciar o TeleZapp:\n" + traceback.format_exc())
+        sys.exit(1)
