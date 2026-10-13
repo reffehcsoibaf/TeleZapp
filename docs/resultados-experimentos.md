@@ -89,12 +89,39 @@ Causa da lentidão do Telethon: partes pequenas enviadas **uma de cada vez**,
 limitadas pela latência de ~190 a 220 ms por requisição (lido no código-fonte do
 Telethon e confirmado pelas medidas).
 
-## 7. Gravação de voz
+## 7. Gravação de voz (sounddevice 0.5.6, soundfile 0.14.0 com libsndfile 1.2.2)
 
-Teste preparado (`experimentos/8-teste-gravacao-voz.bat`); **resultados pendentes**.
-Medido só em ambiente Linux: o `soundfile` grava Ogg/Opus mono de 48 kHz e o
-nível de compressão controla o tamanho (padrão ~62 kbit/s, 0,5 ~134 kbit/s,
-0,0 ~260 kbit/s; mesmo sinal em FLAC: 526 kbit/s).
+Teste `experimentos/8-teste-gravacao-voz.bat`, 13/10/2026, microfone embutido
+(Realtek), 8 segundos, mono, 48 kHz.
+
+| Item | Resultado |
+|---|---|
+| Instalação (ambiente virtual + `pip`) | 9,4 s + 17,9 s |
+| Suporte a Ogg/Opus no `soundfile` do Windows | **Sim** |
+| Gravação | Funcionou; 8,28 s para gravar 8 s |
+| Nível | Pico 0,0 dBFS (saturou), média −18,5 dBFS: microfone alto demais |
+| Codificação | ~0,1 s por versão; duração 8,00 s no cabeçalho e na leitura |
+| Reprodução | Sem erro |
+| Envio ao Telegram como nota de voz | 0,38 a 1,23 s por versão; **apareceram como mensagens de voz** no celular |
+
+| Versão | `compression_level` | Tamanho (8 s) | Taxa |
+|---|---|---|---|
+| A | 0,0 | 259.538 bytes | 260 kbit/s |
+| B | 0,3 | 183.836 bytes | 184 kbit/s |
+| C | 0,5 | 133.635 bytes | 134 kbit/s |
+| **D** | padrão da biblioteca | **62.073 bytes** | **62 kbit/s** |
+| E | 1,0 | 6.644 bytes | 7 kbit/s |
+
+Avaliação do usuário: **nenhuma diferença perceptível de qualidade entre A e
+D**. A versão E serviu só como referência do pior caso.
+
+Observações:
+
+- Microfones Bluetooth (modo viva-voz) aparecem com 8 kHz e 1 canal: gravar por
+  eles dá qualidade de telefone, qualquer que seja a compressão.
+- Pela API MME os nomes dos dispositivos vêm cortados (limite de 31
+  caracteres); pela WASAPI vêm completos.
+- A nota de voz gravada pelo app **ainda não foi enviada pelo WhatsApp**.
 
 ## Não testado
 

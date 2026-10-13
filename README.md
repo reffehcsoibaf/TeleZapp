@@ -28,6 +28,7 @@ Fora do escopo por enquanto: chamadas de voz e de vídeo.
 | Telegram (Telethon) | Login com senha de duas etapas, mesmas mídias, e transferências de ~10 MB/s com `cryptg` e partes paralelas |
 | Interface (wxPython) | Protótipo lido pelo NVDA, com fala direta, marcador de não lidas, Esc, menus e atalhos |
 | Empacotamento (PyInstaller) | Executável de 95 MB com todos os componentes funcionando |
+| Gravação de voz (sounddevice + soundfile) | Microfone gravado em Ogg/Opus; nota de voz de ~62 kbit/s sem perda perceptível, recebida como mensagem de voz no Telegram |
 
 Números e detalhes: [`docs/resultados-experimentos.md`](docs/resultados-experimentos.md).
 Escolhas técnicas, riscos e pendências: [`docs/decisoes.md`](docs/decisoes.md).
