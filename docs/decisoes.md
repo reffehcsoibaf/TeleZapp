@@ -17,6 +17,7 @@ partir dos experimentos, ainda a confirmar.
 | 8 | Empacotamento | Proposta | **PyInstaller `--onedir`** | 95 MB; todos os componentes carregam |
 | 9 | Provedores | Proposta | Uma interface comum (conectar, listar, ler, enviar, baixar, eventos), uma implementação por serviço, cada uma em sua thread | Telethon usa `asyncio`; o neonize bloqueia ao conectar |
 | 10 | Histórico | Proposta | Banco local (SQLite) | O WhatsApp só entrega mensagens como eventos |
+| 11 | Licença | Adotada | **GPL-3.0-or-later** | Escolha do responsável: versões derivadas devem continuar abertas. As dependências em uso são compatíveis, exceto o `hachoir` (ver pendência 1 e `docs/licencas-de-terceiros.md`) |
 
 ## Interface e acessibilidade
 
@@ -31,11 +32,13 @@ partir dos experimentos, ainda a confirmar.
 
 ## Riscos e pendências
 
-1. **Licença do projeto: a definir.** O `hachoir` (leitura da duração de vídeo)
-   é **GPL-2.0** pelos metadados do pacote; distribuí-lo junto do app impõe
-   condições de GPL. Proposta: substituí-lo por uma leitura própria da duração do
-   MP4 antes de qualquer distribuição. Telethon é MIT, soundfile é BSD, neonize é
-   Apache-2.0 e o PyInstaller tem exceção que permite distribuir programas não GPL.
+1. **`hachoir` e a GPL-3.0.** A licença do projeto é a GPL-3.0-or-later
+   (adotada). O `hachoir` (leitura da duração de vídeo) declara **GPL-2.0**
+   nos metadados do pacote; se for "somente 2.0", ele **não pode** ser
+   combinado com código GPL-3.0. Proposta: substituí-lo por uma leitura
+   própria da duração do MP4 antes de qualquer distribuição. Também falta
+   conferir a licença da DLL do controlador do NVDA e das dependências Go
+   embutidas na DLL do neonize (veja `docs/licencas-de-terceiros.md`).
 2. **Bloqueio de contas**: nenhum dos dois serviços oferece API oficial para
    contas pessoais. O risco existe e não foi medido. A troca de conta dentro do
    mesmo app mitiga o efeito, não a causa.
@@ -53,6 +56,6 @@ partir dos experimentos, ainda a confirmar.
 
 1. Resultado do teste de gravação de voz e escolha da qualidade padrão.
 2. Esqueleto do aplicativo: camada de provedores, banco local, interface.
-3. Substituir o `hachoir` e definir a licença.
+3. Substituir o `hachoir`, adicionar o aviso de licença nos arquivos e conferir as licenças pendentes.
 4. Instalador, atualização (trocar só o que mudou) e assinatura.
 5. Testes de estabilidade e de arquivos maiores.

@@ -51,5 +51,9 @@ esses arquivos; leia [`docs/seguranca.md`](docs/seguranca.md).
 
 ## Licença
 
-A definir. Há uma dependência com licença GPL-2.0 usada nos experimentos
-(`hachoir`) que influencia essa escolha; veja [`docs/decisoes.md`](docs/decisoes.md).
+O TeleZapp é software livre, distribuído sob a **GNU General Public License,
+versão 3 ou posterior** (GPL-3.0-or-later). O texto completo está em
+[`LICENSE`](LICENSE). As bibliotecas de terceiros e as licenças delas estão em
+[`docs/licencas-de-terceiros.md`](docs/licencas-de-terceiros.md).
+
+Copyright (C) 2026 Contribuidores do TeleZapp.
