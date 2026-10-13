@@ -20,14 +20,16 @@ cabeçalhos dos arquivos. Não é parecer jurídico. O TeleZapp usa a
 | protobuf | Mensagens do WhatsApp | BSD-3-Clause | Sim |
 | accessible-output2 (só a DLL) | Fala pelo NVDA | MIT (pela classificação do pacote; o campo de licença diz UNKNOWN) | Sim, mas a DLL é do NVDA: ver pendências |
 | PyInstaller 6.22.3 (ferramenta) | Gera o executável | GPL-2.0-ou-posterior com exceção que permite distribuir programas de qualquer licença | Sim: o executável gerado não herda a GPL do PyInstaller |
-| **hachoir 3.4.0** | Duração de vídeo | **GPL-2.0** | **Em dúvida/não**: ver abaixo |
+| hachoir 3.4.0 | Duração de vídeo (só nos experimentos) | **GPL-2.0** | **Não**: fica fora do aplicativo (ver abaixo) |
 
 ## Pendências
 
-1. **hachoir.** Declara "GNU GPL v2". A GPL-2.0 *somente* é incompatível com a
-   GPL-3.0; a GPL-2.0 *ou posterior* seria compatível. Não confirmei qual é o
-   caso do pacote. Proposta: remover a dependência e ler a duração do MP4
-   diretamente (poucas linhas) antes de distribuir.
+1. **hachoir (resolvido por exclusão).** O pacote 3.4.0 declara "GNU GPL v2",
+   traz o texto da GPL versão 2 e nenhum arquivo diz "ou qualquer versão
+   posterior": é tratado como GPL-2.0 *somente*, incompatível com a GPL-3.0.
+   Decisão: o aplicativo **não usa** o hachoir; a duração e o tamanho dos
+   vídeos são lidos por código próprio (família MP4). Os experimentos antigos
+   continuam a usá-lo, mas não são distribuídos.
 2. **DLL de fala do NVDA** (`nvdaControllerClient`, que vem dentro do
    accessible-output2): não conferi a licença do controlador do NVDA. Verificar
    antes de distribuir junto do aplicativo.

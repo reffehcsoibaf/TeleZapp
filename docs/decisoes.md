@@ -11,13 +11,13 @@ partir dos experimentos, ainda a confirmar.
 | 2 | Interface | Proposta | **wxPython** (controles nativos) | Lido corretamente pelo NVDA no protótipo |
 | 3 | WhatsApp | Proposta | **neonize** (ligação Python da whatsmeow) | Sem navegador, Node nem `npm`; transferências de 7 a 18 MB/s |
 | 4 | Telegram | Proposta | **Telethon + `cryptg`**, partes de 512 KB, 4 a 8 transferências paralelas | De 0,6 para ~10 MB/s |
-| 5 | Mídia sem FFmpeg | Proposta | Montar vídeo e nota de voz no próprio app (duração lida do arquivo) | O FFmpeg só serve ao neonize para ler duração e fazer miniatura |
+| 5 | Mídia sem FFmpeg | Adotada | Montar vídeo e nota de voz no próprio app. **Sem `hachoir`**: duração, largura e altura lidas por código próprio da família MP4 (MP4, MOV, M4V, 3GP). Outros formatos (MKV, AVI, WMV, WEBM...) vão como **documento**. Vídeo HEVC vai como vídeo, com aviso de que pode não tocar em todos os celulares. Conversão por FFmpeg, se vier, será opcional e baixada só por quem ativar | O FFmpeg só serve ao neonize para ler duração e fazer miniatura; os apps de celular convertem para MP4 antes de enviar, e outros formatos chegam como documento; o `hachoir` é GPL-2.0 (ver decisão 11). Ao receber, a duração e o tamanho vêm na própria mensagem |
 | 6 | Nota de voz | Adotada | **Ogg/Opus mono 48 kHz, nível padrão do `soundfile` (~62 kbit/s)**, ajustável nas configurações | Exigência dos dois serviços para aparecer como mensagem de voz; no teste de microfone, nenhuma diferença perceptível entre ~260 e ~62 kbit/s, com um quarto do tamanho |
 | 7 | Fala | Proposta | DLL do controlador do NVDA, carregada por `ctypes` | Fala direta funcionou (código 0) |
 | 8 | Empacotamento | Proposta | **PyInstaller `--onedir`** | 95 MB; todos os componentes carregam |
 | 9 | Provedores | Proposta | Uma interface comum (conectar, listar, ler, enviar, baixar, eventos), uma implementação por serviço, cada uma em sua thread | Telethon usa `asyncio`; o neonize bloqueia ao conectar |
 | 10 | Histórico | Proposta | Banco local (SQLite) | O WhatsApp só entrega mensagens como eventos |
-| 11 | Licença | Adotada | **GPL-3.0-or-later** | Escolha do responsável: versões derivadas devem continuar abertas. As dependências em uso são compatíveis, exceto o `hachoir` (ver pendência 1 e `docs/licencas-de-terceiros.md`) |
+| 11 | Licença | Adotada | **GPL-3.0-or-later** | Escolha do responsável: versões derivadas devem continuar abertas. O `hachoir` (GPL-2.0) fica fora do aplicativo (decisão 5); restam licenças a conferir (pendência 1 e `docs/licencas-de-terceiros.md`) |
 
 ## Interface e acessibilidade
 
@@ -32,11 +32,9 @@ partir dos experimentos, ainda a confirmar.
 
 ## Riscos e pendências
 
-1. **`hachoir` e a GPL-3.0.** A licença do projeto é a GPL-3.0-or-later
-   (adotada). O `hachoir` (leitura da duração de vídeo) declara **GPL-2.0**
-   nos metadados do pacote; se for "somente 2.0", ele **não pode** ser
-   combinado com código GPL-3.0. Proposta: substituí-lo por uma leitura
-   própria da duração do MP4 antes de qualquer distribuição. Também falta
+1. **Licenças.** O `hachoir` declara GPL-2.0 sem "ou posterior" (conferido
+   no pacote 3.4.0), incompatível com a GPL-3.0-or-later: **não entra no
+   aplicativo** (decisão 5); só os experimentos antigos o usam. Falta
    conferir a licença da DLL do controlador do NVDA e das dependências Go
    embutidas na DLL do neonize (veja `docs/licencas-de-terceiros.md`).
 2. **Bloqueio de contas**: nenhum dos dois serviços oferece API oficial para
@@ -57,6 +55,6 @@ partir dos experimentos, ainda a confirmar.
 ## Próximos passos sugeridos
 
 1. Esqueleto do aplicativo: camada de provedores, banco local, interface.
-2. Substituir o `hachoir`, adicionar o aviso de licença nos arquivos e conferir as licenças pendentes.
+2. Adicionar o aviso de licença nos arquivos e conferir as licenças pendentes.
 3. Instalador, atualização (trocar só o que mudou) e assinatura.
 4. Testes de estabilidade e de arquivos maiores.
