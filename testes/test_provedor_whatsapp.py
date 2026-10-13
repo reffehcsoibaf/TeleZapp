@@ -276,9 +276,93 @@ def test_falha_de_envio_e_lida_em_outro_aparelho(amb):
     assert [c.nao_lidas for c in convs] == [0]
 
 
-def test_saida_pelo_celular(amb):
+
+
+# ------------------------------------------------------------- historico
+def wmi(id, texto, de_mim=False, ts=TS, status=0, chat="5551988887777"):
+    from neonize.proto.waWeb import WAWebProtobufsWeb_pb2 as W
+    from neonize.proto.waCommon import WACommon_pb2 as C
+    return W.WebMessageInfo(
+        key=C.MessageKey(remoteJID=chat + "@s.whatsapp.net", fromMe=de_mim,
+                         ID=id),
+        message=E.Message(conversation=texto), messageTimestamp=ts,
+        status=status, pushName="Ana")
+
+
+def test_props_pedem_o_periodo_escolhido():
+    assert not wa.props_do_aparelho("recentes").requireFullSync
+    p = wa.props_do_aparelho("365")
+    assert p.requireFullSync and p.historySyncConfig.fullSyncDaysLimit == 365
+    assert p.os == "TeleZapp"
+
+
+def test_historico_guarda_conversas_nomes_e_mensagens(amb):
+    import time as t
+    agora = int(t.time())
+    h = H.HistorySync(
+        syncType=0,
+        pushnames=[H.Pushname(ID="5551966665555@s.whatsapp.net",
+                              pushname="Bia")],
+        phoneNumberToLidMappings=[H.PhoneNumberToLIDMapping(
+            lidJID="77@lid", pnJID="5551966665555@s.whatsapp.net")],
+        conversations=[
+            H.Conversation(ID="5551988887777@s.whatsapp.net", unreadCount=1,
+                           conversationTimestamp=agora, messages=[
+                               H.HistorySyncMsg(message=wmi("H1", "antiga",
+                                                            ts=agora - 60)),
+                               H.HistorySyncMsg(message=wmi(
+                                   "H2", "minha", de_mim=True, status=4,
+                                   ts=agora - 30)),
+                               H.HistorySyncMsg(message=wmi("H3", "nova",
+                                                            ts=agora - 10)),
+                               H.HistorySyncMsg(message=wmi(
+                                   "H0", "velha demais",
+                                   ts=agora - 400 * 86400))]),
+            H.Conversation(ID="77@lid", conversationTimestamp=agora - 5),
+            H.Conversation(ID="123@g.us", name="Família"),
+            H.Conversation(ID="status@broadcast"),
+            H.Conversation(ID="999@newsletter")])
+    amb.p.historico = "365"
+    amb.p.guardar_historico(h)
+    convs = {c.id: c for c in amb.banco.conversas("w1")}
+    assert set(convs) == {"5551988887777@s.whatsapp.net",
+                          "5551966665555@s.whatsapp.net", "123@g.us"}
+    assert convs["5551988887777@s.whatsapp.net"].nome == "Ana Silva"
+    assert convs["5551988887777@s.whatsapp.net"].nao_lidas == 1
+    assert convs["5551966665555@s.whatsapp.net"].nome == "Bia"
+    assert convs["123@g.us"].nome == "Família"
+    msgs = amb.banco.mensagens("w1", "5551988887777@s.whatsapp.net")
+    assert [x.id for x in msgs] == ["H1", "H2", "H3"]   # H0 fora do periodo
+    assert msgs[1].minha and msgs[1].estado == m.LIDA
+    assert esperar(amb.fila, ev.ConversasAtualizadas).conversas
+
+    # abrir a conversa marca como lida a ultima recebida, vinda do historico
+    amb.f["Connected"](amb.c, N.Connected())
+    amb.p.marcar_como_lida("5551988887777@s.whatsapp.net")
+    amb.p.enviar_texto("5551988887777@s.whatsapp.net", "x")
+    esperar(amb.fila, ev.MensagemNova)
+    assert amb.c.lidas == [(["H3"], "5551988887777@s.whatsapp.net",
+                            "5551988887777")]
+
+
+def test_recentes_guarda_tudo_que_vier(amb):
+    h = H.HistorySync(syncType=3, conversations=[H.Conversation(
+        ID="5551988887777@s.whatsapp.net", messages=[H.HistorySyncMsg(
+            message=wmi("V1", "bem antiga", ts=TS - 3000 * 86400))])])
+    amb.p.guardar_historico(h)
+    assert [x.id for x in amb.banco.mensagens(
+        "w1", "5551988887777@s.whatsapp.net")] == ["V1"]
+
+
+def test_depois_de_desconectada_ignora_qr(amb):
     amb.f["LoggedOut"](amb.c, N.LoggedOut())
     e = esperar(amb.fila, ev.EstadoConta)
     while e.estado != ev.PRECISA_LOGIN:
         e = esperar(amb.fila, ev.EstadoConta)
-    assert esperar(amb.fila, ev.Aviso).grave
+    assert e.detalhe == wa.DESCONECTADA_PELO_CELULAR
+    amb.c.event.funcao_qr(amb.c, b"2@novo")
+    import queue as q
+    with pytest.raises(q.Empty):
+        while True:
+            x = amb.fila.get(timeout=0.3)
+            assert not isinstance(x, ev.QrPareamento)

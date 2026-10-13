@@ -65,3 +65,31 @@ def test_contas_salvas_sao_iniciadas_e_reconectadas(tmp_path, monkeypatch):
     assert criados[0].parado and criados[1].iniciado
     contas.parar_todos()
     assert criados[1].parado
+
+
+def test_parear_de_novo_e_remover_apagam_a_sessao(tmp_path, monkeypatch):
+    from telezapp.armazenamento.banco import Banco
+    from telezapp.nucleo import contas as cm
+    from telezapp.nucleo.modelos import Conversa
+    cfg, b, contas, criados = montar(tmp_path, monkeypatch)
+    contas.banco = Banco(str(tmp_path / "t.db"))
+    sessoes = config.pasta("sessoes")
+    cfg.salvar_conta({"id": "whatsapp-1", "servico": "whatsapp",
+                      "nome": "Eu", "historico": "recentes"})
+    contas.iniciar_salvas()
+    for nome in ("whatsapp-1.db", "whatsapp-1.db-wal", "whatsapp-10.db"):
+        (tmp_path / "sessoes" / nome).write_text("x")
+    contas.banco.salvar_conversas([Conversa("whatsapp-1", "a@s", "A")])
+
+    assert contas.parear_de_novo("whatsapp-1", "365")
+    assert criados[0].parado and criados[1].iniciado
+    import os
+    assert sorted(os.listdir(sessoes)) == ["whatsapp-10.db"]
+    assert contas._historico["whatsapp-1"] == "365"
+    assert len(contas.banco.conversas("whatsapp-1")) == 1  # conversas ficam
+
+    contas.remover("whatsapp-1")
+    assert criados[1].parado and cfg.contas() == []
+    assert contas.banco.conversas("whatsapp-1") == []
+    assert contas.provedor("whatsapp-1") is None
+    assert cm.apagar_sessao is not None

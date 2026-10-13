@@ -6,9 +6,9 @@
   envios passam por uma fila com a sua propria thread.
 - Os eventos do WhatsApp chegam em threads do neonize: aqui so se converte,
   grava no banco e publica eventos para a interface.
-- O WhatsApp nao entrega historico depois do pareamento: o banco local e a
-  fonte das conversas. Nesta etapa (2a) o pacote de historico do pareamento
-  so e registrado no log em numeros, para planejar a etapa 2b.
+- O WhatsApp so entrega historico logo depois do pareamento: o banco local e
+  a fonte das conversas. O pacote de historico e guardado conforme o periodo
+  escolhido pela pessoa antes de parear (OPCOES_HISTORICO).
 - As mensagens enviadas pelo app nao voltam como evento: o app as registra.
 
 O registro nunca grava texto de mensagens, telefones completos ou codigos.
@@ -36,6 +36,22 @@ SO_CONTROLE = {"senderKeyDistributionMessage", "messageContextInfo",
 # Tipos de recibo do neonize (Receipt.Type)
 RECIBO_ENTREGUE, RECIBO_LIDO, RECIBO_LIDO_POR_MIM, RECIBO_OUVIDO = 1, 4, 5, 6
 MAX_GUARDADAS = 2000
+# Status de mensagem no historico (WebMessageInfo.Status)
+HIST_ENTREGUE, HIST_LIDA, HIST_OUVIDA = 3, 4, 5
+# Conversas que nao sao conversas para a pessoa
+IGNORAR_CONVERSAS = ("status@broadcast",)
+IGNORAR_SERVIDORES = ("newsletter", "broadcast")
+
+# Quanto historico pedir ao celular no pareamento: chave -> (rotulo, dias).
+# None = o padrao do WhatsApp (so as mensagens recentes).
+OPCOES_HISTORICO = {
+    "recentes": ("Só as recentes (padrão do WhatsApp)", None),
+    "30": ("Últimos 30 dias", 30),
+    "180": ("Últimos 6 meses", 180),
+    "365": ("Último ano", 365),
+    "tudo": ("Todo o histórico (pode demorar e ocupar bastante espaço)",
+             3650),
+}
 
 
 # ----------------------------------------------------- conversao (testavel)
@@ -150,6 +166,55 @@ def converter(evento, conta_id, conversa_id, autor=""):
     return msg, jid_texto(origem.Sender)
 
 
+def jid_de_texto(texto):
+    """'usuario@servidor' -> (usuario, servidor)."""
+    if "@" not in (texto or ""):
+        return texto or "", "s.whatsapp.net"
+    usuario, servidor = texto.split("@", 1)
+    return usuario.split(":")[0], servidor
+
+
+def converter_historico(wmi, conta_id, conversa_id, autor=""):
+    """WebMessageInfo do pacote de historico -> (Mensagem, jid de quem
+    enviou) ou (None, "") se for so controle."""
+    if not wmi.HasField("message"):
+        return None, ""
+    dados = conteudo_de(desembrulhar(wmi.message))
+    if dados is None:
+        return None, ""
+    tipo, texto, seg, arquivo, tamanho = dados
+    minha = bool(wmi.key.fromMe)
+    estado = ""
+    if minha:
+        estado = {HIST_ENTREGUE: m.ENTREGUE, HIST_LIDA: m.LIDA,
+                  HIST_OUVIDA: m.LIDA}.get(int(wmi.status), m.ENVIADA)
+    ctx = _contexto(desembrulhar(wmi.message))
+    remetente = wmi.key.participant or wmi.participant or wmi.key.remoteJID
+    return m.Mensagem(
+        conta_id=conta_id, conversa_id=conversa_id, id=wmi.key.ID,
+        autor="" if minha else (autor or wmi.pushName or ""),
+        minha=minha, data=segundos(wmi.messageTimestamp),
+        tipo=tipo, texto=texto or "", segundos=int(seg or 0),
+        nome_arquivo=arquivo or "", tamanho=int(tamanho or 0),
+        estado=estado,
+        resposta_a=(ctx.stanzaID if ctx is not None and ctx.stanzaID
+                    else "")), remetente
+
+
+def props_do_aparelho(historico):
+    """DeviceProps: o nome 'TeleZapp' no celular e quanto historico pedir."""
+    from neonize.proto.waCompanionReg.WAWebProtobufsCompanionReg_pb2 \
+        import DeviceProps
+    props = DeviceProps(os="TeleZapp", platformType=DeviceProps.DESKTOP)
+    dias = OPCOES_HISTORICO.get(historico, OPCOES_HISTORICO["recentes"])[1]
+    if dias:
+        props.requireFullSync = True
+        props.historySyncConfig.fullSyncDaysLimit = dias
+        props.historySyncConfig.fullSyncSizeMbLimit = 102400
+        props.historySyncConfig.storageQuotaMb = 102400
+    return props
+
+
 def resumo_historico(dados):
     """Numeros do pacote de historico (sem conteudo), para o log."""
     convs = list(dados.conversations)
@@ -172,8 +237,13 @@ class ProvedorWhatsApp(Provedor):
     servico = "whatsapp"
 
     def __init__(self, conta, barramento, banco, pedir=None,
-                 pasta_sessoes=None, fabrica_cliente=None):
+                 pasta_sessoes=None, fabrica_cliente=None,
+                 historico="recentes"):
         super().__init__(conta, barramento, banco, pedir)
+        self.historico = historico
+        self._desligada = False     # desconectada pelo celular
+        self._lid_para_numero = {}  # do pacote de historico
+        self._apelidos = {}         # jid -> nome de perfil (pushname)
         self.pasta_sessoes = pasta_sessoes or config.pasta("sessoes")
         self.fabrica_cliente = fabrica_cliente or self._criar_cliente
         self.cliente = None
@@ -191,12 +261,8 @@ class ProvedorWhatsApp(Provedor):
     # ----------------------------------------------------------- execucao
     def _criar_cliente(self):
         from neonize.client import NewClient
-        from neonize.proto.waCompanionReg.WAWebProtobufsCompanionReg_pb2 \
-            import DeviceProps
-        caminho = os.path.join(self.pasta_sessoes, self.conta.id + ".db")
-        props = DeviceProps(os="TeleZapp",
-                            platformType=DeviceProps.DESKTOP)
-        return NewClient(caminho, props=props)
+        caminho = caminho_sessao(self.pasta_sessoes, self.conta.id)
+        return NewClient(caminho, props=props_do_aparelho(self.historico))
 
     def iniciar(self):
         if self._threads:
@@ -276,6 +342,8 @@ class ProvedorWhatsApp(Provedor):
 
     # ---------------------------------------------------------- pareamento
     def _ao_qr(self, cliente, dados):
+        if self._desligada:
+            return   # so pareia de novo quando a pessoa pedir
         codigo = dados.decode() if isinstance(dados, bytes) else str(dados)
         log.info("QR Code de pareamento recebido")
         self.barramento.publicar(ev.QrPareamento(self.conta.id, codigo))
@@ -336,11 +404,9 @@ class ProvedorWhatsApp(Provedor):
 
     def _ao_sair(self, cliente, e):
         self._conectada = False
+        self._desligada = True
         log.warning("sessão encerrada pelo WhatsApp (motivo %s)", e.Reason)
-        self._estado(ev.PRECISA_LOGIN, "desconectada pelo celular")
-        self._avisar("O WhatsApp desconectou esta conta. Ela foi removida "
-                     "dos aparelhos conectados do celular, ou ficou muito "
-                     "tempo sem uso. Será preciso parear de novo.", True)
+        self._estado(ev.PRECISA_LOGIN, DESCONECTADA_PELO_CELULAR)
 
     def _ao_desconectar(self, cliente, e):
         if self._parar.is_set():
@@ -379,6 +445,8 @@ class ProvedorWhatsApp(Provedor):
     def _id_da_conversa(self, chat):
         """JID da conversa -> texto. Conversas individuais com endereco LID
         sao trocadas pelo numero, quando o WhatsApp informa."""
+        if chat.Server == "lid" and jid_texto(chat) in self._lid_para_numero:
+            return self._lid_para_numero[jid_texto(chat)]
         if chat.Server == "lid" and self.cliente is not None:
             try:
                 pn = self.cliente.get_pn_from_lid(chat)
@@ -389,6 +457,7 @@ class ProvedorWhatsApp(Provedor):
         return jid_texto(chat)
 
     def _nome_contato(self, jid, pushname=""):
+        pushname = pushname or self._apelidos.get(jid_texto(jid), "")
         try:
             info = self.cliente.contact.get_contact(jid)
             nome = info.FullName or info.FirstName or info.BusinessName or \
@@ -535,8 +604,18 @@ class ProvedorWhatsApp(Provedor):
         with self._trava:
             pendentes = self._nao_lidas.pop(conversa_id, [])
             conv = self._conversas.get(conversa_id)
+            antes = conv.nao_lidas if conv is not None else 0
             if conv is not None:
                 conv.nao_lidas = 0
+        if not pendentes and antes and not conversa_id.endswith("@g.us"):
+            # nao lidas que vieram do historico: as ultimas recebidas
+            from neonize.utils.jid import build_jid
+            recebidas = [x for x in self.banco.mensagens(
+                self.conta.id, conversa_id, max(antes, 1) * 3)
+                if not x.minha][-antes:]
+            usuario, servidor = jid_de_texto(conversa_id)
+            pendentes = [(x.id, build_jid(usuario, servidor))
+                         for x in recebidas]
         self.banco.atualizar_conversa(self.conta.id, conversa_id, nao_lidas=0)
         if pendentes:
             self._fila.put(lambda: self._enviar_leitura(conversa_id,
@@ -589,5 +668,101 @@ class ProvedorWhatsApp(Provedor):
         try:
             log.info("pacote de histórico: %s", ", ".join(
                 "%s=%s" % kv for kv in resumo_historico(e.Data).items()))
+            self.guardar_historico(e.Data)
         except Exception:
             log.exception("erro ao ler o pacote de histórico")
+
+    def guardar_historico(self, dados):
+        """Guarda conversas, nomes e mensagens de um pacote de historico."""
+        inicio = time.perf_counter()
+        for x in dados.phoneNumberToLidMappings:
+            if x.lidJID and x.pnJID:
+                self._lid_para_numero[x.lidJID] = x.pnJID
+        for x in dados.pushnames:
+            if x.ID and x.pushname:
+                self._apelidos[x.ID] = x.pushname
+        dias = OPCOES_HISTORICO.get(self.historico,
+                                    OPCOES_HISTORICO["recentes"])[1]
+        limite = time.time() - dias * 86400 if dias else 0
+        convs, msgs = [], []
+        for c in dados.conversations:
+            cid = self._normalizar_id(c.ID)
+            if not cid or cid in IGNORAR_CONVERSAS or \
+                    jid_de_texto(cid)[1] in IGNORAR_SERVIDORES:
+                continue
+            grupo = cid.endswith("@g.us")
+            usuario, servidor = jid_de_texto(cid)
+            nome = c.name or c.displayName or ""
+            data = segundos(c.conversationTimestamp or c.lastMsgTimestamp)
+            novas = []
+            for h in c.messages:
+                x, rem = converter_historico(
+                    h.message, self.conta.id, cid,
+                    self._apelidos.get(h.message.key.participant or
+                                       h.message.participant, ""))
+                if x is None or (limite and x.data < limite):
+                    continue
+                novas.append(x)
+                if not x.minha:
+                    self._remetentes[x.id] = (rem, x.texto)
+            if novas:
+                data = max(data, max(x.data for x in novas))
+            with self._trava:
+                conv = self._conversas.get(cid)
+                if conv is None:
+                    if not nome:
+                        nome = "Grupo" if grupo else self._nome_por_texto(
+                            usuario, servidor)
+                    conv = m.Conversa(self.conta.id, cid, nome, self.servico,
+                                      "grupo" if grupo else "privada",
+                                      data=data)
+                    self._conversas[cid] = conv
+                elif nome and conv.nome in ("Grupo", "") or \
+                        (nome and conv.nome.startswith("+")):
+                    conv.nome = nome
+                conv.data = max(conv.data, data)
+                if c.HasField("unreadCount"):
+                    conv.nao_lidas = int(c.unreadCount)
+            if grupo and conv.nome == "Grupo" and \
+                    cid not in self._nomes_grupo_pedidos:
+                self._nomes_grupo_pedidos.add(cid)
+                self._fila.put(lambda cid=cid, u=usuario, s=servidor:
+                               self._buscar_nome_grupo(cid, _jid_obj(u, s)))
+            convs.append(conv)
+            msgs.extend(novas)
+        if convs:
+            self.banco.salvar_conversas(convs)
+        if msgs:
+            self.banco.salvar_mensagens(msgs)
+        log.info("histórico guardado: %d conversas e %d mensagens em %.2fs",
+                 len(convs), len(msgs), time.perf_counter() - inicio)
+        if convs:
+            self._publicar_conversas()
+
+    def _normalizar_id(self, texto):
+        usuario, servidor = jid_de_texto(texto)
+        cid = "%s@%s" % (usuario, servidor) if usuario else ""
+        return self._lid_para_numero.get(cid, cid)
+
+    def _nome_por_texto(self, usuario, servidor):
+        if self.cliente is not None:
+            try:
+                return self._nome_contato(_jid_obj(usuario, servidor))
+            except Exception:
+                pass
+        apelido = self._apelidos.get("%s@%s" % (usuario, servidor))
+        if apelido:
+            return apelido
+        return "+" + usuario if servidor == "s.whatsapp.net" else usuario
+
+
+DESCONECTADA_PELO_CELULAR = "desconectada pelo celular"
+
+
+def caminho_sessao(pasta, conta_id):
+    return os.path.join(pasta, conta_id + ".db")
+
+
+def _jid_obj(usuario, servidor):
+    from neonize.utils.jid import build_jid
+    return build_jid(usuario, servidor)

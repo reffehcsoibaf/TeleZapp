@@ -5,7 +5,9 @@
 Uma conta nova so e gravada na configuracao depois que o login termina
 (evento ContaPronta); se a pessoa cancelar, nada fica para tras.
 """
+import glob
 import logging
+import os
 import uuid
 
 from telezapp import config
@@ -29,6 +31,7 @@ class Contas:
         self.provedores = {}
         self.contas = {}
         self._novas = set()
+        self._historico = {}      # conta_id -> opcao de historico (WhatsApp)
         barramento.ouvir(self._ao_evento)
 
     def _criar_provedor(self, conta):
@@ -43,7 +46,9 @@ class Contas:
                 perguntar_telefone=conta.id in self._novas)
         if conta.servico == "whatsapp":
             from telezapp.provedores.whatsapp import ProvedorWhatsApp
-            return ProvedorWhatsApp(conta, self.barramento, self.banco)
+            return ProvedorWhatsApp(
+                conta, self.barramento, self.banco,
+                historico=self._historico.get(conta.id, "recentes"))
         log.warning("serviço ainda sem suporte: %s", conta.servico)
         return None
 
@@ -60,16 +65,19 @@ class Contas:
         for dados in self.cfg.contas():
             conta = Conta(dados["id"], dados.get("servico", "telegram"),
                           dados.get("telefone", ""), dados.get("nome", ""))
+            self._historico[conta.id] = dados.get("historico", "recentes")
             if not self._ligar(conta):
                 self.barramento.publicar(ev.Aviso(
                     conta.id, "Não foi possível iniciar a conta %s." % (
                         conta.nome or conta.id), True))
 
-    def adicionar(self, servico, telefone_sugerido=""):
-        """Comeca o login de uma conta nova. False se nao foi possivel."""
+    def adicionar(self, servico, telefone_sugerido="", historico="recentes"):
+        """Comeca o login de uma conta nova. False se nao foi possivel.
+        historico: quanto historico pedir ao celular (so WhatsApp)."""
         conta = Conta("%s-%s" % (servico, uuid.uuid4().hex[:8]), servico,
                       telefone_sugerido)
         self._novas.add(conta.id)
+        self._historico[conta.id] = historico
         if not self._ligar(conta):
             self._novas.discard(conta.id)
             return False
@@ -105,6 +113,35 @@ class Contas:
             p.parar()
         return conta is not None and self._ligar(conta)
 
+    def parear_de_novo(self, conta_id, historico="recentes"):
+        """WhatsApp desconectado pelo celular: apaga so a sessao e pareia de
+        novo na mesma conta (as conversas guardadas continuam)."""
+        conta = self.contas.get(conta_id)
+        if conta is None:
+            return False
+        p = self.provedores.pop(conta_id, None)
+        if p is not None:
+            p.parar()
+        apagar_sessao(conta_id)
+        self._historico[conta_id] = historico
+        log.info("pareando de novo a conta %s (histórico: %s)", conta_id,
+                 historico)
+        return self._ligar(conta)
+
+    def remover(self, conta_id):
+        """Tira a conta do app: desliga, apaga a sessao, as conversas e as
+        mensagens guardadas e a tira da configuracao."""
+        p = self.provedores.pop(conta_id, None)
+        if p is not None:
+            p.parar()
+        self.contas.pop(conta_id, None)
+        self._novas.discard(conta_id)
+        self.cfg.remover_conta(conta_id)
+        if self.banco is not None:
+            self.banco.apagar_conta(conta_id)
+        apagar_sessao(conta_id)
+        log.info("conta %s removida", conta_id)
+
     def provedor(self, conta_id):
         return self.provedores.get(conta_id)
 
@@ -125,9 +162,12 @@ class Contas:
             if conta is None:
                 return
             conta.nome, conta.telefone = e.nome, e.telefone
-            self.cfg.salvar_conta({"id": conta.id, "servico": conta.servico,
-                                   "telefone": conta.telefone,
-                                   "nome": conta.nome})
+            dados = {"id": conta.id, "servico": conta.servico,
+                     "telefone": conta.telefone, "nome": conta.nome}
+            if conta.servico == "whatsapp":
+                dados["historico"] = self._historico.get(conta.id,
+                                                         "recentes")
+            self.cfg.salvar_conta(dados)
             if e.conta_id in self._novas:
                 self._novas.discard(e.conta_id)
                 log.info("conta %s gravada (%s)", conta.id,
@@ -141,3 +181,16 @@ class Contas:
             if p is not None:
                 p.parar()
             log.info("login de conta nova cancelado")
+
+
+def apagar_sessao(conta_id, pasta=None):
+    """Apaga os arquivos de sessao da conta (Telegram e WhatsApp)."""
+    pasta = pasta or config.pasta("sessoes")
+    for caminho in glob.glob(os.path.join(pasta, glob.escape(conta_id) + "*")):
+        nome = os.path.basename(caminho)
+        if nome == conta_id + ".db" or nome.startswith(conta_id + ".db-") \
+                or nome.startswith(conta_id + ".session"):
+            try:
+                os.remove(caminho)
+            except OSError:
+                log.warning("não consegui apagar um arquivo de sessão")

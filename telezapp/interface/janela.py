@@ -131,6 +131,7 @@ class Janela(wx.Frame):
         item(m_arq, "add_tg", "Adicionar conta do &Telegram...")
         item(m_arq, "add_wa", "Adicionar conta do &WhatsApp...")
         item(m_arq, "reconectar", "&Conectar as contas de novo")
+        item(m_arq, "remover", "&Remover uma conta...")
         m_arq.AppendSeparator()
         item(m_arq, "logs", "Abrir a pasta de &logs")
         m_arq.AppendSeparator()
@@ -175,6 +176,7 @@ class Janela(wx.Frame):
             "add_tg": lambda e: self.adicionar_conta("telegram"),
             "add_wa": lambda e: self.adicionar_conta("whatsapp"),
             "reconectar": lambda e: self._reconectar(),
+            "remover": lambda e: self._remover_conta(),
             "logs": lambda e: self._abrir_logs(),
             "sair": lambda e: self.Close(),
             "ir_conv": lambda e: self._ir_para(self.lista_conv, "conversas"),
@@ -261,10 +263,14 @@ class Janela(wx.Frame):
 
     @seguro
     def adicionar_conta(self, servico):
-        sugestao = config.telefone_dos_testes() if servico == "telegram" \
-            else ""
+        sugestao = self._telefone_sugerido()
+        historico = "recentes"
+        if servico == "whatsapp":
+            historico = self._escolher_historico()
+            if historico is None:
+                return
         antes = set(self.contas.provedores)
-        if not self.contas.adicionar(servico, sugestao):
+        if not self.contas.adicionar(servico, sugestao, historico):
             wx.MessageBox("Não foi possível adicionar a conta. Sem as "
                           "credenciais do aplicativo, o Telegram não deixa "
                           "conectar.", NOME, wx.OK | wx.ICON_WARNING, self)
@@ -272,10 +278,70 @@ class Janela(wx.Frame):
         self.SetStatusText("Conectando ao %s..." % m.SERVICOS[servico])
         if servico == "whatsapp":
             for conta_id in set(self.contas.provedores) - antes:
-                self._abrir_pareamento(conta_id)
+                self._abrir_pareamento(conta_id, sugestao)
+
+    def _telefone_sugerido(self):
+        """O numero da conta ja usada (Telegram) ou o dos testes."""
+        for dados in self.cfg.contas():
+            if dados.get("telefone"):
+                return dados["telefone"]
+        return config.telefone_dos_testes()
+
+    def _escolher_historico(self):
+        from telezapp.provedores.whatsapp import OPCOES_HISTORICO
+        return dialogos.escolher_historico(self, OPCOES_HISTORICO)
+
+    @seguro
+    def _parear_whatsapp_de_novo(self, conta_id):
+        historico = self._escolher_historico()
+        if historico is None:
+            return
+        self.pareamento_recusado.discard(conta_id)
+        if self.contas.parear_de_novo(conta_id, historico):
+            self._abrir_pareamento(conta_id, self._telefone_sugerido())
+
+    @seguro
+    def _remover_conta(self):
+        contas = self.cfg.contas()
+        if not contas:
+            self.fala.falar("Não há contas para remover.")
+            return
+        nomes = ["%s, %s" % (c.get("nome") or c.get("telefone") or c["id"],
+                             m.SERVICOS.get(c.get("servico"), "")) for c in contas]
+        dlg = wx.SingleChoiceDialog(self, "Escolha a conta que vai sair do "
+                                    "TeleZapp.", "Remover uma conta", nomes)
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            escolhida = contas[dlg.GetSelection()]
+            nome = nomes[dlg.GetSelection()]
+        finally:
+            dlg.Destroy()
+        r = wx.MessageBox(
+            "Remover a conta %s? As conversas e mensagens guardadas dela neste "
+            "computador serão apagadas. A conta continua existindo no celular."
+            % nome, "Remover uma conta", wx.YES_NO | wx.ICON_QUESTION, self)
+        if r != wx.YES:
+            return
+        conta_id = escolhida["id"]
+        self.contas.remover(conta_id)
+        for chave in [k for k in self.indice if k[0] == conta_id]:
+            del self.indice[chave]
+            self.cache.pop(chave, None)
+        if self.atual and self.atual[0] == conta_id:
+            self.atual = None
+            self.lista_msgs.Set([TEXTO_SEM_CONVERSA])
+        self.estados.pop(conta_id, None)
+        self._ordenar()
+        if self.conversas:
+            self._preencher_conversas()
+        else:
+            self._chaves_conv = []
+            self.lista_conv.Set([TEXTO_SEM_CONTAS])
+        self.fala.falar("Conta removida.")
 
     # --------------------------------------------------- pareamento WhatsApp
-    def _abrir_pareamento(self, conta_id):
+    def _abrir_pareamento(self, conta_id, telefone=""):
         dlg = self.pareamentos.get(conta_id)
         if dlg:
             return dlg
@@ -286,7 +352,7 @@ class Janela(wx.Frame):
                 p.pedir_codigo_pareamento(telefone)
         dlg = dialogos.DialogoPareamento(
             self, self.fala.falar, gerar,
-            lambda: self._pareamento_cancelado(conta_id))
+            lambda: self._pareamento_cancelado(conta_id), telefone, bipe)
         self.pareamentos[conta_id] = dlg
         dlg.Show()
         dlg.Raise()
@@ -377,6 +443,19 @@ class Janela(wx.Frame):
             self.fala.falar("%s conectado." % servico)
         elif e.estado == ev.PRECISA_LOGIN:
             self.fala.falar("%s: %s." % (servico, e.detalhe or e.estado))
+            if e.detalhe == "desconectada pelo celular":
+                wx.CallAfter(self._oferecer_parear_de_novo, e.conta_id)
+
+    @seguro
+    def _oferecer_parear_de_novo(self, conta_id):
+        r = wx.MessageBox(
+            "O WhatsApp desconectou a conta %s: ela foi removida dos "
+            "aparelhos conectados do celular, ou ficou muito tempo sem uso. "
+            "Quer conectar de novo agora? As conversas guardadas continuam."
+            % self.contas.nome(conta_id), NOME,
+            wx.YES_NO | wx.ICON_QUESTION, self)
+        if r == wx.YES:
+            self._parear_whatsapp_de_novo(conta_id)
 
     def _ev_conta_pronta(self, e):
         self.SetStatusText("Conta pronta: %s" % e.nome)
@@ -384,9 +463,9 @@ class Janela(wx.Frame):
         dlg = self.pareamentos.pop(e.conta_id, None)
         if dlg:
             dlg.concluir()
-            self.fala.falar("WhatsApp conectado. As conversas aparecem na "
-                            "lista conforme as mensagens chegam.",
-                            interromper=True)
+            bipe("conectado")
+            self.fala.falar("WhatsApp conectado. As conversas antigas "
+                            "chegam em alguns segundos.", interromper=True)
             self.lista_conv.SetFocus()
 
     def _ev_conversas(self, e):

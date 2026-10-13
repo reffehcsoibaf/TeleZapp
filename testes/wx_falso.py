@@ -15,7 +15,11 @@ DEFAULT_DIALOG_STYLE = RESIZE_BORDER = 0
 LB_SINGLE = LB_HSCROLL = TE_MULTILINE = TE_PASSWORD = TE_READONLY = 0
 VERTICAL = HORIZONTAL = EXPAND = ALL = BOTTOM = TOP = LEFT = RIGHT = 0
 ALIGN_RIGHT = ALIGN_CENTER = RA_SPECIFY_COLS = TE_PROCESS_ENTER = 0
-EVT_RADIOBOX = EVT_TEXT_ENTER = object()
+EVT_RADIOBOX = EVT_TEXT_ENTER = EVT_SIZE = object()
+TE_CENTER = 0
+WHITE = (255, 255, 255)
+escolha_lista = [0]       # o que o SingleChoiceDialog "escolhe"
+resposta_lista = [ID_OK]
 WXK_ESCAPE, WXK_RETURN, WXK_NUMPAD_ENTER = 27, 13, 370
 WXK_UP, WXK_DOWN, WXK_HOME, WXK_END, WXK_PAGEUP, WXK_PAGEDOWN = range(
     315, 321)
@@ -88,8 +92,39 @@ class Frame(Janela):
     def IsActive(self):
         return True
 
+    def SetBackgroundColour(self, c):
+        pass
+
+    def ShowFullScreen(self, v):
+        self.cheia = v
+
+    def GetClientSize(self):
+        return (1920, 1080)
+
     def FindFocus(self):
         return _foco[0]
+
+
+class Fonte:
+    def GetPointSize(self):
+        return 9
+
+    def SetPointSize(self, n):
+        pass
+
+
+class SingleChoiceDialog:
+    def __init__(self, pai, texto, titulo, opcoes):
+        self.opcoes = opcoes
+
+    def ShowModal(self):
+        return resposta_lista[0]
+
+    def GetSelection(self):
+        return escolha_lista[0]
+
+    def Destroy(self):
+        pass
 
 
 class Dialog(Frame):
@@ -119,6 +154,9 @@ class Dialog(Frame):
     def Show(self, v=True):
         self.mostrado = v
 
+    def SetSizerAndFit(self, s):
+        pass
+
 
 class RadioBox(Janela):
     def __init__(self, *a, **k):
@@ -136,6 +174,9 @@ class StaticBitmap(Janela):
     def SetBitmap(self, b):
         self.bitmap = b
 
+    def SetPosition(self, p):
+        self.posicao = p
+
 
 class Image:
     def __init__(self, w, h, dados):
@@ -150,6 +191,12 @@ class Bitmap:
 
 class Panel(Janela):
     def SetSizer(self, s):
+        pass
+
+    def SetSize(self, t):
+        self.tamanho = t
+
+    def SetBackgroundColour(self, c):
         pass
 
     def Show(self, v=True):
@@ -211,6 +258,12 @@ class TextCtrl(Janela):
         self.valor = ""
 
     def SetInsertionPoint(self, i):
+        pass
+
+    def GetFont(self):
+        return Fonte()
+
+    def SetFont(self, f):
         pass
 
 

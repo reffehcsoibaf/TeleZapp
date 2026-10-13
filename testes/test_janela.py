@@ -46,9 +46,17 @@ class ContasFalsas:
         self.provedores = {"t1": self.p}
         self.canceladas = []
 
-    def adicionar(self, servico, telefone=""):
+    def adicionar(self, servico, telefone="", historico="recentes"):
         self.provedores["w-nova"] = self.p
+        self.adicionadas = (servico, telefone, historico)
         return True
+
+    def parear_de_novo(self, conta_id, historico):
+        self.repareada = (conta_id, historico)
+        return True
+
+    def remover(self, conta_id):
+        self.removida = conta_id
 
     def cancelar_nova(self, conta_id):
         self.canceladas.append(conta_id)
@@ -275,7 +283,7 @@ def test_pareamento_do_whatsapp(j):
     assert ("codigo", "+5551999998888") in j.contas.p.pedidos
     j.b.publicar(ev.CodigoPareamento("w-nova", "ABCD-EFGH"))
     assert dlg.codigo.GetValue() == "ABCD-EFGH"
-    assert wx_falso._foco[0] is dlg.codigo
+    assert wx_falso._foco[0] is dlg.janela_codigo.campo
     # QR: a imagem e trocada quando chega um novo
     j.b.publicar(ev.QrPareamento("w-nova", "2@qr1"))
     assert dlg.imagem.bitmap.img.w == dlg.imagem.bitmap.img.h > 100
@@ -312,3 +320,80 @@ def test_entregue_e_lida_no_whatsapp(j):
     j.b.publicar(ev.EstadosMensagens("t1", "20", ["3"], m.LIDA))
     j.b.publicar(ev.EstadosMensagens("t1", "20", ["3"], m.ENTREGUE))
     assert j.lista_msgs.itens[0].endswith("a, lida")
+
+
+def test_whatsapp_pergunta_o_historico_e_preenche_o_numero(j):
+    j.cfg.salvar_conta({"id": "t1", "servico": "telegram",
+                        "telefone": "+5551999998888", "nome": "Fábio"})
+    wx_falso.escolha_lista[0] = 3          # "Último ano"
+    j.adicionar_conta("whatsapp")
+    assert j.contas.adicionadas == ("whatsapp", "+5551999998888", "365")
+    dlg = j.pareamentos["w-nova"]
+    assert dlg.telefone.GetValue() == "+5551999998888"
+    wx_falso.escolha_lista[0] = 0
+
+
+def test_desistir_na_escolha_do_historico(j):
+    wx_falso.resposta_lista[0] = wx_falso.ID_CANCEL
+    try:
+        j.adicionar_conta("whatsapp")
+    finally:
+        wx_falso.resposta_lista[0] = wx_falso.ID_OK
+    assert not j.pareamentos and not hasattr(j.contas, "adicionadas")
+
+
+def test_codigo_abre_janela_propria_e_tela_cheia_do_qr(j):
+    j.adicionar_conta("whatsapp")
+    dlg = j.pareamentos["w-nova"]
+    j.b.publicar(ev.CodigoPareamento("w-nova", "ABCD-EFGH"))
+    assert dlg.janela_codigo.campo.GetValue() == "ABCD-EFGH"
+    assert wx_falso._foco[0] is dlg.janela_codigo.campo
+    j.b.publicar(ev.CodigoPareamento("w-nova", "WXYZ-1234"))
+    assert dlg.janela_codigo.campo.GetValue() == "WXYZ-1234"
+    dlg._tela_cheia()                       # sem QR ainda: nao abre
+    assert dlg.tela_cheia is None
+    j.b.publicar(ev.QrPareamento("w-nova", "2@" + "x" * 150))
+    dlg._tela_cheia()
+    cheia = dlg.tela_cheia
+    assert cheia.cheia
+    # o QR ocupa quase toda a altura da tela, ampliado por um inteiro
+    assert cheia.imagem.bitmap.img.w >= 900
+    j.b.publicar(ev.QrPareamento("w-nova", "2@" + "y" * 150))
+    assert cheia.codigo == "2@" + "y" * 150
+    j.b.publicar(ev.ContaPronta("w-nova", "Fábio", "+55"))
+    assert not cheia.vivo and not dlg.janela_codigo
+
+
+def test_desconectada_pelo_celular_oferece_parear_de_novo(j):
+    wx_falso.resposta_messagebox[0] = wx_falso.YES
+    try:
+        j.b.publicar(ev.EstadoConta("w1", ev.PRECISA_LOGIN,
+                                    "desconectada pelo celular"))
+    finally:
+        wx_falso.resposta_messagebox[0] = wx_falso.NO
+    assert j.contas.repareada == ("w1", "recentes")
+    assert "w1" in j.pareamentos
+
+
+def test_remover_conta(j):
+    wx_falso.resposta_messagebox[0] = wx_falso.YES
+    try:
+        j._remover_conta()
+    finally:
+        wx_falso.resposta_messagebox[0] = wx_falso.NO
+    assert j.contas.removida == "t1"
+    assert j.lista_conv.itens == [jm.TEXTO_SEM_CONTAS]
+
+
+def test_qr_gerado_e_lido_por_um_leitor_de_qr():
+    cv2 = pytest.importorskip("cv2")
+    import numpy as np
+    from telezapp.interface import dialogos
+    # do tamanho de um QR real do WhatsApp
+    codigo = "2@" + "R" * 80 + "," + "n" * 44 + "," + "i" * 44 + "," + \
+        "a" * 44 + ",1"
+    for escala in (dialogos.ESCALA_JANELA, 12):
+        lado, px = dialogos.pixels_qr(codigo, escala)
+        img = np.frombuffer(px, dtype=np.uint8).reshape(lado, lado, 3)
+        texto, _, _ = cv2.QRCodeDetector().detectAndDecode(img)
+        assert texto == codigo
