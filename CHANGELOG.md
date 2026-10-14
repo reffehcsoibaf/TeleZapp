@@ -35,6 +35,8 @@ Etapa 3a: receber e abrir mídias.
 - Atalhos: Alt+1 conversas, Alt+2 marcador de não lidas (na conversa) ou
   próxima conversa com não lidas (na lista), Alt+3 mensagens. Saem Ctrl+1,
   Ctrl+2 e Ctrl+U; Ctrl+N fica reservado para nova conversa.
+- Vídeo (MediaCtrl) não repete mais: a nova tentativa de Play só vale antes
+  de o vídeo andar; ao acabar e voltar ao início, marca como terminado.
 - Nada move a seleção da lista de mensagens sozinho (envio, mensagens
   novas, recargas): mensagens novas são só acrescentadas ao fim da lista.
 - Opção `audio_janela`: Enter em áudio/voz toca sem janela (padrão) ou abre o

@@ -305,6 +305,7 @@ def _reproducao(pai, msg, caminho, texto, fala, motor, video):
 
     pausou = [False]
     tentativas = [0]
+    progrediu = [False]
 
     def alternar(evt=None):
         pausou[0] = mo.tocando      # apertou com ele tocando: e uma pausa
@@ -337,9 +338,14 @@ def _reproducao(pai, msg, caminho, texto, fala, motor, video):
         if ctrl is not None and not iniciou[0] and mo.duracao > 0:
             comecar()          # o aviso de "carregou" nao chegou: toca assim
         tocando = mo.tocando
+        if tocando or mo.posicao > 0:
+            progrediu[0] = True     # o video chegou a andar
+        if ctrl is not None and progrediu[0] and not tocando and \
+                not pausou[0] and not mo.terminou and mo.posicao == 0:
+            mo.terminou = True      # acabou e o Windows voltou ao inicio
         if ctrl is not None and iniciou[0] and not tocando and \
-                not mo.terminou and not pausou[0] and tentativas[0] < 3 \
-                and mo.posicao == 0:
+                not progrediu[0] and not mo.terminou and not pausou[0] \
+                and tentativas[0] < 3:
             tentativas[0] += 1      # o Windows ignorou o primeiro Play
             mo.tocar()
             tocando = True
