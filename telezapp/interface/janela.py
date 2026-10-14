@@ -1124,6 +1124,15 @@ class Janela(wx.Frame):
         recibos = []
         if x.minha and self.banco is not None and not x.id.startswith("local-"):
             recibos = self.banco.recibos(x.conta_id, x.conversa_id, x.id)
+        nomes = {}
+        prov = self.contas.provedores.get(x.conta_id) if recibos else None
+        for quem in {r[0] for r in recibos}:
+            try:
+                nome = prov.nome_de_participante(quem) if prov else ""
+            except Exception:
+                nome = ""
+            if nome:
+                nomes[quem] = nome
         midia = None
         if x.tipo in armazem.BAIXAVEIS and self.midias is not None:
             midia = "baixada" if self.midias.caminho(x) else "não baixada"
@@ -1134,7 +1143,7 @@ class Janela(wx.Frame):
         pessoa = dialogos.mostrar_texto(
             self, "Detalhes da mensagem",
             m.detalhes(x, conv.nome if conv else "", recibos=recibos,
-                       midia=midia),
+                       nomes=nomes, midia=midia),
             "Detalhes e texto completo", links=links,
             botoes=[tuple(b) for b in extras["botoes"]],
             mencoes=extras["mencoes"])

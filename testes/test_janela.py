@@ -1052,3 +1052,19 @@ def test_enter_em_foto_com_link_mostra_detalhes_e_ctrl_o_abre_a_midia(
     selecionar(j, "6")
     j._detalhes_ou_marcador()
     assert abertas
+
+
+def test_detalhes_pedem_ao_provedor_o_nome_de_quem_recebeu(j, monkeypatch):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    x = msg("7", "oi", minha=True, conversa="10")
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [x]))
+    j.banco.salvar_recibos("t1", "10", ["7"], "5551@s.whatsapp.net",
+                           "entregue", AGORA)
+    j.contas.p.nome_de_participante = lambda q: "Ana Silva"
+    chamadas = []
+    monkeypatch.setattr(jm.dialogos, "mostrar_texto",
+                        lambda *a, **k: chamadas.append(a) or None)
+    selecionar(j, "7")
+    j._detalhes()
+    assert "Entregue a Ana Silva em" in chamadas[0][2]

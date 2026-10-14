@@ -719,3 +719,13 @@ def test_mensagem_de_canal_ganha_o_nome_do_canal(amb):
         threading.Event().wait(0.02)
     assert amb.p._conversas["120363000000000001@newsletter"].nome == \
         "Canal de Notícias"
+
+
+def test_nome_de_participante_usa_agenda_ou_telefone(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    assert amb.p.nome_de_participante("5551988887777@s.whatsapp.net") == \
+        "Ana Silva"
+    assert amb.p.nome_de_participante("5551900000000@s.whatsapp.net") == \
+        "+5551900000000"
+    assert amb.p.nome_de_participante("55544433322211100@lid") == ""

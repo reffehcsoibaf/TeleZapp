@@ -268,6 +268,15 @@ def texto_marcador(n):
         n, "mensagem" if n == 1 else "mensagens")
 
 
+def _quem_legivel(quem):
+    """Identificador de participante que nunca mostra o codigo interno."""
+    if quem.endswith("@s.whatsapp.net"):
+        return "+" + quem.split("@")[0]
+    if "@" in quem:
+        return "Contato sem nome"
+    return quem
+
+
 def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
              midia=None):
     linhas = [
@@ -294,7 +303,8 @@ def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
         linhas.append("")
         for quem, tipo, data in recibos:
             linhas.append("%s a %s em %s" % (
-                rotulos.get(tipo, tipo), nomes.get(quem, quem),
+                rotulos.get(tipo, tipo),
+                nomes.get(quem) or _quem_legivel(quem),
                 time.strftime("%d/%m/%Y %H:%M:%S", time.localtime(data))
                 if data else "-"))
     if m.texto:

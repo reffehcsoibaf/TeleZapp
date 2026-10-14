@@ -633,6 +633,17 @@ class ProvedorWhatsApp(Provedor):
             return "+" + alvo.User
         return SEM_NOME
 
+    def nome_de_participante(self, participante_id):
+        """Nome de quem entregou/leu uma mensagem, para os detalhes."""
+        if self.cliente is None or "@" not in (participante_id or ""):
+            return ""
+        try:
+            usuario, servidor = jid_de_texto(participante_id)
+            nome = self._nome_contato(_jid_obj(usuario, servidor))
+        except Exception:
+            return ""
+        return "" if nome == SEM_NOME else nome
+
     def _dados_mencao(self, jid_txt):
         """{'nome', 'id', 'telefone'} de quem foi mencionado (com cache)."""
         achado = self._cache_mencoes.get(jid_txt)
