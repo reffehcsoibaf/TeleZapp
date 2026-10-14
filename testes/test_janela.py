@@ -134,13 +134,13 @@ def test_lista_de_conversas(j):
                                   "Bruno, Telegram"]
 
 
-def test_abrir_conversa_com_nao_lidas_vai_direto_na_primeira(j):
+def test_abrir_conversa_com_nao_lidas_foca_o_marcador(j):
     ditas = []
     j.fala.falar = lambda t, interromper=False: ditas.append(t)
     j.lista_conv.SetFocus()
     j.lista_conv.SetSelection(0)
     j._char_hook(Tecla(wx_falso.WXK_RETURN))
-    assert ditas == ["2 mensagens não lidas"]       # so a contagem
+    assert ditas == []                              # nada falado a parte
     assert ("carregar", "10", 50) in j.contas.p.pedidos
     assert ("lida", "10") in j.contas.p.pedidos
     assert j.lista_conv.itens[0] == "Ana, Telegram"
@@ -150,10 +150,12 @@ def test_abrir_conversa_com_nao_lidas_vai_direto_na_primeira(j):
         msg("1", "antiga"), msg("2", "minha", minha=True),
         msg("3", "nova 1"), msg("4", "nova 2")]))
     itens = j.lista_msgs.itens
-    assert not any("Início" in x for x in itens)     # sem item de marcador
-    assert j.lista_msgs.selecionado().endswith("nova 1")
+    assert j.lista_msgs.selecionado() == \
+        "Início das mensagens não lidas: 2 mensagens"
+    assert itens[itens.index(j.lista_msgs.selecionado()) + 1].endswith(
+        "nova 1")                                    # seta para baixo: 1a
     assert wx_falso._foco[0] is j.lista_msgs         # foco uma vez so
-    assert ditas == ["2 mensagens não lidas"]
+    assert ditas == []
 
     j._char_hook(Tecla(wx_falso.WXK_ESCAPE))         # Esc volta
     assert wx_falso._foco[0] is j.lista_conv
@@ -748,10 +750,10 @@ def test_parou_no_fim_reabre_na_ultima_mensagem(j):
     assert j._chave_selecionada() == "8"             # a ultima da conversa
 
 
-def test_primeira_vez_continua_na_primeira_nao_lida(j):
+def test_primeira_vez_continua_no_marcador(j):
     assert j.banco.posicao("t1", "10") is None
     _abrir_ana(j)
-    assert j._chave_selecionada() == j.marcador_id == "5"
+    assert j._chave_selecionada() == jm.MARCADOR and j.marcador_id == "5"
 
 
 def test_ponto_que_sumiu_cai_no_marcador_ou_fim(j):
@@ -769,7 +771,7 @@ def test_alt2_marcador_na_conversa_e_proxima_na_lista(j):
     j.selecao_automatica = False
     j.caixa.SetFocus()
     j._ir_nao_lidas()
-    assert j._chave_selecionada() == j.marcador_id
+    assert j._chave_selecionada() == jm.MARCADOR
     assert wx_falso._foco[0] is j.lista_msgs
     # sem marcador: avisa
     j.marcador_id = None

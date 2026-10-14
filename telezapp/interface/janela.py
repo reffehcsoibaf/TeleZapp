@@ -44,7 +44,7 @@ para escrever fica logo abaixo das mensagens.
 ATALHOS
 Alt 1: ir para a lista de conversas
 Alt 2: na lista de conversas, a próxima conversa com mensagens não lidas;
-dentro da conversa, a primeira mensagem não lida
+dentro da conversa, o marcador de mensagens não lidas
 Alt 3: ir para a lista de mensagens
 End: ir para o fim da lista (Home: para o início)
 Control E: ir para a caixa de digitação
@@ -668,7 +668,7 @@ class Janela(wx.Frame):
         if primeira and self.alvo_inicial and \
                 self.alvo_inicial not in self.mapa:
             self.fala.falar("Não achei o ponto em que você parou; abri no "
-                            "%s." % ("primeira mensagem não lida"
+                            "%s." % ("marcador de não lidas"
                                      if self.marcador_id else "fim"))
         if primeira:
             self._dar_foco_as_mensagens()
@@ -870,12 +870,9 @@ class Janela(wx.Frame):
         self._preencher_mensagens(self._destino_inicial())
         log.info("conversa aberta (%d no cache, %d não lidas)", len(lista),
                  self.marcador_n)
-        n = self.marcador_n
-        if n > 0:
-            # so a contagem: a primeira nao lida e lida quando a lista recebe
-            # o foco, logo que o servico responde
-            self.fala.falar("1 mensagem não lida" if n == 1 else
-                            "%d mensagens não lidas" % n, interromper=True)
+        if self.marcador_n > 0:
+            # o foco espera o servico responder: assim o leitor de tela fala
+            # uma vez so, no marcador de nao lidas
             self.aguardando_foco = True
             wx.CallLater(3000, self._dar_foco_as_mensagens, conv.chave)
         else:
@@ -971,6 +968,9 @@ class Janela(wx.Frame):
         itens, mapa = [], []
         anterior = None
         for x in msgs:
+            if self.marcador_id is not None and x.id == self.marcador_id:
+                itens.append(m.texto_marcador(self.marcador_n))
+                mapa.append(MARCADOR)
             itens.append(m.formatar(x, self.estilo, anterior,
                                     respondida=nomes.get(x.resposta_a)))
             mapa.append(x.id)
@@ -997,13 +997,13 @@ class Janela(wx.Frame):
         self.lista_msgs.Set(itens)
         sel = len(itens) - 1
         if destino == MARCADOR:
-            if self.marcador_id in mapa:
-                sel = mapa.index(self.marcador_id)
+            if MARCADOR in mapa:
+                sel = mapa.index(MARCADOR)
         elif destino not in (None, "ultima"):
             if destino in mapa:
                 sel = mapa.index(destino)
-            elif self.marcador_id in mapa:
-                sel = mapa.index(self.marcador_id)
+            elif MARCADOR in mapa:
+                sel = mapa.index(MARCADOR)
         elif destino is None:
             if antes in mapa:
                 sel = mapa.index(antes)
@@ -1033,6 +1033,8 @@ class Janela(wx.Frame):
             alvo = ""
         else:
             alvo = self.mapa[i]
+            if alvo == MARCADOR:
+                alvo = self.mapa[i + 1]
         try:
             self.banco.salvar_posicao(self.atual[0], self.atual[1], alvo or "")
         except Exception:
@@ -1049,8 +1051,8 @@ class Janela(wx.Frame):
         if self.FindFocus() is self.lista_conv or self.atual is None:
             self._proxima_nao_lida()
             return
-        if self.marcador_id in self.mapa:
-            self.lista_msgs.SetSelection(self.mapa.index(self.marcador_id))
+        if MARCADOR in self.mapa:
+            self.lista_msgs.SetSelection(self.mapa.index(MARCADOR))
             self.selecao_automatica = False
             self.lista_msgs.SetFocus()
             return
@@ -1074,6 +1076,10 @@ class Janela(wx.Frame):
         return None
 
     def _detalhes_ou_marcador(self):
+        if self._chave_selecionada() == MARCADOR:
+            self.fala.falar("Marcador. As mensagens não lidas começam na "
+                            "próxima.")
+            return
         x = self._mensagem_selecionada()
         if x is not None and x.tipo in armazem.BAIXAVEIS and \
                 not x.id.startswith("local-"):
