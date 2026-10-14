@@ -67,6 +67,7 @@ class EnvioFalhou:
     conversa_id: str
     texto: str
     motivo: str
+    devolver_texto: bool = True    # False: resposta de botao, nada a devolver
 
 
 @dataclass

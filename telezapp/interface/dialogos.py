@@ -128,7 +128,7 @@ def rotulo_mencao(men):
 
 
 def mostrar_texto(pai, titulo, texto, rotulo, links=(), botoes=(),
-                  mencoes=()):
+                  mencoes=(), acoes=()):
     """Texto longo somente leitura, navegavel pelas setas.
 
     Depois do texto vem, so quando existirem, uma lista de Links, uma de
@@ -136,10 +136,12 @@ def mostrar_texto(pai, titulo, texto, rotulo, links=(), botoes=(),
     em cada lista, as setas passam de um item a outro; Enter ou Espaco abre
     o endereco no navegador padrao. Numa pessoa, Enter fecha a janela e a
     devolve (dicionario da mencao), para a conversa ser aberta; sem escolha,
-    devolve None.
+    devolve None. Em Botoes de resposta (e Opcoes), Enter fecha a janela e
+    devolve {"_acao": indice}: quem chamou confirma e envia a resposta.
 
     links: [(endereco, texto)]; botoes: [(rotulo, endereco)];
-    mencoes: [dict com nome, usuario, telefone, id]."""
+    mencoes: [dict com nome, usuario, telefone, id];
+    acoes: [(rotulo, e_opcao_de_lista)] que podem ser tocados."""
     dlg = wx.Dialog(pai, title=titulo, size=(620, 520),
                     style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
     rot = wx.StaticText(dlg, label=rotulo)
@@ -178,6 +180,15 @@ def mostrar_texto(pai, titulo, texto, rotulo, links=(), botoes=(),
                   [com_endereco(r_, u) for r_, u in botoes],
                   lambda i: abrir_link(botoes[i][1])
                   if 0 <= i < len(botoes) else None)
+    if acoes:
+        def tocar(i):
+            if 0 <= i < len(acoes):
+                escolhida[0] = {"_acao": i}
+                dlg.EndModal(wx.ID_OK)
+        adicionar("Botões de resposta e opções (%d). Enter escolhe e "
+                  "pede confirmação antes de enviar" % len(acoes),
+                  [("Opção: " if lista else "Botão: ") + r_
+                   for r_, lista in acoes], tocar)
     if mencoes:
         def abrir_pessoa(i):
             if 0 <= i < len(mencoes):

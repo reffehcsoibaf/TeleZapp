@@ -752,11 +752,11 @@ class Janela(wx.Frame):
                 break
         if chave == self.atual:
             self._preencher_mensagens()
-            if not self.caixa.GetValue():
+            if e.devolver_texto and not self.caixa.GetValue():
                 self.caixa.SetValue(e.texto)
         bipe("erro")
         texto = "Não foi possível enviar: %s." % e.motivo
-        if chave == self.atual:
+        if chave == self.atual and e.devolver_texto:
             texto += " O texto voltou para a caixa de digitação."
         self.fala.falar(texto, interromper=True)
         self.SetStatusText(texto)
@@ -1146,9 +1146,38 @@ class Janela(wx.Frame):
                        nomes=nomes, midia=midia),
             "Detalhes e texto completo", links=links,
             botoes=[tuple(b) for b in extras["botoes"]],
-            mencoes=extras["mencoes"])
-        if pessoa is not None:
+            mencoes=extras["mencoes"],
+            acoes=[(a.get("rotulo", ""), a.get("tipo") == "lista")
+                   for a in extras["acoes"]])
+        if pessoa is not None and "_acao" in pessoa:
+            wx.CallAfter(self._tocar_acao, x, extras["acoes"][pessoa["_acao"]])
+        elif pessoa is not None:
             wx.CallAfter(self._abrir_conversa_da_mencao, x, pessoa)
+
+    @seguro
+    def _tocar_acao(self, x, acao):
+        """Confirma e envia a resposta de um botao/opcao de uma mensagem."""
+        prov = self.contas.provedores.get(x.conta_id)
+        conv = self.indice.get((x.conta_id, x.conversa_id))
+        nome = conv.nome if conv else "esta conversa"
+        rotulo = acao.get("rotulo", "")
+        o_que = "a opção" if acao.get("tipo") == "lista" else "o botão"
+        if prov is None:
+            bipe("erro")
+            self.fala.falar("Esta conta não está disponível agora.")
+            return
+        r = wx.MessageBox("Enviar %s \"%s\" para %s?" % (o_que, rotulo, nome),
+                          "Confirmar", wx.YES_NO | wx.NO_DEFAULT |
+                          wx.ICON_QUESTION, self)
+        if r != wx.YES:
+            return
+        try:
+            prov.responder_acao(x, acao)
+        except NotImplementedError:
+            bipe("erro")
+            self.fala.falar("Este serviço ainda não responde a botões.")
+            return
+        self.fala.falar("Enviando: " + rotulo)
 
     @seguro
     def _abrir_conversa_da_mencao(self, x, pessoa):

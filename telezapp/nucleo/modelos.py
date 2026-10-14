@@ -87,7 +87,8 @@ class Mensagem:
 # ---------------------------------------------------- links, botoes, mencoes
 def extras_de(msg):
     """{'links': [[endereco, texto]], 'botoes': [[rotulo, endereco]],
-    'mencoes': [{'nome', 'usuario', 'id', 'telefone'}]} da mensagem; as
+    'mencoes': [{'nome', 'usuario', 'id', 'telefone'}],
+    'acoes': [{'tipo', 'rotulo', 'id', 'indice', 'descricao'}]} da mensagem; as
     chaves que nao existem vem como lista vazia."""
     try:
         dados = json.loads(msg.extras) if msg.extras else {}
@@ -97,11 +98,13 @@ def extras_de(msg):
         dados = {}
     return {"links": list(dados.get("links") or []),
             "botoes": list(dados.get("botoes") or []),
-            "mencoes": list(dados.get("mencoes") or [])}
+            "mencoes": list(dados.get("mencoes") or []),
+            "acoes": list(dados.get("acoes") or [])}
 
 
-def guardar_extras(msg, links=(), botoes=(), mencoes=()):
-    """Poe links, botoes e mencoes na mensagem (nada, se tudo vazio)."""
+def guardar_extras(msg, links=(), botoes=(), mencoes=(), acoes=()):
+    """Poe links, botoes, mencoes e acoes (botoes de resposta e opcoes de
+    lista que podem ser tocados) na mensagem (nada, se tudo vazio)."""
     dados = {}
     if links:
         dados["links"] = [list(x) for x in links]
@@ -109,6 +112,8 @@ def guardar_extras(msg, links=(), botoes=(), mencoes=()):
         dados["botoes"] = [list(x) for x in botoes]
     if mencoes:
         dados["mencoes"] = [dict(x) for x in mencoes]
+    if acoes:
+        dados["acoes"] = [dict(x) for x in acoes]
     msg.extras = json.dumps(dados, ensure_ascii=False) if dados else ""
     return msg
 
