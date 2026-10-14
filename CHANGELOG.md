@@ -3,7 +3,7 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
-## 2026.10.14.2
+## 2026.10.14.3
 
 PR #9: links escondidos, botões de link e menções.
 
@@ -26,6 +26,8 @@ PR #9: links escondidos, botões de link e menções.
   ("tipo do WhatsApp: ...") e vai para o log. Nome verificado da empresa
   (`nome_verificado`) vira nome da conversa/autor; conversas só com telefone
   tentam de novo a cada mensagem.
+- WhatsApp, conversa privada: remetente sem nome de perfil usa o nome da
+  conversa como autor (antes: "Desconhecido").
 - Telegram: entidades `MessageEntityTextUrl`/`Url` (posições em UTF-16),
   `Mention` (@usuario, resolvido com `get_entity`, com cache e no máximo 10
   buscas novas por lote) e `MentionName`; botões só de link, nos formatos novo

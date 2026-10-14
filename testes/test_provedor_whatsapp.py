@@ -785,3 +785,12 @@ def test_conversa_so_com_telefone_ganha_nome_verificado_da_empresa(amb):
     ev_.Info.VerifiedName.Details.verifiedName = "Banco Exemplo"
     amb.f["Message"](amb.c, ev_)
     assert esperar(amb.fila, ev.MensagemNova).conversa.nome == "Banco Exemplo"
+
+
+def test_conversa_privada_sem_pushname_usa_o_nome_da_conversa_como_autor(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento("P1", E.Message(conversation="oi"),
+                                   chat="5511912617423", pushname=""))
+    nova = esperar(amb.fila, ev.MensagemNova).mensagem
+    assert nova.autor == "+5511912617423"

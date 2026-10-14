@@ -883,6 +883,8 @@ class ProvedorWhatsApp(Provedor):
             conv = self._conversa(cid, origem.Chat,
                                   info.Pushname or nome_verificado(info), grupo,
                                   msg.data)
+            if not grupo and not msg.minha and not msg.autor:
+                msg.autor = conv.nome       # conversa privada: quem fala
             with self._trava:
                 conv.data = max(conv.data, msg.data)
                 self._remetentes[msg.id] = (remetente, msg.texto)
@@ -1167,6 +1169,10 @@ class ProvedorWhatsApp(Provedor):
                 conv.data = max(conv.data, data)
                 if c.HasField("unreadCount"):
                     conv.nao_lidas = int(c.unreadCount)
+            if not grupo:
+                for x in novas:
+                    if not x.minha and not x.autor:
+                        x.autor = conv.nome
             if grupo and conv.nome == "Grupo" and \
                     cid not in self._nomes_grupo_pedidos:
                 self._nomes_grupo_pedidos.add(cid)
