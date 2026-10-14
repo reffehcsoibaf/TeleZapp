@@ -954,3 +954,117 @@ def test_esc_volta_da_mensagem_respondida(j):
     assert j._chave_selecionada() == "4" and j.atual is not None
     j._char_hook(Tecla(wx_falso.WXK_ESCAPE))      # agora fecha a conversa
     assert j.atual is None
+
+
+def test_rotulo_da_mencao_nome_usuario_e_telefone_por_ultimo():
+    from telezapp.interface import dialogos
+    assert dialogos.rotulo_mencao(
+        {"nome": "Ana Silva", "usuario": "ana", "telefone": "+5551999"}) == \
+        "Ana Silva, @ana, +5551999"
+    assert dialogos.rotulo_mencao({"nome": "+5551999",
+                                   "telefone": "+5551999"}) == "+5551999"
+    assert dialogos.rotulo_mencao({"usuario": "bia"}) == "@bia"
+    assert dialogos.rotulo_mencao({}) == "Contato sem nome"
+
+
+def test_detalhes_junta_links_do_texto_e_escondidos(j, monkeypatch):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    x = msg("4", "veja https://a.com e aqui", conversa="10")
+    m.guardar_extras(x, links=[("https://escondido.com", "aqui"),
+                               ("https://a.com", "https://a.com")],
+                     botoes=[("Site", "https://s.com")],
+                     mencoes=[{"nome": "Bia", "id": "77"}])
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [x]))
+    chamadas = []
+    monkeypatch.setattr(jm.dialogos, "mostrar_texto",
+                        lambda *a, **k: chamadas.append(k) or None)
+    selecionar(j, "4")
+    j._detalhes()
+    k = chamadas[0]
+    assert k["links"] == [("https://escondido.com", "aqui"),
+                          ("https://a.com", "https://a.com")]
+    assert k["botoes"] == [("Site", "https://s.com")]
+    assert k["mencoes"] == [{"nome": "Bia", "id": "77"}]
+
+
+def test_enter_na_mencao_abre_conversa_nova_no_mesmo_servico(j, monkeypatch):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    x = msg("4", "oi @Bia", conversa="10")
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [x]))
+    monkeypatch.setattr(jm.wx, "CallAfter", lambda f, *a: f(*a),
+                        raising=False)
+    monkeypatch.setattr(jm.dialogos, "mostrar_texto",
+                        lambda *a, **k: {"nome": "Bia", "id": "77"})
+    selecionar(j, "4")
+    j._detalhes()
+    assert j.atual == ("t1", "77")
+    assert j.indice[("t1", "77")].nome == "Bia"
+    assert ("carregar", "77", 50) in j.contas.p.pedidos
+    # a mencao de uma conversa que ja existe so abre essa conversa
+    j._fechar_conversa()
+    j._abrir_conversa_da_mencao(x, {"nome": "Ana", "id": "20"})
+    assert j.atual == ("t1", "20")
+
+
+def test_mencao_sem_id_avisa_e_nao_abre(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    x = msg("4", "oi", conversa="10")
+    j._abrir_conversa_da_mencao(x, {"nome": "Bia"})
+    assert j.atual is None and "Não consegui localizar" in ditas[-1]
+
+
+def test_foto_com_link_na_legenda_avisa_na_lista_e_detalhes_traz_o_link(
+        j, monkeypatch):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    x = msg("5", "veja https://a.com/x", conversa="10")
+    x.tipo = m.FOTO
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [x]))
+    linhas = [j.lista_msgs.GetString(i)
+              for i in range(j.lista_msgs.GetCount())]
+    assert any("com link (Enter)" in l for l in linhas), linhas
+    chamadas = []
+    monkeypatch.setattr(jm.dialogos, "mostrar_texto",
+                        lambda *a, **k: chamadas.append(k) or None)
+    selecionar(j, "5")
+    j._detalhes()
+    assert chamadas[0]["links"] == [("https://a.com/x", "https://a.com/x")]
+
+
+def test_enter_em_foto_com_link_mostra_detalhes_e_ctrl_o_abre_a_midia(
+        j, monkeypatch):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    x = msg("5", "veja https://a.com/x", conversa="10")
+    x.tipo = m.FOTO
+    sem = msg("6", "so a foto", conversa="10")
+    sem.tipo = m.FOTO
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [x, sem]))
+    abertas, detalhes = [], []
+    monkeypatch.setattr(j, "_abrir_midia", lambda *a, **k: abertas.append(1))
+    monkeypatch.setattr(j, "_detalhes", lambda: detalhes.append(1))
+    selecionar(j, "5")
+    j._detalhes_ou_marcador()
+    assert detalhes and not abertas
+    selecionar(j, "6")
+    j._detalhes_ou_marcador()
+    assert abertas
+
+
+def test_detalhes_pedem_ao_provedor_o_nome_de_quem_recebeu(j, monkeypatch):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    x = msg("7", "oi", minha=True, conversa="10")
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [x]))
+    j.banco.salvar_recibos("t1", "10", ["7"], "5551@s.whatsapp.net",
+                           "entregue", AGORA)
+    j.contas.p.nome_de_participante = lambda q: "Ana Silva"
+    chamadas = []
+    monkeypatch.setattr(jm.dialogos, "mostrar_texto",
+                        lambda *a, **k: chamadas.append(a) or None)
+    selecionar(j, "7")
+    j._detalhes()
+    assert "Entregue a Ana Silva em" in chamadas[0][2]

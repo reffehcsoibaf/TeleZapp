@@ -26,9 +26,11 @@ def main():
         sys.stdout = open(os.devnull, "w", encoding="utf-8")
     if sys.stderr is None:
         sys.stderr = open(os.devnull, "w", encoding="utf-8")
-    from telezapp import NOME, config
+    from telezapp import NOME, VERSAO, config
     arquivo_log = config.configurar_registro()
     log = logging.getLogger("telezapp")
+    log.info("%s versão %s iniciado, código em %s", NOME, VERSAO,
+             os.path.dirname(os.path.abspath(__file__)))
 
     def erro_nao_tratado(tipo, valor, tb):
         log.error("ERRO NÃO TRATADO:\n%s",

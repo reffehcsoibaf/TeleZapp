@@ -2,6 +2,7 @@
 # Copyright (C) 2026 Contribuidores do TeleZapp
 """Formato comum aos dois servicos (conta, conversa, mensagem) e o texto que
 o leitor de tela fala para cada item. Sem dependencia de wxPython."""
+import json
 import os
 import re
 import time
@@ -76,10 +77,40 @@ class Mensagem:
     estado: str = ""
     resposta_a: str = ""       # id da mensagem respondida
     remetente: str = ""        # WhatsApp: jid de quem enviou (para "lida")
+    extras: str = ""           # JSON: links, botoes e mencoes (ver extras_de)
 
     @property
     def chave(self):
         return (self.conta_id, self.conversa_id, self.id)
+
+
+# ---------------------------------------------------- links, botoes, mencoes
+def extras_de(msg):
+    """{'links': [[endereco, texto]], 'botoes': [[rotulo, endereco]],
+    'mencoes': [{'nome', 'usuario', 'id', 'telefone'}]} da mensagem; as
+    chaves que nao existem vem como lista vazia."""
+    try:
+        dados = json.loads(msg.extras) if msg.extras else {}
+    except ValueError:
+        dados = {}
+    if not isinstance(dados, dict):
+        dados = {}
+    return {"links": list(dados.get("links") or []),
+            "botoes": list(dados.get("botoes") or []),
+            "mencoes": list(dados.get("mencoes") or [])}
+
+
+def guardar_extras(msg, links=(), botoes=(), mencoes=()):
+    """Poe links, botoes e mencoes na mensagem (nada, se tudo vazio)."""
+    dados = {}
+    if links:
+        dados["links"] = [list(x) for x in links]
+    if botoes:
+        dados["botoes"] = [list(x) for x in botoes]
+    if mencoes:
+        dados["mencoes"] = [dict(x) for x in mencoes]
+    msg.extras = json.dumps(dados, ensure_ascii=False) if dados else ""
+    return msg
 
 
 # ------------------------------------------------------------- formatacao
@@ -174,6 +205,8 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None):
     do autor (texto).
     """
     cont = conteudo(m).replace("\r", " ").replace("\n", " ")
+    if m.tipo not in (TEXTO, VOZ, FIGURINHA) and tem_links(m):
+        cont = _juntar(cont, "com link (Enter)")
     if m.resposta_a:
         if isinstance(respondida, Mensagem):
             quem = "você" if respondida.minha else (
@@ -225,9 +258,23 @@ def extrair_links(texto):
     return achados
 
 
+def tem_links(m):
+    """A mensagem tem algum link (na legenda ou escondido)?"""
+    return bool(extrair_links(m.texto) or extras_de(m)["links"])
+
+
 def texto_marcador(n):
     return "Início das mensagens não lidas: %d %s" % (
         n, "mensagem" if n == 1 else "mensagens")
+
+
+def _quem_legivel(quem):
+    """Identificador de participante que nunca mostra o codigo interno."""
+    if quem.endswith("@s.whatsapp.net"):
+        return "+" + quem.split("@")[0]
+    if "@" in quem:
+        return "Contato sem nome"
+    return quem
 
 
 def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
@@ -256,7 +303,8 @@ def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
         linhas.append("")
         for quem, tipo, data in recibos:
             linhas.append("%s a %s em %s" % (
-                rotulos.get(tipo, tipo), nomes.get(quem, quem),
+                rotulos.get(tipo, tipo),
+                nomes.get(quem) or _quem_legivel(quem),
                 time.strftime("%d/%m/%Y %H:%M:%S", time.localtime(data))
                 if data else "-"))
     if m.texto:

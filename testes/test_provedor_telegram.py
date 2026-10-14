@@ -150,6 +150,14 @@ class ClienteFalso:
     async def get_input_entity(self, id):
         return "peer%d" % id
 
+    async def get_entity(self, usuario):
+        self.buscas = getattr(self, "buscas", [])
+        self.buscas.append(usuario)
+        if usuario == "naoexiste":
+            raise ValueError("sem usuario")
+        return types.SimpleNamespace(id=777, first_name="Bia", last_name="",
+                                     username=usuario, title=None)
+
     async def send_message(self, ent, texto, reply_to=None):
         if texto == "falhar":
             raise errors.ChatWriteForbiddenError(None)
@@ -398,3 +406,78 @@ def test_baixar_arquivo_grande_em_partes_paralelas(ambiente, tmp_path,
                     for n in ns if n.endswith(".parte")]
     finally:
         p.parar()
+
+
+def test_converter_links_escondidos_botoes_e_mencoes():
+    from telethon.tl import types as T
+    # a figurinha de emoji conta 2 posicoes UTF-16: confere o deslocamento
+    texto = "😀 veja aqui, fale com @bia e Carla, ou t.me/canal"
+    off_aqui = len("😀 veja ".encode("utf-16-le")) // 2
+    off_bia = len("😀 veja aqui, fale com ".encode("utf-16-le")) // 2
+    off_carla = len("😀 veja aqui, fale com @bia e ".encode("utf-16-le")) // 2
+    off_url = len("😀 veja aqui, fale com @bia e Carla, ou ".encode(
+        "utf-16-le")) // 2
+    ents = [
+        T.MessageEntityTextUrl(offset=off_aqui, length=4,
+                               url="https://exemplo.com/x"),
+        T.MessageEntityMention(offset=off_bia, length=4),
+        T.MessageEntityMentionName(offset=off_carla, length=5, user_id=42),
+        T.MessageEntityUrl(offset=off_url, length=10)]
+    marcador = T.ReplyInlineMarkup(rows=[T.KeyboardInlineButtonRow(buttons=[
+        T.KeyboardInlineButton(text="Site",
+                               type=T.InlineButtonTypeUrl(url="https://s.com")),
+        T.KeyboardInlineButton(text="Votar",
+                               type=T.InlineButtonTypeCallback(data=b"x"))])])
+    x = tg.converter(mensagem(7, texto, sender=ANA, entities=ents,
+                              reply_markup=marcador), "t1", 10)
+    extras = m.extras_de(x)
+    assert extras["links"] == [["https://exemplo.com/x", "aqui"],
+                               ["https://t.me/canal", "t.me/canal"]]
+    assert extras["botoes"] == [["Site", "https://s.com"]]   # sem callback
+    assert extras["mencoes"] == [{"usuario": "bia"},
+                                 {"id": "42", "nome": "Carla"}]
+
+
+def test_mencao_por_usuario_ganha_id_e_nome(ambiente):
+    from telethon.tl import types as T
+    cliente = ClienteFalso()
+
+    async def iter_messages(ent, limit=None):
+        t = "oi @bia e @carla e @naoexiste"
+        yield mensagem(5, t, sender=ANA, entities=[
+            T.MessageEntityMention(offset=t.index("@bia"), length=4),
+            T.MessageEntityMention(offset=t.index("@carla"), length=6),
+            T.MessageEntityMention(offset=t.index("@naoexiste"), length=10)])
+    cliente.iter_messages = iter_messages
+    p = ambiente.criar(cliente)
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ConversasAtualizadas)
+        p.carregar_mensagens("10")
+        x = esperar(ambiente.fila, ev.MensagensCarregadas).mensagens[0]
+        men = m.extras_de(x)["mencoes"]
+        assert men[0] == {"usuario": "bia", "id": "777", "nome": "Bia"}
+        assert men[1]["usuario"] == "carla" and men[1]["id"] == "777"
+        assert "id" not in men[2]               # nao achou: fica sem id
+        assert cliente.buscas == ["bia", "carla", "naoexiste"]
+        guardada = ambiente.banco.mensagem("t1", "10", "5")
+        assert m.extras_de(guardada)["mencoes"][0]["nome"] == "Bia"
+    finally:
+        p.parar()
+
+
+def test_botao_de_link_no_formato_antigo_do_telethon():
+    class KeyboardButtonUrl:           # nome da classe nas versoes antigas
+        def __init__(self, text, url):
+            self.text, self.url = text, url
+
+    class KeyboardButtonCallback:
+        def __init__(self, text):
+            self.text = text
+    linha = types.SimpleNamespace(buttons=[
+        KeyboardButtonUrl("Site", "https://s.com"),
+        KeyboardButtonCallback("Votar")])
+    x = tg.converter(mensagem(7, "oi", sender=ANA,
+                              reply_markup=types.SimpleNamespace(
+                                  rows=[linha])), "t1", 10)
+    assert m.extras_de(x)["botoes"] == [["Site", "https://s.com"]]

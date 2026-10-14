@@ -235,3 +235,27 @@ def test_abrir_link_so_http(monkeypatch):
     assert dialogos.abrir_link("file:///c:/windows/x.exe") is False
     assert dialogos.abrir_link("javascript:alert(1)") is False
     assert abertos == ["https://a.com"]
+
+
+def test_midia_com_link_na_legenda_avisa_e_texto_nao_muda():
+    foto = msg(texto="veja https://x.com/a", tipo=m.FOTO)
+    assert m.tem_links(foto)
+    assert "com link (Enter)" in m.formatar(foto, m.ESTILO_CONTEUDO_PRIMEIRO)
+    sem = msg(texto="oi", tipo=m.FOTO)
+    assert not m.tem_links(sem)
+    assert "com link" not in m.formatar(sem, m.ESTILO_CONTEUDO_PRIMEIRO)
+    txt = msg(texto="https://x.com/a")
+    assert "com link" not in m.formatar(txt, m.ESTILO_CONTEUDO_PRIMEIRO)
+
+
+def test_detalhes_mostram_nome_ou_telefone_nunca_o_codigo_do_recibo():
+    x = msg(minha=True, texto="oi")
+    recibos = [("5551988887777@s.whatsapp.net", "entregue", AGORA),
+               ("99887766554433221@lid", "lida", AGORA),
+               ("5551900000000@s.whatsapp.net", "lida", AGORA)]
+    t = m.detalhes(x, "Grupo", recibos=recibos,
+                   nomes={"5551988887777@s.whatsapp.net": "Ana Silva"})
+    assert "Entregue a Ana Silva em" in t
+    assert "Lida a Contato sem nome em" in t
+    assert "Lida a +5551900000000 em" in t
+    assert "@" not in t

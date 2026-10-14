@@ -58,6 +58,11 @@ class Provedor(ABC):
     def marcar_como_lida(self, conversa_id):
         """Avisa o servico que a pessoa leu a conversa."""
 
+    def nome_de_participante(self, participante_id):
+        """Nome para mostrar de quem aparece num recibo (entregue, lida);
+        vazio se nao souber."""
+        return ""
+
     def baixar_arquivo(self, msg, base, progresso, cancelado):
         """Baixa a midia da mensagem e devolve o caminho do arquivo.
 

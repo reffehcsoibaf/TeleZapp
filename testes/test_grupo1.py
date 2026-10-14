@@ -118,3 +118,40 @@ def test_posicao_da_conversa(tmp_path):
     b.apagar_conta("c")
     assert b.posicao("c", "1") is None
     b.fechar()
+
+
+def test_extras_na_mensagem_e_migracao_do_banco(tmp_path):
+    import sqlite3
+    from telezapp.armazenamento.banco import Banco
+    from telezapp.nucleo import modelos as m
+    x = m.Mensagem("c", "1", "9", texto="oi")
+    assert m.extras_de(x) == {"links": [], "botoes": [], "mencoes": []}
+    m.guardar_extras(x, links=[("https://a.com", "clique aqui")],
+                     botoes=[("Abrir", "https://b.com")],
+                     mencoes=[{"nome": "Ana", "id": "5"}])
+    caminho = str(tmp_path / "v.db")
+    b = Banco(caminho)
+    b.salvar_mensagens([x])
+    volta = b.mensagem("c", "1", "9")
+    assert m.extras_de(volta)["links"] == [["https://a.com", "clique aqui"]]
+    assert m.extras_de(volta)["mencoes"][0]["nome"] == "Ana"
+    b.fechar()
+    # banco antigo (sem a coluna extras) ganha a coluna sem perder mensagens
+    con = sqlite3.connect(str(tmp_path / "velho.db"))
+    con.executescript("""
+        CREATE TABLE mensagens (conta_id TEXT, conversa_id TEXT, id TEXT,
+            autor TEXT NOT NULL DEFAULT '', minha INTEGER NOT NULL DEFAULT 0,
+            data REAL NOT NULL DEFAULT 0, tipo TEXT NOT NULL DEFAULT 'texto',
+            texto TEXT NOT NULL DEFAULT '', segundos INTEGER NOT NULL
+            DEFAULT 0, nome_arquivo TEXT NOT NULL DEFAULT '', tamanho INTEGER
+            NOT NULL DEFAULT 0, estado TEXT NOT NULL DEFAULT '', resposta_a
+            TEXT NOT NULL DEFAULT '', remetente TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (conta_id, conversa_id, id));
+        INSERT INTO mensagens (conta_id, conversa_id, id, texto)
+            VALUES ('c', '1', '1', 'antiga');""")
+    con.commit()
+    con.close()
+    b2 = Banco(str(tmp_path / "velho.db"))
+    assert b2.mensagem("c", "1", "1").texto == "antiga"
+    assert b2.mensagem("c", "1", "1").extras == ""
+    b2.fechar()

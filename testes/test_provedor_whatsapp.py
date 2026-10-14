@@ -28,11 +28,11 @@ def jid(user, server="s.whatsapp.net"):
 
 
 def evento(id, mensagem, chat="5551988887777", de_mim=False, grupo=False,
-           remetente=None, pushname="Ana", ts=TS):
-    servidor = "g.us" if grupo else "s.whatsapp.net"
+           remetente=None, pushname="Ana", ts=TS, servidor=None):
+    servidor = servidor or ("g.us" if grupo else "s.whatsapp.net")
     origem = N.MessageSource(Chat=jid(chat, servidor), IsFromMe=de_mim,
                              IsGroup=grupo,
-                             Sender=jid(remetente or chat))
+                             Sender=jid(remetente or chat, servidor))
     info = N.MessageInfo(MessageSource=origem, ID=id, Pushname=pushname,
                          Timestamp=ts)
     return N.Message(Info=info, Message=mensagem)
@@ -129,8 +129,12 @@ class ClienteFalso:
         self.enviadas, self.lidas, self.pareamentos = [], [], []
         self.contact = types.SimpleNamespace(get_contact=self._contato)
 
+    outros = {}      # usuario -> dados de ContactInfo (perfil, empresa...)
+
     def _contato(self, j):
         nomes = {"5551988887777": "Ana Silva"}
+        if j.User in self.outros:
+            return N.ContactInfo(Found=True, **self.outros[j.User])
         return N.ContactInfo(Found=j.User in nomes,
                              FullName=nomes.get(j.User, ""))
 
@@ -145,6 +149,22 @@ class ClienteFalso:
 
     def get_pn_from_lid(self, j):
         return jid("5551977776666") if j.User == "lid1" else N.JID()
+
+    empresas = {}    # usuario -> nome verificado devolvido por get_user_info
+
+    def get_user_info(self, *jids):
+        saida = []
+        for j in jids:
+            info = N.UserInfo()
+            if j.User in self.empresas:
+                info.VerifiedName.Details.verifiedName = self.empresas[j.User]
+            saida.append(N.GetUserInfoSingleReturnFunction(JID=j,
+                                                           UserInfo=info))
+        return saida
+
+    def get_newsletter_info(self, j):
+        return N.NewsletterMetadata(ThreadMeta=N.NewsletterThreadMetadata(
+            Name=N.NewsletterText(Text="Canal de Notícias")))
 
     def get_group_info(self, j):
         return N.GroupInfo(GroupName=N.GroupName(Name="Família"))
@@ -595,3 +615,287 @@ def test_nao_reconecta_se_a_sessao_foi_aberta_em_outro_lugar(tmp_path,
     p.parar()
     banco.fechar()
     assert len(clientes) == 1
+
+
+def _com_mencoes(texto, *jids):
+    ctx = E.ContextInfo(mentionedJID=list(jids))
+    return E.Message(extendedTextMessage=E.ExtendedTextMessage(
+        text=texto, contextInfo=ctx))
+
+
+def test_converter_guarda_quem_foi_mencionado():
+    x, _ = wa.converter(evento("A9", _com_mencoes(
+        "oi @5551988887777", "5551988887777@s.whatsapp.net")), "w1", "c")
+    assert m.extras_de(x)["mencoes"] == [
+        {"jid": "5551988887777@s.whatsapp.net"}]
+    sem, _ = wa.converter(evento("A8", E.Message(conversation="oi")),
+                          "w1", "c")
+    assert m.extras_de(sem)["mencoes"] == []
+
+
+def test_mencoes_com_nome_do_contato_perfil_empresa_e_telefone(amb):
+    amb.c.outros = {
+        "5551977770001": dict(PushName="Beto do Perfil"),
+        "5551977770002": dict(BusinessName="Padaria Central"),
+        "5551977770003": dict(PushName="Perfil", BusinessName="Empresa",
+                              FullName="Nome na Agenda")}
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    texto = ("@5551988887777 @5551977770001 @5551977770002 "
+             "@5551977770003 @5551900000000 e @55519777700011")
+    jids = ["5551988887777@s.whatsapp.net", "5551977770001@s.whatsapp.net",
+            "5551977770002@s.whatsapp.net", "5551977770003@s.whatsapp.net",
+            "5551900000000@s.whatsapp.net"]
+    amb.f["Message"](amb.c, evento("MM1", _com_mencoes(texto, *jids),
+                                   grupo=True, chat="1203", remetente=
+                                   "5551988887777"))
+    nova = esperar(amb.fila, ev.MensagemNova).mensagem
+    # contato > perfil > empresa > telefone; "@...11" (outro numero) intacto
+    assert nova.texto == ("@Ana Silva @Beto do Perfil @Padaria Central "
+                          "@Nome na Agenda @+5551900000000 e @55519777700011")
+    men = m.extras_de(nova)["mencoes"]
+    assert men[0] == {"jid": jids[0], "nome": "Ana Silva",
+                      "id": jids[0], "telefone": "+5551988887777"}
+    assert men[4]["nome"] == "+5551900000000"
+    guardada = amb.banco.mensagem("w1", "1203@g.us", "MM1")
+    assert guardada.texto == nova.texto
+
+
+def test_mencao_com_endereco_lid_vira_o_numero(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento("MM2", _com_mencoes(
+        "oi @lid1", "lid1@lid"), grupo=True, chat="1203",
+        remetente="5551988887777"))
+    nova = esperar(amb.fila, ev.MensagemNova).mensagem
+    men = m.extras_de(nova)["mencoes"][0]
+    assert men["id"] == "5551977776666@s.whatsapp.net"
+    assert men["telefone"] == "+5551977776666"
+    assert nova.texto == "oi @+5551977776666"
+
+
+def test_historico_tambem_guarda_as_mencoes():
+    from neonize.proto.waWeb import WAWebProtobufsWeb_pb2 as W
+    info = W.WebMessageInfo(
+        key=W.WebMessageInfo.DESCRIPTOR.fields_by_name["key"].message_type
+        ._concrete_class(remoteJID="1203@g.us", fromMe=False, ID="H1"),
+        message=_com_mencoes("oi @5551988887777",
+                             "5551988887777@s.whatsapp.net"),
+        messageTimestamp=TS)
+    x, _ = wa.converter_historico(info, "w1", "1203@g.us")
+    assert m.extras_de(x)["mencoes"] == [
+        {"jid": "5551988887777@s.whatsapp.net"}]
+
+
+def _receber(amb, id, chat, servidor, pushname="", texto="oi"):
+    amb.f["Message"](amb.c, evento(id, E.Message(conversation=texto),
+                                   chat=chat, servidor=servidor,
+                                   pushname=pushname))
+    return esperar(amb.fila, ev.MensagemNova).conversa
+
+
+def test_conversa_com_endereco_lid_nunca_mostra_o_codigo(amb):
+    amb.c.outros = {"99887766554433221": dict(BusinessName="Padaria Central"),
+                    "11223344556677889": dict(PushName="Beto do Perfil")}
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    # empresa (so nome de registro), pessoa (so perfil) e sem nada
+    assert _receber(amb, "L1", "99887766554433221", "lid").nome == \
+        "Padaria Central"
+    assert _receber(amb, "L2", "11223344556677889", "lid").nome == \
+        "Beto do Perfil"
+    assert _receber(amb, "L3", "55544433322211100", "lid").nome == \
+        wa.SEM_NOME
+    # com numero conhecido, vence o nome da agenda do numero
+    assert _receber(amb, "L4", "lid1", "lid").nome == "+5551977776666"
+
+
+def test_conversa_guardada_com_codigo_ganha_nome_quando_chega_mensagem(amb):
+    amb.c.outros = {"99887766554433221": dict(PushName="Carla")}
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    antiga = m.Conversa(amb.p.conta.id, "99887766554433221@lid",
+                        "99887766554433221", "whatsapp", "privada")
+    amb.p._conversas[antiga.id] = antiga
+    assert _receber(amb, "L5", "99887766554433221", "lid").nome == "Carla"
+
+
+def test_mensagem_de_canal_ganha_o_nome_do_canal(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    conv = _receber(amb, "C1", "120363000000000001", "newsletter")
+    assert conv.tipo == "canal"
+    for _ in range(50):
+        if conv.nome != wa.CANAL_SEM_NOME:
+            break
+        threading.Event().wait(0.02)
+    assert amb.p._conversas["120363000000000001@newsletter"].nome == \
+        "Canal de Notícias"
+
+
+def test_nome_de_participante_usa_agenda_ou_telefone(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    assert amb.p.nome_de_participante("5551988887777@s.whatsapp.net") == \
+        "Ana Silva"
+    assert amb.p.nome_de_participante("5551900000000@s.whatsapp.net") == \
+        "+5551900000000"
+    assert amb.p.nome_de_participante("55544433322211100@lid") == ""
+
+
+def test_mensagem_de_empresa_com_modelo_e_botao_de_link():
+    h = E.TemplateMessage.HydratedFourRowTemplate(
+        hydratedTitleText="Pedido enviado",
+        hydratedContentText="Seu pedido 123 saiu para entrega.",
+        hydratedFooterText="Loja X",
+        hydratedButtons=[E.HydratedTemplateButton(
+            urlButton=E.HydratedTemplateButton.HydratedURLButton(
+                displayText="Rastrear", URL="https://x.com/r/123"))])
+    msg, _ = wa.converter(evento("T1", E.Message(
+        templateMessage=E.TemplateMessage(hydratedTemplate=h))), "w1", "c")
+    assert msg.tipo == m.TEXTO
+    assert msg.texto == ("Pedido enviado\nSeu pedido 123 saiu para entrega."
+                         "\nLoja X\nBotões: Rastrear")
+    assert m.extras_de(msg)["botoes"] == [["Rastrear", "https://x.com/r/123"]]
+
+
+def test_mensagem_interativa_com_botao_cta_url_e_botoes_simples():
+    nf = E.InteractiveMessage.NativeFlowMessage(buttons=[
+        E.InteractiveMessage.NativeFlowMessage.NativeFlowButton(
+            name="cta_url", buttonParamsJSON=
+            '{"display_text":"Abrir site","url":"https://loja.com"}'),
+        E.InteractiveMessage.NativeFlowMessage.NativeFlowButton(
+            name="quick_reply", buttonParamsJSON='{"display_text":"Sim"}')])
+    inter = E.InteractiveMessage(
+        body=E.InteractiveMessage.Body(text="Olá! Veja a oferta."),
+        footer=E.InteractiveMessage.Footer(text="Loja"), nativeFlowMessage=nf)
+    msg, _ = wa.converter(evento("I1", E.Message(interactiveMessage=inter)),
+                          "w1", "c")
+    assert msg.texto == "Olá! Veja a oferta.\nLoja\nBotões: Abrir site, Sim"
+    assert m.extras_de(msg)["botoes"] == [["Abrir site", "https://loja.com"]]
+    resp = E.Message(buttonsResponseMessage=E.ButtonsResponseMessage(
+        selectedDisplayText="Sim"))
+    msg, _ = wa.converter(evento("I2", resp), "w1", "c")
+    assert msg.texto == "resposta: Sim" and msg.tipo == m.TEXTO
+
+
+def test_conteudo_desconhecido_diz_qual_e_o_tipo_para_tratarmos():
+    msg, _ = wa.converter(evento("U1", E.Message(
+        requestPhoneNumberMessage=E.RequestPhoneNumberMessage())), "w1", "c")
+    assert msg.tipo == m.OUTRO
+    assert "requestPhoneNumberMessage" in msg.texto
+
+
+def test_conversa_so_com_telefone_ganha_nome_verificado_da_empresa(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    antiga = m.Conversa(amb.p.conta.id, "556136863608@s.whatsapp.net",
+                        "+556136863608", "whatsapp", "privada")
+    amb.p._conversas[antiga.id] = antiga
+    ev_ = evento("V1", E.Message(conversation="oi"), chat="556136863608",
+                 pushname="")
+    ev_.Info.VerifiedName.Details.verifiedName = "Banco Exemplo"
+    amb.f["Message"](amb.c, ev_)
+    assert esperar(amb.fila, ev.MensagemNova).conversa.nome == "Banco Exemplo"
+
+
+def test_conversa_privada_sem_pushname_usa_o_nome_da_conversa_como_autor(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento("P1", E.Message(conversation="oi"),
+                                   chat="5511912617423", pushname=""))
+    nova = esperar(amb.fila, ev.MensagemNova).mensagem
+    assert nova.autor == "+5511912617423"
+
+
+def test_conversa_so_com_telefone_pergunta_o_nome_da_empresa_ao_whatsapp(amb):
+    amb.c.empresas = {"556136863608": "99 Pay"}
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    conv = _receber(amb, "E1", "556136863608", "s.whatsapp.net", pushname="")
+    for _ in range(50):
+        if conv.nome == "99 Pay":
+            break
+        threading.Event().wait(0.02)
+    assert conv.nome == "99 Pay"
+    for _ in range(50):
+        if amb.p.banco.conversas(amb.p.conta.id)[0].nome == "99 Pay":
+            break
+        threading.Event().wait(0.02)
+    assert amb.p.banco.conversas(amb.p.conta.id)[0].nome == "99 Pay"
+
+
+def test_estrutura_interativa_descreve_botoes_sem_imagem_nem_texto_longo():
+    nf = E.InteractiveMessage.NativeFlowMessage(buttons=[
+        E.InteractiveMessage.NativeFlowMessage.NativeFlowButton(
+            name="quick_reply", buttonParamsJSON='{"id":"1","display_text":"Sim"}')])
+    inter = E.InteractiveMessage(
+        body=E.InteractiveMessage.Body(text="x" * 200), nativeFlowMessage=nf)
+    forma = wa.estrutura_interativa(E.Message(interactiveMessage=inter))
+    botao = forma["interactiveMessage"]["nativeFlowMessage"]["buttons"][0]
+    assert botao["name"] == "quick_reply"
+    assert len(forma["interactiveMessage"]["body"]["text"]) <= 81
+    assert wa.estrutura_interativa(E.Message(conversation="oi")) is None
+
+
+def test_album_foto_dentro_de_associated_child_aparece_e_cabecalho_some():
+    foto = E.Message(imageMessage=E.ImageMessage(caption="da viagem",
+                                                  fileLength=10))
+    filha = E.Message(associatedChildMessage=E.FutureProofMessage(
+        message=foto))
+    msg, _ = wa.converter(evento("A1", filha), "w1", "c")
+    assert msg.tipo == m.FOTO and msg.texto == "da viagem"
+    cab = E.Message(albumMessage=E.AlbumMessage(expectedImageCount=3))
+    assert wa.converter(evento("A2", cab), "w1", "c") == (None, "")
+    aviso = E.Message(groupStatusMentionMessage=E.FutureProofMessage())
+    assert wa.converter(evento("A3", aviso), "w1", "c") == (None, "")
+
+
+def test_comentario_e_convite_de_grupo_viram_texto():
+    com = E.Message(commentMessage=E.CommentMessage(
+        message=E.Message(conversation="boa ideia")))
+    msg, _ = wa.converter(evento("K1", com), "w1", "c")
+    assert msg.tipo == m.TEXTO and msg.texto == "boa ideia"
+    conv = E.Message(groupInviteMessage=E.GroupInviteMessage(
+        groupName="Família", caption="entra aí"))
+    msg, _ = wa.converter(evento("K2", conv), "w1", "c")
+    assert msg.tipo == m.OUTRO
+    assert msg.texto == "convite para o grupo: Família\nentra aí"
+
+
+def test_lista_mostra_as_opcoes_no_texto():
+    lista = E.ListMessage(title="Escolha", description="Como podemos ajudar?",
+                          sections=[E.ListMessage.Section(rows=[
+                              E.ListMessage.Row(title="Segunda via"),
+                              E.ListMessage.Row(title="Atendente")])])
+    msg, _ = wa.converter(evento("LS1", E.Message(listMessage=lista)),
+                          "w1", "c")
+    assert msg.texto.endswith("Opções: Segunda via, Atendente")
+
+
+def test_consulta_de_empresas_em_lote_renomeia_so_quem_tem_telefone(amb):
+    amb.c.empresas = {"556136863608": "99 Pay", "5511953057252": "Verisure"}
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    conta = amb.p.conta.id
+    for cid, nome in (("556136863608@s.whatsapp.net", "+556136863608"),
+                      ("5511953057252@s.whatsapp.net", "+5511953057252"),
+                      ("5551988887777@s.whatsapp.net", "Ana Silva")):
+        amb.p._conversas[cid] = m.Conversa(conta, cid, nome, "whatsapp",
+                                           "privada")
+    amb.p._consultar_empresas(list(amb.p._conversas))
+    nomes = {c.id.split("@")[0]: c.nome for c in amb.p._conversas.values()}
+    assert nomes["556136863608"] == "99 Pay"
+    assert nomes["5511953057252"] == "Verisure"
+    assert nomes["5551988887777"] == "Ana Silva"
+
+
+def test_pagamento_interativo_sem_texto_vira_solicitacao_de_pagamento():
+    nf = E.InteractiveMessage.NativeFlowMessage(buttons=[
+        E.InteractiveMessage.NativeFlowMessage.NativeFlowButton(
+            name="payment_info", buttonParamsJSON='{"currency":"BRL"}')])
+    msg, _ = wa.converter(evento("PG1", E.Message(
+        interactiveMessage=E.InteractiveMessage(nativeFlowMessage=nf))),
+        "w1", "c")
+    assert msg.tipo == m.TEXTO
+    assert msg.texto == "mensagem interativa: solicitação de pagamento"

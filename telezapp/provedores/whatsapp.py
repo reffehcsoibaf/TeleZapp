@@ -13,9 +13,11 @@
 
 O registro nunca grava texto de mensagens, telefones completos ou codigos.
 """
+import json
 import logging
 import os
 import queue
+import re
 import threading
 import time
 
@@ -29,11 +31,16 @@ log = logging.getLogger("telezapp.whatsapp")
 
 EMBRULHOS = ("deviceSentMessage", "ephemeralMessage", "viewOnceMessage",
              "viewOnceMessageV2", "viewOnceMessageV2Extension",
-             "documentWithCaptionMessage", "editedMessage")
+             "documentWithCaptionMessage", "editedMessage",
+             "associatedChildMessage", "commentMessage")
 # Campos sem conteudo para a pessoa (chaves, controle): a mensagem e ignorada
 SO_CONTROLE = {"senderKeyDistributionMessage", "messageContextInfo",
                "protocolMessage", "reactionMessage", "pollUpdateMessage",
-               "keepInChatMessage", "pinInChatMessage"}
+               "keepInChatMessage", "pinInChatMessage",
+               # cabecalho de album (as fotos e videos chegam um a um),
+               # aviso de grupo mencionado em status e aviso de historico
+               "albumMessage", "groupStatusMentionMessage",
+               "messageHistoryNotice"}
 # Tipos de recibo do neonize (Receipt.Type)
 RECIBO_ENTREGUE, RECIBO_LIDO, RECIBO_LIDO_POR_MIM, RECIBO_OUVIDO = 1, 4, 5, 6
 MAX_GUARDADAS = 2000
@@ -82,6 +89,17 @@ def desembrulhar(msg):
     return msg
 
 
+SEM_NOME = "Contato sem nome"
+CANAL_SEM_NOME = "Canal"
+
+
+def parece_codigo(nome):
+    """O 'nome' e so o codigo interno do WhatsApp (numero de endereco LID,
+    JID)? Telefones de verdade aparecem com '+'."""
+    nome = (nome or "").strip()
+    return "@" in nome or (nome.isdigit() and len(nome) >= 14)
+
+
 def jid_texto(jid):
     """JID -> 'usuario@servidor', sem o numero do aparelho."""
     if jid is None or not getattr(jid, "User", ""):
@@ -106,6 +124,190 @@ def _contexto(interna):
         except (ValueError, AttributeError):
             continue
     return None
+
+
+def mencoes_do_contexto(ctx):
+    """[{'jid': ...}] de quem foi mencionado (@) na mensagem; os nomes sao
+    achados depois, pelo provedor, que tem acesso aos contatos."""
+    if ctx is None:
+        return []
+    return [{"jid": str(j)} for j in ctx.mentionedJID if str(j)]
+
+
+def rotulos_dos_botoes(interna):
+    """(botoes, opcoes): rotulos dos botoes e das linhas de lista."""
+    botoes, opcoes = [], []
+    try:
+        if interna.HasField("buttonsMessage"):
+            botoes += [b.buttonText.displayText
+                       for b in interna.buttonsMessage.buttons]
+        inter = None
+        if interna.HasField("templateMessage"):
+            t = interna.templateMessage
+            h = t.hydratedTemplate if t.HasField("hydratedTemplate") else \
+                t.hydratedFourRowTemplate
+            for b in h.hydratedButtons:
+                for nome in ("quickReplyButton", "urlButton", "callButton"):
+                    if b.HasField(nome):
+                        botoes.append(getattr(b, nome).displayText)
+            if t.HasField("interactiveMessageTemplate"):
+                inter = t.interactiveMessageTemplate
+        if interna.HasField("interactiveMessage"):
+            inter = interna.interactiveMessage
+        if inter is not None and inter.HasField("nativeFlowMessage"):
+            for b in inter.nativeFlowMessage.buttons:
+                dados = json.loads(b.buttonParamsJSON or "{}")
+                botoes.append(dados.get("display_text") or "")
+        if interna.HasField("listMessage"):
+            for sec in interna.listMessage.sections:
+                opcoes += [r.title for r in sec.rows]
+    except Exception:
+        log.info("não consegui ler os rótulos dos botões")
+    return ([b for b in botoes if b], [o for o in opcoes if o])
+
+
+def _partes_texto(*partes):
+    return "\n".join(p.strip() for p in partes if p and p.strip())
+
+
+def texto_estruturado(interna, presentes):
+    """Texto das mensagens de empresa (botoes, modelos, listas, respostas a
+    botoes, pedidos), com os botoes e opcoes no fim. None se o tipo nao e um
+    destes."""
+    texto = _texto_estruturado(interna, presentes)
+    if texto is None:
+        return None
+    botoes, opcoes = rotulos_dos_botoes(interna)
+    return _partes_texto(texto,
+                         ("Botões: " + ", ".join(botoes)) if botoes else "",
+                         ("Opções: " + ", ".join(opcoes)) if opcoes else "")
+
+
+def _texto_estruturado(interna, presentes):
+    if "buttonsMessage" in presentes:
+        x = interna.buttonsMessage
+        return _partes_texto(x.text, x.contentText, x.footerText)
+    if "templateMessage" in presentes:
+        x = interna.templateMessage
+        h = x.hydratedTemplate if x.HasField("hydratedTemplate") else \
+            x.hydratedFourRowTemplate
+        texto = _partes_texto(h.hydratedTitleText, h.hydratedContentText,
+                              h.hydratedFooterText)
+        if texto:
+            return texto
+        if x.HasField("interactiveMessageTemplate"):
+            return _texto_interativo(x.interactiveMessageTemplate)
+        return ""
+    if "interactiveMessage" in presentes:
+        return _texto_interativo(interna.interactiveMessage)
+    if "listMessage" in presentes:
+        x = interna.listMessage
+        return _partes_texto(x.title, x.description, x.footerText)
+    if "buttonsResponseMessage" in presentes:
+        return "resposta: " + interna.buttonsResponseMessage.\
+            selectedDisplayText
+    if "listResponseMessage" in presentes:
+        return "resposta: " + interna.listResponseMessage.title
+    if "templateButtonReplyMessage" in presentes:
+        return "resposta: " + interna.templateButtonReplyMessage.\
+            selectedDisplayText
+    if "interactiveResponseMessage" in presentes:
+        return "resposta: " + interna.interactiveResponseMessage.body.text
+    if "orderMessage" in presentes:
+        x = interna.orderMessage
+        return _partes_texto("pedido", x.orderTitle, x.message)
+    return None
+
+
+NOMES_ACOES_INTERATIVAS = {
+    "payment_info": "solicitação de pagamento",
+    "review_and_pay": "solicitação de pagamento",
+    "order_details": "detalhes do pedido",
+    "send_location": "pedido de localização",
+}
+
+
+def _texto_interativo(x):
+    texto = _partes_texto(x.header.title, x.body.text, x.footer.text)
+    if texto or not x.HasField("nativeFlowMessage"):
+        return texto
+    nomes = [NOMES_ACOES_INTERATIVAS.get(b.name, b.name)
+             for b in x.nativeFlowMessage.buttons if b.name]
+    return ("mensagem interativa: " + ", ".join(nomes)) if nomes else ""
+
+
+def botoes_do_whatsapp(interna):
+    """[(rotulo, endereco)] dos botoes de link de mensagens de empresa."""
+    botoes = []
+    try:
+        if interna.HasField("templateMessage"):
+            t = interna.templateMessage
+            h = t.hydratedTemplate if t.HasField("hydratedTemplate") else \
+                t.hydratedFourRowTemplate
+            for b in h.hydratedButtons:
+                if not b.HasField("urlButton"):
+                    continue
+                url = b.urlButton.URL
+                if url:
+                    botoes.append((b.urlButton.displayText or url, url))
+        inter = None
+        if interna.HasField("interactiveMessage"):
+            inter = interna.interactiveMessage
+        elif interna.HasField("templateMessage") and \
+                interna.templateMessage.HasField("interactiveMessageTemplate"):
+            inter = interna.templateMessage.interactiveMessageTemplate
+        if inter is not None and inter.HasField("nativeFlowMessage"):
+            for b in inter.nativeFlowMessage.buttons:
+                if b.name != "cta_url":
+                    continue
+                dados = json.loads(b.buttonParamsJSON or "{}")
+                url = dados.get("url") or dados.get("merchant_url") or ""
+                if url:
+                    botoes.append((dados.get("display_text") or url, url))
+    except Exception:
+        log.info("não consegui ler os botões de uma mensagem de empresa")
+    return botoes
+
+
+CAMPOS_INTERATIVOS = ("buttonsMessage", "templateMessage", "interactiveMessage",
+                      "listMessage", "buttonsResponseMessage",
+                      "listResponseMessage", "templateButtonReplyMessage",
+                      "interactiveResponseMessage")
+
+
+def estrutura_interativa(interna):
+    """Formato (sem textos longos nem imagens) de uma mensagem de empresa
+    com botoes ou lista, para o registro: serve para implementarmos o toque
+    nos botoes com dados reais. None se nao e deste tipo."""
+    from google.protobuf.json_format import MessageToDict
+    for nome in CAMPOS_INTERATIVOS:
+        try:
+            if not interna.HasField(nome):
+                continue
+            dados = MessageToDict(getattr(interna, nome))
+        except Exception:
+            continue
+
+        def limpar(x):
+            if isinstance(x, dict):
+                return {k: limpar(v) for k, v in x.items()
+                        if k not in ("JPEGThumbnail", "jpegThumbnail",
+                                     "contextInfo", "mediaKey", "thumbnail")}
+            if isinstance(x, list):
+                return [limpar(v) for v in x]
+            if isinstance(x, str) and len(x) > 80:
+                return x[:80] + "…"
+            return x
+        return {nome: limpar(dados)}
+    return None
+
+
+def nome_verificado(info):
+    """Nome verificado de empresa que vem junto da mensagem, ou ''."""
+    try:
+        return info.VerifiedName.Details.verifiedName or ""
+    except Exception:
+        return ""
 
 
 def conteudo_de(interna):
@@ -140,10 +342,23 @@ def conteudo_de(interna):
                 "", 0
     if "locationMessage" in presentes or "liveLocationMessage" in presentes:
         return m.OUTRO, "localização", 0, "", 0
+    if "groupInviteMessage" in presentes:
+        x = interna.groupInviteMessage
+        return m.OUTRO, _partes_texto(
+            "convite para o grupo: " + (x.groupName or "sem nome"),
+            x.caption), 0, "", 0
     if "contactMessage" in presentes:
         return m.OUTRO, "contato: " + interna.contactMessage.displayName, 0, \
             "", 0
-    return m.OUTRO, "", 0, "", 0
+    texto = texto_estruturado(interna, presentes)
+    if texto:
+        return m.TEXTO, texto, 0, "", 0
+    # nao reconhecido: o nome do campo fica na mensagem e no registro, para
+    # tratarmos cada caso
+    desconhecidos = sorted(presentes - SO_CONTROLE)
+    log.info("conteúdo ainda sem suporte: %s", ", ".join(desconhecidos))
+    return m.OUTRO, "tipo do WhatsApp: " + ", ".join(desconhecidos), 0, \
+        "", 0
 
 
 def converter(evento, conta_id, conversa_id, autor=""):
@@ -159,9 +374,14 @@ def converter(evento, conta_id, conversa_id, autor=""):
     origem = info.MessageSource
     minha = bool(origem.IsFromMe)
     ctx = _contexto(interna)
+    forma = estrutura_interativa(interna)
+    if forma:
+        log.info("mensagem interativa: %s", json.dumps(forma,
+                                                       ensure_ascii=False))
     msg = m.Mensagem(
         conta_id=conta_id, conversa_id=conversa_id, id=info.ID,
-        autor="" if minha else (autor or info.Pushname or ""),
+        autor="" if minha else (autor or info.Pushname or
+                                nome_verificado(info)),
         minha=minha, data=segundos(info.Timestamp) or time.time(),
         tipo=tipo, texto=texto or "", segundos=int(seg or 0),
         nome_arquivo=arquivo or "", tamanho=int(tamanho or 0),
@@ -169,6 +389,8 @@ def converter(evento, conta_id, conversa_id, autor=""):
         resposta_a=(ctx.stanzaID if ctx is not None and ctx.stanzaID
                     else ""),
         remetente="" if minha else jid_texto(origem.Sender))
+    m.guardar_extras(msg, botoes=botoes_do_whatsapp(desembrulhar(
+        evento.Message)), mencoes=mencoes_do_contexto(ctx))
     return msg, msg.remetente
 
 
@@ -228,9 +450,13 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
     if minha:
         estado = {HIST_ENTREGUE: m.ENTREGUE, HIST_LIDA: m.LIDA,
                   HIST_OUVIDA: m.LIDA}.get(int(wmi.status), m.ENVIADA)
+    forma = estrutura_interativa(desembrulhar(wmi.message))
+    if forma:
+        log.info("mensagem interativa: %s", json.dumps(forma,
+                                                       ensure_ascii=False))
     ctx = _contexto(desembrulhar(wmi.message))
     remetente = wmi.key.participant or wmi.participant or wmi.key.remoteJID
-    return m.Mensagem(
+    msg = m.Mensagem(
         conta_id=conta_id, conversa_id=conversa_id, id=wmi.key.ID,
         autor="" if minha else (autor or wmi.pushName or ""),
         minha=minha, data=segundos(wmi.messageTimestamp),
@@ -239,7 +465,10 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
         estado=estado,
         resposta_a=(ctx.stanzaID if ctx is not None and ctx.stanzaID
                     else ""),
-        remetente="" if minha else _sem_aparelho(remetente)), remetente
+        remetente="" if minha else _sem_aparelho(remetente))
+    m.guardar_extras(msg, botoes=botoes_do_whatsapp(
+        desembrulhar(wmi.message)), mencoes=mencoes_do_contexto(ctx))
+    return msg, remetente
 
 
 def _sem_aparelho(jid):
@@ -303,7 +532,10 @@ class ProvedorWhatsApp(Provedor):
         self._nao_lidas = {}       # conversa -> [(id, jid do remetente)]
         self._vistas = set()
         self._nomes_grupo_pedidos = set()
+        self._nomes_empresa_pedidos = set()
+        self._sem_nome_registrados = set()
         self._conectada = False
+        self._cache_mencoes = {}   # jid mencionado -> nome, id, telefone
         self._sincronizando = False
         self._progresso_historico = 0   # 0 = nada em andamento
         self._recebidas_na_sincronia = 0
@@ -567,34 +799,204 @@ class ProvedorWhatsApp(Provedor):
                 log.info("sem número para um endereço LID")
         return jid_texto(chat)
 
+    def _numero_do_jid(self, jid):
+        """JID de telefone (s.whatsapp.net) de um endereco LID, ou o proprio
+        JID. Sem numero conhecido, devolve o JID como veio."""
+        if jid.Server != "lid":
+            return jid
+        outro = self._lid_para_numero.get(jid_texto(jid))
+        if outro:
+            usuario, servidor = jid_de_texto(outro)
+            return _jid_obj(usuario, servidor)
+        if self.cliente is not None:
+            try:
+                pn = self.cliente.get_pn_from_lid(jid)
+                if pn.User:
+                    return pn
+            except Exception:
+                log.info("sem número para um endereço LID")
+        return jid
+
     def _nome_contato(self, jid, pushname=""):
+        """Nome do contato (agenda), senao o nome de registro (perfil da
+        pessoa, nome verificado da empresa) e, por ultimo, o telefone. Nunca
+        o codigo interno do WhatsApp."""
         pushname = pushname or self._apelidos.get(jid_texto(jid), "")
-        try:
-            info = self.cliente.contact.get_contact(jid)
-            nome = info.FullName or info.FirstName or info.BusinessName or \
-                info.PushName
-            if nome:
+        alvo = self._numero_do_jid(jid)
+        empresa = ""
+        for tentativa in (alvo, jid) if alvo is not jid else (jid,):
+            try:
+                info = self.cliente.contact.get_contact(tentativa)
+            except Exception:
+                continue
+            nome = info.FullName or info.FirstName
+            if nome and not parece_codigo(nome):
                 return nome
+            pushname = pushname or info.PushName
+            empresa = empresa or info.BusinessName
+        for nome in (pushname, empresa):
+            if nome and not parece_codigo(nome):
+                return nome
+        if alvo.Server == "s.whatsapp.net" and alvo.User:
+            return "+" + alvo.User
+        return SEM_NOME
+
+    def nome_de_participante(self, participante_id):
+        """Nome de quem entregou/leu uma mensagem, para os detalhes."""
+        if self.cliente is None or "@" not in (participante_id or ""):
+            return ""
+        try:
+            usuario, servidor = jid_de_texto(participante_id)
+            nome = self._nome_contato(_jid_obj(usuario, servidor))
         except Exception:
-            pass
-        return pushname or ("+" + jid.User if jid.Server ==
-                            "s.whatsapp.net" else jid.User)
+            return ""
+        return "" if nome == SEM_NOME else nome
+
+    def _dados_mencao(self, jid_txt):
+        """{'nome', 'id', 'telefone'} de quem foi mencionado (com cache)."""
+        achado = self._cache_mencoes.get(jid_txt)
+        if achado is not None:
+            return achado
+        usuario, servidor = jid_de_texto(jid_txt)
+        jid = _jid_obj(usuario, servidor)
+        if servidor == "lid":
+            try:
+                pn = self.cliente.get_pn_from_lid(jid)
+                if pn.User:
+                    jid = pn
+            except Exception:
+                log.info("sem número para uma menção com endereço LID")
+        telefone = "+" + jid.User if jid.Server == "s.whatsapp.net" else ""
+        achado = {"nome": self._nome_contato(jid) or usuario,
+                  "id": jid_texto(jid), "telefone": telefone}
+        self._cache_mencoes[jid_txt] = achado
+        return achado
+
+    def _enriquecer_mencoes(self, msg):
+        """Poe nome, telefone e id em cada @ e troca '@numero' por '@nome'
+        no texto da mensagem."""
+        extras = m.extras_de(msg)
+        if not extras["mencoes"]:
+            return
+        texto = msg.texto
+        for men in extras["mencoes"]:
+            if not men.get("jid") or men.get("nome"):
+                continue
+            try:
+                men.update(self._dados_mencao(men["jid"]))
+            except Exception:
+                log.exception("erro ao achar o nome de uma menção")
+                continue
+            usuario = jid_de_texto(men["jid"])[0]
+            nome = men["nome"]
+            texto = re.sub(r"@%s(?!\d)" % re.escape(usuario),
+                           lambda _: "@" + nome, texto)
+        msg.texto = texto
+        m.guardar_extras(msg, extras["links"], extras["botoes"],
+                         extras["mencoes"])
 
     def _conversa(self, conversa_id, chat, pushname, grupo, data):
+        canal = chat.Server == "newsletter"
         with self._trava:
             conv = self._conversas.get(conversa_id)
             if conv is None:
-                nome = "Grupo" if grupo else self._nome_contato(chat, pushname)
+                if grupo:
+                    nome = "Grupo"
+                elif canal:
+                    nome = CANAL_SEM_NOME
+                else:
+                    nome = self._nome_contato(chat, pushname)
                 conv = m.Conversa(self.conta.id, conversa_id, nome,
                                   self.servico,
-                                  "grupo" if grupo else "privada", data=data)
+                                  "grupo" if grupo else (
+                                      "canal" if canal else "privada"),
+                                  data=data)
                 self._conversas[conversa_id] = conv
+            elif not grupo and not canal and (
+                    parece_codigo(conv.nome) or conv.nome == SEM_NOME or
+                    conv.nome.startswith("+")):
+                # so com codigo, sem nome ou so com o telefone: tenta de novo
+                conv.nome = self._nome_contato(chat, pushname)
             if grupo and conv.nome == "Grupo" and \
                     conversa_id not in self._nomes_grupo_pedidos:
                 self._nomes_grupo_pedidos.add(conversa_id)
                 self._fila.put(lambda: self._buscar_nome_grupo(conversa_id,
                                                                chat))
+            if not grupo and not canal and (
+                    conv.nome.startswith("+") or conv.nome == SEM_NOME) and \
+                    conversa_id not in self._nomes_empresa_pedidos:
+                # so o telefone: pergunta ao WhatsApp se e uma empresa
+                self._nomes_empresa_pedidos.add(conversa_id)
+                self._fila.put(lambda: self._buscar_nome_empresa(
+                    conversa_id, chat))
+            if canal and (conv.nome == CANAL_SEM_NOME or
+                          parece_codigo(conv.nome)) and \
+                    conversa_id not in self._nomes_grupo_pedidos:
+                self._nomes_grupo_pedidos.add(conversa_id)
+                self._fila.put(lambda: self._buscar_nome_canal(conversa_id,
+                                                               chat))
         return conv
+
+    def _buscar_nome_empresa(self, conversa_id, chat):
+        self._consultar_empresas([conversa_id])
+
+    def _consultar_empresas(self, ids):
+        """Nome verificado de empresa, pedido ao WhatsApp em lotes (roda na
+        fila). So para conversas que ainda tem apenas o telefone."""
+        for inicio in range(0, len(ids), 40):
+            lote = ids[inicio:inicio + 40]
+            jids = {}
+            for cid in lote:
+                usuario, servidor = jid_de_texto(cid)
+                jids[cid] = self._numero_do_jid(_jid_obj(usuario, servidor))
+            try:
+                achados = self.cliente.get_user_info(*jids.values())
+            except Exception:
+                log.info("não consegui consultar o nome de %d conversas",
+                         len(lote))
+                continue
+            por_usuario = {}
+            for x in achados:
+                nome = ""
+                try:
+                    nome = x.UserInfo.VerifiedName.Details.verifiedName
+                except Exception:
+                    pass
+                por_usuario[x.JID.User] = nome
+            log.info("consulta de empresa: %d conversas, %d com nome "
+                     "verificado", len(lote),
+                     sum(1 for n in por_usuario.values() if n))
+            mudou = []
+            with self._trava:
+                for cid, jid in jids.items():
+                    nome = por_usuario.get(jid.User, "")
+                    conv = self._conversas.get(cid)
+                    if not nome or parece_codigo(nome) or conv is None or \
+                            not (conv.nome.startswith("+") or
+                                 conv.nome == SEM_NOME):
+                        continue
+                    conv.nome = nome
+                    mudou.append(conv)
+            if mudou:
+                self.banco.salvar_conversas(mudou)
+                self._publicar_conversas()
+
+    def _buscar_nome_canal(self, conversa_id, chat):
+        try:
+            info = self.cliente.get_newsletter_info(chat)
+            nome = info.ThreadMeta.Name.Text
+        except Exception:
+            log.info("não consegui o nome de um canal")
+            return
+        if not nome:
+            return
+        with self._trava:
+            conv = self._conversas.get(conversa_id)
+            if conv is None:
+                return
+            conv.nome = nome
+        self.banco.salvar_conversas([conv])
+        self._publicar_conversas()
 
     def _buscar_nome_grupo(self, conversa_id, chat):
         info = self.cliente.get_group_info(chat)
@@ -624,10 +1026,12 @@ class ProvedorWhatsApp(Provedor):
             cid = self._id_da_conversa(origem.Chat)
             autor = ""
             if grupo and not origem.IsFromMe:
-                autor = self._nome_contato(origem.Sender, info.Pushname)
+                autor = self._nome_contato(
+                    origem.Sender, info.Pushname or nome_verificado(info))
             msg, remetente = converter(evento, self.conta.id, cid, autor)
             if msg is None:
                 return
+            self._enriquecer_mencoes(msg)
             if cid in IGNORAR_CONVERSAS:
                 self._guardar_status(msg, origem, info.Pushname)
                 return
@@ -636,8 +1040,18 @@ class ProvedorWhatsApp(Provedor):
                 if ficha:
                     self.banco.salvar_fichas(
                         [(self.conta.id, cid, msg.id, ficha)])
-            conv = self._conversa(cid, origem.Chat, info.Pushname, grupo,
+            conv = self._conversa(cid, origem.Chat,
+                                  info.Pushname or nome_verificado(info), grupo,
                                   msg.data)
+            if not grupo and conv.nome.startswith("+") and \
+                    cid not in self._sem_nome_registrados:
+                self._sem_nome_registrados.add(cid)
+                log.info("mensagem ao vivo de conversa só com telefone: "
+                         "perfil=%s, nome verificado=%s",
+                         "veio" if info.Pushname else "não veio",
+                         "veio" if nome_verificado(info) else "não veio")
+            if not grupo and not msg.minha and not msg.autor:
+                msg.autor = conv.nome       # conversa privada: quem fala
             with self._trava:
                 conv.data = max(conv.data, msg.data)
                 self._remetentes[msg.id] = (remetente, msg.texto)
@@ -762,10 +1176,14 @@ class ProvedorWhatsApp(Provedor):
             self._vistas.add(resp.ID)
             self._remetentes[resp.ID] = ("", texto)
             conv = self._conversas.get(conversa_id)
-            if conv is not None:
-                conv.data = max(conv.data, msg.data)
-        if conv is not None:
-            self.banco.salvar_conversas([conv])
+        if conv is None:
+            # primeira mensagem de uma conversa nova (ex.: aberta por uma
+            # mencao): passa a existir de verdade
+            conv = self._conversa(conversa_id, self._jid(conversa_id), "",
+                                  conversa_id.endswith("@g.us"), msg.data)
+        with self._trava:
+            conv.data = max(conv.data, msg.data)
+        self.banco.salvar_conversas([conv])
         self.banco.salvar_mensagens([msg])
         self.barramento.publicar(ev.MensagemNova(msg, conv,
                                                  enviada_daqui=True))
@@ -890,6 +1308,7 @@ class ProvedorWhatsApp(Provedor):
                                        h.message.participant, ""))
                 if x is None or (limite and x.data < limite):
                     continue
+                self._enriquecer_mencoes(x)
                 novas.append(x)
                 if x.tipo in armazem.BAIXAVEIS and \
                         h.message.HasField("message"):
@@ -910,12 +1329,17 @@ class ProvedorWhatsApp(Provedor):
                                       "grupo" if grupo else "privada",
                                       data=data)
                     self._conversas[cid] = conv
-                elif nome and conv.nome in ("Grupo", "") or \
-                        (nome and conv.nome.startswith("+")):
+                elif nome and conv.nome in ("Grupo", "", SEM_NOME) or \
+                        (nome and (conv.nome.startswith("+") or
+                                   parece_codigo(conv.nome))):
                     conv.nome = nome
                 conv.data = max(conv.data, data)
                 if c.HasField("unreadCount"):
                     conv.nao_lidas = int(c.unreadCount)
+            if not grupo:
+                for x in novas:
+                    if not x.minha and not x.autor:
+                        x.autor = conv.nome
             if grupo and conv.nome == "Grupo" and \
                     cid not in self._nomes_grupo_pedidos:
                 self._nomes_grupo_pedidos.add(cid)
@@ -923,6 +1347,13 @@ class ProvedorWhatsApp(Provedor):
                                self._buscar_nome_grupo(cid, _jid_obj(u, s)))
             convs.append(conv)
             msgs.extend(novas)
+        so_telefone = [c.id for c in convs if c.tipo == "privada" and (
+            c.nome.startswith("+") or c.nome == SEM_NOME)
+            and c.id not in self._nomes_empresa_pedidos]
+        if so_telefone:
+            self._nomes_empresa_pedidos.update(so_telefone)
+            self._fila.put(lambda ids=so_telefone:
+                           self._consultar_empresas(ids))
         if convs:
             self.banco.salvar_conversas(convs)
         if msgs:
@@ -948,7 +1379,7 @@ class ProvedorWhatsApp(Provedor):
         apelido = self._apelidos.get("%s@%s" % (usuario, servidor))
         if apelido:
             return apelido
-        return "+" + usuario if servidor == "s.whatsapp.net" else usuario
+        return "+" + usuario if servidor == "s.whatsapp.net" else SEM_NOME
 
 
 DESCONECTADA_PELO_CELULAR = "desconectada pelo celular"
