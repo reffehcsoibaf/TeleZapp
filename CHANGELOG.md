@@ -29,8 +29,8 @@ Etapa 3a: receber e abrir mídias.
   dos downloads.
 - Janela: Esc fecha a conversa (só as conversas ficam); a caixa de digitar
   fica visível enquanto a conversa está aberta e o rascunho é guardado ao sair.
-- Cada conversa reabre no ponto em que você parou (na última mensagem, se
-  parou no fim); primeira vez: marcador de não lidas ou fim. Banco na versão 5
+- Conversa com não lidas abre sempre no marcador (mesmo com uma só); sem não
+  lidas, reabre no ponto em que você parou (na última, se parou no fim). Banco na versão 5
   (tabela `posicoes`). A lista de conversas lembra a conversa selecionada.
 - Atalhos: Alt+1 conversas, Alt+2 marcador de não lidas (na conversa) ou
   próxima conversa com não lidas (na lista), Alt+3 mensagens. Saem Ctrl+1,

@@ -1012,9 +1012,11 @@ class Janela(wx.Frame):
         self.lista_msgs.SetSelection(sel)
 
     def _destino_inicial(self):
-        """Onde a selecao cai ao abrir a conversa: no ponto em que a pessoa
-        parou; na primeira vez, no marcador de nao lidas ou no fim."""
+        """Onde a selecao cai ao abrir a conversa: no marcador, se ha nao
+        lidas; senao no ponto em que a pessoa parou (ou no fim)."""
         alvo = self.alvo_inicial
+        if self.marcador_n > 0:
+            return MARCADOR      # com nao lidas, abre sempre no marcador
         if alvo == "":
             return "ultima"
         if alvo:

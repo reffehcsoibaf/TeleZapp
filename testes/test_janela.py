@@ -736,7 +736,7 @@ def test_reabre_no_ponto_em_que_parou(j):
     assert j._chave_selecionada() == "2"
 
 
-def test_parou_no_fim_reabre_na_ultima_mensagem(j):
+def test_parou_no_fim_com_novas_abre_no_marcador(j):
     _abrir_ana(j)
     j.lista_msgs.SetSelection(j.lista_msgs.GetCount() - 1)
     j._char_hook(Tecla(wx_falso.WXK_ESCAPE))
@@ -747,7 +747,7 @@ def test_parou_no_fim_reabre_na_ultima_mensagem(j):
     j._char_hook(Tecla(wx_falso.WXK_RETURN))
     j.b.publicar(ev.MensagensCarregadas("t1", "10", [
         msg(str(i), "texto %d" % i, conversa="10") for i in range(1, 9)]))
-    assert j._chave_selecionada() == "8"             # a ultima da conversa
+    assert j._chave_selecionada() == jm.MARCADOR     # com nao lidas: marcador
 
 
 def test_primeira_vez_continua_no_marcador(j):
@@ -802,3 +802,34 @@ def test_foco_vem_mesmo_se_o_servico_demora(j):
     j._dar_foco_as_mensagens(j.atual)               # passou o tempo limite
     assert wx_falso._foco[0] is j.lista_msgs
     j._dar_foco_as_mensagens(j.atual)               # nao repete
+
+
+def test_com_uma_so_nao_lida_abre_no_marcador_mesmo_se_parou_no_fim(j):
+    j.banco.salvar_posicao("t1", "10", "")          # tinha parado no fim
+    j.indice[("t1", "10")].nao_lidas = 1
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg("1", "antiga", conversa="10"), msg("2", "nova", conversa="10")]))
+    assert j._chave_selecionada() == jm.MARCADOR
+    assert j.lista_msgs.selecionado().startswith("Início das mensagens")
+
+
+def test_sem_nao_lidas_abre_no_ponto_guardado(j):
+    j.banco.salvar_posicao("t1", "20", "1")
+    j.lista_conv.SetSelection(1)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", [
+        msg("1", "a", conversa="20"), msg("2", "b", conversa="20")]))
+    assert j._chave_selecionada() == "1"
+
+
+def test_parou_no_fim_sem_novas_abre_na_ultima(j):
+    _abrir_ana(j)
+    j.lista_msgs.SetSelection(j.lista_msgs.GetCount() - 1)
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg(str(i), "texto %d" % i, conversa="10") for i in range(1, 8)]))
+    assert j._chave_selecionada() == "7"
