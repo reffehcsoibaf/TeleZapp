@@ -229,29 +229,61 @@ def test_responder_e_cancelar(j):
     j._responder()
     assert j.rot_caixa.label.startswith("Respondendo a Ana")
     assert wx_falso._foco[0] is j.caixa
-    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))   # cancela e esconde a caixa
-    assert j.resposta_a is None and wx_falso._foco[0] is j.lista_msgs
-    assert j.caixa.visivel is False
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))   # cancela so a resposta
+    assert j.resposta_a is None and j.atual is not None
+    assert j.caixa.visivel is True
     j._responder()
     assert j.caixa.visivel is True
     j.caixa.SetValue("sim")
     j._enviar_texto()
     assert ("enviar", "20", "sim", "3") in j.contas.p.pedidos
-    assert j.caixa.visivel is False and wx_falso._foco[0] is j.lista_msgs
+    assert j.caixa.visivel is True and wx_falso._foco[0] is j.caixa
+    assert j.caixa.GetValue() == ""
 
 
-def test_so_a_lista_de_conversas_aparece_ate_abrir_uma(j):
+def test_caixa_fica_visivel_com_a_conversa_aberta(j):
     assert j.lista_msgs.visivel is False and j.caixa.visivel is False
     j._mostrar_caixa()                        # sem conversa: so avisa
     assert j.caixa.visivel is False
     j._abrir_conversa(j.indice[("t1", "20")])
-    assert j.lista_msgs.visivel is True and j.caixa.visivel is False
+    assert j.lista_msgs.visivel is True and j.caixa.visivel is True
     assert j.GetTitle() == "TeleZapp: Bruno"
-    j._mostrar_caixa()                        # Control E
-    assert j.caixa.visivel is True and wx_falso._foco[0] is j.caixa
+    j._mostrar_caixa()                        # Control E leva o foco
+    assert wx_falso._foco[0] is j.caixa
     j.caixa.SetValue("rascunho")
-    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))
-    assert j.caixa.GetValue() == "rascunho" and j.caixa.visivel is False
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))  # Esc fecha a conversa
+    assert j.atual is None and j.caixa.visivel is False
+    assert j.lista_msgs.visivel is False
+    assert j.caixa.GetValue() == ""
+    j._abrir_conversa(j.indice[("t1", "20")])  # o rascunho volta
+    assert j.caixa.GetValue() == "rascunho"
+
+
+def test_lista_de_conversas_nao_e_refeita_sem_mudanca(j):
+    antes = list(j.lista_conv.itens)
+    chamadas = []
+    original = j.lista_conv.Set
+    j.lista_conv.Set = lambda itens: (chamadas.append(1), original(itens))
+    j._preencher_conversas()
+    j._preencher_conversas()
+    assert chamadas == [] and j.lista_conv.itens == antes   # NVDA nao repete
+
+
+def test_sincronia_interrompida_avisa_e_oferece_parear(j, monkeypatch):
+    perguntas = []
+    monkeypatch.setattr(jm.wx, "MessageBox",
+                        lambda *a, **k: perguntas.append(a[0]) or jm.wx.NO,
+                        raising=False)
+    j.contas.provedores["w1"] = j.contas.p
+    ditas = []
+    j.fala.falar = lambda texto, interromper=False: ditas.append(texto)
+    j.b.publicar(ev.ProgressoSincronia("w1", 57))
+    j.b.publicar(ev.ProgressoSincronia("w1", 57, interrompida=True))
+    assert "sincronia interrompida em 57%" in j.GetTitle()
+    assert any("interrompida em 57%" in d for d in ditas)
+    assert perguntas and "57%" in perguntas[0]
+    j.b.publicar(ev.EstadoConta("w1", ev.CONECTADA))
+    assert "interrompida" not in j.GetTitle()
 
 
 def test_esc_fecha_a_conversa(j):

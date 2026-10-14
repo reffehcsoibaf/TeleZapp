@@ -28,7 +28,12 @@ Etapa 3a: receber e abrir mídias.
 - Título da janela mostra o progresso da sincronia (`ProgressoSincronia`) e
   dos downloads.
 - Janela: Esc fecha a conversa (só as conversas ficam); a caixa de digitar
-  só aparece com Control E ou ao responder, e some ao enviar ou com Esc.
+  fica visível enquanto a conversa está aberta e o rascunho é guardado ao sair.
+- Lista de conversas só é refeita quando algo muda (o NVDA repetia o foco
+  durante a sincronia).
+- WhatsApp: se a conexão cair sem pedido, reconecta sozinho (esperas de 3 a
+  120 s); se o histórico estava chegando, avisa "sincronia interrompida em N%"
+  (título, fala) e oferece conectar de novo.
 
 ## 2026.10.13.0
 

@@ -39,6 +39,8 @@ RECIBO_ENTREGUE, RECIBO_LIDO, RECIBO_LIDO_POR_MIM, RECIBO_OUVIDO = 1, 4, 5, 6
 MAX_GUARDADAS = 2000
 # Sem o aviso de fim da sincronia, os avisos voltam depois deste tempo
 TEMPO_MAX_SINCRONIA = 45
+# espera (segundos) antes de cada nova tentativa de conexao; a ultima repete
+ESPERAS_RECONEXAO = (3, 10, 30, 60, 120)
 # Status de mensagem no historico (WebMessageInfo.Status)
 HIST_ENTREGUE, HIST_LIDA, HIST_OUVIDA = 3, 4, 5
 # Conversas que nao sao conversas para a pessoa
@@ -287,6 +289,7 @@ class ProvedorWhatsApp(Provedor):
         super().__init__(conta, barramento, banco, pedir)
         self.historico = historico
         self._desligada = False     # desconectada pelo celular
+        self._nao_reconectar = False  # banida ou aberta em outro lugar
         self._lid_para_numero = {}  # do pacote de historico
         self._apelidos = {}         # jid -> nome de perfil (pushname)
         self.pasta_sessoes = pasta_sessoes or config.pasta("sessoes")
@@ -302,6 +305,7 @@ class ProvedorWhatsApp(Provedor):
         self._nomes_grupo_pedidos = set()
         self._conectada = False
         self._sincronizando = False
+        self._progresso_historico = 0   # 0 = nada em andamento
         self._recebidas_na_sincronia = 0
         self._trava = threading.RLock()
 
@@ -330,6 +334,41 @@ class ProvedorWhatsApp(Provedor):
                                                 detalhe))
 
     def _conectar(self):
+        """Mantem a conexao: se o connect() terminar sem que ninguem tenha
+        pedido (queda de rede, websocket fechado), avisa e tenta de novo
+        com espera crescente."""
+        tentativa = 0
+        while not self._parar.is_set():
+            inicio = time.monotonic()
+            if not self._uma_conexao():
+                return          # erro de configuracao: nao adianta repetir
+            if self._parar.is_set() or self._desligada \
+                    or self._nao_reconectar:
+                return
+            if time.monotonic() - inicio > 300:
+                tentativa = 0   # ficou conectada um bom tempo
+            self._conectada = False
+            self._avisar_sincronia_interrompida()
+            espera = ESPERAS_RECONEXAO[min(tentativa,
+                                           len(ESPERAS_RECONEXAO) - 1)]
+            tentativa += 1
+            log.warning("conexão do WhatsApp encerrada sem pedido; nova "
+                        "tentativa em %ds (tentativa %d)", espera, tentativa)
+            self._estado(ev.DESCONECTADA, "reconectando")
+            if self._parar.wait(espera):
+                return
+
+    def _avisar_sincronia_interrompida(self):
+        """Se o historico estava chegando, diz em quantos por cento parou."""
+        pct = self._progresso_historico
+        if 0 < pct < 100:
+            self._progresso_historico = 0
+            self.barramento.publicar(ev.ProgressoSincronia(
+                self.conta.id, pct, interrompida=True))
+
+    def _uma_conexao(self):
+        """Cria o cliente e conecta (bloqueia ate a conexao acabar).
+        Devolve False se houve erro que nao adianta repetir."""
         try:
             import neonize.events as nev
             self.cliente = self.fabrica_cliente()
@@ -358,12 +397,14 @@ class ProvedorWhatsApp(Provedor):
             self._inicio = time.perf_counter()
             self.cliente.connect()   # bloqueia ate parar()
             log.info("connect() retornou")
+            return True
         except Exception:
             if not self._parar.is_set():
                 log.exception("erro na conexão do WhatsApp")
                 self._estado(ev.ERRO, "falha na conexão")
                 self._avisar("Erro na conexão do WhatsApp. Os detalhes estão "
                              "no log.", True)
+            return False
 
     def _trabalhar(self):
         while not self._parar.is_set():
@@ -480,6 +521,7 @@ class ProvedorWhatsApp(Provedor):
         if self._parar.is_set():
             return
         self._conectada = False
+        self._avisar_sincronia_interrompida()
         self._estado(ev.DESCONECTADA, "reconectando")
 
     def _ao_banimento(self, cliente, e):
@@ -488,6 +530,7 @@ class ProvedorWhatsApp(Provedor):
 
     def _ao_substituida(self, cliente, e):
         log.warning("sessão substituída por outro aparelho")
+        self._nao_reconectar = True
         self._estado(ev.ERRO, "aberta em outro lugar")
         self._avisar("Esta sessão do WhatsApp foi aberta em outro lugar.",
                      True)
@@ -810,8 +853,10 @@ class ProvedorWhatsApp(Provedor):
             log.info("pacote de histórico: %s", ", ".join(
                 "%s=%s" % kv for kv in resumo_historico(e.Data).items()))
             self.guardar_historico(e.Data)
+            pct = min(100, int(e.Data.progress))
+            self._progresso_historico = 0 if pct >= 100 else pct
             self.barramento.publicar(ev.ProgressoSincronia(
-                self.conta.id, min(100, int(e.Data.progress))))
+                self.conta.id, pct))
         except Exception:
             log.exception("erro ao ler o pacote de histórico")
 

@@ -533,3 +533,65 @@ def test_historico_guarda_a_ficha_das_midias(amb):
 def base_de(msg):
     from telezapp.midia import armazem
     return armazem.caminho_base(msg)
+
+
+def test_reconecta_sozinho_e_avisa_sincronia_interrompida(tmp_path,
+                                                          monkeypatch):
+    monkeypatch.setattr(wa, "ESPERAS_RECONEXAO", (0.05,))
+    fila = queue.Queue()
+    b = ev.Barramento()
+    b.ouvir(fila.put)
+    banco = Banco(str(tmp_path / "r.db"))
+    clientes = []
+
+    class Cai(ClienteFalso):
+        def connect(self):
+            if len(clientes) == 1:      # a primeira conexao cai logo
+                return
+            super().connect()
+
+    def fabrica():
+        c = Cai()
+        clientes.append(c)
+        return c
+
+    p = wa.ProvedorWhatsApp(m.Conta("w1", "whatsapp"), b, banco,
+                            pasta_sessoes=str(tmp_path),
+                            fabrica_cliente=fabrica)
+    p._progresso_historico = 57          # o historico estava no meio
+    p.iniciar()
+    try:
+        e = esperar(fila, ev.ProgressoSincronia)
+        assert e.interrompida and e.percentual == 57
+        for _ in range(200):
+            if len(clientes) >= 2:
+                break
+            threading.Event().wait(0.02)
+        assert len(clientes) == 2         # criou outro cliente e reconectou
+    finally:
+        p.parar()
+        banco.fechar()
+
+
+def test_nao_reconecta_se_a_sessao_foi_aberta_em_outro_lugar(tmp_path,
+                                                             monkeypatch):
+    monkeypatch.setattr(wa, "ESPERAS_RECONEXAO", (0.05,))
+    b = ev.Barramento()
+    banco = Banco(str(tmp_path / "s.db"))
+    clientes = []
+
+    def fabrica():
+        c = ClienteFalso()
+        c.connect = lambda: None
+        clientes.append(c)
+        return c
+
+    p = wa.ProvedorWhatsApp(m.Conta("w1", "whatsapp"), b, banco,
+                            pasta_sessoes=str(tmp_path),
+                            fabrica_cliente=fabrica)
+    p._nao_reconectar = True
+    p.iniciar()
+    threading.Event().wait(0.4)
+    p.parar()
+    banco.fechar()
+    assert len(clientes) == 1

@@ -37,13 +37,13 @@ LIMITE_MEMORIA = 1200     # mensagens mantidas na memoria por conversa
 AJUDA = """\
 ESTRUTURA DA JANELA
 Sem conversa aberta, só a lista de Conversas aparece. Enter abre a conversa e
-leva você à lista de Mensagens; Esc fecha a conversa. A caixa para escrever só
-aparece quando você pede (Control E) ou manda responder.
+leva você à lista de Mensagens; Esc fecha a conversa. Com a conversa aberta, a caixa
+para escrever fica logo abaixo das mensagens.
 
 ATALHOS
 Control 1: ir para a lista de conversas
 Control 2: ir para a lista de mensagens
-Control E: escrever uma mensagem (mostra a caixa de digitação)
+Control E: ir para a caixa de digitação
 Control U: ir para a próxima conversa com mensagens não lidas
 Control R: ouvir a última mensagem da conversa aberta
 F5: atualizar a lista de conversas
@@ -106,6 +106,8 @@ class Janela(wx.Frame):
         self.fala = Fala()
         self.conversas = []           # ordenadas pela ultima mensagem
         self._chaves_conv = []        # chave de cada item da lista
+        self._rotulos_conv = []       # texto de cada item da lista
+        self.rascunhos = {}           # texto nao enviado de cada conversa
         self.indice = {}              # chave -> Conversa
         self.cache = {}               # chave da conversa -> [Mensagem]
         self.atual = None             # chave da conversa aberta
@@ -117,6 +119,7 @@ class Janela(wx.Frame):
         self.resposta_a = None
         self.locais = 0               # contador de mensagens "enviando"
         self.sincronia = {}           # conta_id -> (percentual, quando)
+        self.interrompidas = {}       # conta_id -> % em que a sincronia parou
         self.progresso_midias = {}    # chave da midia -> percentual
         self.abrindo = None           # chave da midia que abre ao baixar
         self.abrindo_abrir = True     # False: so baixar, sem abrir
@@ -296,8 +299,8 @@ class Janela(wx.Frame):
         self._mostrar_conversa(False, False)
 
     def _mostrar_conversa(self, mensagens, escrever):
-        """Sem conversa aberta so a lista de conversas aparece; a caixa de
-        digitar so aparece quando a pessoa pede (Control E) ou responde."""
+        """Sem conversa aberta so a lista de conversas aparece; com a
+        conversa aberta aparecem as mensagens e a caixa de digitar."""
         for w in (self.rot_msgs, self.lista_msgs):
             w.Show(mensagens)
         for w in (self.rot_caixa, self.caixa, self.botao_enviar):
@@ -320,6 +323,11 @@ class Janela(wx.Frame):
             servico = m.SERVICOS.get(self.contas.servico(cid), "") \
                 if self.contas else ""
             extras.append("%s sincronizando %d%%" % (servico, pct))
+        for cid, pct in self.interrompidas.items():
+            servico = m.SERVICOS.get(self.contas.servico(cid), "") \
+                if self.contas else ""
+            extras.append("%s sincronia interrompida em %d%%" % (servico,
+                                                                  pct))
         n = len(self.progresso_midias)
         if n == 1:
             pct = next(iter(self.progresso_midias.values()))
@@ -439,6 +447,7 @@ class Janela(wx.Frame):
             self._preencher_conversas()
         else:
             self._chaves_conv = []
+            self._rotulos_conv = []
             self.lista_conv.Set([TEXTO_SEM_CONTAS])
         self.fala.falar("Conta removida.")
 
@@ -547,6 +556,8 @@ class Janela(wx.Frame):
             if self.contas else ""
         if e.estado == ev.CONECTADA and antes != ev.CONECTADA:
             self.fala.falar("%s conectado." % servico)
+            if self.interrompidas.pop(e.conta_id, None) is not None:
+                self._atualizar_titulo()
         elif e.estado == ev.PRECISA_LOGIN:
             self.fala.falar("%s: %s." % (servico, e.detalhe or e.estado))
             if e.detalhe == "desconectada pelo celular":
@@ -601,8 +612,23 @@ class Janela(wx.Frame):
         antes = None
         if 0 <= i < len(self._chaves_conv):
             antes = self._chaves_conv[i]
-        self._chaves_conv = [c.chave for c in self.conversas]
-        self.lista_conv.Set([m.rotulo_conversa(c) for c in self.conversas])
+        chaves = [c.chave for c in self.conversas]
+        rotulos = [m.rotulo_conversa(c) for c in self.conversas]
+        if chaves == self._chaves_conv and \
+                rotulos == self._rotulos_conv:
+            return      # nada mudou: mexer na lista faz o NVDA repetir o foco
+        if chaves == self._chaves_conv and \
+                len(rotulos) == self.lista_conv.GetCount():
+            # mesma ordem: troca so os textos que mudaram
+            for k, (velho, novo) in enumerate(zip(self._rotulos_conv,
+                                                  rotulos)):
+                if velho != novo:
+                    self.lista_conv.SetString(k, novo)
+            self._rotulos_conv = rotulos
+            return
+        self._chaves_conv = chaves
+        self._rotulos_conv = rotulos
+        self.lista_conv.Set(rotulos)
         if antes in self._chaves_conv:
             self.lista_conv.SetSelection(self._chaves_conv.index(antes))
         elif self._chaves_conv:
@@ -698,7 +724,7 @@ class Janela(wx.Frame):
         bipe("erro")
         texto = "Não foi possível enviar: %s." % e.motivo
         if chave == self.atual:
-            texto += " O texto voltou para a caixa: Control E."
+            texto += " O texto voltou para a caixa de digitação."
         self.fala.falar(texto, interromper=True)
         self.SetStatusText(texto)
         log.info("envio falhou (%s)", e.motivo)
@@ -803,7 +829,8 @@ class Janela(wx.Frame):
             self.esperando_servidor = True
         self.rot_msgs.SetLabel("Mensagens de " + conv.nome)
         self.rot_caixa.SetLabel("Digite sua mensagem")
-        self._mostrar_conversa(True, False)
+        self.caixa.SetValue(self.rascunhos.get(conv.chave, ""))
+        self._mostrar_conversa(True, True)
         self._atualizar_titulo()
         p = self.contas.provedor(conv.conta_id)
         if p is not None:
@@ -829,6 +856,12 @@ class Janela(wx.Frame):
             self.lista_conv.SetSelection(self._chaves_conv.index(self.atual))
         if self.resposta_a is not None:
             self._cancelar_resposta()
+        texto = self.caixa.GetValue()
+        if texto.strip():
+            self.rascunhos[self.atual] = texto
+        else:
+            self.rascunhos.pop(self.atual, None)
+        self.caixa.Clear()
         self.marcador_id = None
         self.marcador_n = 0
         self.atual = None
@@ -843,16 +876,15 @@ class Janela(wx.Frame):
         if self.atual is None:
             self.fala.falar(TEXTO_SEM_CONVERSA)
             return
-        self._mostrar_conversa(True, True)
         self.caixa.SetFocus()
 
     def _sair_da_caixa(self):
-        """Esc na caixa: cancela a resposta, esconde a caixa (o rascunho
-        fica guardado) e volta para as mensagens."""
+        """Esc na caixa: primeiro cancela a resposta em andamento; sem
+        resposta, fecha a conversa (o rascunho fica guardado)."""
         if self.resposta_a is not None:
             self._cancelar_resposta()
-        self._mostrar_conversa(True, False)
-        self.lista_msgs.SetFocus()
+            return
+        self._fechar_conversa()
 
     def _proxima_nao_lida(self):
         n = len(self._chaves_conv)
@@ -1041,8 +1073,7 @@ class Janela(wx.Frame):
             self.resposta_a = None
             self.rot_caixa.SetLabel("Digite sua mensagem")
         self._preencher_mensagens("ultima")
-        self._mostrar_conversa(True, False)
-        self.lista_msgs.SetFocus()
+        self.caixa.SetFocus()
         p.enviar_texto(conversa_id, texto, resposta)
         log.info("texto enviado para a fila (%d caracteres)", len(texto))
 
@@ -1146,12 +1177,42 @@ class Janela(wx.Frame):
             armazem.tamanho_da_pasta()))
 
     def _ev_progresso_sincronia(self, e):
+        if e.interrompida:
+            self.sincronia.pop(e.conta_id, None)
+            self.interrompidas[e.conta_id] = e.percentual
+            servico = m.SERVICOS.get(self.contas.servico(e.conta_id), "") \
+                if self.contas else ""
+            texto = ("%s: a sincronia do histórico foi interrompida em %d%%. "
+                     "O TeleZapp está tentando reconectar." %
+                     (servico, e.percentual))
+            self.SetStatusText(texto)
+            self.fala.falar(texto, interromper=True)
+            self._atualizar_titulo()
+            wx.CallAfter(self._oferecer_historico_de_novo, e.conta_id,
+                         e.percentual)
+            return
+        self.interrompidas.pop(e.conta_id, None)
         if e.percentual >= 100:
             self.sincronia.pop(e.conta_id, None)
         else:
             self.sincronia[e.conta_id] = (e.percentual, time.time())
             wx.CallLater(91000, self._atualizar_titulo)
         self._atualizar_titulo()
+
+    @seguro
+    def _oferecer_historico_de_novo(self, conta_id, percentual):
+        if self.contas is None or self.contas.provedor(conta_id) is None:
+            return
+        r = wx.MessageBox(
+            "A sincronia do histórico da conta %s parou em %d%% porque a "
+            "conexão caiu. O WhatsApp só envia o histórico uma vez, logo "
+            "depois do pareamento. Para receber o resto, é preciso "
+            "conectar a conta de novo (as conversas já guardadas "
+            "continuam). Quer conectar de novo agora?"
+            % (self.contas.nome(conta_id), percentual), NOME,
+            wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
+        if r == wx.YES:
+            self._parear_whatsapp_de_novo(conta_id)
 
     def _ev_progresso_midia(self, e):
         chave = (e.conta_id, e.conversa_id, e.mensagem_id)

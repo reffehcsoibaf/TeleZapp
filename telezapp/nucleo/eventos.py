@@ -91,6 +91,7 @@ class ProgressoSincronia:
     """WhatsApp: andamento (0 a 100) do historico que o celular envia."""
     conta_id: str
     percentual: int
+    interrompida: bool = False   # a conexao caiu antes do fim
 
 
 @dataclass
