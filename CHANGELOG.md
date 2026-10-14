@@ -9,6 +9,8 @@ PR #9: links escondidos, botões de link e menções.
 
 - `Mensagem.extras` (JSON: `links`, `botoes`, `mencoes`) e coluna `extras` no
   banco, esquema 6 (migração automática).
+- Foto, vídeo, áudio e documento com link na legenda: a linha diz "com link
+  (Alt+Enter)" e os detalhes listam os links (`tem_links`).
 - Telegram: entidades `MessageEntityTextUrl`/`Url` (posições em UTF-16),
   `Mention` (@usuario, resolvido com `get_entity`, com cache e no máximo 10
   buscas novas por lote) e `MentionName`; botões só de link, nos formatos novo

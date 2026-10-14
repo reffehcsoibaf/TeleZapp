@@ -205,6 +205,8 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None):
     do autor (texto).
     """
     cont = conteudo(m).replace("\r", " ").replace("\n", " ")
+    if m.tipo not in (TEXTO, VOZ, FIGURINHA) and tem_links(m):
+        cont = _juntar(cont, "com link (Alt+Enter)")
     if m.resposta_a:
         if isinstance(respondida, Mensagem):
             quem = "você" if respondida.minha else (
@@ -254,6 +256,11 @@ def extrair_links(texto):
             vistos.add(url)
             achados.append((url, t))
     return achados
+
+
+def tem_links(m):
+    """A mensagem tem algum link (na legenda ou escondido)?"""
+    return bool(extrair_links(m.texto) or extras_de(m)["links"])
 
 
 def texto_marcador(n):
