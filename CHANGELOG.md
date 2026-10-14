@@ -3,6 +3,16 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.14.9
+
+PR #10: nome verificado de empresas.
+
+- `_consultar_empresas`: o whatsmeow grava o nome verificado (`BusinessName`)
+  no armazenamento de contatos ao rodar `get_user_info`, mas não o devolve em
+  `UserInfo.VerifiedName`. Agora, depois da consulta, lê-se
+  `contact.get_contact(jid).BusinessName`. O log "consulta de empresa" mostra
+  quantas conversas tiveram nome.
+
 ## 2026.10.14.8
 
 PR #9: links escondidos, botões de link e menções.
