@@ -32,6 +32,9 @@ class ProvedorFalso:
     def enviar_texto(self, cid, texto, resposta_a=""):
         self.pedidos.append(("enviar", cid, texto, resposta_a))
 
+    def responder_acao(self, msg, acao):
+        self.pedidos.append(("acao", msg.id, acao["rotulo"]))
+
     def atualizar_conversas(self):
         self.pedidos.append(("atualizar",))
 
@@ -1068,3 +1071,29 @@ def test_detalhes_pedem_ao_provedor_o_nome_de_quem_recebeu(j, monkeypatch):
     selecionar(j, "7")
     j._detalhes()
     assert "Entregue a Ana Silva em" in chamadas[0][2]
+
+
+def test_enter_em_botao_de_resposta_confirma_e_envia(j, monkeypatch):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    x = msg("8", "Você confirma?", conversa="10")
+    m.guardar_extras(x, acoes=[{"tipo": "modelo", "rotulo": "Sim",
+                                "id": "s", "indice": 0},
+                               {"tipo": "lista", "rotulo": "Particular",
+                                "id": "p", "indice": 0}])
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [x]))
+    monkeypatch.setattr(jm.wx, "CallAfter", lambda f, *a: f(*a),
+                        raising=False)
+    chamadas = []
+    monkeypatch.setattr(
+        jm.dialogos, "mostrar_texto",
+        lambda *a, **k: chamadas.append(k) or {"_acao": 0})
+    selecionar(j, "8")
+    wx_falso.resposta_messagebox[0] = wx_falso.NO
+    j._detalhes()
+    assert chamadas[0]["acoes"] == [("Sim", False), ("Particular", True)]
+    assert ("acao", "8", "Sim") not in j.contas.p.pedidos     # disse não
+    wx_falso.resposta_messagebox[0] = wx_falso.YES
+    j._detalhes()
+    assert ("acao", "8", "Sim") in j.contas.p.pedidos
+    assert "Enviar o botão \"Sim\"" in wx_falso.mensagens[-1]

@@ -3,6 +3,24 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.14.10
+
+PR #11: tocar nos botões de resposta e nas listas do WhatsApp.
+
+- `extras.acoes`: `acoes_do_whatsapp` guarda botões de resposta rápida de
+  modelo (`modelo`), `buttonsMessage` (`botoes`), `quick_reply` de mensagem
+  interativa (`fluxo`) e linhas de `listMessage` (`lista`).
+- `Provedor.responder_acao(msg, acao)`; WhatsApp monta
+  `templateButtonReplyMessage` (selectedID/DisplayText/Index),
+  `buttonsResponseMessage`, `listResponseMessage` ou
+  `interactiveResponseMessage`, citando a mensagem original.
+- Janela de detalhes: lista "Botões de resposta e opções"; Enter confirma
+  ("Enviar o botão ... para ...?") e envia. `EnvioFalhou.devolver_texto`
+  evita devolver o rótulo do botão à caixa de digitação.
+- Não verificado no WhatsApp real: só o modelo de resposta rápida tem dados
+  reais no log; `fluxo`, `lista` e `botoes` seguem o protocolo, sem teste real.
+  Ainda sem toque: `single_select` do fluxo nativo, pagamento, ligar.
+
 ## 2026.10.14.9
 
 PR #10: nome verificado de empresas.

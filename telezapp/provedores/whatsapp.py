@@ -269,6 +269,58 @@ def botoes_do_whatsapp(interna):
     return botoes
 
 
+def acoes_do_whatsapp(interna):
+    """Botoes de resposta e opcoes de lista que o toque pode acionar:
+    [{'tipo', 'rotulo', 'id', 'indice', 'descricao'}]. Tipos: modelo
+    (botao de resposta rapida de modelo de empresa), botoes (buttonsMessage),
+    fluxo (quick_reply de mensagem interativa) e lista (linha de lista).
+    Botoes de link, ligar e pagamento nao entram: nao sao respostas."""
+    acoes = []
+    try:
+        if interna.HasField("buttonsMessage"):
+            for i, b in enumerate(interna.buttonsMessage.buttons):
+                if b.buttonText.displayText:
+                    acoes.append({"tipo": "botoes", "indice": i,
+                                  "rotulo": b.buttonText.displayText,
+                                  "id": b.buttonID})
+        inter = None
+        if interna.HasField("templateMessage"):
+            t = interna.templateMessage
+            h = t.hydratedTemplate if t.HasField("hydratedTemplate") else \
+                t.hydratedFourRowTemplate
+            for pos, b in enumerate(h.hydratedButtons):
+                if b.HasField("quickReplyButton") and \
+                        b.quickReplyButton.displayText:
+                    acoes.append({
+                        "tipo": "modelo",
+                        "indice": b.index if b.index else pos,
+                        "rotulo": b.quickReplyButton.displayText,
+                        "id": b.quickReplyButton.ID})
+            if t.HasField("interactiveMessageTemplate"):
+                inter = t.interactiveMessageTemplate
+        if interna.HasField("interactiveMessage"):
+            inter = interna.interactiveMessage
+        if inter is not None and inter.HasField("nativeFlowMessage"):
+            for i, b in enumerate(inter.nativeFlowMessage.buttons):
+                if b.name != "quick_reply":
+                    continue
+                dados = json.loads(b.buttonParamsJSON or "{}")
+                if dados.get("display_text"):
+                    acoes.append({"tipo": "fluxo", "indice": i,
+                                  "rotulo": dados["display_text"],
+                                  "id": dados.get("id") or str(i)})
+        if interna.HasField("listMessage"):
+            for sec in interna.listMessage.sections:
+                for r in sec.rows:
+                    if r.title:
+                        acoes.append({"tipo": "lista", "indice": 0,
+                                      "rotulo": r.title, "id": r.rowID,
+                                      "descricao": r.description})
+    except Exception:
+        log.info("não consegui ler as ações de uma mensagem de empresa")
+    return acoes
+
+
 CAMPOS_INTERATIVOS = ("buttonsMessage", "templateMessage", "interactiveMessage",
                       "listMessage", "buttonsResponseMessage",
                       "listResponseMessage", "templateButtonReplyMessage",
@@ -389,8 +441,10 @@ def converter(evento, conta_id, conversa_id, autor=""):
         resposta_a=(ctx.stanzaID if ctx is not None and ctx.stanzaID
                     else ""),
         remetente="" if minha else jid_texto(origem.Sender))
-    m.guardar_extras(msg, botoes=botoes_do_whatsapp(desembrulhar(
-        evento.Message)), mencoes=mencoes_do_contexto(ctx))
+    interna_ = desembrulhar(evento.Message)
+    m.guardar_extras(msg, botoes=botoes_do_whatsapp(interna_),
+                     mencoes=mencoes_do_contexto(ctx),
+                     acoes=acoes_do_whatsapp(interna_))
     return msg, msg.remetente
 
 
@@ -466,8 +520,10 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
         resposta_a=(ctx.stanzaID if ctx is not None and ctx.stanzaID
                     else ""),
         remetente="" if minha else _sem_aparelho(remetente))
-    m.guardar_extras(msg, botoes=botoes_do_whatsapp(
-        desembrulhar(wmi.message)), mencoes=mencoes_do_contexto(ctx))
+    interna_ = desembrulhar(wmi.message)
+    m.guardar_extras(msg, botoes=botoes_do_whatsapp(interna_),
+                     mencoes=mencoes_do_contexto(ctx),
+                     acoes=acoes_do_whatsapp(interna_))
     return msg, remetente
 
 
@@ -893,7 +949,7 @@ class ProvedorWhatsApp(Provedor):
                            lambda _: "@" + nome, texto)
         msg.texto = texto
         m.guardar_extras(msg, extras["links"], extras["botoes"],
-                         extras["mencoes"])
+                         extras["mencoes"], extras["acoes"])
 
     def _conversa(self, conversa_id, chat, pushname, grupo, data):
         canal = chat.Server == "newsletter"
@@ -1167,20 +1223,67 @@ class ProvedorWhatsApp(Provedor):
         return Message(extendedTextMessage=ExtendedTextMessage(
             text=texto, contextInfo=ctx))
 
-    def _enviar(self, conversa_id, texto, resposta_a):
+    def responder_acao(self, msg, acao):
+        """Toca um botao de resposta (ou escolhe uma opcao de lista) de uma
+        mensagem de empresa: manda a resposta citando a mensagem."""
+        self._fila.put(lambda: self._enviar(
+            msg.conversa_id, acao.get("rotulo", ""), msg.id,
+            lambda: self._mensagem_de_acao(msg, acao)))
+
+    def _mensagem_de_acao(self, msg, acao):
+        from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (
+            ButtonsResponseMessage, ContextInfo, InteractiveResponseMessage,
+            ListResponseMessage, Message, TemplateButtonReplyMessage)
+        rotulo = acao.get("rotulo", "")
+        tipo = acao.get("tipo", "")
+        remetente = msg.remetente or (
+            "" if msg.conversa_id.endswith("@g.us") else msg.conversa_id)
+        ctx = ContextInfo(stanzaID=msg.id, quotedMessage=Message(
+            conversation=msg.texto or m.conteudo(msg)))
+        if remetente:
+            ctx.participant = remetente
+        if tipo == "modelo":
+            return Message(templateButtonReplyMessage=TemplateButtonReplyMessage(
+                selectedID=acao.get("id", ""), selectedDisplayText=rotulo,
+                selectedIndex=int(acao.get("indice", 0)), contextInfo=ctx))
+        if tipo == "botoes":
+            return Message(buttonsResponseMessage=ButtonsResponseMessage(
+                selectedButtonID=acao.get("id", ""),
+                selectedDisplayText=rotulo,
+                type=ButtonsResponseMessage.DISPLAY_TEXT, contextInfo=ctx))
+        if tipo == "lista":
+            resp = ListResponseMessage(
+                title=rotulo, description=acao.get("descricao", ""),
+                listType=ListResponseMessage.SINGLE_SELECT, contextInfo=ctx)
+            resp.singleSelectReply.selectedRowID = acao.get("id", "")
+            return Message(listResponseMessage=resp)
+        if tipo == "fluxo":
+            resp = InteractiveResponseMessage(contextInfo=ctx)
+            resp.body.text = rotulo
+            resp.nativeFlowResponseMessage.name = "quick_reply"
+            resp.nativeFlowResponseMessage.paramsJSON = json.dumps(
+                {"display_text": rotulo, "id": acao.get("id", "")},
+                ensure_ascii=False)
+            resp.nativeFlowResponseMessage.version = 3
+            return Message(interactiveResponseMessage=resp)
+        raise ValueError("ação desconhecida: %s" % tipo)
+
+    def _enviar(self, conversa_id, texto, resposta_a, construir=None):
         inicio = time.perf_counter()
         try:
             if not self._conectada:
                 raise ConnectionError("sem conexão")
             resp = self.cliente.send_message(
                 self._jid(conversa_id),
+                construir() if construir is not None else
                 self._mensagem_de_texto(conversa_id, texto, resposta_a))
         except Exception as e:
             log.warning("envio falhou: %s", type(e).__name__)
             motivo = "sem conexão" if isinstance(e, ConnectionError) else \
                 "erro do WhatsApp (%s)" % type(e).__name__
             self.barramento.publicar(ev.EnvioFalhou(
-                self.conta.id, conversa_id, texto, motivo))
+                self.conta.id, conversa_id, texto, motivo,
+                devolver_texto=construir is None))
             return
         log.info("texto enviado em %.2fs", time.perf_counter() - inicio)
         msg = m.Mensagem(self.conta.id, conversa_id, resp.ID, minha=True,

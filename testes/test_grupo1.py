@@ -125,7 +125,8 @@ def test_extras_na_mensagem_e_migracao_do_banco(tmp_path):
     from telezapp.armazenamento.banco import Banco
     from telezapp.nucleo import modelos as m
     x = m.Mensagem("c", "1", "9", texto="oi")
-    assert m.extras_de(x) == {"links": [], "botoes": [], "mencoes": []}
+    assert m.extras_de(x) == {"links": [], "botoes": [], "mencoes": [],
+                              "acoes": []}
     m.guardar_extras(x, links=[("https://a.com", "clique aqui")],
                      botoes=[("Abrir", "https://b.com")],
                      mencoes=[{"nome": "Ana", "id": "5"}])

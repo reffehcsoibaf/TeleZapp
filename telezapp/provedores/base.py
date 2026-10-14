@@ -58,6 +58,12 @@ class Provedor(ABC):
     def marcar_como_lida(self, conversa_id):
         """Avisa o servico que a pessoa leu a conversa."""
 
+    def responder_acao(self, msg, acao):
+        """Toca um botao de resposta ou escolhe uma opcao de lista de uma
+        mensagem (ex.: de empresa). Publica MensagemNova ou EnvioFalhou.
+        Por padrao o servico nao tem isso."""
+        raise NotImplementedError
+
     def nome_de_participante(self, participante_id):
         """Nome para mostrar de quem aparece num recibo (entregue, lida);
         vazio se nao souber."""

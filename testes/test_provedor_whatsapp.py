@@ -900,3 +900,79 @@ def test_pagamento_interativo_sem_texto_vira_solicitacao_de_pagamento():
         "w1", "c")
     assert msg.tipo == m.TEXTO
     assert msg.texto == "mensagem interativa: solicitação de pagamento"
+
+
+def _modelo_com_botoes():
+    h = E.TemplateMessage.HydratedFourRowTemplate(
+        hydratedContentText="Você confirma a consulta?",
+        hydratedButtons=[
+            E.HydratedTemplateButton(
+                index=0, quickReplyButton=E.HydratedTemplateButton.
+                HydratedQuickReplyButton(displayText="Sim", ID="s")),
+            E.HydratedTemplateButton(
+                index=1, quickReplyButton=E.HydratedTemplateButton.
+                HydratedQuickReplyButton(displayText="Não", ID="n")),
+            E.HydratedTemplateButton(
+                index=2, urlButton=E.HydratedTemplateButton.
+                HydratedURLButton(displayText="Site", URL="https://x.com"))])
+    return E.Message(templateMessage=E.TemplateMessage(
+        hydratedFourRowTemplate=h))
+
+
+def test_acoes_guardam_so_botoes_de_resposta_e_opcoes_de_lista():
+    msg, _ = wa.converter(evento("A1", _modelo_com_botoes()), "w1", "c")
+    acoes = m.extras_de(msg)["acoes"]
+    assert [(a["tipo"], a["rotulo"], a["id"], a["indice"]) for a in acoes] \
+        == [("modelo", "Sim", "s", 0), ("modelo", "Não", "n", 1)]
+    lista = E.ListMessage(title="Escolha", sections=[E.ListMessage.Section(
+        rows=[E.ListMessage.Row(title="Convênio", rowID="c1",
+                                description="Plano"),
+              E.ListMessage.Row(title="Particular", rowID="p1")])])
+    msg, _ = wa.converter(evento("A2", E.Message(listMessage=lista)),
+                          "w1", "c")
+    acoes = m.extras_de(msg)["acoes"]
+    assert [(a["tipo"], a["rotulo"], a["id"]) for a in acoes] == [
+        ("lista", "Convênio", "c1"), ("lista", "Particular", "p1")]
+    msg, _ = wa.converter(evento("A3", E.Message(conversation="oi")),
+                          "w1", "c")
+    assert m.extras_de(msg)["acoes"] == []
+
+
+def test_tocar_botao_de_modelo_responde_citando_a_mensagem(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento("B1", _modelo_com_botoes()))
+    recebida = esperar(amb.fila, ev.MensagemNova).mensagem
+    acao = m.extras_de(recebida)["acoes"][1]
+    amb.p.responder_acao(recebida, acao)
+    esperar(amb.fila, ev.MensagemNova)
+    _, proto = amb.c.enviadas[-1]
+    r = proto.templateButtonReplyMessage
+    assert (r.selectedID, r.selectedDisplayText, r.selectedIndex) == \
+        ("n", "Não", 1)
+    assert r.contextInfo.stanzaID == "B1"
+
+
+def test_escolher_opcao_de_lista_e_botoes_simples(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    recebida = m.Mensagem("w1", "5551988887777@s.whatsapp.net", "L1",
+                          texto="Escolha")
+    amb.p.responder_acao(recebida, {"tipo": "lista", "rotulo": "Particular",
+                                    "id": "p1", "descricao": ""})
+    esperar(amb.fila, ev.MensagemNova)
+    r = amb.c.enviadas[-1][1].listResponseMessage
+    assert r.title == "Particular" and r.singleSelectReply.selectedRowID == "p1"
+    amb.p.responder_acao(recebida, {"tipo": "botoes", "rotulo": "Sim",
+                                    "id": "1"})
+    esperar(amb.fila, ev.MensagemNova)
+    b = amb.c.enviadas[-1][1].buttonsResponseMessage
+    assert (b.selectedButtonID, b.selectedDisplayText) == ("1", "Sim")
+
+
+def test_falha_ao_tocar_botao_nao_devolve_texto_para_a_caixa(amb):
+    recebida = m.Mensagem("w1", "5551988887777@s.whatsapp.net", "L1")
+    amb.p.responder_acao(recebida, {"tipo": "botoes", "rotulo": "Sim",
+                                    "id": "1"})
+    falha = esperar(amb.fila, ev.EnvioFalhou)
+    assert falha.motivo == "sem conexão" and not falha.devolver_texto
