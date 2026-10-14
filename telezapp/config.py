@@ -119,6 +119,12 @@ OPCOES = (
           "Guarda, no seu computador, a estrutura original das últimas 500 "
           "mensagens do WhatsApp para o menu Depurar mostrar. Contém o texto "
           "e os telefones dessas mensagens. Ao desligar, tudo é apagado."),
+    Opcao("log_detalhado_whatsapp", "Registro técnico detalhado do WhatsApp",
+          "Avançado", False,
+          "Grava no log cada pacote que o WhatsApp troca com o TeleZapp "
+          "(sem o texto das mensagens, que vai criptografado). Serve para "
+          "investigar erros de envio; deixa o log grande. Vale na próxima "
+          "abertura do TeleZapp."),
     Opcao("estilo", "Como cada mensagem é lida", "Leitura", 1,
           "A ordem em que autor, hora e conteúdo aparecem na lista de "
           "mensagens.",

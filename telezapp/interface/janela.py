@@ -227,6 +227,9 @@ class Janela(wx.Frame):
         m_dep.AppendSeparator()
         item(m_dep, "depuracao", "&Modo de depuração (guardar a estrutura "
                                  "das mensagens novas)", "check")
+        item(m_dep, "log_detalhado", "&Registro técnico detalhado do "
+                                     "WhatsApp (vale na próxima abertura)",
+             "check")
 
         m_aj = wx.Menu()
         item(m_aj, "guia", "&Guia de uso\tF1")
@@ -290,6 +293,11 @@ class Janela(wx.Frame):
         self.Bind(wx.EVT_MENU,
                   lambda e: self._modo_depuracao(e.IsChecked()),
                   self.itens["depuracao"])
+        self.itens["log_detalhado"].Check(
+            bool(self.cfg.get("log_detalhado_whatsapp")))
+        self.Bind(wx.EVT_MENU,
+                  lambda e: self._log_detalhado(e.IsChecked()),
+                  self.itens["log_detalhado"])
         for chave in ("som", "falar_novas", "confirmar_envio"):
             self.itens[chave].Check(bool(self.cfg.get(chave)))
             self.Bind(wx.EVT_MENU,
@@ -1262,6 +1270,13 @@ class Janela(wx.Frame):
             self.banco.limpar_depuracao()
             self.fala.falar("Modo de depuração desligado. As estruturas "
                             "guardadas foram apagadas.")
+
+    def _log_detalhado(self, ligado):
+        self.cfg.set("log_detalhado_whatsapp", bool(ligado))
+        self.fala.falar(
+            "Registro técnico detalhado do WhatsApp %s. Vale na próxima "
+            "abertura do TeleZapp; feche e abra o programa." % (
+                "ligado" if ligado else "desligado"))
 
     def _area_de_transferencia(self, texto):
         if wx.TheClipboard.Open():

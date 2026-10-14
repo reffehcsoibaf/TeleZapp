@@ -1126,3 +1126,10 @@ def test_modo_de_depuracao_liga_desliga_e_salva_em_arquivo(j, tmp_path,
     j._modo_depuracao(False)
     assert j.banco.depuracao is False
     assert j.banco.depuracao_de("t1", "10", "9") == ""
+
+
+def test_registro_detalhado_do_whatsapp_so_grava_a_opcao(j):
+    j._log_detalhado(True)
+    assert j.cfg.get("log_detalhado_whatsapp") is True
+    j._log_detalhado(False)
+    assert j.cfg.get("log_detalhado_whatsapp") is False

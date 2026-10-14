@@ -641,8 +641,27 @@ class ProvedorWhatsApp(Provedor):
     # ----------------------------------------------------------- execucao
     def _criar_cliente(self):
         from neonize.client import NewClient
+        self._ligar_log_detalhado()
         caminho = caminho_sessao(self.pasta_sessoes, self.conta.id)
         return NewClient(caminho, props=props_do_aparelho(self.historico))
+
+    @staticmethod
+    def _ligar_log_detalhado():
+        """Com a opcao ligada, o lado em Go grava cada pacote trocado com o
+        WhatsApp no log (o nivel e lido quando o cliente conecta)."""
+        try:
+            from telezapp import config
+            if not config.Config().get("log_detalhado_whatsapp"):
+                return
+            from neonize.utils import log as log_neonize
+            log_neonize.setLevel(logging.DEBUG)
+            # os registros do lado em Go chegam com nomes whatsmeow.*, que
+            # herdam o nivel destes
+            for nome in ("whatsmeow", "Whatsmeow"):
+                logging.getLogger(nome).setLevel(logging.DEBUG)
+            log.info("registro técnico detalhado do WhatsApp ligado")
+        except Exception:
+            log.exception("não consegui ligar o registro detalhado")
 
     def iniciar(self):
         if self._threads:

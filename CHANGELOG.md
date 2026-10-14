@@ -3,6 +3,16 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.14.14
+
+- Teste real: modelo (`templateButtonReplyMessage`) foi aceito e entendido;
+  `buttonsResponseMessage` foi recusado com 479 nas três variantes, mesmo
+  citando a mensagem inteira. Como o conteúdo vai criptografado, a recusa é do
+  pacote (stanza), possivelmente do nó `<biz><buttons_response/>` que o
+  whatsmeow acrescenta. Para ver os pacotes: opção "Registro técnico detalhado
+  do WhatsApp" (menu Depurar, vale na próxima abertura), que põe o lado em Go
+  em nível DEBUG (`_ligar_log_detalhado`).
+
 ## 2026.10.14.13
 
 - Resposta de botão: o servidor devolveu 479 (formato recusado) ao enviar um
