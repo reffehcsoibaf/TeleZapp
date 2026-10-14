@@ -150,6 +150,18 @@ class ClienteFalso:
     def get_pn_from_lid(self, j):
         return jid("5551977776666") if j.User == "lid1" else N.JID()
 
+    empresas = {}    # usuario -> nome verificado devolvido por get_user_info
+
+    def get_user_info(self, *jids):
+        saida = []
+        for j in jids:
+            info = N.UserInfo()
+            if j.User in self.empresas:
+                info.VerifiedName.Details.verifiedName = self.empresas[j.User]
+            saida.append(N.GetUserInfoSingleReturnFunction(JID=j,
+                                                           UserInfo=info))
+        return saida
+
     def get_newsletter_info(self, j):
         return N.NewsletterMetadata(ThreadMeta=N.NewsletterThreadMetadata(
             Name=N.NewsletterText(Text="Canal de Notícias")))
@@ -794,3 +806,20 @@ def test_conversa_privada_sem_pushname_usa_o_nome_da_conversa_como_autor(amb):
                                    chat="5511912617423", pushname=""))
     nova = esperar(amb.fila, ev.MensagemNova).mensagem
     assert nova.autor == "+5511912617423"
+
+
+def test_conversa_so_com_telefone_pergunta_o_nome_da_empresa_ao_whatsapp(amb):
+    amb.c.empresas = {"556136863608": "99 Pay"}
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    conv = _receber(amb, "E1", "556136863608", "s.whatsapp.net", pushname="")
+    for _ in range(50):
+        if conv.nome == "99 Pay":
+            break
+        threading.Event().wait(0.02)
+    assert conv.nome == "99 Pay"
+    for _ in range(50):
+        if amb.p.banco.conversas(amb.p.conta.id)[0].nome == "99 Pay":
+            break
+        threading.Event().wait(0.02)
+    assert amb.p.banco.conversas(amb.p.conta.id)[0].nome == "99 Pay"

@@ -425,6 +425,7 @@ class ProvedorWhatsApp(Provedor):
         self._nao_lidas = {}       # conversa -> [(id, jid do remetente)]
         self._vistas = set()
         self._nomes_grupo_pedidos = set()
+        self._nomes_empresa_pedidos = set()
         self._conectada = False
         self._cache_mencoes = {}   # jid mencionado -> nome, id, telefone
         self._sincronizando = False
@@ -813,6 +814,13 @@ class ProvedorWhatsApp(Provedor):
                 self._nomes_grupo_pedidos.add(conversa_id)
                 self._fila.put(lambda: self._buscar_nome_grupo(conversa_id,
                                                                chat))
+            if not grupo and not canal and (
+                    conv.nome.startswith("+") or conv.nome == SEM_NOME) and \
+                    conversa_id not in self._nomes_empresa_pedidos:
+                # so o telefone: pergunta ao WhatsApp se e uma empresa
+                self._nomes_empresa_pedidos.add(conversa_id)
+                self._fila.put(lambda: self._buscar_nome_empresa(
+                    conversa_id, chat))
             if canal and (conv.nome == CANAL_SEM_NOME or
                           parece_codigo(conv.nome)) and \
                     conversa_id not in self._nomes_grupo_pedidos:
@@ -820,6 +828,30 @@ class ProvedorWhatsApp(Provedor):
                 self._fila.put(lambda: self._buscar_nome_canal(conversa_id,
                                                                chat))
         return conv
+
+    def _buscar_nome_empresa(self, conversa_id, chat):
+        """Nome verificado de empresa, pedido ao WhatsApp (roda na fila)."""
+        try:
+            alvo = self._numero_do_jid(chat)
+            achados = self.cliente.get_user_info(alvo)
+            nome = ""
+            for x in achados:
+                nome = nome or x.UserInfo.VerifiedName.Details.verifiedName
+            log.info("consulta de empresa para %s: nome verificado %s",
+                     conversa_id, "encontrado" if nome else "não veio")
+        except Exception:
+            log.info("não consegui consultar o nome de %s", conversa_id)
+            return
+        if not nome or parece_codigo(nome):
+            return
+        with self._trava:
+            conv = self._conversas.get(conversa_id)
+            if conv is None or not (conv.nome.startswith("+") or
+                                    conv.nome == SEM_NOME):
+                return
+            conv.nome = nome
+        self.banco.salvar_conversas([conv])
+        self._publicar_conversas()
 
     def _buscar_nome_canal(self, conversa_id, chat):
         try:
