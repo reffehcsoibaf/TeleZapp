@@ -300,6 +300,9 @@ class Menu:
     def AppendSeparator(self):
         pass
 
+    def AppendSubMenu(self, submenu, rotulo):
+        return MenuItem()
+
 
 class MenuBar:
     def Append(self, *a):

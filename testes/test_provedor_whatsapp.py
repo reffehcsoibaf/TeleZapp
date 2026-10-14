@@ -407,3 +407,40 @@ def test_grupo_do_historico_marca_lida_com_cada_remetente(amb):
     lidas = sorted(amb.c.lidas)
     assert lidas == [(["G2"], "123@g.us", "5552"), (["G3"], "123@g.us",
                                                     "5553")]
+
+
+def test_recibos_por_participante_e_status_guardado(amb):
+    cid = "120363@g.us"
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento("EU9", E.Message(conversation="oi"),
+                                   chat="120363", grupo=True, de_mim=True,
+                                   remetente="5551999998888"))
+    esperar(amb.fila, ev.MensagemNova)
+    origem = N.MessageSource(Chat=jid("120363", "g.us"), IsGroup=True,
+                             Sender=jid("5551988887777"))
+    amb.f["Receipt"](amb.c, N.Receipt(MessageSource=origem, MessageIDs=["EU9"],
+                                      Type=1, Timestamp=TS + 5))
+    amb.f["Receipt"](amb.c, N.Receipt(MessageSource=origem, MessageIDs=["EU9"],
+                                      Type=4, Timestamp=TS + 9))
+    esperar(amb.fila, ev.EstadosMensagens)
+    esperar(amb.fila, ev.EstadosMensagens)
+    rec = amb.banco.recibos("w1", cid, "EU9")
+    assert [(r[1], r[2]) for r in rec] == [("entregue", TS + 5),
+                                           ("lida", TS + 9)]
+    assert rec[0][0] == "5551988887777@s.whatsapp.net"
+
+    # status: nao vira conversa, vai para a tabela de status
+    origem_st = N.MessageSource(Chat=jid("status", "broadcast"),
+                                Sender=jid("5551988887777"))
+    amb.f["Message"](amb.c, N.Message(
+        Info=N.MessageInfo(MessageSource=origem_st, ID="S1", Pushname="Ana",
+                           Timestamp=TS),
+        Message=E.Message(conversation="meu status")))
+    for _ in range(100):
+        if amb.banco.status("w1"):
+            break
+        threading.Event().wait(0.02)
+    st = amb.banco.status("w1")
+    assert [(s["id"], s["texto"]) for s in st] == [("S1", "meu status")]
+    assert all("status" not in c.id for c in amb.banco.conversas("w1"))

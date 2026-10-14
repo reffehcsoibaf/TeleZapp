@@ -20,6 +20,7 @@ from telezapp.acessibilidade.fala import Fala, bipe
 from telezapp.interface import dialogos
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import modelos as m
+from telezapp.nucleo import paginas
 
 log = logging.getLogger("telezapp.janela")
 
@@ -27,8 +28,8 @@ MARCADOR = "marcador"
 TEXTO_SEM_CONVERSA = "Nenhuma conversa aberta. Aperte Enter numa conversa."
 TEXTO_SEM_MENSAGENS = "Esta conversa ainda não tem mensagens."
 TEXTO_CARREGANDO = "Carregando mensagens..."
-TEXTO_SEM_CONTAS = "Nenhuma conversa ainda. Use o menu Arquivo para " \
-                   "adicionar uma conta do Telegram ou do WhatsApp."
+TEXTO_SEM_CONTAS = "Nenhuma conversa ainda. Aperte Alt e use Contas, no " \
+                   "menu, para adicionar uma conta do Telegram ou do WhatsApp."
 LIMITE_CACHE = 100        # mensagens lidas do banco ao abrir a conversa
 LIMITE_MEMORIA = 1200     # mensagens mantidas na memoria por conversa
 
@@ -62,7 +63,12 @@ NA CAIXA DE DIGITAÇÃO
 Enter: envia. Shift Enter: nova linha. Esc: cancela a resposta, se houver,
 ou volta para a lista de conversas.
 
-MENU EXIBIÇÃO
+MENU
+Aperte Alt para abrir o Menu. Ele tem submenus (Contas, Conversa, Mensagem,
+Exibição e Ajuda): use a seta para a direita para entrar e a seta para a
+esquerda para voltar. F1 abre o guia de uso completo.
+
+EXIBIÇÃO
 Escolha como cada mensagem é lida (autor e hora primeiro, conteúdo primeiro
 ou autor só quando muda) e ligue ou desligue o som e a fala das mensagens
 novas.
@@ -128,16 +134,16 @@ class Janela(wx.Frame):
             self.itens[chave] = it
             return it
 
-        m_arq = wx.Menu()
-        item(m_arq, "add_tg", "Adicionar conta do &Telegram...")
-        item(m_arq, "add_wa", "Adicionar conta do &WhatsApp...")
-        item(m_arq, "reconectar", "&Conectar as contas de novo")
-        item(m_arq, "remover", "&Remover uma conta...")
-        m_arq.AppendSeparator()
-        item(m_arq, "logs", "Abrir a pasta de &logs")
-        m_arq.AppendSeparator()
-        item(m_arq, "sair", "&Sair\tCtrl+Q")
-        barra.Append(m_arq, "&Arquivo")
+        # Menu vertical (como no telezapp migration): uma unica entrada na
+        # barra, aberta pelo Alt, com as secoes como submenus (seta para a
+        # direita). E um menu nativo: o NVDA le como qualquer outro.
+        raiz = wx.Menu()
+
+        m_contas = wx.Menu()
+        item(m_contas, "add_tg", "Adicionar conta do &Telegram...")
+        item(m_contas, "add_wa", "Adicionar conta do &WhatsApp...")
+        item(m_contas, "reconectar", "&Conectar as contas de novo")
+        item(m_contas, "remover", "&Remover uma conta...")
 
         m_conv = wx.Menu()
         item(m_conv, "ir_conv", "Ir para a lista de &conversas\tCtrl+1")
@@ -148,13 +154,11 @@ class Janela(wx.Frame):
         item(m_conv, "proxima", "Próxima conversa &não lida\tCtrl+U")
         item(m_conv, "ler_ultima", "&Ouvir a última mensagem\tCtrl+R")
         item(m_conv, "atualizar", "A&tualizar a lista de conversas\tF5")
-        barra.Append(m_conv, "&Conversa")
 
         m_msg = wx.Menu()
         item(m_msg, "responder", "&Responder\tCtrl+Shift+R")
         item(m_msg, "copiar", "&Copiar texto\tCtrl+Shift+C")
         item(m_msg, "detalhes", "&Detalhes\tAlt+Enter")
-        barra.Append(m_msg, "&Mensagem")
 
         m_exib = wx.Menu()
         for est, nome in m.NOMES_ESTILOS.items():
@@ -162,15 +166,24 @@ class Janela(wx.Frame):
             self.Bind(wx.EVT_MENU,
                       lambda e, est=est: self._mudar_estilo(est), it)
         m_exib.AppendSeparator()
-        item(m_exib, "som", "&Som ao receber mensagem", "check")
-        item(m_exib, "falar_novas", "&Falar mensagens novas", "check")
-        item(m_exib, "confirmar_envio", "Confirmar envio por &voz", "check")
-        barra.Append(m_exib, "&Exibição")
+        rotulos = {o.chave: o.rotulo for o in config.OPCOES}
+        for chave in ("som", "falar_novas", "confirmar_envio"):
+            item(m_exib, chave, rotulos[chave], "check")
 
         m_aj = wx.Menu()
-        item(m_aj, "ajuda", "&Teclas de atalho\tF1")
+        item(m_aj, "guia", "&Guia de uso\tF1")
+        item(m_aj, "ajuda", "&Teclas de atalho\tShift+F1")
+        item(m_aj, "novidades", "&Novidades desta versão")
+        item(m_aj, "logs", "Abrir a pasta de &logs")
         item(m_aj, "sobre", "&Sobre o %s" % NOME)
-        barra.Append(m_aj, "A&juda")
+
+        for submenu, rotulo in ((m_contas, "&Contas"), (m_conv, "C&onversa"),
+                                (m_msg, "&Mensagem"), (m_exib, "&Exibição"),
+                                (m_aj, "A&juda")):
+            raiz.AppendSubMenu(submenu, rotulo)
+        raiz.AppendSeparator()
+        item(raiz, "sair", "&Sair\tCtrl+Q")
+        barra.Append(raiz, "&Menu")
         self.SetMenuBar(barra)
 
         ligacoes = {
@@ -192,6 +205,8 @@ class Janela(wx.Frame):
             "detalhes": lambda e: self._detalhes(),
             "ajuda": lambda e: dialogos.mostrar_texto(
                 self, "Teclas de atalho", AJUDA, "Teclas de atalho"),
+            "guia": lambda e: self._abrir_pagina("guia.html"),
+            "novidades": lambda e: self._abrir_pagina("novidades.html"),
             "sobre": lambda e: self._sobre(),
         }
         for chave, tratador in ligacoes.items():
@@ -255,12 +270,19 @@ class Janela(wx.Frame):
 
     @seguro
     def _oferecer_primeira_conta(self):
-        r = wx.MessageBox(
-            "Bem-vindo ao %s. Ainda não há nenhuma conta. Quer adicionar uma "
-            "conta do Telegram agora? Para o WhatsApp, use o menu Arquivo."
-            % NOME, NOME, wx.YES_NO | wx.ICON_QUESTION, self)
-        if r == wx.YES:
-            self.adicionar_conta("telegram")
+        servicos = ["telegram", "whatsapp"]
+        dlg = wx.SingleChoiceDialog(
+            self, "Bem-vindo ao %s. Ainda não há nenhuma conta. Escolha qual "
+            "adicionar agora, ou cancele para fazer isso depois pelo menu "
+            "(tecla Alt), em Contas." % NOME, NOME,
+            [m.SERVICOS[s] for s in servicos])
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            servico = servicos[dlg.GetSelection()]
+        finally:
+            dlg.Destroy()
+        self.adicionar_conta(servico)
 
     @seguro
     def adicionar_conta(self, servico):
@@ -810,8 +832,12 @@ class Janela(wx.Frame):
         if x is None:
             return
         conv = self.indice.get(self.atual)
+        recibos = []
+        if x.minha and self.banco is not None and not x.id.startswith("local-"):
+            recibos = self.banco.recibos(x.conta_id, x.conversa_id, x.id)
         dialogos.mostrar_texto(self, "Detalhes da mensagem",
-                               m.detalhes(x, conv.nome if conv else ""),
+                               m.detalhes(x, conv.nome if conv else "",
+                                          recibos=recibos),
                                "Detalhes e texto completo")
 
     def _responder(self):
@@ -928,6 +954,18 @@ class Janela(wx.Frame):
 
     def _ir_para(self, controle, nome):
         controle.SetFocus()
+
+    def _abrir_pagina(self, nome):
+        """Guia de uso ou novidades, no navegador padrao."""
+        caminho = paginas.gerar(nome, config.pasta_temporaria())
+        if caminho is None:
+            wx.MessageBox("O arquivo %s não foi encontrado." % nome, NOME,
+                          wx.OK | wx.ICON_WARNING, self)
+            return
+        if os.name == "nt":
+            os.startfile(caminho)
+        else:
+            self.fala.falar(caminho)
 
     def _abrir_logs(self):
         pasta = config.pasta("logs")

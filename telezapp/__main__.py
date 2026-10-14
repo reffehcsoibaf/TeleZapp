@@ -56,6 +56,7 @@ def main():
         wx.MessageBox("O %s já está aberto." % NOME, NOME,
                       wx.OK | wx.ICON_INFORMATION)
         return 0
+    config.limpar_temporarios()   # sobras de uma abertura anterior
 
     cfg = config.Config()
     banco = Banco(os.path.join(config.pasta(), "telezapp.db"))
@@ -67,6 +68,7 @@ def main():
     wx.CallAfter(janela.comecar)
     app.MainLoop()
     banco.fechar()
+    config.limpar_temporarios()
     log.info("encerrado normalmente")
     # Garante o fim do processo mesmo se alguma biblioteca deixar uma
     # thread presa (tudo ja foi gravado e fechado acima).
