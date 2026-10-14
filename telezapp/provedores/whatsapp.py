@@ -13,6 +13,7 @@
 
 O registro nunca grava texto de mensagens, telefones completos ou codigos.
 """
+import json
 import logging
 import os
 import queue
@@ -128,6 +129,93 @@ def mencoes_do_contexto(ctx):
     return [{"jid": str(j)} for j in ctx.mentionedJID if str(j)]
 
 
+def _partes_texto(*partes):
+    return "\n".join(p.strip() for p in partes if p and p.strip())
+
+
+def texto_estruturado(interna, presentes):
+    """Texto das mensagens de empresa (botoes, modelos, listas, respostas a
+    botoes, pedidos). None se o tipo nao e um destes."""
+    if "buttonsMessage" in presentes:
+        x = interna.buttonsMessage
+        return _partes_texto(x.text, x.contentText, x.footerText)
+    if "templateMessage" in presentes:
+        x = interna.templateMessage
+        h = x.hydratedTemplate if x.HasField("hydratedTemplate") else \
+            x.hydratedFourRowTemplate
+        texto = _partes_texto(h.hydratedTitleText, h.hydratedContentText,
+                              h.hydratedFooterText)
+        if texto:
+            return texto
+        if x.HasField("interactiveMessageTemplate"):
+            return _texto_interativo(x.interactiveMessageTemplate)
+        return ""
+    if "interactiveMessage" in presentes:
+        return _texto_interativo(interna.interactiveMessage)
+    if "listMessage" in presentes:
+        x = interna.listMessage
+        return _partes_texto(x.title, x.description, x.footerText)
+    if "buttonsResponseMessage" in presentes:
+        return "resposta: " + interna.buttonsResponseMessage.\
+            selectedDisplayText
+    if "listResponseMessage" in presentes:
+        return "resposta: " + interna.listResponseMessage.title
+    if "templateButtonReplyMessage" in presentes:
+        return "resposta: " + interna.templateButtonReplyMessage.\
+            selectedDisplayText
+    if "interactiveResponseMessage" in presentes:
+        return "resposta: " + interna.interactiveResponseMessage.body.text
+    if "orderMessage" in presentes:
+        x = interna.orderMessage
+        return _partes_texto("pedido", x.orderTitle, x.message)
+    return None
+
+
+def _texto_interativo(x):
+    return _partes_texto(x.header.title, x.body.text, x.footer.text)
+
+
+def botoes_do_whatsapp(interna):
+    """[(rotulo, endereco)] dos botoes de link de mensagens de empresa."""
+    botoes = []
+    try:
+        if interna.HasField("templateMessage"):
+            t = interna.templateMessage
+            h = t.hydratedTemplate if t.HasField("hydratedTemplate") else \
+                t.hydratedFourRowTemplate
+            for b in h.hydratedButtons:
+                if not b.HasField("urlButton"):
+                    continue
+                url = b.urlButton.URL
+                if url:
+                    botoes.append((b.urlButton.displayText or url, url))
+        inter = None
+        if interna.HasField("interactiveMessage"):
+            inter = interna.interactiveMessage
+        elif interna.HasField("templateMessage") and \
+                interna.templateMessage.HasField("interactiveMessageTemplate"):
+            inter = interna.templateMessage.interactiveMessageTemplate
+        if inter is not None and inter.HasField("nativeFlowMessage"):
+            for b in inter.nativeFlowMessage.buttons:
+                if b.name != "cta_url":
+                    continue
+                dados = json.loads(b.buttonParamsJSON or "{}")
+                url = dados.get("url") or dados.get("merchant_url") or ""
+                if url:
+                    botoes.append((dados.get("display_text") or url, url))
+    except Exception:
+        log.info("não consegui ler os botões de uma mensagem de empresa")
+    return botoes
+
+
+def nome_verificado(info):
+    """Nome verificado de empresa que vem junto da mensagem, ou ''."""
+    try:
+        return info.VerifiedName.Details.verifiedName or ""
+    except Exception:
+        return ""
+
+
 def conteudo_de(interna):
     """(tipo, texto, segundos, nome_arquivo, tamanho) ou None se a mensagem
     nao tem nada para mostrar (chaves, reacoes, controle)."""
@@ -163,7 +251,15 @@ def conteudo_de(interna):
     if "contactMessage" in presentes:
         return m.OUTRO, "contato: " + interna.contactMessage.displayName, 0, \
             "", 0
-    return m.OUTRO, "", 0, "", 0
+    texto = texto_estruturado(interna, presentes)
+    if texto:
+        return m.TEXTO, texto, 0, "", 0
+    # nao reconhecido: o nome do campo fica na mensagem e no registro, para
+    # tratarmos cada caso
+    desconhecidos = sorted(presentes - SO_CONTROLE)
+    log.info("conteúdo ainda sem suporte: %s", ", ".join(desconhecidos))
+    return m.OUTRO, "tipo do WhatsApp: " + ", ".join(desconhecidos), 0, \
+        "", 0
 
 
 def converter(evento, conta_id, conversa_id, autor=""):
@@ -181,7 +277,8 @@ def converter(evento, conta_id, conversa_id, autor=""):
     ctx = _contexto(interna)
     msg = m.Mensagem(
         conta_id=conta_id, conversa_id=conversa_id, id=info.ID,
-        autor="" if minha else (autor or info.Pushname or ""),
+        autor="" if minha else (autor or info.Pushname or
+                                nome_verificado(info)),
         minha=minha, data=segundos(info.Timestamp) or time.time(),
         tipo=tipo, texto=texto or "", segundos=int(seg or 0),
         nome_arquivo=arquivo or "", tamanho=int(tamanho or 0),
@@ -189,7 +286,8 @@ def converter(evento, conta_id, conversa_id, autor=""):
         resposta_a=(ctx.stanzaID if ctx is not None and ctx.stanzaID
                     else ""),
         remetente="" if minha else jid_texto(origem.Sender))
-    m.guardar_extras(msg, mencoes=mencoes_do_contexto(ctx))
+    m.guardar_extras(msg, botoes=botoes_do_whatsapp(desembrulhar(
+        evento.Message)), mencoes=mencoes_do_contexto(ctx))
     return msg, msg.remetente
 
 
@@ -261,7 +359,8 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
         resposta_a=(ctx.stanzaID if ctx is not None and ctx.stanzaID
                     else ""),
         remetente="" if minha else _sem_aparelho(remetente))
-    m.guardar_extras(msg, mencoes=mencoes_do_contexto(ctx))
+    m.guardar_extras(msg, botoes=botoes_do_whatsapp(
+        desembrulhar(wmi.message)), mencoes=mencoes_do_contexto(ctx))
     return msg, remetente
 
 
@@ -705,8 +804,9 @@ class ProvedorWhatsApp(Provedor):
                                   data=data)
                 self._conversas[conversa_id] = conv
             elif not grupo and not canal and (
-                    parece_codigo(conv.nome) or conv.nome == SEM_NOME):
-                # conversa guardada com o codigo (ou sem nome): tenta de novo
+                    parece_codigo(conv.nome) or conv.nome == SEM_NOME or
+                    conv.nome.startswith("+")):
+                # so com codigo, sem nome ou so com o telefone: tenta de novo
                 conv.nome = self._nome_contato(chat, pushname)
             if grupo and conv.nome == "Grupo" and \
                     conversa_id not in self._nomes_grupo_pedidos:
@@ -766,7 +866,8 @@ class ProvedorWhatsApp(Provedor):
             cid = self._id_da_conversa(origem.Chat)
             autor = ""
             if grupo and not origem.IsFromMe:
-                autor = self._nome_contato(origem.Sender, info.Pushname)
+                autor = self._nome_contato(
+                    origem.Sender, info.Pushname or nome_verificado(info))
             msg, remetente = converter(evento, self.conta.id, cid, autor)
             if msg is None:
                 return
@@ -779,7 +880,8 @@ class ProvedorWhatsApp(Provedor):
                 if ficha:
                     self.banco.salvar_fichas(
                         [(self.conta.id, cid, msg.id, ficha)])
-            conv = self._conversa(cid, origem.Chat, info.Pushname, grupo,
+            conv = self._conversa(cid, origem.Chat,
+                                  info.Pushname or nome_verificado(info), grupo,
                                   msg.data)
             with self._trava:
                 conv.data = max(conv.data, msg.data)

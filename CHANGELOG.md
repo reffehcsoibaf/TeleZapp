@@ -19,6 +19,13 @@ PR #9: links escondidos, botões de link e menções.
 - Detalhes da mensagem: recibos (entregue/lida) mostram o nome de quem recebeu
   (`Provedor.nome_de_participante`; WhatsApp usa `_nome_contato`), senão
   "+telefone" ou "Contato sem nome", nunca o JID.
+- WhatsApp, mensagens de empresa: `texto_estruturado` lê botões, modelos,
+  interativas (header/body/footer), listas, respostas a botões e pedidos como
+  texto; `botoes_do_whatsapp` extrai botões de link (modelo e `cta_url`).
+  Tipo não reconhecido continua `OUTRO`, mas o texto traz o nome do campo
+  ("tipo do WhatsApp: ...") e vai para o log. Nome verificado da empresa
+  (`nome_verificado`) vira nome da conversa/autor; conversas só com telefone
+  tentam de novo a cada mensagem.
 - Telegram: entidades `MessageEntityTextUrl`/`Url` (posições em UTF-16),
   `Mention` (@usuario, resolvido com `get_entity`, com cache e no máximo 10
   buscas novas por lote) e `MentionName`; botões só de link, nos formatos novo

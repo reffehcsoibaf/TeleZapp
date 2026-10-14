@@ -729,3 +729,59 @@ def test_nome_de_participante_usa_agenda_ou_telefone(amb):
     assert amb.p.nome_de_participante("5551900000000@s.whatsapp.net") == \
         "+5551900000000"
     assert amb.p.nome_de_participante("55544433322211100@lid") == ""
+
+
+def test_mensagem_de_empresa_com_modelo_e_botao_de_link():
+    h = E.TemplateMessage.HydratedFourRowTemplate(
+        hydratedTitleText="Pedido enviado",
+        hydratedContentText="Seu pedido 123 saiu para entrega.",
+        hydratedFooterText="Loja X",
+        hydratedButtons=[E.HydratedTemplateButton(
+            urlButton=E.HydratedTemplateButton.HydratedURLButton(
+                displayText="Rastrear", URL="https://x.com/r/123"))])
+    msg, _ = wa.converter(evento("T1", E.Message(
+        templateMessage=E.TemplateMessage(hydratedTemplate=h))), "w1", "c")
+    assert msg.tipo == m.TEXTO
+    assert msg.texto == ("Pedido enviado\nSeu pedido 123 saiu para entrega."
+                         "\nLoja X")
+    assert m.extras_de(msg)["botoes"] == [["Rastrear", "https://x.com/r/123"]]
+
+
+def test_mensagem_interativa_com_botao_cta_url_e_botoes_simples():
+    nf = E.InteractiveMessage.NativeFlowMessage(buttons=[
+        E.InteractiveMessage.NativeFlowMessage.NativeFlowButton(
+            name="cta_url", buttonParamsJSON=
+            '{"display_text":"Abrir site","url":"https://loja.com"}'),
+        E.InteractiveMessage.NativeFlowMessage.NativeFlowButton(
+            name="quick_reply", buttonParamsJSON='{"display_text":"Sim"}')])
+    inter = E.InteractiveMessage(
+        body=E.InteractiveMessage.Body(text="Olá! Veja a oferta."),
+        footer=E.InteractiveMessage.Footer(text="Loja"), nativeFlowMessage=nf)
+    msg, _ = wa.converter(evento("I1", E.Message(interactiveMessage=inter)),
+                          "w1", "c")
+    assert msg.texto == "Olá! Veja a oferta.\nLoja"
+    assert m.extras_de(msg)["botoes"] == [["Abrir site", "https://loja.com"]]
+    resp = E.Message(buttonsResponseMessage=E.ButtonsResponseMessage(
+        selectedDisplayText="Sim"))
+    msg, _ = wa.converter(evento("I2", resp), "w1", "c")
+    assert msg.texto == "resposta: Sim" and msg.tipo == m.TEXTO
+
+
+def test_conteudo_desconhecido_diz_qual_e_o_tipo_para_tratarmos():
+    msg, _ = wa.converter(evento("U1", E.Message(
+        requestPhoneNumberMessage=E.RequestPhoneNumberMessage())), "w1", "c")
+    assert msg.tipo == m.OUTRO
+    assert "requestPhoneNumberMessage" in msg.texto
+
+
+def test_conversa_so_com_telefone_ganha_nome_verificado_da_empresa(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    antiga = m.Conversa(amb.p.conta.id, "556136863608@s.whatsapp.net",
+                        "+556136863608", "whatsapp", "privada")
+    amb.p._conversas[antiga.id] = antiga
+    ev_ = evento("V1", E.Message(conversation="oi"), chat="556136863608",
+                 pushname="")
+    ev_.Info.VerifiedName.Details.verifiedName = "Banco Exemplo"
+    amb.f["Message"](amb.c, ev_)
+    assert esperar(amb.fila, ev.MensagemNova).conversa.nome == "Banco Exemplo"
