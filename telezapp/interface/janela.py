@@ -116,6 +116,7 @@ class Janela(wx.Frame):
         self.marcador_id = None       # id da 1a nao lida (quando conhecido)
         self.esperando_servidor = False
         self.selecao_automatica = True
+        self._itens_msgs = []         # texto de cada item da lista
         self.mapa = [None]            # por item da lista: msg id, MARCADOR...
         self.resposta_a = None
         self.locais = 0               # contador de mensagens "enviando"
@@ -650,7 +651,8 @@ class Janela(wx.Frame):
                 n = min(self.marcador_n, len(recebidas))
                 self.marcador_id = recebidas[-n].id if n else None
         destino = None
-        if self.selecao_automatica:
+        if self.selecao_automatica and self.mapa == [None]:
+            # so na primeira carga da conversa recem-aberta
             destino = MARCADOR if self.marcador_id else "ultima"
         self._preencher_mensagens(destino)
 
@@ -680,11 +682,8 @@ class Janela(wx.Frame):
             self._tirar_local(chave, msg.texto)
         self._mesclar(chave, [msg])
         if aberta:
-            no_fim = self._selecionado_no_fim()
-            # mensagem minha nunca tira a pessoa de onde ela esta
-            self._preencher_mensagens(
-                "ultima" if no_fim and not msg.minha and
-                self.FindFocus() is not self.lista_msgs else None)
+            # nada tira a pessoa de onde ela esta por conta propria
+            self._preencher_mensagens()
             if not msg.minha and self.IsActive():
                 p = self.contas.provedor(msg.conta_id)
                 if p is not None:
@@ -872,6 +871,7 @@ class Janela(wx.Frame):
         self.marcador_n = 0
         self.atual = None
         self.mapa = [None]
+        self._itens_msgs = []
         self.rot_msgs.SetLabel("Mensagens")
         self.lista_msgs.Set([TEXTO_SEM_CONVERSA])
         self._mostrar_conversa(False, False)
@@ -943,13 +943,30 @@ class Janela(wx.Frame):
             itens = [TEXTO_CARREGANDO if self.esperando_servidor
                      else TEXTO_SEM_MENSAGENS]
             mapa = [None]
+        velho_mapa, velhos = self.mapa, self._itens_msgs
         self.mapa = mapa
+        self._itens_msgs = itens
+        if destino is None and mapa[:len(velho_mapa)] == velho_mapa \
+                and velho_mapa != [None] and \
+                self.lista_msgs.GetCount() == len(velho_mapa):
+            # so mudou o fim ou o texto de algum item: mexe so no que mudou
+            # e nao toca na selecao (o leitor de tela nao anuncia nada)
+            for k, (a, b) in enumerate(zip(velhos, itens)):
+                if a != b:
+                    self.lista_msgs.SetString(k, b)
+            for texto in itens[len(velho_mapa):]:
+                self.lista_msgs.Append(texto)
+            return
+        i_antes = self.lista_msgs.GetSelection()
         self.lista_msgs.Set(itens)
         sel = len(itens) - 1
         if destino == MARCADOR and MARCADOR in mapa:
             sel = mapa.index(MARCADOR)
-        elif destino is None and antes in mapa:
-            sel = mapa.index(antes)
+        elif destino is None:
+            if antes in mapa:
+                sel = mapa.index(antes)
+            elif i_antes >= 0:
+                sel = min(i_antes, len(itens) - 1)   # perto de onde estava
         self.lista_msgs.SetSelection(sel)
 
     def _chave_selecionada(self):

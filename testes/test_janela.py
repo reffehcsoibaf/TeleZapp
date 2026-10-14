@@ -679,3 +679,37 @@ def test_enviar_mantem_a_selecao_na_mensagem_atual(jm_midia):
         if "enviada_daqui" in ev.MensagemNova.__dataclass_fields__ else None
     assert j._chave_selecionada() == "1"
     assert wx_falso._foco[0] is j.caixa
+
+
+def test_nada_move_a_selecao_sozinho(jm_midia):
+    j = jm_midia
+    for onde in ("1", "3"):                  # no meio e no fim
+        selecionar(j, onde)
+        antes = j._chave_selecionada()
+        i = j.lista_msgs.GetSelection()
+        # mensagem de outra pessoa chega com o foco na lista e fora dela
+        j.caixa.SetFocus()
+        c = j.indice[("t1", "10")]
+        j.b.publicar(ev.MensagemNova(msg("7" + onde, "nova", conversa="10",
+                                         data=AGORA + 70 + int(onde)), c))
+        assert j._chave_selecionada() == antes
+        assert j.lista_msgs.GetSelection() == i
+        # o servidor devolve mensagens de novo (recarga)
+        j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+            msg("1", "texto")]))
+        assert j._chave_selecionada() == antes
+
+
+def test_lista_de_mensagens_so_acrescenta_no_fim(jm_midia):
+    j = jm_midia
+    selecionar(j, "2")
+    chamadas = []
+    original = j.lista_msgs.Set
+    j.lista_msgs.Set = lambda itens: (chamadas.append(1), original(itens))
+    c = j.indice[("t1", "10")]
+    j.b.publicar(ev.MensagemNova(msg("8", "nova", conversa="10",
+                                     data=AGORA + 99), c))
+    assert chamadas == []                  # nao refez a lista: sem anuncio
+    assert j.lista_msgs.itens[-1].endswith("nova") or "nova" in \
+        j.lista_msgs.itens[-1]
+    assert j._chave_selecionada() == "2"

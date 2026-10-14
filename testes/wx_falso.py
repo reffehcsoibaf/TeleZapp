@@ -239,6 +239,9 @@ class ListBox(Janela):
     def SetString(self, i, texto):
         self.itens[i] = texto
 
+    def Append(self, texto):
+        self.itens.append(texto)
+
     def GetCount(self):
         return len(self.itens)
 
