@@ -120,6 +120,7 @@ class Janela(wx.Frame):
         self.selecao_automatica = True
         self._itens_msgs = []         # texto de cada item da lista
         self.alvo_inicial = None      # ponto guardado da conversa aberta
+        self.carga_inicial = False
         self.aguardando_foco = False  # esperando o servico para dar o foco
         self.mapa = [None]            # por item da lista: msg id, MARCADOR...
         self.resposta_a = None
@@ -660,8 +661,10 @@ class Janela(wx.Frame):
                 recebidas = [x for x in lista if not x.minha]
                 n = min(self.marcador_n, len(recebidas))
                 self.marcador_id = recebidas[-n].id if n else None
+        inicial = primeira or self.carga_inicial or self.mapa == [None]
+        self.carga_inicial = False
         destino = None
-        if self.selecao_automatica and (primeira or self.mapa == [None]):
+        if self.selecao_automatica and inicial:
             # so na primeira carga da conversa recem-aberta
             destino = self._destino_inicial()
         self._preencher_mensagens(destino)
@@ -844,6 +847,7 @@ class Janela(wx.Frame):
         self.marcador_id = None
         self.selecao_automatica = True
         self.alvo_inicial = self.banco.posicao(conv.conta_id, conv.id)
+        self.carga_inicial = True     # a 1a resposta do servico ainda e a abertura
         guardadas = self.banco.mensagens(conv.conta_id, conv.id, LIMITE_CACHE)
         lista = self._mesclar(conv.chave, guardadas)
         if self.marcador_n > 0 or not lista:
