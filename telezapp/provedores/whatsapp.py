@@ -83,6 +83,17 @@ def desembrulhar(msg):
     return msg
 
 
+SEM_NOME = "Contato sem nome"
+CANAL_SEM_NOME = "Canal"
+
+
+def parece_codigo(nome):
+    """O 'nome' e so o codigo interno do WhatsApp (numero de endereco LID,
+    JID)? Telefones de verdade aparecem com '+'."""
+    nome = (nome or "").strip()
+    return "@" in nome or (nome.isdigit() and len(nome) >= 14)
+
+
 def jid_texto(jid):
     """JID -> 'usuario@servidor', sem o numero do aparelho."""
     if jid is None or not getattr(jid, "User", ""):
@@ -580,22 +591,47 @@ class ProvedorWhatsApp(Provedor):
                 log.info("sem número para um endereço LID")
         return jid_texto(chat)
 
+    def _numero_do_jid(self, jid):
+        """JID de telefone (s.whatsapp.net) de um endereco LID, ou o proprio
+        JID. Sem numero conhecido, devolve o JID como veio."""
+        if jid.Server != "lid":
+            return jid
+        outro = self._lid_para_numero.get(jid_texto(jid))
+        if outro:
+            usuario, servidor = jid_de_texto(outro)
+            return _jid_obj(usuario, servidor)
+        if self.cliente is not None:
+            try:
+                pn = self.cliente.get_pn_from_lid(jid)
+                if pn.User:
+                    return pn
+            except Exception:
+                log.info("sem número para um endereço LID")
+        return jid
+
     def _nome_contato(self, jid, pushname=""):
-        """Nome do contato (agenda), senao o do perfil, senao o nome
-        verificado de empresa e, por ultimo, o telefone."""
+        """Nome do contato (agenda), senao o nome de registro (perfil da
+        pessoa, nome verificado da empresa) e, por ultimo, o telefone. Nunca
+        o codigo interno do WhatsApp."""
         pushname = pushname or self._apelidos.get(jid_texto(jid), "")
+        alvo = self._numero_do_jid(jid)
         empresa = ""
-        try:
-            info = self.cliente.contact.get_contact(jid)
+        for tentativa in (alvo, jid) if alvo is not jid else (jid,):
+            try:
+                info = self.cliente.contact.get_contact(tentativa)
+            except Exception:
+                continue
             nome = info.FullName or info.FirstName
-            if nome:
+            if nome and not parece_codigo(nome):
                 return nome
-            pushname = info.PushName or pushname
-            empresa = info.BusinessName
-        except Exception:
-            pass
-        return pushname or empresa or ("+" + jid.User if jid.Server ==
-                                       "s.whatsapp.net" else jid.User)
+            pushname = pushname or info.PushName
+            empresa = empresa or info.BusinessName
+        for nome in (pushname, empresa):
+            if nome and not parece_codigo(nome):
+                return nome
+        if alvo.Server == "s.whatsapp.net" and alvo.User:
+            return "+" + alvo.User
+        return SEM_NOME
 
     def _dados_mencao(self, jid_txt):
         """{'nome', 'id', 'telefone'} de quem foi mencionado (com cache)."""
@@ -641,20 +677,55 @@ class ProvedorWhatsApp(Provedor):
                          extras["mencoes"])
 
     def _conversa(self, conversa_id, chat, pushname, grupo, data):
+        canal = chat.Server == "newsletter"
         with self._trava:
             conv = self._conversas.get(conversa_id)
             if conv is None:
-                nome = "Grupo" if grupo else self._nome_contato(chat, pushname)
+                if grupo:
+                    nome = "Grupo"
+                elif canal:
+                    nome = CANAL_SEM_NOME
+                else:
+                    nome = self._nome_contato(chat, pushname)
                 conv = m.Conversa(self.conta.id, conversa_id, nome,
                                   self.servico,
-                                  "grupo" if grupo else "privada", data=data)
+                                  "grupo" if grupo else (
+                                      "canal" if canal else "privada"),
+                                  data=data)
                 self._conversas[conversa_id] = conv
+            elif not grupo and not canal and (
+                    parece_codigo(conv.nome) or conv.nome == SEM_NOME):
+                # conversa guardada com o codigo (ou sem nome): tenta de novo
+                conv.nome = self._nome_contato(chat, pushname)
             if grupo and conv.nome == "Grupo" and \
                     conversa_id not in self._nomes_grupo_pedidos:
                 self._nomes_grupo_pedidos.add(conversa_id)
                 self._fila.put(lambda: self._buscar_nome_grupo(conversa_id,
                                                                chat))
+            if canal and (conv.nome == CANAL_SEM_NOME or
+                          parece_codigo(conv.nome)) and \
+                    conversa_id not in self._nomes_grupo_pedidos:
+                self._nomes_grupo_pedidos.add(conversa_id)
+                self._fila.put(lambda: self._buscar_nome_canal(conversa_id,
+                                                               chat))
         return conv
+
+    def _buscar_nome_canal(self, conversa_id, chat):
+        try:
+            info = self.cliente.get_newsletter_info(chat)
+            nome = info.ThreadMeta.Name.Text
+        except Exception:
+            log.info("não consegui o nome de um canal")
+            return
+        if not nome:
+            return
+        with self._trava:
+            conv = self._conversas.get(conversa_id)
+            if conv is None:
+                return
+            conv.nome = nome
+        self.banco.salvar_conversas([conv])
+        self._publicar_conversas()
 
     def _buscar_nome_grupo(self, conversa_id, chat):
         info = self.cliente.get_group_info(chat)
@@ -976,8 +1047,9 @@ class ProvedorWhatsApp(Provedor):
                                       "grupo" if grupo else "privada",
                                       data=data)
                     self._conversas[cid] = conv
-                elif nome and conv.nome in ("Grupo", "") or \
-                        (nome and conv.nome.startswith("+")):
+                elif nome and conv.nome in ("Grupo", "", SEM_NOME) or \
+                        (nome and (conv.nome.startswith("+") or
+                                   parece_codigo(conv.nome))):
                     conv.nome = nome
                 conv.data = max(conv.data, data)
                 if c.HasField("unreadCount"):
@@ -1014,7 +1086,7 @@ class ProvedorWhatsApp(Provedor):
         apelido = self._apelidos.get("%s@%s" % (usuario, servidor))
         if apelido:
             return apelido
-        return "+" + usuario if servidor == "s.whatsapp.net" else usuario
+        return "+" + usuario if servidor == "s.whatsapp.net" else SEM_NOME
 
 
 DESCONECTADA_PELO_CELULAR = "desconectada pelo celular"

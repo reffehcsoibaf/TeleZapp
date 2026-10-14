@@ -28,11 +28,11 @@ def jid(user, server="s.whatsapp.net"):
 
 
 def evento(id, mensagem, chat="5551988887777", de_mim=False, grupo=False,
-           remetente=None, pushname="Ana", ts=TS):
-    servidor = "g.us" if grupo else "s.whatsapp.net"
+           remetente=None, pushname="Ana", ts=TS, servidor=None):
+    servidor = servidor or ("g.us" if grupo else "s.whatsapp.net")
     origem = N.MessageSource(Chat=jid(chat, servidor), IsFromMe=de_mim,
                              IsGroup=grupo,
-                             Sender=jid(remetente or chat))
+                             Sender=jid(remetente or chat, servidor))
     info = N.MessageInfo(MessageSource=origem, ID=id, Pushname=pushname,
                          Timestamp=ts)
     return N.Message(Info=info, Message=mensagem)
@@ -149,6 +149,10 @@ class ClienteFalso:
 
     def get_pn_from_lid(self, j):
         return jid("5551977776666") if j.User == "lid1" else N.JID()
+
+    def get_newsletter_info(self, j):
+        return N.NewsletterMetadata(ThreadMeta=N.NewsletterThreadMetadata(
+            Name=N.NewsletterText(Text="Canal de Notícias")))
 
     def get_group_info(self, j):
         return N.GroupInfo(GroupName=N.GroupName(Name="Família"))
@@ -669,3 +673,49 @@ def test_historico_tambem_guarda_as_mencoes():
     x, _ = wa.converter_historico(info, "w1", "1203@g.us")
     assert m.extras_de(x)["mencoes"] == [
         {"jid": "5551988887777@s.whatsapp.net"}]
+
+
+def _receber(amb, id, chat, servidor, pushname="", texto="oi"):
+    amb.f["Message"](amb.c, evento(id, E.Message(conversation=texto),
+                                   chat=chat, servidor=servidor,
+                                   pushname=pushname))
+    return esperar(amb.fila, ev.MensagemNova).conversa
+
+
+def test_conversa_com_endereco_lid_nunca_mostra_o_codigo(amb):
+    amb.c.outros = {"99887766554433221": dict(BusinessName="Padaria Central"),
+                    "11223344556677889": dict(PushName="Beto do Perfil")}
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    # empresa (so nome de registro), pessoa (so perfil) e sem nada
+    assert _receber(amb, "L1", "99887766554433221", "lid").nome == \
+        "Padaria Central"
+    assert _receber(amb, "L2", "11223344556677889", "lid").nome == \
+        "Beto do Perfil"
+    assert _receber(amb, "L3", "55544433322211100", "lid").nome == \
+        wa.SEM_NOME
+    # com numero conhecido, vence o nome da agenda do numero
+    assert _receber(amb, "L4", "lid1", "lid").nome == "+5551977776666"
+
+
+def test_conversa_guardada_com_codigo_ganha_nome_quando_chega_mensagem(amb):
+    amb.c.outros = {"99887766554433221": dict(PushName="Carla")}
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    antiga = m.Conversa(amb.p.conta.id, "99887766554433221@lid",
+                        "99887766554433221", "whatsapp", "privada")
+    amb.p._conversas[antiga.id] = antiga
+    assert _receber(amb, "L5", "99887766554433221", "lid").nome == "Carla"
+
+
+def test_mensagem_de_canal_ganha_o_nome_do_canal(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    conv = _receber(amb, "C1", "120363000000000001", "newsletter")
+    assert conv.tipo == "canal"
+    for _ in range(50):
+        if conv.nome != wa.CANAL_SEM_NOME:
+            break
+        threading.Event().wait(0.02)
+    assert amb.p._conversas["120363000000000001@newsletter"].nome == \
+        "Canal de Notícias"

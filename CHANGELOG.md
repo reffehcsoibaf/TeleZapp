@@ -11,6 +11,11 @@ PR #9: links escondidos, botões de link e menções.
   banco, esquema 6 (migração automática).
 - Foto, vídeo, áudio e documento com link na legenda: a linha diz "com link
   (Enter)", o Enter abre os detalhes com os links e Ctrl+O abre a mídia (`tem_links`).
+- WhatsApp: nome de conversa nunca é o código interno. `_nome_contato` resolve
+  LID→número, tenta agenda > perfil > nome de empresa > telefone e, sem nada,
+  "Contato sem nome" (`parece_codigo`, `SEM_NOME`). Conversas já guardadas com
+  código são renomeadas na próxima mensagem. Canais (`newsletter`) viram
+  conversa do tipo `canal`, com o nome vindo de `get_newsletter_info`.
 - Telegram: entidades `MessageEntityTextUrl`/`Url` (posições em UTF-16),
   `Mention` (@usuario, resolvido com `get_entity`, com cache e no máximo 10
   buscas novas por lote) e `MentionName`; botões só de link, nos formatos novo
