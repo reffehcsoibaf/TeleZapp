@@ -1124,11 +1124,46 @@ class Janela(wx.Frame):
         midia = None
         if x.tipo in armazem.BAIXAVEIS and self.midias is not None:
             midia = "baixada" if self.midias.caminho(x) else "não baixada"
-        dialogos.mostrar_texto(self, "Detalhes da mensagem",
-                               m.detalhes(x, conv.nome if conv else "",
-                                          recibos=recibos, midia=midia),
-                               "Detalhes e texto completo",
-                               links=m.extrair_links(x.texto))
+        extras = m.extras_de(x)
+        links = [tuple(l) for l in extras["links"]]
+        vistos = {u for u, _ in links}
+        links += [l for l in m.extrair_links(x.texto) if l[0] not in vistos]
+        pessoa = dialogos.mostrar_texto(
+            self, "Detalhes da mensagem",
+            m.detalhes(x, conv.nome if conv else "", recibos=recibos,
+                       midia=midia),
+            "Detalhes e texto completo", links=links,
+            botoes=[tuple(b) for b in extras["botoes"]],
+            mencoes=extras["mencoes"])
+        if pessoa is not None:
+            wx.CallAfter(self._abrir_conversa_da_mencao, x, pessoa)
+
+    @seguro
+    def _abrir_conversa_da_mencao(self, x, pessoa):
+        """Abre (ou cria, vazia) a conversa com quem foi mencionado, no
+        mesmo servico e na mesma conta da mensagem."""
+        cid = pessoa.get("id")
+        if not cid:
+            bipe("erro")
+            self.fala.falar("Não consegui localizar esta pessoa.",
+                            interromper=True)
+            return
+        chave = (x.conta_id, cid)
+        conv = self.indice.get(chave)
+        if conv is None:
+            nome = pessoa.get("nome") or (
+                "@" + pessoa["usuario"] if pessoa.get("usuario") else "") \
+                or pessoa.get("telefone") or "Contato"
+            conv = m.Conversa(x.conta_id, cid, nome,
+                              self.contas.servico(x.conta_id), "privada",
+                              data=time.time())
+            self.indice[chave] = conv
+            self._ordenar()
+            self._preencher_conversas()
+        if self.atual is not None:
+            self._fechar_conversa()
+        self._abrir_conversa(conv)
+        self.fala.falar("Conversa com %s." % conv.nome, interromper=True)
 
     def _responder(self):
         x = self._mensagem_selecionada()

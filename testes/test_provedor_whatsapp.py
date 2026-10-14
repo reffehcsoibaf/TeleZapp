@@ -129,8 +129,12 @@ class ClienteFalso:
         self.enviadas, self.lidas, self.pareamentos = [], [], []
         self.contact = types.SimpleNamespace(get_contact=self._contato)
 
+    outros = {}      # usuario -> dados de ContactInfo (perfil, empresa...)
+
     def _contato(self, j):
         nomes = {"5551988887777": "Ana Silva"}
+        if j.User in self.outros:
+            return N.ContactInfo(Found=True, **self.outros[j.User])
         return N.ContactInfo(Found=j.User in nomes,
                              FullName=nomes.get(j.User, ""))
 
@@ -595,3 +599,73 @@ def test_nao_reconecta_se_a_sessao_foi_aberta_em_outro_lugar(tmp_path,
     p.parar()
     banco.fechar()
     assert len(clientes) == 1
+
+
+def _com_mencoes(texto, *jids):
+    ctx = E.ContextInfo(mentionedJID=list(jids))
+    return E.Message(extendedTextMessage=E.ExtendedTextMessage(
+        text=texto, contextInfo=ctx))
+
+
+def test_converter_guarda_quem_foi_mencionado():
+    x, _ = wa.converter(evento("A9", _com_mencoes(
+        "oi @5551988887777", "5551988887777@s.whatsapp.net")), "w1", "c")
+    assert m.extras_de(x)["mencoes"] == [
+        {"jid": "5551988887777@s.whatsapp.net"}]
+    sem, _ = wa.converter(evento("A8", E.Message(conversation="oi")),
+                          "w1", "c")
+    assert m.extras_de(sem)["mencoes"] == []
+
+
+def test_mencoes_com_nome_do_contato_perfil_empresa_e_telefone(amb):
+    amb.c.outros = {
+        "5551977770001": dict(PushName="Beto do Perfil"),
+        "5551977770002": dict(BusinessName="Padaria Central"),
+        "5551977770003": dict(PushName="Perfil", BusinessName="Empresa",
+                              FullName="Nome na Agenda")}
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    texto = ("@5551988887777 @5551977770001 @5551977770002 "
+             "@5551977770003 @5551900000000 e @55519777700011")
+    jids = ["5551988887777@s.whatsapp.net", "5551977770001@s.whatsapp.net",
+            "5551977770002@s.whatsapp.net", "5551977770003@s.whatsapp.net",
+            "5551900000000@s.whatsapp.net"]
+    amb.f["Message"](amb.c, evento("MM1", _com_mencoes(texto, *jids),
+                                   grupo=True, chat="1203", remetente=
+                                   "5551988887777"))
+    nova = esperar(amb.fila, ev.MensagemNova).mensagem
+    # contato > perfil > empresa > telefone; "@...11" (outro numero) intacto
+    assert nova.texto == ("@Ana Silva @Beto do Perfil @Padaria Central "
+                          "@Nome na Agenda @+5551900000000 e @55519777700011")
+    men = m.extras_de(nova)["mencoes"]
+    assert men[0] == {"jid": jids[0], "nome": "Ana Silva",
+                      "id": jids[0], "telefone": "+5551988887777"}
+    assert men[4]["nome"] == "+5551900000000"
+    guardada = amb.banco.mensagem("w1", "1203@g.us", "MM1")
+    assert guardada.texto == nova.texto
+
+
+def test_mencao_com_endereco_lid_vira_o_numero(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento("MM2", _com_mencoes(
+        "oi @lid1", "lid1@lid"), grupo=True, chat="1203",
+        remetente="5551988887777"))
+    nova = esperar(amb.fila, ev.MensagemNova).mensagem
+    men = m.extras_de(nova)["mencoes"][0]
+    assert men["id"] == "5551977776666@s.whatsapp.net"
+    assert men["telefone"] == "+5551977776666"
+    assert nova.texto == "oi @+5551977776666"
+
+
+def test_historico_tambem_guarda_as_mencoes():
+    from neonize.proto.waWeb import WAWebProtobufsWeb_pb2 as W
+    info = W.WebMessageInfo(
+        key=W.WebMessageInfo.DESCRIPTOR.fields_by_name["key"].message_type
+        ._concrete_class(remoteJID="1203@g.us", fromMe=False, ID="H1"),
+        message=_com_mencoes("oi @5551988887777",
+                             "5551988887777@s.whatsapp.net"),
+        messageTimestamp=TS)
+    x, _ = wa.converter_historico(info, "w1", "1203@g.us")
+    assert m.extras_de(x)["mencoes"] == [
+        {"jid": "5551988887777@s.whatsapp.net"}]

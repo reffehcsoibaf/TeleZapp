@@ -2,6 +2,7 @@
 # Copyright (C) 2026 Contribuidores do TeleZapp
 """Formato comum aos dois servicos (conta, conversa, mensagem) e o texto que
 o leitor de tela fala para cada item. Sem dependencia de wxPython."""
+import json
 import os
 import re
 import time
@@ -76,10 +77,40 @@ class Mensagem:
     estado: str = ""
     resposta_a: str = ""       # id da mensagem respondida
     remetente: str = ""        # WhatsApp: jid de quem enviou (para "lida")
+    extras: str = ""           # JSON: links, botoes e mencoes (ver extras_de)
 
     @property
     def chave(self):
         return (self.conta_id, self.conversa_id, self.id)
+
+
+# ---------------------------------------------------- links, botoes, mencoes
+def extras_de(msg):
+    """{'links': [[endereco, texto]], 'botoes': [[rotulo, endereco]],
+    'mencoes': [{'nome', 'usuario', 'id', 'telefone'}]} da mensagem; as
+    chaves que nao existem vem como lista vazia."""
+    try:
+        dados = json.loads(msg.extras) if msg.extras else {}
+    except ValueError:
+        dados = {}
+    if not isinstance(dados, dict):
+        dados = {}
+    return {"links": list(dados.get("links") or []),
+            "botoes": list(dados.get("botoes") or []),
+            "mencoes": list(dados.get("mencoes") or [])}
+
+
+def guardar_extras(msg, links=(), botoes=(), mencoes=()):
+    """Poe links, botoes e mencoes na mensagem (nada, se tudo vazio)."""
+    dados = {}
+    if links:
+        dados["links"] = [list(x) for x in links]
+    if botoes:
+        dados["botoes"] = [list(x) for x in botoes]
+    if mencoes:
+        dados["mencoes"] = [dict(x) for x in mencoes]
+    msg.extras = json.dumps(dados, ensure_ascii=False) if dados else ""
+    return msg
 
 
 # ------------------------------------------------------------- formatacao

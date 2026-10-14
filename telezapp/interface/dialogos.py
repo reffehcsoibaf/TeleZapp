@@ -117,12 +117,30 @@ def abrir_link(url):
     return wx.LaunchDefaultBrowser(url)
 
 
-def mostrar_texto(pai, titulo, texto, rotulo, links=()):
-    """Texto longo somente leitura, navegavel pelas setas. Se houver links
-    ([(endereco, texto)]), aparecem numa lista depois do texto: Tab chega
-    nela, as setas passam de um link a outro e Enter ou Espaco abre o link
-    no navegador padrao."""
-    dlg = wx.Dialog(pai, title=titulo, size=(620, 460),
+def rotulo_mencao(men):
+    """Nome primeiro, depois o @usuario e, por ultimo, o telefone."""
+    partes = []
+    for p in (men.get("nome"), "@" + men["usuario"] if men.get("usuario")
+              else "", men.get("telefone")):
+        if p and p not in partes:
+            partes.append(p)
+    return ", ".join(partes) or "Contato sem nome"
+
+
+def mostrar_texto(pai, titulo, texto, rotulo, links=(), botoes=(),
+                  mencoes=()):
+    """Texto longo somente leitura, navegavel pelas setas.
+
+    Depois do texto vem, so quando existirem, uma lista de Links, uma de
+    Botoes (os que abrem um endereco) e uma de Pessoas mencionadas. Tab chega
+    em cada lista, as setas passam de um item a outro; Enter ou Espaco abre
+    o endereco no navegador padrao. Numa pessoa, Enter fecha a janela e a
+    devolve (dicionario da mencao), para a conversa ser aberta; sem escolha,
+    devolve None.
+
+    links: [(endereco, texto)]; botoes: [(rotulo, endereco)];
+    mencoes: [dict com nome, usuario, telefone, id]."""
+    dlg = wx.Dialog(pai, title=titulo, size=(620, 520),
                     style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
     rot = wx.StaticText(dlg, label=rotulo)
     caixa = wx.TextCtrl(dlg, value=texto, name=rotulo,
@@ -132,37 +150,62 @@ def mostrar_texto(pai, titulo, texto, rotulo, links=()):
     lay = wx.BoxSizer(wx.VERTICAL)
     lay.Add(rot, 0, wx.ALL, 8)
     lay.Add(caixa, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
-    lista = None
+    escolhida = [None]
+    listas = []        # (ListBox, acao(indice))
+
+    def adicionar(rotulo_lista, itens, acao):
+        r = wx.StaticText(dlg, label=rotulo_lista)
+        lb = wx.ListBox(dlg, choices=itens, name=rotulo_lista)
+        lb.SetSelection(0)
+        lay.Add(r, 0, wx.ALL, 8)
+        lay.Add(lb, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
+        listas.append((lb, acao))
+        lb.Bind(wx.EVT_LISTBOX_DCLICK,
+                lambda e, lb=lb, ac=acao: ac(lb.GetSelection()))
+
+    def com_endereco(rotulo_item, url):
+        return url if rotulo_item == url else "%s: %s" % (rotulo_item, url)
+
     if links:
-        rot_l = "Links da mensagem (%d). Enter ou Espaço abre no navegador" \
-            % len(links)
-        lay.Add(wx.StaticText(dlg, label=rot_l), 0, wx.ALL, 8)
-        lista = wx.ListBox(dlg, choices=[t for _, t in links], name=rot_l)
-        lista.SetSelection(0)
-        lay.Add(lista, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
-
-        def abrir_selecionado(evt=None):
-            i = lista.GetSelection()
-            if 0 <= i < len(links):
-                abrir_link(links[i][0])
-
+        adicionar("Links da mensagem (%d). Enter ou Espaço abre no "
+                  "navegador" % len(links),
+                  [com_endereco(t, u) for u, t in links],
+                  lambda i: abrir_link(links[i][0])
+                  if 0 <= i < len(links) else None)
+    if botoes:
+        adicionar("Botões de link (%d). Enter ou Espaço abre no navegador"
+                  % len(botoes),
+                  [com_endereco(r_, u) for r_, u in botoes],
+                  lambda i: abrir_link(botoes[i][1])
+                  if 0 <= i < len(botoes) else None)
+    if mencoes:
+        def abrir_pessoa(i):
+            if 0 <= i < len(mencoes):
+                escolhida[0] = mencoes[i]
+                dlg.EndModal(wx.ID_OK)
+        adicionar("Pessoas mencionadas (%d). Enter abre uma conversa com a "
+                  "pessoa" % len(mencoes),
+                  [rotulo_mencao(men) for men in mencoes], abrir_pessoa)
+    if listas:
         def tecla(evt):
             k = evt.GetKeyCode()
-            if dlg.FindFocus() is lista and k in (
-                    wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER, wx.WXK_SPACE) and \
+            foco = dlg.FindFocus()
+            if k in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER, wx.WXK_SPACE) and \
                     not (evt.AltDown() or evt.ControlDown()
                          or evt.ShiftDown()):
-                abrir_selecionado()
-                return
+                for lb, acao in listas:
+                    if foco is lb:
+                        acao(lb.GetSelection())
+                        return
             evt.Skip()
         dlg.Bind(wx.EVT_CHAR_HOOK, tecla)
-        lista.Bind(wx.EVT_LISTBOX_DCLICK, abrir_selecionado)
     lay.Add(ok, 0, wx.ALL | wx.ALIGN_RIGHT, 8)
     dlg.SetSizer(lay)
     dlg.SetEscapeId(wx.ID_OK)
     caixa.SetFocus()
     dlg.ShowModal()
     dlg.Destroy()
+    return escolhida[0]
 
 
 # ------------------------------------------------------- pareamento WhatsApp

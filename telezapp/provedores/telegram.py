@@ -83,6 +83,74 @@ def nome_de(entidade):
     return "@" + usuario if usuario else ""
 
 
+LIMITE_BUSCAS_POR_VEZ = 10     # @usuarios novos resolvidos a cada lote
+
+
+def _trecho(texto, offset, tamanho):
+    """O Telegram conta posicoes em unidades UTF-16."""
+    dados = texto.encode("utf-16-le")
+    return dados[offset * 2:(offset + tamanho) * 2].decode("utf-16-le",
+                                                           "ignore")
+
+
+def _endereco(texto):
+    return texto if texto.lower().startswith(("http://", "https://")) \
+        else "https://" + texto
+
+
+def _url_do_botao(botao):
+    """Endereco de um botao que abre um link; '' para os outros (voto,
+    callback, compra...). Vale para o formato novo do Telethon (o tipo do
+    botao carrega o endereco) e para o antigo (KeyboardButtonUrl)."""
+    tipo = getattr(botao, "type", None)
+    if type(tipo).__name__ == "InlineButtonTypeUrl":
+        return getattr(tipo, "url", "") or ""
+    if type(botao).__name__ == "KeyboardButtonUrl":
+        return getattr(botao, "url", "") or ""
+    return ""
+
+
+def extras_do_telegram(msg):
+    """(links, botoes, mencoes) de uma mensagem do Telethon.
+
+    links: [(endereco, texto visivel)], incluindo os escondidos atras de um
+    texto; botoes: so os que abrem um endereco; mencoes: @usuario (a
+    resolucao do nome e do id e feita depois) e mencoes por id."""
+    texto = getattr(msg, "message", "") or ""
+    links, mencoes = [], []
+    vistos = set()
+    for ent in getattr(msg, "entities", None) or []:
+        nome = type(ent).__name__
+        visivel = _trecho(texto, getattr(ent, "offset", 0),
+                          getattr(ent, "length", 0))
+        if nome == "MessageEntityTextUrl" and getattr(ent, "url", ""):
+            url = ent.url
+            if url not in vistos:
+                vistos.add(url)
+                links.append((url, visivel or url))
+        elif nome == "MessageEntityUrl" and visivel:
+            url = _endereco(visivel)
+            if url not in vistos:
+                vistos.add(url)
+                links.append((url, visivel))
+        elif nome == "MessageEntityMention" and visivel.startswith("@"):
+            nova = {"usuario": visivel[1:]}
+            if nova not in mencoes:
+                mencoes.append(nova)
+        elif nome == "MessageEntityMentionName":
+            nova = {"id": str(ent.user_id), "nome": visivel}
+            if nova not in mencoes:
+                mencoes.append(nova)
+    botoes = []
+    markup = getattr(msg, "reply_markup", None)
+    for linha in getattr(markup, "rows", None) or []:
+        for b in getattr(linha, "buttons", None) or []:
+            url = _url_do_botao(b)
+            if url:
+                botoes.append((getattr(b, "text", "") or url, url))
+    return links, botoes, mencoes
+
+
 def converter(msg, conta_id, conversa_id, lidas_ate=0, nome_padrao=""):
     """Mensagem do Telethon -> modelos.Mensagem (None para mensagens de
     servico, como 'fulano entrou no grupo')."""
@@ -110,13 +178,15 @@ def converter(msg, conta_id, conversa_id, lidas_ate=0, nome_padrao=""):
     resposta_a = getattr(resposta, "reply_to_msg_id", None) if resposta \
         else None
     data = getattr(msg, "date", None)
-    return m.Mensagem(
+    nova = m.Mensagem(
         conta_id=conta_id, conversa_id=str(conversa_id), id=str(msg.id),
         autor=autor, minha=minha,
         data=data.timestamp() if data is not None else time.time(),
         tipo=tipo, texto=texto, segundos=segundos,
         nome_arquivo=nome_arquivo, tamanho=tamanho, estado=estado,
         resposta_a=str(resposta_a) if resposta_a else "")
+    links, botoes, mencoes = extras_do_telegram(msg)
+    return m.guardar_extras(nova, links, botoes, mencoes)
 
 
 def tipo_da_conversa(dialogo):
@@ -144,6 +214,7 @@ class ProvedorTelegram(Provedor):
         self._thread = None
         self._entidades = {}                    # conversa_id -> InputPeer
         self._conversas = {}                    # conversa_id -> Conversa
+        self._usuarios = {}                     # @usuario -> dados ou None
         self._pronto = threading.Event()
 
     # ----------------------------------------------------------- execucao
@@ -337,6 +408,43 @@ class ProvedorTelegram(Provedor):
                  time.perf_counter() - inicio)
         self.barramento.publicar(ev.ConversasAtualizadas(self.conta.id, lista))
 
+    async def _resolver_mencoes(self, mensagens):
+        """Acha o id e o nome de quem foi mencionado por @usuario (com cache;
+        poucas buscas por vez, para nao irritar o limite do Telegram)."""
+        buscas = 0
+        for x in mensagens:
+            extras = m.extras_de(x)
+            mudou = False
+            for men in extras["mencoes"]:
+                usuario = men.get("usuario")
+                if not usuario or men.get("id"):
+                    continue
+                if usuario not in self._usuarios:
+                    if buscas >= LIMITE_BUSCAS_POR_VEZ:
+                        continue
+                    buscas += 1
+                    self._usuarios[usuario] = await self._buscar_usuario(
+                        usuario)
+                dados = self._usuarios.get(usuario)
+                if dados:
+                    men.update(dados)
+                    mudou = True
+            if mudou:
+                m.guardar_extras(x, extras["links"], extras["botoes"],
+                                 extras["mencoes"])
+
+    async def _buscar_usuario(self, usuario):
+        try:
+            ent = await self.cliente.get_entity(usuario)
+        except Exception as e:
+            log.info("não achei um @usuario mencionado (%s)",
+                     type(e).__name__)
+            return None
+        nome = nome_de(ent)
+        if nome == "@" + usuario:
+            nome = ""
+        return {"id": str(ent.id), "nome": nome}
+
     async def _entidade(self, conversa_id):
         ent = self._entidades.get(conversa_id)
         if ent is None:
@@ -359,6 +467,7 @@ class ProvedorTelegram(Provedor):
             if x is not None:
                 msgs.append(x)
         msgs.reverse()
+        await self._resolver_mencoes(msgs)
         self.banco.salvar_mensagens(msgs)
         log.info("mensagens carregadas: %d", len(msgs))
         self.barramento.publicar(
@@ -469,7 +578,18 @@ class ProvedorTelegram(Provedor):
         log.info("texto enviado em %.2fs", time.perf_counter() - inicio)
         msg = converter(enviada, self.conta.id, conversa_id)
         conv = self._conversas.get(conversa_id)
-        if conv is not None:
+        if conv is None:
+            # primeira mensagem de uma conversa nova (ex.: aberta por uma
+            # mencao): passa a existir de verdade
+            try:
+                nome = nome_de(await self.cliente.get_entity(int(conversa_id)))
+            except Exception:
+                nome = ""
+            conv = m.Conversa(self.conta.id, conversa_id, nome or "Sem nome",
+                              self.servico, "privada", data=msg.data)
+            self._conversas[conversa_id] = conv
+            self.banco.salvar_conversas([conv])
+        else:
             conv.data = msg.data
             self.banco.atualizar_conversa(self.conta.id, conversa_id,
                                           data=msg.data)
@@ -509,6 +629,7 @@ class ProvedorTelegram(Provedor):
                              conv.nome)
             if nova is None:
                 return
+            await self._resolver_mencoes([nova])
             conv.data = nova.data
             if not nova.minha:
                 conv.nao_lidas += 1

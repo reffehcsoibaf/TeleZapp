@@ -3,6 +3,23 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.14.1
+
+PR #9: links escondidos, botões de link e menções.
+
+- `Mensagem.extras` (JSON: `links`, `botoes`, `mencoes`) e coluna `extras` no
+  banco, esquema 6 (migração automática).
+- Telegram: entidades `MessageEntityTextUrl`/`Url` (posições em UTF-16),
+  `Mention` (@usuario, resolvido com `get_entity`, com cache e no máximo 10
+  buscas novas por lote) e `MentionName`; botões só de link, nos formatos novo
+  (`InlineButtonTypeUrl`) e antigo (`KeyboardButtonUrl`) do Telethon.
+- WhatsApp: `mentionedJID` do `ContextInfo`; nome = agenda > perfil > nome
+  verificado de empresa > telefone (também em `_nome_contato`); `@número` do
+  texto vira `@nome`; endereços LID viram o número quando conhecido.
+- Janela de detalhes: listas Links, Botões de link e Pessoas mencionadas; na
+  pessoa, Enter abre a conversa (criada vazia se não existir; passa a existir
+  no primeiro envio, nos dois provedores).
+
 ## 2026.10.14.0
 
 Etapa 3a: receber e abrir mídias.

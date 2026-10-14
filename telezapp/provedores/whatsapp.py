@@ -16,6 +16,7 @@ O registro nunca grava texto de mensagens, telefones completos ou codigos.
 import logging
 import os
 import queue
+import re
 import threading
 import time
 
@@ -108,6 +109,14 @@ def _contexto(interna):
     return None
 
 
+def mencoes_do_contexto(ctx):
+    """[{'jid': ...}] de quem foi mencionado (@) na mensagem; os nomes sao
+    achados depois, pelo provedor, que tem acesso aos contatos."""
+    if ctx is None:
+        return []
+    return [{"jid": str(j)} for j in ctx.mentionedJID if str(j)]
+
+
 def conteudo_de(interna):
     """(tipo, texto, segundos, nome_arquivo, tamanho) ou None se a mensagem
     nao tem nada para mostrar (chaves, reacoes, controle)."""
@@ -169,6 +178,7 @@ def converter(evento, conta_id, conversa_id, autor=""):
         resposta_a=(ctx.stanzaID if ctx is not None and ctx.stanzaID
                     else ""),
         remetente="" if minha else jid_texto(origem.Sender))
+    m.guardar_extras(msg, mencoes=mencoes_do_contexto(ctx))
     return msg, msg.remetente
 
 
@@ -230,7 +240,7 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
                   HIST_OUVIDA: m.LIDA}.get(int(wmi.status), m.ENVIADA)
     ctx = _contexto(desembrulhar(wmi.message))
     remetente = wmi.key.participant or wmi.participant or wmi.key.remoteJID
-    return m.Mensagem(
+    msg = m.Mensagem(
         conta_id=conta_id, conversa_id=conversa_id, id=wmi.key.ID,
         autor="" if minha else (autor or wmi.pushName or ""),
         minha=minha, data=segundos(wmi.messageTimestamp),
@@ -239,7 +249,9 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
         estado=estado,
         resposta_a=(ctx.stanzaID if ctx is not None and ctx.stanzaID
                     else ""),
-        remetente="" if minha else _sem_aparelho(remetente)), remetente
+        remetente="" if minha else _sem_aparelho(remetente))
+    m.guardar_extras(msg, mencoes=mencoes_do_contexto(ctx))
+    return msg, remetente
 
 
 def _sem_aparelho(jid):
@@ -304,6 +316,7 @@ class ProvedorWhatsApp(Provedor):
         self._vistas = set()
         self._nomes_grupo_pedidos = set()
         self._conectada = False
+        self._cache_mencoes = {}   # jid mencionado -> nome, id, telefone
         self._sincronizando = False
         self._progresso_historico = 0   # 0 = nada em andamento
         self._recebidas_na_sincronia = 0
@@ -568,17 +581,64 @@ class ProvedorWhatsApp(Provedor):
         return jid_texto(chat)
 
     def _nome_contato(self, jid, pushname=""):
+        """Nome do contato (agenda), senao o do perfil, senao o nome
+        verificado de empresa e, por ultimo, o telefone."""
         pushname = pushname or self._apelidos.get(jid_texto(jid), "")
+        empresa = ""
         try:
             info = self.cliente.contact.get_contact(jid)
-            nome = info.FullName or info.FirstName or info.BusinessName or \
-                info.PushName
+            nome = info.FullName or info.FirstName
             if nome:
                 return nome
+            pushname = info.PushName or pushname
+            empresa = info.BusinessName
         except Exception:
             pass
-        return pushname or ("+" + jid.User if jid.Server ==
-                            "s.whatsapp.net" else jid.User)
+        return pushname or empresa or ("+" + jid.User if jid.Server ==
+                                       "s.whatsapp.net" else jid.User)
+
+    def _dados_mencao(self, jid_txt):
+        """{'nome', 'id', 'telefone'} de quem foi mencionado (com cache)."""
+        achado = self._cache_mencoes.get(jid_txt)
+        if achado is not None:
+            return achado
+        usuario, servidor = jid_de_texto(jid_txt)
+        jid = _jid_obj(usuario, servidor)
+        if servidor == "lid":
+            try:
+                pn = self.cliente.get_pn_from_lid(jid)
+                if pn.User:
+                    jid = pn
+            except Exception:
+                log.info("sem número para uma menção com endereço LID")
+        telefone = "+" + jid.User if jid.Server == "s.whatsapp.net" else ""
+        achado = {"nome": self._nome_contato(jid) or usuario,
+                  "id": jid_texto(jid), "telefone": telefone}
+        self._cache_mencoes[jid_txt] = achado
+        return achado
+
+    def _enriquecer_mencoes(self, msg):
+        """Poe nome, telefone e id em cada @ e troca '@numero' por '@nome'
+        no texto da mensagem."""
+        extras = m.extras_de(msg)
+        if not extras["mencoes"]:
+            return
+        texto = msg.texto
+        for men in extras["mencoes"]:
+            if not men.get("jid") or men.get("nome"):
+                continue
+            try:
+                men.update(self._dados_mencao(men["jid"]))
+            except Exception:
+                log.exception("erro ao achar o nome de uma menção")
+                continue
+            usuario = jid_de_texto(men["jid"])[0]
+            nome = men["nome"]
+            texto = re.sub(r"@%s(?!\d)" % re.escape(usuario),
+                           lambda _: "@" + nome, texto)
+        msg.texto = texto
+        m.guardar_extras(msg, extras["links"], extras["botoes"],
+                         extras["mencoes"])
 
     def _conversa(self, conversa_id, chat, pushname, grupo, data):
         with self._trava:
@@ -628,6 +688,7 @@ class ProvedorWhatsApp(Provedor):
             msg, remetente = converter(evento, self.conta.id, cid, autor)
             if msg is None:
                 return
+            self._enriquecer_mencoes(msg)
             if cid in IGNORAR_CONVERSAS:
                 self._guardar_status(msg, origem, info.Pushname)
                 return
@@ -762,10 +823,14 @@ class ProvedorWhatsApp(Provedor):
             self._vistas.add(resp.ID)
             self._remetentes[resp.ID] = ("", texto)
             conv = self._conversas.get(conversa_id)
-            if conv is not None:
-                conv.data = max(conv.data, msg.data)
-        if conv is not None:
-            self.banco.salvar_conversas([conv])
+        if conv is None:
+            # primeira mensagem de uma conversa nova (ex.: aberta por uma
+            # mencao): passa a existir de verdade
+            conv = self._conversa(conversa_id, self._jid(conversa_id), "",
+                                  conversa_id.endswith("@g.us"), msg.data)
+        with self._trava:
+            conv.data = max(conv.data, msg.data)
+        self.banco.salvar_conversas([conv])
         self.banco.salvar_mensagens([msg])
         self.barramento.publicar(ev.MensagemNova(msg, conv,
                                                  enviada_daqui=True))
@@ -890,6 +955,7 @@ class ProvedorWhatsApp(Provedor):
                                        h.message.participant, ""))
                 if x is None or (limite and x.data < limite):
                     continue
+                self._enriquecer_mencoes(x)
                 novas.append(x)
                 if x.tipo in armazem.BAIXAVEIS and \
                         h.message.HasField("message"):

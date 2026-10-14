@@ -954,3 +954,63 @@ def test_esc_volta_da_mensagem_respondida(j):
     assert j._chave_selecionada() == "4" and j.atual is not None
     j._char_hook(Tecla(wx_falso.WXK_ESCAPE))      # agora fecha a conversa
     assert j.atual is None
+
+
+def test_rotulo_da_mencao_nome_usuario_e_telefone_por_ultimo():
+    from telezapp.interface import dialogos
+    assert dialogos.rotulo_mencao(
+        {"nome": "Ana Silva", "usuario": "ana", "telefone": "+5551999"}) == \
+        "Ana Silva, @ana, +5551999"
+    assert dialogos.rotulo_mencao({"nome": "+5551999",
+                                   "telefone": "+5551999"}) == "+5551999"
+    assert dialogos.rotulo_mencao({"usuario": "bia"}) == "@bia"
+    assert dialogos.rotulo_mencao({}) == "Contato sem nome"
+
+
+def test_detalhes_junta_links_do_texto_e_escondidos(j, monkeypatch):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    x = msg("4", "veja https://a.com e aqui", conversa="10")
+    m.guardar_extras(x, links=[("https://escondido.com", "aqui"),
+                               ("https://a.com", "https://a.com")],
+                     botoes=[("Site", "https://s.com")],
+                     mencoes=[{"nome": "Bia", "id": "77"}])
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [x]))
+    chamadas = []
+    monkeypatch.setattr(jm.dialogos, "mostrar_texto",
+                        lambda *a, **k: chamadas.append(k) or None)
+    selecionar(j, "4")
+    j._detalhes()
+    k = chamadas[0]
+    assert k["links"] == [("https://escondido.com", "aqui"),
+                          ("https://a.com", "https://a.com")]
+    assert k["botoes"] == [("Site", "https://s.com")]
+    assert k["mencoes"] == [{"nome": "Bia", "id": "77"}]
+
+
+def test_enter_na_mencao_abre_conversa_nova_no_mesmo_servico(j, monkeypatch):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    x = msg("4", "oi @Bia", conversa="10")
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [x]))
+    monkeypatch.setattr(jm.wx, "CallAfter", lambda f, *a: f(*a),
+                        raising=False)
+    monkeypatch.setattr(jm.dialogos, "mostrar_texto",
+                        lambda *a, **k: {"nome": "Bia", "id": "77"})
+    selecionar(j, "4")
+    j._detalhes()
+    assert j.atual == ("t1", "77")
+    assert j.indice[("t1", "77")].nome == "Bia"
+    assert ("carregar", "77", 50) in j.contas.p.pedidos
+    # a mencao de uma conversa que ja existe so abre essa conversa
+    j._fechar_conversa()
+    j._abrir_conversa_da_mencao(x, {"nome": "Ana", "id": "20"})
+    assert j.atual == ("t1", "20")
+
+
+def test_mencao_sem_id_avisa_e_nao_abre(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    x = msg("4", "oi", conversa="10")
+    j._abrir_conversa_da_mencao(x, {"nome": "Bia"})
+    assert j.atual is None and "Não consegui localizar" in ditas[-1]
