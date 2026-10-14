@@ -955,14 +955,28 @@ class ProvedorWhatsApp(Provedor):
                 log.info("não consegui consultar o nome de %d conversas",
                          len(lote))
                 continue
+            # A whatsmeow guarda o nome verificado no cadastro de contatos
+            # (BusinessName) ao receber a resposta, mas nao o devolve em
+            # UserInfo: por isso o nome e lido do cadastro depois da consulta.
             por_usuario = {}
             for x in achados:
-                nome = ""
                 try:
-                    nome = x.UserInfo.VerifiedName.Details.verifiedName
+                    por_usuario[x.JID.User] = \
+                        x.UserInfo.VerifiedName.Details.verifiedName
                 except Exception:
                     pass
-                por_usuario[x.JID.User] = nome
+            for cid, jid in jids.items():
+                if por_usuario.get(jid.User):
+                    continue
+                usuario, servidor = jid_de_texto(cid)
+                for tentativa in (jid, _jid_obj(usuario, servidor)):
+                    try:
+                        info = self.cliente.contact.get_contact(tentativa)
+                    except Exception:
+                        continue
+                    if info.BusinessName:
+                        por_usuario[jid.User] = info.BusinessName
+                        break
             log.info("consulta de empresa: %d conversas, %d com nome "
                      "verificado", len(lote),
                      sum(1 for n in por_usuario.values() if n))

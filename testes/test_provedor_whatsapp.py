@@ -153,13 +153,14 @@ class ClienteFalso:
     empresas = {}    # usuario -> nome verificado devolvido por get_user_info
 
     def get_user_info(self, *jids):
+        """Como a whatsmeow: o nome verificado vai para o cadastro de
+        contatos (BusinessName) e nao volta em UserInfo."""
         saida = []
         for j in jids:
-            info = N.UserInfo()
             if j.User in self.empresas:
-                info.VerifiedName.Details.verifiedName = self.empresas[j.User]
-            saida.append(N.GetUserInfoSingleReturnFunction(JID=j,
-                                                           UserInfo=info))
+                self.outros[j.User] = dict(BusinessName=self.empresas[j.User])
+            saida.append(N.GetUserInfoSingleReturnFunction(
+                JID=j, UserInfo=N.UserInfo()))
         return saida
 
     def get_newsletter_info(self, j):
