@@ -16,7 +16,7 @@ from telezapp.nucleo.modelos import ORDEM_ESTADOS, Conversa, Mensagem
 
 log = logging.getLogger("telezapp.banco")
 
-VERSAO_ESQUEMA = 4
+VERSAO_ESQUEMA = 5
 
 ESQUEMA = """
 CREATE TABLE IF NOT EXISTS conversas (
@@ -81,6 +81,13 @@ CREATE TABLE IF NOT EXISTS fichas (
     mensagem_id TEXT NOT NULL,
     dados BLOB NOT NULL,
     PRIMARY KEY (conta_id, conversa_id, mensagem_id)
+);
+-- Ponto em que a pessoa parou em cada conversa ('' = no fim da lista).
+CREATE TABLE IF NOT EXISTS posicoes (
+    conta_id TEXT NOT NULL,
+    conversa_id TEXT NOT NULL,
+    mensagem_id TEXT NOT NULL,
+    PRIMARY KEY (conta_id, conversa_id)
 );
 -- Arquivos de midia baixados (base da limpeza de conversas).
 CREATE TABLE IF NOT EXISTS midias (
@@ -153,7 +160,7 @@ class Banco:
             self._con.execute("DELETE FROM conversas WHERE conta_id=?",
                               (conta_id,))
             for tabela in ("mensagens", "recibos", "status", "midias",
-                           "fichas"):
+                           "fichas", "posicoes"):
                 self._con.execute(
                     "DELETE FROM %s WHERE conta_id=?" % tabela, (conta_id,))
 
@@ -291,6 +298,21 @@ class Banco:
                 "conversa_id=? AND mensagem_id=?",
                 (conta_id, conversa_id, mensagem_id)).fetchone()
         return bytes(linha[0]) if linha else None
+
+    def salvar_posicao(self, conta_id, conversa_id, mensagem_id):
+        """mensagem_id '' quer dizer: parou no fim da conversa."""
+        with self._trava, self._con:
+            self._con.execute(
+                "INSERT OR REPLACE INTO posicoes VALUES (?, ?, ?)",
+                (conta_id, conversa_id, mensagem_id))
+
+    def posicao(self, conta_id, conversa_id):
+        """None se a conversa nunca foi aberta; '' = fim; senao o id."""
+        with self._trava:
+            linha = self._con.execute(
+                "SELECT mensagem_id FROM posicoes WHERE conta_id=? AND "
+                "conversa_id=?", (conta_id, conversa_id)).fetchone()
+        return linha[0] if linha else None
 
     def esquecer_midia(self, conta_id, conversa_id, mensagem_id):
         with self._trava, self._con:

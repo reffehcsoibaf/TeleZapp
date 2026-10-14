@@ -42,10 +42,12 @@ leva você à lista de Mensagens; Esc fecha a conversa. Com a conversa aberta, a
 para escrever fica logo abaixo das mensagens.
 
 ATALHOS
-Control 1: ir para a lista de conversas
-Control 2: ir para a lista de mensagens
+Alt 1: ir para a lista de conversas
+Alt 2: na lista de conversas, a próxima conversa com mensagens não lidas;
+dentro da conversa, o marcador de mensagens não lidas
+Alt 3: ir para a lista de mensagens
+End: ir para o fim da lista (Home: para o início)
 Control E: ir para a caixa de digitação
-Control U: ir para a próxima conversa com mensagens não lidas
 Control R: ouvir a última mensagem da conversa aberta
 F5: atualizar a lista de conversas
 Control Shift R: responder à mensagem selecionada
@@ -117,6 +119,7 @@ class Janela(wx.Frame):
         self.esperando_servidor = False
         self.selecao_automatica = True
         self._itens_msgs = []         # texto de cada item da lista
+        self.alvo_inicial = None      # ponto guardado da conversa aberta
         self.mapa = [None]            # por item da lista: msg id, MARCADOR...
         self.resposta_a = None
         self.locais = 0               # contador de mensagens "enviando"
@@ -167,12 +170,13 @@ class Janela(wx.Frame):
         item(m_contas, "remover", "&Remover uma conta...")
 
         m_conv = wx.Menu()
-        item(m_conv, "ir_conv", "Ir para a lista de &conversas\tCtrl+1")
-        item(m_conv, "ir_msgs", "Ir para a lista de &mensagens\tCtrl+2")
+        item(m_conv, "ir_conv", "Ir para a lista de &conversas\tAlt+1")
+        item(m_conv, "nao_lidas", "Mensagens &não lidas (marcador ou próxima "
+                                  "conversa)\tAlt+2")
+        item(m_conv, "ir_msgs", "Ir para a lista de &mensagens\tAlt+3")
         item(m_conv, "ir_caixa", "&Escrever mensagem\tCtrl+E")
         m_conv.AppendSeparator()
         item(m_conv, "abrir_conv", "&Abrir a conversa selecionada")
-        item(m_conv, "proxima", "Próxima conversa &não lida\tCtrl+U")
         item(m_conv, "ler_ultima", "&Ouvir a última mensagem\tCtrl+R")
         item(m_conv, "atualizar", "A&tualizar a lista de conversas\tF5")
 
@@ -235,7 +239,7 @@ class Janela(wx.Frame):
             "ir_msgs": lambda e: self._ir_para(self.lista_msgs, "mensagens"),
             "ir_caixa": lambda e: self._mostrar_caixa(),
             "abrir_conv": lambda e: self._abrir_selecionada_na_lista(),
-            "proxima": lambda e: self._proxima_nao_lida(),
+            "nao_lidas": lambda e: self._ir_nao_lidas(),
             "ler_ultima": lambda e: self._ler_ultima(),
             "atualizar": lambda e: self._atualizar_conversas(),
             "responder": lambda e: self._responder(),
@@ -355,7 +359,11 @@ class Janela(wx.Frame):
             wx.CallLater(400, self._oferecer_primeira_conta)
         self.lista_conv.SetFocus()
         if self.lista_conv.GetCount():
-            self.lista_conv.SetSelection(0)
+            ultima = self.cfg.get("ultima_conversa")
+            chave = tuple(ultima) if isinstance(ultima, list) else None
+            self.lista_conv.SetSelection(
+                self._chaves_conv.index(chave)
+                if chave in self._chaves_conv else 0)
         log.info("fala direta pelo NVDA: %s", self.fala.ativa())
 
     @seguro
@@ -644,6 +652,7 @@ class Janela(wx.Frame):
         lista = self._mesclar(chave, e.mensagens)
         if chave != self.atual:
             return
+        primeira = self.esperando_servidor
         if self.esperando_servidor:
             self.esperando_servidor = False
             if self.marcador_n > 0:
@@ -651,10 +660,21 @@ class Janela(wx.Frame):
                 n = min(self.marcador_n, len(recebidas))
                 self.marcador_id = recebidas[-n].id if n else None
         destino = None
-        if self.selecao_automatica and self.mapa == [None]:
+        if self.selecao_automatica and (primeira or self.mapa == [None]):
             # so na primeira carga da conversa recem-aberta
-            destino = MARCADOR if self.marcador_id else "ultima"
+            destino = self._destino_inicial()
         self._preencher_mensagens(destino)
+        if primeira and self.alvo_inicial and \
+                self.alvo_inicial not in self.mapa:
+            self.fala.falar("Não achei o ponto em que você parou; abri no "
+                            "%s." % ("marcador de não lidas"
+                                     if self.marcador_id else "fim"))
+        elif primeira and self.marcador_id and destino != MARCADOR:
+            n = self.marcador_n
+            self.fala.falar("%s. Alt 2 vai para %s." % (
+                "1 mensagem não lida" if n == 1 else
+                "%d mensagens não lidas" % n,
+                "ela" if n == 1 else "elas"))
 
     def _mesclar(self, chave, novas):
         """Junta mensagens ao cache da conversa, sem repetir, em ordem."""
@@ -826,6 +846,7 @@ class Janela(wx.Frame):
         self.marcador_n = conv.nao_lidas
         self.marcador_id = None
         self.selecao_automatica = True
+        self.alvo_inicial = self.banco.posicao(conv.conta_id, conv.id)
         guardadas = self.banco.mensagens(conv.conta_id, conv.id, LIMITE_CACHE)
         lista = self._mesclar(conv.chave, guardadas)
         if self.marcador_n > 0 or not lista:
@@ -849,7 +870,7 @@ class Janela(wx.Frame):
                 p.marcar_como_lida(conv.id)
         conv.nao_lidas = 0
         self._preencher_conversas()
-        self._preencher_mensagens("ultima")
+        self._preencher_mensagens(self._destino_inicial())
         log.info("conversa aberta (%d no cache, %d não lidas)", len(lista),
                  self.marcador_n)
         self.lista_msgs.SetFocus()
@@ -861,6 +882,8 @@ class Janela(wx.Frame):
             self.lista_conv.SetSelection(self._chaves_conv.index(self.atual))
         if self.resposta_a is not None:
             self._cancelar_resposta()
+        self._guardar_posicao()
+        self._guardar_lista()
         texto = self.caixa.GetValue()
         if texto.strip():
             self.rascunhos[self.atual] = texto
@@ -962,12 +985,67 @@ class Janela(wx.Frame):
         sel = len(itens) - 1
         if destino == MARCADOR and MARCADOR in mapa:
             sel = mapa.index(MARCADOR)
+        elif destino not in (None, "ultima", MARCADOR):
+            if destino in mapa:
+                sel = mapa.index(destino)
+            elif MARCADOR in mapa:
+                sel = mapa.index(MARCADOR)
         elif destino is None:
             if antes in mapa:
                 sel = mapa.index(antes)
             elif i_antes >= 0:
                 sel = min(i_antes, len(itens) - 1)   # perto de onde estava
         self.lista_msgs.SetSelection(sel)
+
+    def _destino_inicial(self):
+        """Onde a selecao cai ao abrir a conversa: no ponto em que a pessoa
+        parou; na primeira vez, no marcador de nao lidas ou no fim."""
+        alvo = self.alvo_inicial
+        if alvo == "":
+            return "ultima"
+        if alvo:
+            return alvo      # se nao estiver na lista, cai no marcador/fim
+        return MARCADOR if self.marcador_id else "ultima"
+
+    def _guardar_posicao(self):
+        """Grava onde a selecao esta (no fim da lista: ''), para reabrir a
+        conversa no mesmo ponto."""
+        if self.atual is None or self.mapa == [None]:
+            return
+        i = self.lista_msgs.GetSelection()
+        if i < 0:
+            return
+        if i >= len(self.mapa) - 1:
+            alvo = ""
+        else:
+            alvo = self.mapa[i]
+            if alvo == MARCADOR:
+                alvo = self.mapa[i + 1]
+        try:
+            self.banco.salvar_posicao(self.atual[0], self.atual[1], alvo or "")
+        except Exception:
+            log.exception("erro ao guardar a posição da conversa")
+
+    def _guardar_lista(self):
+        i = self.lista_conv.GetSelection()
+        if 0 <= i < len(self._chaves_conv):
+            self.cfg.set("ultima_conversa", list(self._chaves_conv[i]))
+
+    def _ir_nao_lidas(self):
+        """Alt 2: na lista de conversas, a proxima conversa com nao lidas;
+        dentro da conversa, o marcador de mensagens nao lidas."""
+        if self.FindFocus() is self.lista_conv or self.atual is None:
+            self._proxima_nao_lida()
+            return
+        if self.marcador_id and MARCADOR in self.mapa:
+            self.lista_msgs.SetSelection(self.mapa.index(MARCADOR))
+            self.selecao_automatica = False
+            self.lista_msgs.SetFocus()
+            return
+        self.lista_msgs.SetFocus()
+        bipe("erro")
+        self.fala.falar("Nenhuma mensagem não lida nesta conversa.",
+                        interromper=True)
 
     def _chave_selecionada(self):
         i = self.lista_msgs.GetSelection()
@@ -1378,6 +1456,8 @@ class Janela(wx.Frame):
     def _ao_fechar(self, evt):
         log.info("fechando a janela")
         self.Hide()
+        self._guardar_posicao()
+        self._guardar_lista()
         self._parar_audio(falar=False)
         try:
             if self.contas is not None:

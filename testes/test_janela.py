@@ -713,3 +713,79 @@ def test_lista_de_mensagens_so_acrescenta_no_fim(jm_midia):
     assert j.lista_msgs.itens[-1].endswith("nova") or "nova" in \
         j.lista_msgs.itens[-1]
     assert j._chave_selecionada() == "2"
+
+
+def _abrir_ana(j, n=6):
+    j.lista_conv.SetFocus()
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg(str(i), "texto %d" % i, conversa="10") for i in range(1, n + 1)]))
+
+
+def test_reabre_no_ponto_em_que_parou(j):
+    _abrir_ana(j)
+    j.lista_msgs.SetSelection(j.mapa.index("2"))
+    j.selecao_automatica = False
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))          # fecha a conversa
+    assert j.banco.posicao("t1", "10") == "2"
+    _abrir_ana(j)
+    assert j._chave_selecionada() == "2"
+
+
+def test_parou_no_fim_reabre_na_ultima_mensagem(j):
+    _abrir_ana(j)
+    j.lista_msgs.SetSelection(j.lista_msgs.GetCount() - 1)
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))
+    assert j.banco.posicao("t1", "10") == ""
+    # chegaram mensagens novas enquanto estava fora
+    j.indice[("t1", "10")].nao_lidas = 2
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg(str(i), "texto %d" % i, conversa="10") for i in range(1, 9)]))
+    assert j._chave_selecionada() == "8"             # a ultima da conversa
+
+
+def test_primeira_vez_continua_no_marcador(j):
+    assert j.banco.posicao("t1", "10") is None
+    _abrir_ana(j)
+    assert j._chave_selecionada() == jm.MARCADOR
+
+
+def test_ponto_que_sumiu_cai_no_marcador_ou_fim(j):
+    j.banco.salvar_posicao("t1", "20", "999")
+    j.lista_conv.SetSelection(1)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", [
+        msg("1", "a", conversa="20"), msg("2", "b", conversa="20")]))
+    assert j._chave_selecionada() == "2"
+
+
+def test_alt2_marcador_na_conversa_e_proxima_na_lista(j):
+    _abrir_ana(j)
+    j.lista_msgs.SetSelection(0)
+    j.selecao_automatica = False
+    j.caixa.SetFocus()
+    j._ir_nao_lidas()
+    assert j._chave_selecionada() == jm.MARCADOR
+    assert wx_falso._foco[0] is j.lista_msgs
+    # sem marcador: avisa
+    j.marcador_id = None
+    j._preencher_mensagens()
+    j._ir_nao_lidas()
+    # na lista de conversas: proxima com nao lidas
+    j.indice[("t1", "20")].nao_lidas = 4
+    j.lista_conv.SetFocus()
+    j.lista_conv.SetSelection(0)
+    j._ir_nao_lidas()
+    assert j._conversa_selecionada().id == "20"
+
+
+def test_lista_de_conversas_lembra_onde_parou(j):
+    j.lista_conv.SetSelection(1)
+    j._guardar_lista()
+    assert j.cfg.get("ultima_conversa") == ["t1", "20"]
+    j.lista_conv.SetSelection(0)
+    j.comecar()
+    assert j.lista_conv.GetSelection() == 1

@@ -106,3 +106,15 @@ def test_detalhes_mostram_se_a_midia_esta_baixada():
     x = m.Mensagem("c", "v", "1", tipo=m.FOTO, data=100)
     assert "Mídia: baixada" in m.detalhes(x, "G", midia="baixada")
     assert "Mídia" not in m.detalhes(x, "G")
+
+
+def test_posicao_da_conversa(tmp_path):
+    from telezapp.armazenamento.banco import Banco
+    b = Banco(str(tmp_path / "p.db"))
+    assert b.posicao("c", "1") is None
+    b.salvar_posicao("c", "1", "m5")
+    b.salvar_posicao("c", "2", "")
+    assert b.posicao("c", "1") == "m5" and b.posicao("c", "2") == ""
+    b.apagar_conta("c")
+    assert b.posicao("c", "1") is None
+    b.fechar()
