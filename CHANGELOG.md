@@ -3,7 +3,7 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
-## 2026.10.14.5
+## 2026.10.14.6
 
 PR #9: links escondidos, botões de link e menções.
 
@@ -26,6 +26,13 @@ PR #9: links escondidos, botões de link e menções.
   ("tipo do WhatsApp: ...") e vai para o log. Nome verificado da empresa
   (`nome_verificado`) vira nome da conversa/autor; conversas só com telefone
   tentam de novo a cada mensagem.
+- WhatsApp, pelo diagnóstico do Fábio: fotos/vídeos de álbum (`associatedChildMessage`)
+  e comentários (`commentMessage`) passam a aparecer (envelopes); cabeçalho
+  de álbum, aviso de grupo mencionado em status e aviso de histórico são
+  ignorados (controle); convite de grupo vira "convite para o grupo: nome";
+  botões e opções de lista aparecem no texto ("Botões: ...", "Opções: ...").
+  A consulta de nome de empresa agora também roda em lote para as conversas
+  do histórico que só têm telefone (`_consultar_empresas`).
 - WhatsApp: mensagens de empresa com botões/lista gravam no log o formato
   (`estrutura_interativa`, linha "mensagem interativa: ..."), sem imagens nem
   textos longos, para implementarmos o toque nos botões com dados reais.

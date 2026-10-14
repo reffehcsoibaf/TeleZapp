@@ -31,11 +31,16 @@ log = logging.getLogger("telezapp.whatsapp")
 
 EMBRULHOS = ("deviceSentMessage", "ephemeralMessage", "viewOnceMessage",
              "viewOnceMessageV2", "viewOnceMessageV2Extension",
-             "documentWithCaptionMessage", "editedMessage")
+             "documentWithCaptionMessage", "editedMessage",
+             "associatedChildMessage", "commentMessage")
 # Campos sem conteudo para a pessoa (chaves, controle): a mensagem e ignorada
 SO_CONTROLE = {"senderKeyDistributionMessage", "messageContextInfo",
                "protocolMessage", "reactionMessage", "pollUpdateMessage",
-               "keepInChatMessage", "pinInChatMessage"}
+               "keepInChatMessage", "pinInChatMessage",
+               # cabecalho de album (as fotos e videos chegam um a um),
+               # aviso de grupo mencionado em status e aviso de historico
+               "albumMessage", "groupStatusMentionMessage",
+               "messageHistoryNotice"}
 # Tipos de recibo do neonize (Receipt.Type)
 RECIBO_ENTREGUE, RECIBO_LIDO, RECIBO_LIDO_POR_MIM, RECIBO_OUVIDO = 1, 4, 5, 6
 MAX_GUARDADAS = 2000
@@ -129,13 +134,56 @@ def mencoes_do_contexto(ctx):
     return [{"jid": str(j)} for j in ctx.mentionedJID if str(j)]
 
 
+def rotulos_dos_botoes(interna):
+    """(botoes, opcoes): rotulos dos botoes e das linhas de lista."""
+    botoes, opcoes = [], []
+    try:
+        if interna.HasField("buttonsMessage"):
+            botoes += [b.buttonText.displayText
+                       for b in interna.buttonsMessage.buttons]
+        inter = None
+        if interna.HasField("templateMessage"):
+            t = interna.templateMessage
+            h = t.hydratedTemplate if t.HasField("hydratedTemplate") else \
+                t.hydratedFourRowTemplate
+            for b in h.hydratedButtons:
+                for nome in ("quickReplyButton", "urlButton", "callButton"):
+                    if b.HasField(nome):
+                        botoes.append(getattr(b, nome).displayText)
+            if t.HasField("interactiveMessageTemplate"):
+                inter = t.interactiveMessageTemplate
+        if interna.HasField("interactiveMessage"):
+            inter = interna.interactiveMessage
+        if inter is not None and inter.HasField("nativeFlowMessage"):
+            for b in inter.nativeFlowMessage.buttons:
+                dados = json.loads(b.buttonParamsJSON or "{}")
+                botoes.append(dados.get("display_text") or "")
+        if interna.HasField("listMessage"):
+            for sec in interna.listMessage.sections:
+                opcoes += [r.title for r in sec.rows]
+    except Exception:
+        log.info("não consegui ler os rótulos dos botões")
+    return ([b for b in botoes if b], [o for o in opcoes if o])
+
+
 def _partes_texto(*partes):
     return "\n".join(p.strip() for p in partes if p and p.strip())
 
 
 def texto_estruturado(interna, presentes):
     """Texto das mensagens de empresa (botoes, modelos, listas, respostas a
-    botoes, pedidos). None se o tipo nao e um destes."""
+    botoes, pedidos), com os botoes e opcoes no fim. None se o tipo nao e um
+    destes."""
+    texto = _texto_estruturado(interna, presentes)
+    if texto is None:
+        return None
+    botoes, opcoes = rotulos_dos_botoes(interna)
+    return _partes_texto(texto,
+                         ("Botões: " + ", ".join(botoes)) if botoes else "",
+                         ("Opções: " + ", ".join(opcoes)) if opcoes else "")
+
+
+def _texto_estruturado(interna, presentes):
     if "buttonsMessage" in presentes:
         x = interna.buttonsMessage
         return _partes_texto(x.text, x.contentText, x.footerText)
@@ -281,6 +329,11 @@ def conteudo_de(interna):
                 "", 0
     if "locationMessage" in presentes or "liveLocationMessage" in presentes:
         return m.OUTRO, "localização", 0, "", 0
+    if "groupInviteMessage" in presentes:
+        x = interna.groupInviteMessage
+        return m.OUTRO, _partes_texto(
+            "convite para o grupo: " + (x.groupName or "sem nome"),
+            x.caption), 0, "", 0
     if "contactMessage" in presentes:
         return m.OUTRO, "contato: " + interna.contactMessage.displayName, 0, \
             "", 0
@@ -384,6 +437,10 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
     if minha:
         estado = {HIST_ENTREGUE: m.ENTREGUE, HIST_LIDA: m.LIDA,
                   HIST_OUVIDA: m.LIDA}.get(int(wmi.status), m.ENVIADA)
+    forma = estrutura_interativa(desembrulhar(wmi.message))
+    if forma:
+        log.info("mensagem interativa: %s", json.dumps(forma,
+                                                       ensure_ascii=False))
     ctx = _contexto(desembrulhar(wmi.message))
     remetente = wmi.key.participant or wmi.participant or wmi.key.remoteJID
     msg = m.Mensagem(
@@ -867,28 +924,48 @@ class ProvedorWhatsApp(Provedor):
         return conv
 
     def _buscar_nome_empresa(self, conversa_id, chat):
-        """Nome verificado de empresa, pedido ao WhatsApp (roda na fila)."""
-        try:
-            alvo = self._numero_do_jid(chat)
-            achados = self.cliente.get_user_info(alvo)
-            nome = ""
+        self._consultar_empresas([conversa_id])
+
+    def _consultar_empresas(self, ids):
+        """Nome verificado de empresa, pedido ao WhatsApp em lotes (roda na
+        fila). So para conversas que ainda tem apenas o telefone."""
+        for inicio in range(0, len(ids), 40):
+            lote = ids[inicio:inicio + 40]
+            jids = {}
+            for cid in lote:
+                usuario, servidor = jid_de_texto(cid)
+                jids[cid] = self._numero_do_jid(_jid_obj(usuario, servidor))
+            try:
+                achados = self.cliente.get_user_info(*jids.values())
+            except Exception:
+                log.info("não consegui consultar o nome de %d conversas",
+                         len(lote))
+                continue
+            por_usuario = {}
             for x in achados:
-                nome = nome or x.UserInfo.VerifiedName.Details.verifiedName
-            log.info("consulta de empresa para %s: nome verificado %s",
-                     conversa_id, "encontrado" if nome else "não veio")
-        except Exception:
-            log.info("não consegui consultar o nome de %s", conversa_id)
-            return
-        if not nome or parece_codigo(nome):
-            return
-        with self._trava:
-            conv = self._conversas.get(conversa_id)
-            if conv is None or not (conv.nome.startswith("+") or
-                                    conv.nome == SEM_NOME):
-                return
-            conv.nome = nome
-        self.banco.salvar_conversas([conv])
-        self._publicar_conversas()
+                nome = ""
+                try:
+                    nome = x.UserInfo.VerifiedName.Details.verifiedName
+                except Exception:
+                    pass
+                por_usuario[x.JID.User] = nome
+            log.info("consulta de empresa: %d conversas, %d com nome "
+                     "verificado", len(lote),
+                     sum(1 for n in por_usuario.values() if n))
+            mudou = []
+            with self._trava:
+                for cid, jid in jids.items():
+                    nome = por_usuario.get(jid.User, "")
+                    conv = self._conversas.get(cid)
+                    if not nome or parece_codigo(nome) or conv is None or \
+                            not (conv.nome.startswith("+") or
+                                 conv.nome == SEM_NOME):
+                        continue
+                    conv.nome = nome
+                    mudou.append(conv)
+            if mudou:
+                self.banco.salvar_conversas(mudou)
+                self._publicar_conversas()
 
     def _buscar_nome_canal(self, conversa_id, chat):
         try:
@@ -1249,6 +1326,13 @@ class ProvedorWhatsApp(Provedor):
                                self._buscar_nome_grupo(cid, _jid_obj(u, s)))
             convs.append(conv)
             msgs.extend(novas)
+        so_telefone = [c.id for c in convs if c.tipo == "privada" and (
+            c.nome.startswith("+") or c.nome == SEM_NOME)
+            and c.id not in self._nomes_empresa_pedidos]
+        if so_telefone:
+            self._nomes_empresa_pedidos.update(so_telefone)
+            self._fila.put(lambda ids=so_telefone:
+                           self._consultar_empresas(ids))
         if convs:
             self.banco.salvar_conversas(convs)
         if msgs:

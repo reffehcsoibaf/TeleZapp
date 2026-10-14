@@ -755,7 +755,7 @@ def test_mensagem_de_empresa_com_modelo_e_botao_de_link():
         templateMessage=E.TemplateMessage(hydratedTemplate=h))), "w1", "c")
     assert msg.tipo == m.TEXTO
     assert msg.texto == ("Pedido enviado\nSeu pedido 123 saiu para entrega."
-                         "\nLoja X")
+                         "\nLoja X\nBotões: Rastrear")
     assert m.extras_de(msg)["botoes"] == [["Rastrear", "https://x.com/r/123"]]
 
 
@@ -771,7 +771,7 @@ def test_mensagem_interativa_com_botao_cta_url_e_botoes_simples():
         footer=E.InteractiveMessage.Footer(text="Loja"), nativeFlowMessage=nf)
     msg, _ = wa.converter(evento("I1", E.Message(interactiveMessage=inter)),
                           "w1", "c")
-    assert msg.texto == "Olá! Veja a oferta.\nLoja"
+    assert msg.texto == "Olá! Veja a oferta.\nLoja\nBotões: Abrir site, Sim"
     assert m.extras_de(msg)["botoes"] == [["Abrir site", "https://loja.com"]]
     resp = E.Message(buttonsResponseMessage=E.ButtonsResponseMessage(
         selectedDisplayText="Sim"))
@@ -836,3 +836,55 @@ def test_estrutura_interativa_descreve_botoes_sem_imagem_nem_texto_longo():
     assert botao["name"] == "quick_reply"
     assert len(forma["interactiveMessage"]["body"]["text"]) <= 81
     assert wa.estrutura_interativa(E.Message(conversation="oi")) is None
+
+
+def test_album_foto_dentro_de_associated_child_aparece_e_cabecalho_some():
+    foto = E.Message(imageMessage=E.ImageMessage(caption="da viagem",
+                                                  fileLength=10))
+    filha = E.Message(associatedChildMessage=E.FutureProofMessage(
+        message=foto))
+    msg, _ = wa.converter(evento("A1", filha), "w1", "c")
+    assert msg.tipo == m.FOTO and msg.texto == "da viagem"
+    cab = E.Message(albumMessage=E.AlbumMessage(expectedImageCount=3))
+    assert wa.converter(evento("A2", cab), "w1", "c") == (None, "")
+    aviso = E.Message(groupStatusMentionMessage=E.FutureProofMessage())
+    assert wa.converter(evento("A3", aviso), "w1", "c") == (None, "")
+
+
+def test_comentario_e_convite_de_grupo_viram_texto():
+    com = E.Message(commentMessage=E.CommentMessage(
+        message=E.Message(conversation="boa ideia")))
+    msg, _ = wa.converter(evento("K1", com), "w1", "c")
+    assert msg.tipo == m.TEXTO and msg.texto == "boa ideia"
+    conv = E.Message(groupInviteMessage=E.GroupInviteMessage(
+        groupName="Família", caption="entra aí"))
+    msg, _ = wa.converter(evento("K2", conv), "w1", "c")
+    assert msg.tipo == m.OUTRO
+    assert msg.texto == "convite para o grupo: Família\nentra aí"
+
+
+def test_lista_mostra_as_opcoes_no_texto():
+    lista = E.ListMessage(title="Escolha", description="Como podemos ajudar?",
+                          sections=[E.ListMessage.Section(rows=[
+                              E.ListMessage.Row(title="Segunda via"),
+                              E.ListMessage.Row(title="Atendente")])])
+    msg, _ = wa.converter(evento("LS1", E.Message(listMessage=lista)),
+                          "w1", "c")
+    assert msg.texto.endswith("Opções: Segunda via, Atendente")
+
+
+def test_consulta_de_empresas_em_lote_renomeia_so_quem_tem_telefone(amb):
+    amb.c.empresas = {"556136863608": "99 Pay", "5511953057252": "Verisure"}
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    conta = amb.p.conta.id
+    for cid, nome in (("556136863608@s.whatsapp.net", "+556136863608"),
+                      ("5511953057252@s.whatsapp.net", "+5511953057252"),
+                      ("5551988887777@s.whatsapp.net", "Ana Silva")):
+        amb.p._conversas[cid] = m.Conversa(conta, cid, nome, "whatsapp",
+                                           "privada")
+    amb.p._consultar_empresas(list(amb.p._conversas))
+    nomes = {c.id.split("@")[0]: c.nome for c in amb.p._conversas.values()}
+    assert nomes["556136863608"] == "99 Pay"
+    assert nomes["5511953057252"] == "Verisure"
+    assert nomes["5551988887777"] == "Ana Silva"
