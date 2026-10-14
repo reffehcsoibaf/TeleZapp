@@ -134,28 +134,29 @@ def test_lista_de_conversas(j):
                                   "Bruno, Telegram"]
 
 
-def test_abrir_conversa_com_nao_lidas_poe_o_marcador(j):
+def test_abrir_conversa_com_nao_lidas_vai_direto_na_primeira(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
     j.lista_conv.SetFocus()
     j.lista_conv.SetSelection(0)
     j._char_hook(Tecla(wx_falso.WXK_RETURN))
-    assert j.lista_msgs.itens == [jm.TEXTO_CARREGANDO]
+    assert ditas == ["2 mensagens não lidas"]       # so a contagem
     assert ("carregar", "10", 50) in j.contas.p.pedidos
     assert ("lida", "10") in j.contas.p.pedidos
     assert j.lista_conv.itens[0] == "Ana, Telegram"
-    assert wx_falso._foco[0] is j.lista_msgs
+    assert wx_falso._foco[0] is j.lista_conv        # espera o servico
 
     j.b.publicar(ev.MensagensCarregadas("t1", "10", [
         msg("1", "antiga"), msg("2", "minha", minha=True),
         msg("3", "nova 1"), msg("4", "nova 2")]))
     itens = j.lista_msgs.itens
-    assert itens[2] == "Início das mensagens não lidas: 2 mensagens"
-    assert j.lista_msgs.selecionado() == itens[2]
-    assert itens[3].endswith("nova 1")
+    assert not any("Início" in x for x in itens)     # sem item de marcador
+    assert j.lista_msgs.selecionado().endswith("nova 1")
+    assert wx_falso._foco[0] is j.lista_msgs         # foco uma vez so
+    assert ditas == ["2 mensagens não lidas"]
 
-    # Esc volta para as conversas e tira o marcador
-    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))         # Esc volta
     assert wx_falso._foco[0] is j.lista_conv
-    assert not any("Início" in x for x in j.lista_msgs.itens)
 
 
 def test_enviar_trocar_pela_confirmada_e_falha(j):
@@ -747,10 +748,10 @@ def test_parou_no_fim_reabre_na_ultima_mensagem(j):
     assert j._chave_selecionada() == "8"             # a ultima da conversa
 
 
-def test_primeira_vez_continua_no_marcador(j):
+def test_primeira_vez_continua_na_primeira_nao_lida(j):
     assert j.banco.posicao("t1", "10") is None
     _abrir_ana(j)
-    assert j._chave_selecionada() == jm.MARCADOR
+    assert j._chave_selecionada() == j.marcador_id == "5"
 
 
 def test_ponto_que_sumiu_cai_no_marcador_ou_fim(j):
@@ -768,7 +769,7 @@ def test_alt2_marcador_na_conversa_e_proxima_na_lista(j):
     j.selecao_automatica = False
     j.caixa.SetFocus()
     j._ir_nao_lidas()
-    assert j._chave_selecionada() == jm.MARCADOR
+    assert j._chave_selecionada() == j.marcador_id
     assert wx_falso._foco[0] is j.lista_msgs
     # sem marcador: avisa
     j.marcador_id = None
@@ -789,3 +790,13 @@ def test_lista_de_conversas_lembra_onde_parou(j):
     j.lista_conv.SetSelection(0)
     j.comecar()
     assert j.lista_conv.GetSelection() == 1
+
+
+def test_foco_vem_mesmo_se_o_servico_demora(j):
+    j.lista_conv.SetFocus()
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert wx_falso._foco[0] is j.lista_conv
+    j._dar_foco_as_mensagens(j.atual)               # passou o tempo limite
+    assert wx_falso._foco[0] is j.lista_msgs
+    j._dar_foco_as_mensagens(j.atual)               # nao repete

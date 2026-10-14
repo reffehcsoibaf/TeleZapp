@@ -187,11 +187,6 @@ def rotulo_conversa(c):
     return base
 
 
-def texto_marcador(n):
-    return "Início das mensagens não lidas: %d %s" % (
-        n, "mensagem" if n == 1 else "mensagens")
-
-
 def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
              midia=None):
     linhas = [

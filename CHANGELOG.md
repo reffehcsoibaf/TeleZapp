@@ -37,6 +37,9 @@ Etapa 3a: receber e abrir mídias.
   Ctrl+2 e Ctrl+U; Ctrl+N fica reservado para nova conversa.
 - Vídeo (MediaCtrl) não repete mais: a nova tentativa de Play só vale antes
   de o vídeo andar; ao acabar e voltar ao início, marca como terminado.
+- Sem o item "Início das mensagens não lidas": a conversa abre direto na
+  primeira não lida; o leitor de tela fala só a contagem ao apertar Enter e o
+  foco só vai para a lista depois que a seleção está no lugar (uma fala só).
 - Nada move a seleção da lista de mensagens sozinho (envio, mensagens
   novas, recargas): mensagens novas são só acrescentadas ao fim da lista.
 - Opção `audio_janela`: Enter em áudio/voz toca sem janela (padrão) ou abre o
