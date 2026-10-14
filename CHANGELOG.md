@@ -3,7 +3,7 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
-## 2026.10.14.1
+## 2026.10.14.2
 
 PR #9: links escondidos, botões de link e menções.
 
