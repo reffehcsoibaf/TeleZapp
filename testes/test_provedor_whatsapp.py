@@ -510,6 +510,12 @@ def test_download_cancelado_com_falha_ou_sem_ficha(amb, dados_midia):
                              lambda: False)
 
 
+def test_pacote_de_historico_informa_o_progresso(amb):
+    h = H.HistorySync(syncType=2, progress=37, conversations=[])
+    amb.f["HistorySync"](amb.c, types.SimpleNamespace(Data=h))
+    assert esperar(amb.fila, ev.ProgressoSincronia).percentual == 37
+
+
 def test_historico_guarda_a_ficha_das_midias(amb):
     from neonize.proto.waWeb import WAWebProtobufsWeb_pb2 as W
     from neonize.proto.waCommon import WACommon_pb2 as C

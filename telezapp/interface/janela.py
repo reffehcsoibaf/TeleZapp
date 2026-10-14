@@ -36,13 +36,14 @@ LIMITE_MEMORIA = 1200     # mensagens mantidas na memoria por conversa
 
 AJUDA = """\
 ESTRUTURA DA JANELA
-A janela tem três áreas, nesta ordem de Tab: Conversas, Mensagens e a caixa
-Digite sua mensagem, seguida do botão Enviar.
+Sem conversa aberta, só a lista de Conversas aparece. Enter abre a conversa e
+leva você à lista de Mensagens; Esc fecha a conversa. A caixa para escrever só
+aparece quando você pede (Control E) ou manda responder.
 
 ATALHOS
 Control 1: ir para a lista de conversas
 Control 2: ir para a lista de mensagens
-Control 3: ir para a caixa de digitação
+Control E: escrever uma mensagem (mostra a caixa de digitação)
 Control U: ir para a próxima conversa com mensagens não lidas
 Control R: ouvir a última mensagem da conversa aberta
 F5: atualizar a lista de conversas
@@ -59,7 +60,7 @@ Enter: abre a conversa e leva o foco para as mensagens: para o item "Início
 das mensagens não lidas", se houver não lidas, ou para a última mensagem.
 
 NA LISTA DE MENSAGENS
-Esc: volta para a lista de conversas (também funciona na caixa de digitação).
+Esc: fecha a conversa e volta para a lista de conversas.
 Enter: mostra os detalhes e o texto completo da mensagem. Numa mensagem com
 foto, vídeo, áudio, voz ou documento, abre a mídia. Esc cancela um download.
 
@@ -68,8 +69,8 @@ Espaço: tocar ou pausar. Seta para a direita e para a esquerda: avançar e
 voltar 5 segundos (com Shift, 30). Home: voltar ao início. Esc: fechar.
 
 NA CAIXA DE DIGITAÇÃO
-Enter: envia. Shift Enter: nova linha. Esc: cancela a resposta, se houver,
-ou volta para a lista de conversas.
+Enter: envia e esconde a caixa. Shift Enter: nova linha. Esc: cancela a
+resposta, se houver, esconde a caixa e volta para as mensagens.
 
 MENU
 Aperte Alt para abrir o Menu. Ele tem submenus (Contas, Conversa, Mensagem,
@@ -115,6 +116,8 @@ class Janela(wx.Frame):
         self.mapa = [None]            # por item da lista: msg id, MARCADOR...
         self.resposta_a = None
         self.locais = 0               # contador de mensagens "enviando"
+        self.sincronia = {}           # conta_id -> (percentual, quando)
+        self.progresso_midias = {}    # chave da midia -> percentual
         self.abrindo = None           # chave da midia que abre ao baixar
         self.abrindo_abrir = True     # False: so baixar, sem abrir
         self.progresso_falado = 0
@@ -160,7 +163,7 @@ class Janela(wx.Frame):
         m_conv = wx.Menu()
         item(m_conv, "ir_conv", "Ir para a lista de &conversas\tCtrl+1")
         item(m_conv, "ir_msgs", "Ir para a lista de &mensagens\tCtrl+2")
-        item(m_conv, "ir_caixa", "Ir para a caixa de &digitação\tCtrl+3")
+        item(m_conv, "ir_caixa", "&Escrever mensagem\tCtrl+E")
         m_conv.AppendSeparator()
         item(m_conv, "abrir_conv", "&Abrir a conversa selecionada")
         item(m_conv, "proxima", "Próxima conversa &não lida\tCtrl+U")
@@ -223,7 +226,7 @@ class Janela(wx.Frame):
             "sair": lambda e: self.Close(),
             "ir_conv": lambda e: self._ir_para(self.lista_conv, "conversas"),
             "ir_msgs": lambda e: self._ir_para(self.lista_msgs, "mensagens"),
-            "ir_caixa": lambda e: self._ir_para(self.caixa, "caixa"),
+            "ir_caixa": lambda e: self._mostrar_caixa(),
             "abrir_conv": lambda e: self._abrir_selecionada_na_lista(),
             "proxima": lambda e: self._proxima_nao_lida(),
             "ler_ultima": lambda e: self._ler_ultima(),
@@ -258,6 +261,7 @@ class Janela(wx.Frame):
 
     def _criar_controles(self):
         painel = wx.Panel(self)
+        self.painel = painel
         rot_conv = wx.StaticText(painel, label="Conversas")
         self.lista_conv = wx.ListBox(painel, style=wx.LB_SINGLE | wx.LB_HSCROLL,
                                      name="Conversas")
@@ -289,6 +293,41 @@ class Janela(wx.Frame):
         self.lista_msgs.Bind(wx.EVT_KEY_DOWN, self._tecla_mensagens)
         self.botao_enviar.Bind(wx.EVT_BUTTON,
                                seguro(lambda e: self._enviar_texto()))
+        self._mostrar_conversa(False, False)
+
+    def _mostrar_conversa(self, mensagens, escrever):
+        """Sem conversa aberta so a lista de conversas aparece; a caixa de
+        digitar so aparece quando a pessoa pede (Control E) ou responde."""
+        for w in (self.rot_msgs, self.lista_msgs):
+            w.Show(mensagens)
+        for w in (self.rot_caixa, self.caixa, self.botao_enviar):
+            w.Show(escrever)
+        self.painel.Layout()
+
+    def _atualizar_titulo(self):
+        """Titulo da janela: conversa aberta e o que esta em andamento
+        (sincronia do historico, downloads de midia)."""
+        base = NOME
+        conv = self.indice.get(self.atual) if self.atual else None
+        if conv is not None:
+            base = "%s: %s" % (NOME, conv.nome)
+        extras = []
+        agora = time.time()
+        for cid, (pct, quando) in list(self.sincronia.items()):
+            if agora - quando > 90:      # o celular parou de mandar
+                del self.sincronia[cid]
+                continue
+            servico = m.SERVICOS.get(self.contas.servico(cid), "") \
+                if self.contas else ""
+            extras.append("%s sincronizando %d%%" % (servico, pct))
+        n = len(self.progresso_midias)
+        if n == 1:
+            pct = next(iter(self.progresso_midias.values()))
+            extras.append("baixando mídia %d%%" % pct if pct > 0
+                          else "baixando mídia")
+        elif n > 1:
+            extras.append("baixando %d mídias" % n)
+        self.SetTitle(base + (" - " + ", ".join(extras) if extras else ""))
 
     # ============================================================== inicio
     def comecar(self):
@@ -392,6 +431,8 @@ class Janela(wx.Frame):
         if self.atual and self.atual[0] == conta_id:
             self.atual = None
             self.lista_msgs.Set([TEXTO_SEM_CONVERSA])
+            self._mostrar_conversa(False, False)
+            self._atualizar_titulo()
         self.estados.pop(conta_id, None)
         self._ordenar()
         if self.conversas:
@@ -490,6 +531,7 @@ class Janela(wx.Frame):
             ev.QrPareamento: self._ev_qr,
             ev.CodigoPareamento: self._ev_codigo,
             ev.SincronizacaoConcluida: self._ev_sincronia,
+            ev.ProgressoSincronia: self._ev_progresso_sincronia,
             ev.ProgressoMidia: self._ev_progresso_midia,
             ev.MidiaBaixada: self._ev_midia_baixada,
         }.get(type(e))
@@ -655,6 +697,8 @@ class Janela(wx.Frame):
                 self.caixa.SetValue(e.texto)
         bipe("erro")
         texto = "Não foi possível enviar: %s." % e.motivo
+        if chave == self.atual:
+            texto += " O texto voltou para a caixa: Control E."
         self.fala.falar(texto, interromper=True)
         self.SetStatusText(texto)
         log.info("envio falhou (%s)", e.motivo)
@@ -701,13 +745,12 @@ class Janela(wx.Frame):
             sem_mod = not (evt.AltDown() or evt.ControlDown()
                            or evt.ShiftDown())
             if k == wx.WXK_ESCAPE and sem_mod:
-                if foco is self.caixa and self.resposta_a is not None:
-                    self._cancelar_resposta()
+                if foco in (self.caixa, self.botao_enviar):
+                    self._sair_da_caixa()
                     return
-                if foco is self.lista_msgs and self._cancelar_download():
-                    return
-                if foco in (self.lista_msgs, self.caixa, self.botao_enviar):
-                    self._voltar_para_conversas()
+                if foco is self.lista_msgs:
+                    if not self._cancelar_download():
+                        self._fechar_conversa()
                     return
             if k in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) and sem_mod:
                 if foco is self.lista_conv:
@@ -760,7 +803,8 @@ class Janela(wx.Frame):
             self.esperando_servidor = True
         self.rot_msgs.SetLabel("Mensagens de " + conv.nome)
         self.rot_caixa.SetLabel("Digite sua mensagem")
-        self.SetTitle("%s: %s" % (NOME, conv.nome))
+        self._mostrar_conversa(True, False)
+        self._atualizar_titulo()
         p = self.contas.provedor(conv.conta_id)
         if p is not None:
             # no WhatsApp o historico e local e rapido: carrega todas as nao
@@ -778,15 +822,37 @@ class Janela(wx.Frame):
                  self.marcador_n)
         self.lista_msgs.SetFocus()
 
-    def _voltar_para_conversas(self):
+    def _fechar_conversa(self):
+        """Esc na lista de mensagens: fecha a conversa e volta para a lista
+        de conversas. Mensagens que chegarem depois contam como novas."""
         if self.atual in self._chaves_conv:
             self.lista_conv.SetSelection(self._chaves_conv.index(self.atual))
-        if self.marcador_id is not None:
-            self.marcador_id = None
-            self.marcador_n = 0
-            if self.atual is not None:
-                self._preencher_mensagens()
+        if self.resposta_a is not None:
+            self._cancelar_resposta()
+        self.marcador_id = None
+        self.marcador_n = 0
+        self.atual = None
+        self.mapa = [None]
+        self.rot_msgs.SetLabel("Mensagens")
+        self.lista_msgs.Set([TEXTO_SEM_CONVERSA])
+        self._mostrar_conversa(False, False)
+        self._atualizar_titulo()
         self.lista_conv.SetFocus()
+
+    def _mostrar_caixa(self):
+        if self.atual is None:
+            self.fala.falar(TEXTO_SEM_CONVERSA)
+            return
+        self._mostrar_conversa(True, True)
+        self.caixa.SetFocus()
+
+    def _sair_da_caixa(self):
+        """Esc na caixa: cancela a resposta, esconde a caixa (o rascunho
+        fica guardado) e volta para as mensagens."""
+        if self.resposta_a is not None:
+            self._cancelar_resposta()
+        self._mostrar_conversa(True, False)
+        self.lista_msgs.SetFocus()
 
     def _proxima_nao_lida(self):
         n = len(self._chaves_conv)
@@ -899,7 +965,7 @@ class Janela(wx.Frame):
         self.rot_caixa.SetLabel("Respondendo a %s. Digite sua resposta"
                                 % autor)
         self.fala.falar("Respondendo a %s. Esc cancela a resposta." % autor)
-        self.caixa.SetFocus()
+        self._mostrar_caixa()
 
     def _cancelar_resposta(self):
         self.resposta_a = None
@@ -975,6 +1041,8 @@ class Janela(wx.Frame):
             self.resposta_a = None
             self.rot_caixa.SetLabel("Digite sua mensagem")
         self._preencher_mensagens("ultima")
+        self._mostrar_conversa(True, False)
+        self.lista_msgs.SetFocus()
         p.enviar_texto(conversa_id, texto, resposta)
         log.info("texto enviado para a fila (%d caracteres)", len(texto))
 
@@ -1015,6 +1083,8 @@ class Janela(wx.Frame):
             if r != wx.YES:
                 return
         self.abrindo = x.chave
+        self.progresso_midias[x.chave] = 0
+        self._atualizar_titulo()
         self.abrindo_abrir = abrir
         self.progresso_falado = 0
         self.midias.baixar(x)
@@ -1075,8 +1145,20 @@ class Janela(wx.Frame):
         self.fala.falar("As mídias baixadas ocupam %s." % m.tamanho_legivel(
             armazem.tamanho_da_pasta()))
 
+    def _ev_progresso_sincronia(self, e):
+        if e.percentual >= 100:
+            self.sincronia.pop(e.conta_id, None)
+        else:
+            self.sincronia[e.conta_id] = (e.percentual, time.time())
+            wx.CallLater(91000, self._atualizar_titulo)
+        self._atualizar_titulo()
+
     def _ev_progresso_midia(self, e):
-        if (e.conta_id, e.conversa_id, e.mensagem_id) != self.abrindo:
+        chave = (e.conta_id, e.conversa_id, e.mensagem_id)
+        if self.progresso_midias.get(chave) != e.percentual:
+            self.progresso_midias[chave] = e.percentual
+            self._atualizar_titulo()
+        if chave != self.abrindo:
             return
         marco = e.percentual // 25 * 25
         if 0 < marco < 100 and marco > self.progresso_falado:
@@ -1086,6 +1168,8 @@ class Janela(wx.Frame):
 
     def _ev_midia_baixada(self, e):
         chave = (e.conta_id, e.conversa_id, e.mensagem_id)
+        if self.progresso_midias.pop(chave, None) is not None:
+            self._atualizar_titulo()
         pedida = chave == self.abrindo
         if pedida:
             self.abrindo = None
@@ -1125,6 +1209,9 @@ class Janela(wx.Frame):
         log.info("opção %s = %s", chave, valor)
 
     def _ir_para(self, controle, nome):
+        if self.atual is None and controle is self.lista_msgs:
+            self.fala.falar(TEXTO_SEM_CONVERSA)
+            return
         controle.SetFocus()
 
     def _abrir_pagina(self, nome):

@@ -303,7 +303,11 @@ def _reproducao(pai, msg, caminho, texto, fala, motor, video):
         posicao.SetLabel("%s de %s" % (formatar_tempo(mo.posicao),
                                        formatar_tempo(mo.duracao)))
 
+    pausou = [False]
+    tentativas = [0]
+
     def alternar(evt=None):
+        pausou[0] = mo.tocando      # apertou com ele tocando: e uma pausa
         mo.alternar()
         atualizar_rotulo()
         fala.falar("Tocando" if mo.tocando else "Pausado", interromper=True)
@@ -330,13 +334,32 @@ def _reproducao(pai, msg, caminho, texto, fala, motor, video):
     anterior = {"tocando": False}
 
     def tique(evt):
+        if ctrl is not None and not iniciou[0] and mo.duracao > 0:
+            comecar()          # o aviso de "carregou" nao chegou: toca assim
         tocando = mo.tocando
+        if ctrl is not None and iniciou[0] and not tocando and \
+                not mo.terminou and not pausou[0] and tentativas[0] < 3 \
+                and mo.posicao == 0:
+            tentativas[0] += 1      # o Windows ignorou o primeiro Play
+            mo.tocar()
+            tocando = True
         if anterior["tocando"] and not tocando and \
                 (mo.terminou or mo.posicao >= mo.duracao > 0):
             fala.falar("Fim.", interromper=True)
         anterior["tocando"] = tocando
         atualizar_rotulo()
     dlg.Bind(wx.EVT_TIMER, tique, relogio)
+
+    iniciou = [False]
+
+    def comecar():
+        if iniciou[0]:
+            return
+        iniciou[0] = True
+        mo.tocar()
+        anterior["tocando"] = True
+        atualizar_rotulo()
+        fala.falar("Tocando", interromper=True)
 
     def iniciar():
         """Depois da janela aparecer: o MediaCtrl so carrega visivel."""
@@ -349,18 +372,12 @@ def _reproducao(pai, msg, caminho, texto, fala, motor, video):
                     "programa.", NOME, wx.OK | wx.ICON_WARNING, dlg)
                 dlg.EndModal(wx.ID_CANCEL)
             return
-        mo.tocar()
-        anterior["tocando"] = True
-        atualizar_rotulo()
-        fala.falar("Tocando", interromper=True)
+        comecar()
 
     if ctrl is not None:
 
         def carregou(evt):
-            mo.tocar()
-            anterior["tocando"] = True
-            atualizar_rotulo()
-            fala.falar("Tocando", interromper=True)
+            comecar()
 
         def acabou(evt):
             mo.terminou = True

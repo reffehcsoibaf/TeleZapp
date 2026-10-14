@@ -54,6 +54,12 @@ class Janela:
     def Bind(self, *a, **k):
         pass
 
+    def Show(self, v=True):
+        self.visivel = v
+
+    def Layout(self):
+        pass
+
     def SetFocus(self):
         _foco[0] = self
 
@@ -64,6 +70,9 @@ class Janela:
 class Frame(Janela):
     def SetTitle(self, t):
         self.titulo = t
+
+    def GetTitle(self):
+        return self.titulo
 
     def CreateStatusBar(self):
         self.status = ""

@@ -810,6 +810,8 @@ class ProvedorWhatsApp(Provedor):
             log.info("pacote de histórico: %s", ", ".join(
                 "%s=%s" % kv for kv in resumo_historico(e.Data).items()))
             self.guardar_historico(e.Data)
+            self.barramento.publicar(ev.ProgressoSincronia(
+                self.conta.id, min(100, int(e.Data.progress))))
         except Exception:
             log.exception("erro ao ler o pacote de histórico")
 

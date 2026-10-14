@@ -22,6 +22,10 @@ from telezapp.provedores.base import (PEDIR_CODIGO, PEDIR_SENHA,
 log = logging.getLogger("telezapp.telegram")
 
 LIMITE_CONVERSAS = 300
+# Download em partes de 512 KB, 8 ao mesmo tempo: nos testes foi de 0,6 para
+# cerca de 10 MB/s (docs/resultados-experimentos.md)
+PARTE_DOWNLOAD = 512 * 1024
+DOWNLOADS_PARALELOS = 8
 
 
 # ----------------------------------------------------- conversao (testavel)
@@ -383,10 +387,20 @@ class ProvedorTelegram(Provedor):
                 raise DownloadCancelado()
             if total:
                 progresso(int(feito * 100 / total))
+        tamanho = int(getattr(arquivo, "size", 0) or 0)
         try:
             progresso(0)
-            await self.cliente.download_media(
-                original, file=parcial, progress_callback=andamento)
+            inicio = time.perf_counter()
+            if tamanho >= 2 * PARTE_DOWNLOAD:
+                await self._baixar_em_partes(original, parcial, tamanho,
+                                             andamento)
+            else:
+                await self.cliente.download_media(
+                    original, file=parcial, progress_callback=andamento)
+            gasto = max(time.perf_counter() - inicio, 0.001)
+            log.info("mídia do Telegram: %s em %.1fs (%.2f MB/s)",
+                     m.tamanho_legivel(tamanho), gasto,
+                     tamanho / 1048576 / gasto)
             if cancelado():
                 raise DownloadCancelado()
             os.replace(parcial, caminho)
@@ -401,6 +415,42 @@ class ProvedorTelegram(Provedor):
                 os.remove(parcial)
         progresso(100)
         return caminho
+
+    async def _baixar_em_partes(self, original, destino, tamanho, andamento):
+        """Varios trechos em andamento juntos: o trabalhador i baixa as
+        partes i, i+N, i+2N... e grava cada uma na posicao certa."""
+        n = DOWNLOADS_PARALELOS
+        total = (tamanho + PARTE_DOWNLOAD - 1) // PARTE_DOWNLOAD
+        feitos = [0]
+        with open(destino, "wb") as f:
+            f.truncate(tamanho)
+        f = open(destino, "r+b")
+        try:
+            async def trabalhador(i):
+                limite = (total - i + n - 1) // n
+                if limite <= 0:
+                    return
+                k = 0
+                async for dados in self.cliente.iter_download(
+                        original.media, offset=i * PARTE_DOWNLOAD,
+                        stride=n * PARTE_DOWNLOAD, chunk_size=PARTE_DOWNLOAD,
+                        request_size=PARTE_DOWNLOAD, limit=limite,
+                        file_size=tamanho):
+                    f.seek((i + k * n) * PARTE_DOWNLOAD)
+                    f.write(dados)
+                    k += 1
+                    feitos[0] += len(dados)
+                    andamento(feitos[0], tamanho)
+            tarefas = [asyncio.ensure_future(trabalhador(i))
+                       for i in range(n)]
+            try:
+                await asyncio.gather(*tarefas)
+            except BaseException:
+                for t in tarefas:
+                    t.cancel()
+                raise
+        finally:
+            f.close()
 
     def enviar_texto(self, conversa_id, texto, resposta_a=""):
         self._agendar(self._enviar(conversa_id, texto, resposta_a))

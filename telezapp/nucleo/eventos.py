@@ -87,6 +87,13 @@ class EstadosMensagens:
 
 
 @dataclass
+class ProgressoSincronia:
+    """WhatsApp: andamento (0 a 100) do historico que o celular envia."""
+    conta_id: str
+    percentual: int
+
+
+@dataclass
 class ProgressoMidia:
     """Um download de midia andou: `percentual` de 0 a 100."""
     conta_id: str

@@ -229,12 +229,59 @@ def test_responder_e_cancelar(j):
     j._responder()
     assert j.rot_caixa.label.startswith("Respondendo a Ana")
     assert wx_falso._foco[0] is j.caixa
-    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))   # cancela a resposta
-    assert j.resposta_a is None and wx_falso._foco[0] is j.caixa
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))   # cancela e esconde a caixa
+    assert j.resposta_a is None and wx_falso._foco[0] is j.lista_msgs
+    assert j.caixa.visivel is False
     j._responder()
+    assert j.caixa.visivel is True
     j.caixa.SetValue("sim")
     j._enviar_texto()
     assert ("enviar", "20", "sim", "3") in j.contas.p.pedidos
+    assert j.caixa.visivel is False and wx_falso._foco[0] is j.lista_msgs
+
+
+def test_so_a_lista_de_conversas_aparece_ate_abrir_uma(j):
+    assert j.lista_msgs.visivel is False and j.caixa.visivel is False
+    j._mostrar_caixa()                        # sem conversa: so avisa
+    assert j.caixa.visivel is False
+    j._abrir_conversa(j.indice[("t1", "20")])
+    assert j.lista_msgs.visivel is True and j.caixa.visivel is False
+    assert j.GetTitle() == "TeleZapp: Bruno"
+    j._mostrar_caixa()                        # Control E
+    assert j.caixa.visivel is True and wx_falso._foco[0] is j.caixa
+    j.caixa.SetValue("rascunho")
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))
+    assert j.caixa.GetValue() == "rascunho" and j.caixa.visivel is False
+
+
+def test_esc_fecha_a_conversa(j):
+    j._abrir_conversa(j.indice[("t1", "20")])
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))
+    assert j.atual is None and wx_falso._foco[0] is j.lista_conv
+    assert j.lista_msgs.visivel is False and j.GetTitle() == "TeleZapp"
+    assert j.lista_msgs.itens == [jm.TEXTO_SEM_CONVERSA]
+    # mensagem que chega na conversa fechada conta como nao lida
+    c = j.indice[("t1", "20")]
+    c.nao_lidas = 1                       # o provedor soma antes de avisar
+    j.b.publicar(ev.MensagemNova(msg("9", "oi", conversa="20"), c))
+    assert j.lista_conv.itens[1] == "Bruno, Telegram, 1 não lida"
+
+
+def test_titulo_mostra_sincronia_e_downloads(j):
+    j.b.publicar(ev.ProgressoSincronia("w1", 40))
+    assert j.GetTitle() == "TeleZapp - WhatsApp sincronizando 40%"
+    j.b.publicar(ev.ProgressoSincronia("w1", 100))
+    assert j.GetTitle() == "TeleZapp"
+    j.b.publicar(ev.ProgressoMidia("t1", "10", "1", 45))
+    assert j.GetTitle() == "TeleZapp - baixando mídia 45%"
+    j.b.publicar(ev.ProgressoMidia("t1", "10", "2", 10))
+    assert j.GetTitle() == "TeleZapp - baixando 2 mídias"
+    j.b.publicar(ev.MidiaBaixada("t1", "10", "1", "/p/1.jpg"))
+    j.b.publicar(ev.MidiaBaixada("t1", "10", "2", cancelada=True))
+    assert j.GetTitle() == "TeleZapp"
+    j.sincronia["w1"] = (30, time.time() - 120)   # celular parou de mandar
+    j._atualizar_titulo()
+    assert j.GetTitle() == "TeleZapp" and not j.sincronia
 
 
 def test_sem_conexao_nao_envia(j):

@@ -23,6 +23,12 @@ Etapa 3a: receber e abrir mídias.
   texto e documento, todos em janelas do app.
 - Menu: Mensagem (abrir, baixar, salvar cópia) e submenu Mídias.
 - Dependências novas: soundfile, sounddevice.
+- Telegram: download em partes de 512 KB, 8 em paralelo; log com a velocidade.
+- Vídeo (MediaCtrl) começa a tocar sozinho mesmo sem o aviso de "carregou".
+- Título da janela mostra o progresso da sincronia (`ProgressoSincronia`) e
+  dos downloads.
+- Janela: Esc fecha a conversa (só as conversas ficam); a caixa de digitar
+  só aparece com Control E ou ao responder, e some ao enviar ou com Esc.
 
 ## 2026.10.13.0
 
