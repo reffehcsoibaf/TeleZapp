@@ -199,6 +199,7 @@ class Janela(wx.Frame):
                       lambda e, v=valor: self._mudar_baixar(v), it)
         m_mid.AppendSeparator()
         item(m_mid, "audio_janela", "&Enter em áudio...")
+        item(m_mid, "audio_sequencia", "Áudios em &sequência...")
         item(m_mid, "midias_limite", "&Limite do download automático...")
         item(m_mid, "midias_confirmar", "&Confirmar downloads grandes...")
         item(m_mid, "midias_espaco", "&Espaço usado pelas mídias")
@@ -253,6 +254,8 @@ class Janela(wx.Frame):
             "baixar_midia": lambda e: self._abrir_midia(abrir=False),
             "salvar_midia": lambda e: self._salvar_midia(),
             "audio_janela": lambda e: self._escolher_opcao("audio_janela"),
+            "audio_sequencia": lambda e: self._escolher_opcao(
+                "audio_sequencia"),
             "midias_limite": lambda e: self._escolher_opcao(
                 "midias_limite_auto_mb"),
             "midias_confirmar": lambda e: self._escolher_opcao(
@@ -968,7 +971,7 @@ class Janela(wx.Frame):
             return
         msgs = self._mensagens_atuais()
         antes = self._chave_selecionada()
-        nomes = {x.id: ("Você" if x.minha else x.autor) for x in msgs}
+        porid = {x.id: x for x in msgs}
         itens, mapa = [], []
         anterior = None
         for x in msgs:
@@ -976,7 +979,7 @@ class Janela(wx.Frame):
                 itens.append(m.texto_marcador(self.marcador_n))
                 mapa.append(MARCADOR)
             itens.append(m.formatar(x, self.estilo, anterior,
-                                    respondida=nomes.get(x.resposta_a)))
+                                    respondida=self._original(x, porid)))
             mapa.append(x.id)
             anterior = x
         if not itens:
@@ -1066,6 +1069,18 @@ class Janela(wx.Frame):
         bipe("erro")
         self.fala.falar("Nenhuma mensagem não lida nesta conversa.",
                         interromper=True)
+
+    def _original(self, x, porid):
+        """A mensagem que `x` responde: da lista ou, se ficou fora dela, do
+        banco de dados."""
+        if not x.resposta_a:
+            return None
+        o = porid.get(x.resposta_a)
+        if o is None and self.banco is not None:
+            o = self.banco.mensagem(x.conta_id, x.conversa_id, x.resposta_a)
+            if o is not None:
+                porid[o.id] = o
+        return o
 
     def _chave_selecionada(self):
         i = self.lista_msgs.GetSelection()
@@ -1212,8 +1227,9 @@ class Janela(wx.Frame):
             self.fala.falar("Enviada.")
 
     # =============================================================== midias
-    def _abrir_midia(self, abrir=True):
-        x = self._mensagem_selecionada()
+    def _abrir_midia(self, abrir=True, x=None):
+        if x is None:
+            x = self._mensagem_selecionada()
         if x is None or self.midias is None:
             return
         if x.tipo not in armazem.BAIXAVEIS:
@@ -1280,9 +1296,29 @@ class Janela(wx.Frame):
         if self.audio is None or self.audio[1] is not motor:
             return
         if motor.terminou:
+            chave = self.audio[0]
             self._parar_audio(falar=False)
+            if self.cfg.get("audio_sequencia") == "sim":
+                self._tocar_proximo_audio(chave)
             return
         wx.CallLater(500, self._vigiar_audio, motor)
+
+    def _tocar_proximo_audio(self, chave):
+        """Acabou um audio: segue para o proximo audio ou voz da conversa
+        (baixando antes, se preciso). Nao mexe na selecao da lista."""
+        lista = self.cache.get((chave[0], chave[1]), [])
+        achou = False
+        for x in lista:
+            if achou and x.tipo in (m.VOZ, m.AUDIO) and \
+                    not x.id.startswith("local-"):
+                autor = "você" if x.minha else (x.autor or "")
+                self.fala.falar("Próximo áudio" + (", de " + autor
+                                                   if autor else ""),
+                                interromper=True)
+                self._abrir_midia(x=x)
+                return
+            if x.chave == chave:
+                achou = True
 
     def _parar_audio(self, falar=True):
         if self.audio is None:

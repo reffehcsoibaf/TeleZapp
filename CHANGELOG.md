@@ -29,6 +29,9 @@ Etapa 3a: receber e abrir mídias.
   dos downloads.
 - Janela: Esc fecha a conversa (só as conversas ficam); a caixa de digitar
   fica visível enquanto a conversa está aberta e o rascunho é guardado ao sair.
+- Respostas citam um trecho da mensagem original (do banco, se fora da
+  lista). Opção `audio_sequencia` (padrão sim): ao fim de um áudio sem janela
+  toca o próximo áudio/voz da conversa.
 - Conversa com não lidas abre sempre no marcador (mesmo com uma só); sem não
   lidas, reabre no ponto em que você parou (na última, se parou no fim). Banco na versão 5
   (tabela `posicoes`). A lista de conversas lembra a conversa selecionada.

@@ -182,6 +182,14 @@ class Banco:
                 (conta_id, conversa_id, limite)).fetchall()
         return [_msg(l) for l in reversed(linhas)]
 
+    def mensagem(self, conta_id, conversa_id, mensagem_id):
+        with self._trava:
+            linha = self._con.execute(
+                "SELECT %s FROM mensagens WHERE conta_id=? AND conversa_id=? "
+                "AND id=?" % ", ".join(_CAMPOS_MSG),
+                (conta_id, conversa_id, mensagem_id)).fetchone()
+        return _msg(linha) if linha else None
+
     def mudar_estado(self, conta_id, conversa_id, ids, estado):
         """WhatsApp: muda o estado das minhas mensagens com esses ids, sem
         voltar atras (lida nao vira entregue). Devolve os ids que mudaram."""

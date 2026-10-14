@@ -156,15 +156,34 @@ def _juntar(cont, resto):
     return cont + (" " if final in ".!?…" else ", ") + resto
 
 
+LIMITE_CITACAO = 80
+
+
+def citacao(original, max_caracteres=LIMITE_CITACAO):
+    """Trecho curto de uma mensagem para mostrar numa resposta."""
+    texto = " ".join(conteudo(original).split())
+    if len(texto) > max_caracteres:
+        texto = texto[:max_caracteres].rsplit(" ", 1)[0].rstrip(" ,;:.") + "…"
+    return texto
+
+
 def formatar(m, estilo, anterior=None, agora=None, respondida=None):
     """Uma linha da lista de mensagens, no estilo escolhido.
 
-    respondida: autor da mensagem respondida, se conhecido.
+    respondida: a mensagem respondida (Mensagem), se conhecida; ou só o nome
+    do autor (texto).
     """
     cont = conteudo(m).replace("\r", " ").replace("\n", " ")
     if m.resposta_a:
-        cont = ("em resposta a %s: " % respondida if respondida
-                else "em resposta: ") + cont
+        if isinstance(respondida, Mensagem):
+            quem = "você" if respondida.minha else (
+                respondida.autor or "mensagem")
+            cont = 'em resposta a %s, "%s": %s' % (
+                quem, citacao(respondida), cont)
+        elif respondida:
+            cont = "em resposta a %s: %s" % (respondida, cont)
+        else:
+            cont = "em resposta a uma mensagem mais antiga: " + cont
     autor = "Você" if m.minha else (m.autor or "Desconhecido")
     estado = m.estado if (m.minha and m.estado) else ""
     hora = hora_legivel(m.data, agora)

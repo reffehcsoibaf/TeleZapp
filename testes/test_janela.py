@@ -833,3 +833,77 @@ def test_parou_no_fim_sem_novas_abre_na_ultima(j):
     j.b.publicar(ev.MensagensCarregadas("t1", "10", [
         msg(str(i), "texto %d" % i, conversa="10") for i in range(1, 8)]))
     assert j._chave_selecionada() == "7"
+
+
+def test_resposta_mostra_a_mensagem_original(j):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    longa = "texto muito comprido " * 10
+    r = msg("4", "concordo", conversa="10")
+    r.resposta_a = "3"
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg("3", longa, conversa="10"), r]))
+    linha = [x for x in j.lista_msgs.itens if "concordo" in x][0]
+    assert 'em resposta a Ana, "texto muito comprido' in linha
+    assert "…" in linha and linha.endswith("concordo") or "concordo" in linha
+    assert len(linha) < 200
+
+
+def test_resposta_a_mensagem_fora_da_lista_usa_o_banco(j):
+    j.banco.salvar_mensagens([msg("1", "pergunta antiga", conversa="10")])
+    r = msg("40", "sim", conversa="10")
+    r.resposta_a = "1"
+    j._mesclar(("t1", "10"), [r])
+    j.atual = ("t1", "10")
+    j._preencher_mensagens()
+    assert any('"pergunta antiga"' in x for x in j.lista_msgs.itens)
+    r.resposta_a = "999"                              # nao existe em lugar algum
+    j._preencher_mensagens()
+    assert any("em resposta a uma mensagem mais antiga" in x
+               for x in j.lista_msgs.itens)
+
+
+def _preparar_sequencia(j, monkeypatch):
+    MotorFalso.criados = []
+    monkeypatch.setattr(jm, "Reprodutor", MotorFalso)
+    monkeypatch.setattr(jm.wx, "CallLater", lambda *a, **k: None,
+                        raising=False)
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        voz("5"), msg("6", "texto"), voz("7"), foto("8")]))
+    for i in ("5", "7"):
+        j.midias.prontas[("t1", "10", i)] = "/p/%s.ogg" % i
+    selecionar(j, "5")
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    return MotorFalso.criados[0]
+
+
+def test_audios_tocam_em_sequencia(jm_midia, monkeypatch):
+    j = jm_midia
+    primeiro = _preparar_sequencia(j, monkeypatch)
+    primeiro.terminou = True
+    j._vigiar_audio(primeiro)                    # acabou o primeiro
+    assert len(MotorFalso.criados) == 2          # pulou o texto, tocou o 7
+    assert MotorFalso.criados[1].caminho == "/p/7.ogg"
+    assert j._chave_selecionada() == "5"         # selecao nao se mexeu
+    segundo = MotorFalso.criados[1]
+    segundo.terminou = True
+    j._vigiar_audio(segundo)                     # nao ha mais audios
+    assert len(MotorFalso.criados) == 2 and j.audio is None
+
+
+def test_sequencia_desligada_para_no_fim(jm_midia, monkeypatch):
+    j = jm_midia
+    j.cfg.set("audio_sequencia", "nao")
+    primeiro = _preparar_sequencia(j, monkeypatch)
+    primeiro.terminou = True
+    j._vigiar_audio(primeiro)
+    assert len(MotorFalso.criados) == 1 and j.audio is None
+
+
+def test_sequencia_baixa_o_proximo_se_preciso(jm_midia, monkeypatch):
+    j = jm_midia
+    primeiro = _preparar_sequencia(j, monkeypatch)
+    del j.midias.prontas[("t1", "10", "7")]
+    primeiro.terminou = True
+    j._vigiar_audio(primeiro)
+    assert j.midias.baixados[-1] == "7"

@@ -113,6 +113,11 @@ OPCOES = (
           "posição.",
           (("sem", "Só tocar, sem janela"),
            ("janela", "Abrir a janela do player"))),
+    Opcao("audio_sequencia", "Áudios em sequência", "Mídias", "sim",
+          "Quando um áudio ou mensagem de voz termina (sem janela), toca o "
+          "próximo áudio da conversa, baixando antes se preciso. Esc para.",
+          (("sim", "Tocar os áudios em sequência"),
+           ("nao", "Parar quando o áudio terminar"))),
     Opcao("midias_baixar", "Quando baixar as mídias", "Mídias", "demanda",
           "Sob demanda baixa só quando você abre a mídia. Automático baixa "
           "ao receber, até o limite escolhido.",

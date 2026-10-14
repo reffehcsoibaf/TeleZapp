@@ -56,7 +56,11 @@ def test_resposta():
     r = msg(id="5", texto="sim", resposta_a="1")
     assert m.formatar(r, 1, agora=AGORA, respondida="Bruno") == \
         "Ana, 14:59: em resposta a Bruno: sim"
-    assert "em resposta: sim" in m.formatar(r, 1, agora=AGORA)
+    assert "em resposta a uma mensagem mais antiga: sim" in m.formatar(
+        r, 1, agora=AGORA)
+    original = msg(id="1", texto="você vai hoje?")
+    assert m.formatar(r, 1, agora=AGORA, respondida=original) == \
+        'Ana, 14:59: em resposta a Ana, "você vai hoje?": sim'
 
 
 def test_rotulo_conversa():
