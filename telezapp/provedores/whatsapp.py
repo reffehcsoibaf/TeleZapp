@@ -219,8 +219,21 @@ def _texto_estruturado(interna, presentes):
     return None
 
 
+NOMES_ACOES_INTERATIVAS = {
+    "payment_info": "solicitação de pagamento",
+    "review_and_pay": "solicitação de pagamento",
+    "order_details": "detalhes do pedido",
+    "send_location": "pedido de localização",
+}
+
+
 def _texto_interativo(x):
-    return _partes_texto(x.header.title, x.body.text, x.footer.text)
+    texto = _partes_texto(x.header.title, x.body.text, x.footer.text)
+    if texto or not x.HasField("nativeFlowMessage"):
+        return texto
+    nomes = [NOMES_ACOES_INTERATIVAS.get(b.name, b.name)
+             for b in x.nativeFlowMessage.buttons if b.name]
+    return ("mensagem interativa: " + ", ".join(nomes)) if nomes else ""
 
 
 def botoes_do_whatsapp(interna):
@@ -520,6 +533,7 @@ class ProvedorWhatsApp(Provedor):
         self._vistas = set()
         self._nomes_grupo_pedidos = set()
         self._nomes_empresa_pedidos = set()
+        self._sem_nome_registrados = set()
         self._conectada = False
         self._cache_mencoes = {}   # jid mencionado -> nome, id, telefone
         self._sincronizando = False
@@ -1029,6 +1043,13 @@ class ProvedorWhatsApp(Provedor):
             conv = self._conversa(cid, origem.Chat,
                                   info.Pushname or nome_verificado(info), grupo,
                                   msg.data)
+            if not grupo and conv.nome.startswith("+") and \
+                    cid not in self._sem_nome_registrados:
+                self._sem_nome_registrados.add(cid)
+                log.info("mensagem ao vivo de conversa só com telefone: "
+                         "perfil=%s, nome verificado=%s",
+                         "veio" if info.Pushname else "não veio",
+                         "veio" if nome_verificado(info) else "não veio")
             if not grupo and not msg.minha and not msg.autor:
                 msg.autor = conv.nome       # conversa privada: quem fala
             with self._trava:

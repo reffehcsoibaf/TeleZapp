@@ -888,3 +888,14 @@ def test_consulta_de_empresas_em_lote_renomeia_so_quem_tem_telefone(amb):
     assert nomes["556136863608"] == "99 Pay"
     assert nomes["5511953057252"] == "Verisure"
     assert nomes["5551988887777"] == "Ana Silva"
+
+
+def test_pagamento_interativo_sem_texto_vira_solicitacao_de_pagamento():
+    nf = E.InteractiveMessage.NativeFlowMessage(buttons=[
+        E.InteractiveMessage.NativeFlowMessage.NativeFlowButton(
+            name="payment_info", buttonParamsJSON='{"currency":"BRL"}')])
+    msg, _ = wa.converter(evento("PG1", E.Message(
+        interactiveMessage=E.InteractiveMessage(nativeFlowMessage=nf))),
+        "w1", "c")
+    assert msg.tipo == m.TEXTO
+    assert msg.texto == "mensagem interativa: solicitação de pagamento"

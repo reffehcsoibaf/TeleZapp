@@ -3,7 +3,7 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
-## 2026.10.14.7
+## 2026.10.14.8
 
 PR #9: links escondidos, botões de link e menções.
 
@@ -26,6 +26,9 @@ PR #9: links escondidos, botões de link e menções.
   ("tipo do WhatsApp: ...") e vai para o log. Nome verificado da empresa
   (`nome_verificado`) vira nome da conversa/autor; conversas só com telefone
   tentam de novo a cada mensagem.
+- WhatsApp: mensagem interativa sem texto (ex.: `payment_info`) vira "mensagem
+  interativa: solicitação de pagamento"; a primeira mensagem ao vivo de uma
+  conversa só com telefone grava se o perfil e o nome verificado vieram.
 - Registro: a primeira linha de cada execução traz a versão e a pasta do código,
   para sabermos qual compilação gerou o log.
 - WhatsApp, pelo diagnóstico do Fábio: fotos/vídeos de álbum (`associatedChildMessage`)
