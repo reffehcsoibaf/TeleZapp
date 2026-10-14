@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guia de uso do TeleZapp {{versao}}</title>
+<style>body{font-family:Segoe UI,Arial,sans-serif;max-width:46em;margin:1em auto;padding:0 1em;line-height:1.5}h1,h2,h3{line-height:1.25}footer{margin-top:2em;border-top:1px solid #888;padding-top:.5em}</style>
+</head>
+<body>
+<header>
+<h1>Guia de uso do TeleZapp</h1>
+<p>Versão {{versao}}</p>
+</header>
+<main>
+<nav aria-label="Índice">
+<h2>Índice</h2>
+<ul>
+<li><a href="#o-que-e">O que é o TeleZapp</a></li>
+<li><a href="#menu">O menu</a></li>
+<li><a href="#contas">Adicionar e remover contas</a></li>
+<li><a href="#janela">A janela principal</a></li>
+<li><a href="#atalhos">Teclas de atalho</a></li>
+<li><a href="#mensagens">Ler e enviar mensagens</a></li>
+<li><a href="#detalhes">Dados de uma mensagem</a></li>
+<li><a href="#dados">Onde ficam os seus dados</a></li>
+</ul>
+</nav>
+
+<h2 id="o-que-e">O que é o TeleZapp</h2>
+<p>O TeleZapp reúne o WhatsApp e o Telegram numa só janela do Windows, pensada para quem usa leitor de tela, como o NVDA. Todos os controles são os do próprio Windows, sem telas desenhadas à mão.</p>
+
+<h2 id="menu">O menu</h2>
+<p>Aperte Alt para abrir o Menu. Ele tem um submenu para cada assunto: Contas, Conversa, Mensagem, Exibição e Ajuda, e no fim o item Sair. Use a seta para baixo para percorrer, a seta para a direita para entrar num submenu, a seta para a esquerda para voltar e Esc para fechar.</p>
+
+<h2 id="contas">Adicionar e remover contas</h2>
+<p>No Menu, em Contas, escolha adicionar uma conta do Telegram ou do WhatsApp.</p>
+<h3>Telegram</h3>
+<p>Informe o telefone, depois o código que o Telegram envia e, se existir, a senha da verificação em duas etapas.</p>
+<h3>WhatsApp</h3>
+<p>Escolha quanto histórico pedir ao celular e como parear: pelo código de oito caracteres, que você digita no celular, ou pelo QR Code, que pode ser mostrado em tela cheia. Os dois métodos estão em Aparelhos conectados, no WhatsApp do celular.</p>
+<h3>Remover</h3>
+<p>Em Contas, Remover uma conta apaga a sessão e as conversas guardadas daquela conta neste computador. Nada é apagado nos serviços.</p>
+
+<h2 id="janela">A janela principal</h2>
+<p>Com a tecla Tab você passa por três áreas: a lista de Conversas, a lista de Mensagens e a caixa Digite sua mensagem, seguida do botão Enviar.</p>
+
+<h2 id="atalhos">Teclas de atalho</h2>
+<ul>
+<li>Control 1: lista de conversas.</li>
+<li>Control 2: lista de mensagens.</li>
+<li>Control 3: caixa de digitação.</li>
+<li>Control U: próxima conversa com mensagens não lidas.</li>
+<li>Control R: ouvir a última mensagem da conversa aberta.</li>
+<li>F5: atualizar a lista de conversas.</li>
+<li>Control Shift R: responder à mensagem selecionada.</li>
+<li>Control Shift C: copiar o texto da mensagem selecionada.</li>
+<li>Alt Enter: dados e texto completo da mensagem selecionada.</li>
+<li>Tecla Aplicativos ou Shift F10: menu da mensagem selecionada.</li>
+<li>F1: este guia. Shift F1: resumo das teclas.</li>
+<li>Control Q: sair.</li>
+</ul>
+
+<h2 id="mensagens">Ler e enviar mensagens</h2>
+<p>Na lista de conversas, Enter abre a conversa e leva você às mensagens: ao item Início das mensagens não lidas, se houver, ou à última mensagem. Esc volta para as conversas.</p>
+<p>Na caixa de digitação, Enter envia e Shift Enter faz uma nova linha. Para responder a uma mensagem, selecione-a e use Control Shift R; Esc cancela a resposta.</p>
+<p>Em Exibição você escolhe a ordem em que cada mensagem é lida (autor e hora primeiro, conteúdo primeiro, ou autor só quando muda) e liga ou desliga o som e a fala das mensagens novas.</p>
+
+<h2 id="detalhes">Dados de uma mensagem</h2>
+<p>Alt Enter mostra, num texto que você lê com as setas, a conversa, o autor, a data, o tipo e o texto completo. Nas mensagens que você enviou pelo WhatsApp, aparece também quando cada pessoa recebeu e leu. No Telegram, em grupos, só se sabe até que mensagem alguém leu, sem a hora.</p>
+
+<h2 id="dados">Onde ficam os seus dados</h2>
+<p>Tudo fica na pasta TeleZapp dentro de AppData\Roaming do seu usuário: configurações, sessões, conversas guardadas e registros de funcionamento (logs), sem o texto das suas mensagens. Arquivos temporários ficam numa subpasta do próprio programa e são apagados ao abrir e ao fechar.</p>
+</main>
+<footer>
+<p>TeleZapp versão {{versao}}. Software livre, licença GNU GPL versão 3 ou posterior. Desenvolvido pelos contribuidores do TeleZapp. Site e downloads: <a href="{{site}}">{{site}}</a></p>
+</footer>
+</body>
+</html>

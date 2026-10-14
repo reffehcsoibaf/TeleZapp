@@ -16,7 +16,7 @@ from telezapp.nucleo.modelos import ORDEM_ESTADOS, Conversa, Mensagem
 
 log = logging.getLogger("telezapp.banco")
 
-VERSAO_ESQUEMA = 2
+VERSAO_ESQUEMA = 3
 
 ESQUEMA = """
 CREATE TABLE IF NOT EXISTS conversas (
@@ -49,6 +49,42 @@ CREATE TABLE IF NOT EXISTS mensagens (
 );
 CREATE INDEX IF NOT EXISTS mensagens_por_data
     ON mensagens (conta_id, conversa_id, data);
+-- Quando cada pessoa recebeu, leu ou ouviu uma mensagem minha.
+CREATE TABLE IF NOT EXISTS recibos (
+    conta_id TEXT NOT NULL,
+    conversa_id TEXT NOT NULL,
+    mensagem_id TEXT NOT NULL,
+    participante TEXT NOT NULL,
+    tipo TEXT NOT NULL,
+    data REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (conta_id, conversa_id, mensagem_id, participante, tipo)
+);
+-- Status (stories) do WhatsApp: guardados fora das conversas.
+CREATE TABLE IF NOT EXISTS status (
+    conta_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    autor_id TEXT NOT NULL DEFAULT '',
+    autor TEXT NOT NULL DEFAULT '',
+    minha INTEGER NOT NULL DEFAULT 0,
+    data REAL NOT NULL DEFAULT 0,
+    tipo TEXT NOT NULL DEFAULT 'texto',
+    texto TEXT NOT NULL DEFAULT '',
+    segundos INTEGER NOT NULL DEFAULT 0,
+    nome_arquivo TEXT NOT NULL DEFAULT '',
+    tamanho INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (conta_id, id)
+);
+-- Arquivos de midia baixados (base da limpeza de conversas).
+CREATE TABLE IF NOT EXISTS midias (
+    conta_id TEXT NOT NULL,
+    conversa_id TEXT NOT NULL,
+    mensagem_id TEXT NOT NULL,
+    tipo TEXT NOT NULL,
+    caminho TEXT NOT NULL,
+    tamanho INTEGER NOT NULL DEFAULT 0,
+    data REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (conta_id, conversa_id, mensagem_id)
+);
 """
 
 _CAMPOS_CONV = [f.name for f in fields(Conversa)]
@@ -108,8 +144,9 @@ class Banco:
         with self._trava, self._con:
             self._con.execute("DELETE FROM conversas WHERE conta_id=?",
                               (conta_id,))
-            self._con.execute("DELETE FROM mensagens WHERE conta_id=?",
-                              (conta_id,))
+            for tabela in ("mensagens", "recibos", "status", "midias"):
+                self._con.execute(
+                    "DELETE FROM %s WHERE conta_id=?" % tabela, (conta_id,))
 
     # ------------------------------------------------------------ mensagens
     def salvar_mensagens(self, mensagens):
@@ -156,6 +193,79 @@ class Banco:
                 "UPDATE mensagens SET estado=? WHERE conta_id=? AND "
                 "conversa_id=? AND minha=1 AND CAST(id AS INTEGER)<=?",
                 (estado, conta_id, conversa_id, ate_id))
+
+    # -------------------------------------------------------------- recibos
+    def salvar_recibos(self, conta_id, conversa_id, mensagem_ids,
+                       participante, tipo, data):
+        """Guarda que `participante` teve `tipo` (entregue, lida, ouvida)
+        nessas mensagens. A primeira data vale; repetir nao muda."""
+        with self._trava, self._con:
+            self._con.executemany(
+                "INSERT OR IGNORE INTO recibos VALUES (?,?,?,?,?,?)",
+                [(conta_id, conversa_id, i, participante, tipo, data)
+                 for i in mensagem_ids])
+
+    def recibos(self, conta_id, conversa_id, mensagem_id):
+        """[(participante, tipo, data)] em ordem de data."""
+        with self._trava:
+            return self._con.execute(
+                "SELECT participante, tipo, data FROM recibos WHERE "
+                "conta_id=? AND conversa_id=? AND mensagem_id=? "
+                "ORDER BY data, participante",
+                (conta_id, conversa_id, mensagem_id)).fetchall()
+
+    # --------------------------------------------------------------- status
+    def salvar_status(self, conta_id, s):
+        """s: dict com id, autor_id, autor, minha, data, tipo, texto,
+        segundos, nome_arquivo, tamanho."""
+        with self._trava, self._con:
+            self._con.execute(
+                "INSERT OR REPLACE INTO status (conta_id, id, autor_id, "
+                "autor, minha, data, tipo, texto, segundos, nome_arquivo, "
+                "tamanho) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (conta_id, s["id"], s.get("autor_id", ""),
+                 s.get("autor", ""), int(bool(s.get("minha"))),
+                 s.get("data", 0), s.get("tipo", "texto"),
+                 s.get("texto", ""), s.get("segundos", 0),
+                 s.get("nome_arquivo", ""), s.get("tamanho", 0)))
+
+    def status(self, conta_id, limite=200):
+        """Os mais recentes primeiro."""
+        with self._trava:
+            linhas = self._con.execute(
+                "SELECT id, autor_id, autor, minha, data, tipo, texto, "
+                "segundos, nome_arquivo, tamanho FROM status WHERE "
+                "conta_id=? ORDER BY data DESC LIMIT ?",
+                (conta_id, limite)).fetchall()
+        chaves = ("id", "autor_id", "autor", "minha", "data", "tipo",
+                  "texto", "segundos", "nome_arquivo", "tamanho")
+        return [dict(zip(chaves, l)) for l in linhas]
+
+    # --------------------------------------------------------------- midias
+    def registrar_midia(self, conta_id, conversa_id, mensagem_id, tipo,
+                        caminho, tamanho, data):
+        with self._trava, self._con:
+            self._con.execute(
+                "INSERT OR REPLACE INTO midias VALUES (?,?,?,?,?,?,?)",
+                (conta_id, conversa_id, mensagem_id, tipo, caminho, tamanho,
+                 data))
+
+    def midias(self, conta_id, conversa_id=None):
+        """[(conversa_id, mensagem_id, tipo, caminho, tamanho, data)]"""
+        sql = ("SELECT conversa_id, mensagem_id, tipo, caminho, tamanho, "
+               "data FROM midias WHERE conta_id=?")
+        args = [conta_id]
+        if conversa_id is not None:
+            sql += " AND conversa_id=?"
+            args.append(conversa_id)
+        with self._trava:
+            return self._con.execute(sql + " ORDER BY data", args).fetchall()
+
+    def esquecer_midia(self, conta_id, conversa_id, mensagem_id):
+        with self._trava, self._con:
+            self._con.execute(
+                "DELETE FROM midias WHERE conta_id=? AND conversa_id=? AND "
+                "mensagem_id=?", (conta_id, conversa_id, mensagem_id))
 
 
 def _linha_msg(m):

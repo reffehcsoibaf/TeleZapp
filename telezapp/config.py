@@ -13,7 +13,10 @@ import json
 import logging
 import logging.handlers
 import os
+import shutil
 import threading
+import unicodedata
+from dataclasses import dataclass
 
 from telezapp import NOME, VERSAO
 
@@ -67,15 +70,69 @@ def mascarar_telefone(telefone):
     return t[:3] + "..." + t[-4:] if len(t) > 7 else "..."
 
 
-PADROES = {
-    "estilo": 1,             # estilo de leitura das mensagens
-    "som": True,             # som ao receber mensagem
-    "falar_novas": True,     # falar mensagens novas pelo NVDA
-    "confirmar_envio": True, # falar "Enviada" depois de enviar
+def pasta_temporaria():
+    """Arquivos temporarios do app: so aqui, nunca no %temp% do Windows."""
+    return pasta("temp")
+
+
+def limpar_temporarios():
+    """Apaga o conteudo da pasta temporaria (na abertura e no fechamento)."""
+    caminho = os.path.join(pasta_dados(), "temp")
+    if os.path.isdir(caminho):
+        shutil.rmtree(caminho, ignore_errors=True)
+
+
+# ------------------------------------------------- opcoes de configuracao
+@dataclass(frozen=True)
+class Opcao:
+    """Uma opcao que a pessoa pode mudar. O registro unico serve aos menus
+    de hoje e a janela de configuracoes com busca (etapa 4)."""
+    chave: str
+    rotulo: str
+    categoria: str
+    padrao: object
+    descricao: str
+    escolhas: tuple = ()     # vazio: sim ou nao; senao (valor, rotulo)
+
+
+OPCOES = (
+    Opcao("som", "Som ao receber mensagem", "Avisos", True,
+          "Toca um som curto quando chega uma mensagem nova."),
+    Opcao("falar_novas", "Falar mensagens novas", "Avisos", True,
+          "O leitor de tela fala o autor e o conteúdo de cada mensagem nova."),
+    Opcao("confirmar_envio", "Confirmar envio por voz", "Avisos", True,
+          "Fala Enviada depois que uma mensagem sai."),
+    Opcao("estilo", "Como cada mensagem é lida", "Leitura", 1,
+          "A ordem em que autor, hora e conteúdo aparecem na lista de "
+          "mensagens.",
+          ((1, "Autor e hora primeiro"), (2, "Conteúdo primeiro"),
+           (3, "Autor só quando muda"))),
+)
+
+
+def _sem_acento(texto):
+    return "".join(c for c in unicodedata.normalize("NFD", texto.lower())
+                   if unicodedata.category(c) != "Mn")
+
+
+def buscar_opcoes(texto):
+    """Opcoes cujo nome, categoria ou descricao contem todas as palavras
+    buscadas (sem diferenca de acento ou maiusculas)."""
+    palavras = _sem_acento(texto).split()
+    achadas = []
+    for o in OPCOES:
+        alvo = _sem_acento(" ".join((o.rotulo, o.categoria, o.descricao)))
+        if all(p in alvo for p in palavras):
+            achadas.append(o)
+    return achadas
+
+
+PADROES = {o.chave: o.padrao for o in OPCOES}
+PADROES.update({
     "contas": [],            # [{"id", "servico", "telefone", "nome"}]
     "telegram_api_id": 0,
     "telegram_api_hash": "",
-}
+})
 
 
 class Config:

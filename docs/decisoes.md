@@ -93,11 +93,66 @@ partir dos experimentos, ainda a confirmar.
 7. **Chamadas**: fora do escopo. O neonize só avisa e recusa; uma biblioteca
    separada (meowcaller) existe, mas é jovem e não está exposta ao Python.
 
+## Plano do projeto (lista de ideias do responsável, 13/10/2026)
+
+Aprovado pelo responsável. As ideias foram divididas pelo efeito na base.
+
+### Grupo 1: afeta a base, feito antes da etapa 3
+
+- **Versão `ano.mês.dia.dígito`** (ex.: 2026.10.9.0; uma segunda versão no
+  mesmo dia é 2026.10.9.1). Cabe nos metadados de versão do Windows (quatro
+  números até 65535); entra no instalador, no executável portátil e na lista
+  de programas instalados quando eles existirem (etapa 4).
+- **Menu vertical**, como no telezapp migration: uma única entrada "Menu" na
+  barra, aberta pelo Alt, com as seções como submenus.
+- **Guia de uso em HTML** no estilo do NVDA, sempre com a versão atual e um
+  rodapé com licença, desenvolvedores e site.
+- **Dois registros de mudanças**: `novidades.html` para o usuário (da versão
+  mais nova para a mais antiga, sem termos técnicos) e `CHANGELOG.md`, o
+  registro técnico.
+- **Rotas limpas**: dados só em `%APPDATA%\TeleZapp`; arquivos temporários
+  numa subpasta própria, limpa pelo app; nada solto no `%temp%` do Windows.
+- **Recibos por participante** (data e hora de entrega, leitura e
+  reprodução; nos grupos, por membro), guardados desde já para a janela de
+  dados da mensagem. No Telegram, em grupos, só existe "lida até tal
+  mensagem".
+- **Status do WhatsApp guardados** em vez de descartados, para postar,
+  curtir e responder depois.
+- **Registro das opções de configuração** (nome, categoria, descrição), base
+  da janela de configurações com busca.
+- **Mídias baixadas registradas no banco** (caminho, tamanho, data), base da
+  limpeza de conversas: entra com a etapa 3.
+
+### Grupo 2: nas etapas previstas
+
+- **Etapa 3, mídias**: baixar, abrir e enviar foto, vídeo, documento e
+  áudio; gravar nota de voz.
+- **Etapa 4**: várias contas (acabamento); sons de eventos com arquivos e
+  opções; janela de configurações no estilo do NVDA (categorias na vertical,
+  itens por Tab, busca); backup e restauração das configurações (sem
+  sessões nem senhas); ordem das informações da mensagem definida pelo
+  usuário; instalador, portátil, desinstalação limpa e atualização com uma
+  janela de novidades em texto somente leitura, com o foco no texto.
+
+### Grupo 3: depois (etapa 5 em diante)
+
+| Ideia | Viabilidade |
+|---|---|
+| IA multiprovedores (transcrição, descrição de imagem e vídeo, PDF acessível) | Viável |
+| Limpeza de conversas com filtros e total antes de confirmar | Viável depois da etapa 3 |
+| Privacidade, editar perfil, bloquear e desbloquear | Viável nos dois serviços |
+| Enquetes | Viável nos dois |
+| Status: postar, curtir, responder | Viável no WhatsApp, com cuidado |
+| Comunidades | Viável para ver (grupos ligados) |
+| Contatos | Telegram sim; WhatsApp só leitura (a agenda é do celular) |
+| Listas de transmissão | Incerto: suporte limitado da whatsmeow |
+| Chamadas de áudio e vídeo | Fora por enquanto: o neonize não tem; no Telegram exigiria componente pesado |
+
 ## Próximos passos sugeridos
 
-1. Etapa 2b (histórico do WhatsApp e pareamento acessível): testar no
-   Windows, com um pareamento novo.
+1. Grupo 1 do plano acima.
 2. Etapa 3: mídias (foto, vídeo, documento e nota de voz).
 3. Adicionar o aviso de licença nos arquivos e conferir as licenças pendentes.
-4. Instalador, atualização (trocar só o que mudou) e assinatura.
+4. Etapa 4 (ver o plano): configurações, sons, instalador, atualização e
+   assinatura.
 5. Testes de estabilidade e de arquivos maiores.

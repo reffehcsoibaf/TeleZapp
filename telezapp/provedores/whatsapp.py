@@ -550,6 +550,9 @@ class ProvedorWhatsApp(Provedor):
             msg, remetente = converter(evento, self.conta.id, cid, autor)
             if msg is None:
                 return
+            if cid in IGNORAR_CONVERSAS:
+                self._guardar_status(msg, origem, info.Pushname)
+                return
             conv = self._conversa(cid, origem.Chat, info.Pushname, grupo,
                                   msg.data)
             with self._trava:
@@ -568,6 +571,19 @@ class ProvedorWhatsApp(Provedor):
                                                      silenciosa=silenciosa))
         except Exception:
             log.exception("erro ao tratar mensagem recebida")
+
+    def _guardar_status(self, msg, origem, pushname):
+        """Status (stories) nao sao conversas: ficam numa tabela a parte,
+        para ver, curtir e responder numa etapa futura."""
+        autor_id = self._id_da_conversa(origem.Sender)
+        self.banco.salvar_status(self.conta.id, {
+            "id": msg.id, "autor_id": autor_id,
+            "autor": "Você" if msg.minha else self._nome_contato(
+                origem.Sender, pushname),
+            "minha": msg.minha, "data": msg.data, "tipo": msg.tipo,
+            "texto": msg.texto, "segundos": msg.segundos,
+            "nome_arquivo": msg.nome_arquivo, "tamanho": msg.tamanho})
+        log.info("status guardado (%s)", msg.tipo)
 
     def carregar_mensagens(self, conversa_id, limite=50):
         msgs = self.banco.mensagens(self.conta.id, conversa_id,
@@ -676,6 +692,11 @@ class ProvedorWhatsApp(Provedor):
         log.info("leitura confirmada ao WhatsApp (%d mensagens)",
                  len(pendentes))
 
+    def _id_do_participante(self, jid):
+        """Numero de quem recebeu ou leu (troca o endereco LID pelo numero
+        quando o WhatsApp informa)."""
+        return self._id_da_conversa(jid)
+
     # ------------------------------------------------------------- recibos
     def _ao_recibo(self, cliente, e):
         try:
@@ -697,6 +718,11 @@ class ProvedorWhatsApp(Provedor):
                       RECIBO_OUVIDO: m.LIDA}.get(tipo)
             if estado is None or origem.IsFromMe:
                 return
+            self.banco.salvar_recibos(
+                self.conta.id, cid, list(e.MessageIDs),
+                self._id_do_participante(origem.Sender),
+                {RECIBO_ENTREGUE: "entregue", RECIBO_LIDO: "lida",
+                 RECIBO_OUVIDO: "ouvida"}[tipo], segundos(e.Timestamp))
             mudaram = self.banco.mudar_estado(self.conta.id, cid,
                                               list(e.MessageIDs), estado)
             if mudaram:
