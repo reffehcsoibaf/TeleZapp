@@ -597,3 +597,70 @@ def test_menu_de_midias_muda_a_opcao(j):
     assert j.cfg.get("midias_baixar") == "demanda"
     j._mudar_baixar("automatico")
     assert j.cfg.get("midias_baixar") == "automatico"
+
+
+class MotorFalso:
+    criados = []
+
+    def __init__(self, caminho):
+        self.caminho, self.tocando, self.terminou = caminho, False, False
+        self.fechado = False
+        MotorFalso.criados.append(self)
+
+    def tocar(self):
+        self.tocando = True
+
+    def alternar(self):
+        self.tocando = not self.tocando
+
+    def fechar(self):
+        self.fechado, self.tocando = True, False
+
+
+def voz(id):
+    return m.Mensagem("t1", "10", id, autor="Ana", tipo=m.VOZ,
+                      tamanho=1000, data=AGORA + int(id))
+
+
+def test_enter_em_voz_toca_sem_janela_pausa_e_esc_para(jm_midia, monkeypatch):
+    j = jm_midia
+    MotorFalso.criados = []
+    monkeypatch.setattr(jm, "Reprodutor", MotorFalso)
+    monkeypatch.setattr(jm.wx, "CallLater", lambda *a, **k: None,
+                        raising=False)
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [voz("5")]))
+    j.midias.prontas[("t1", "10", "5")] = "/p/5.ogg"
+    selecionar(j, "5")
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert j.abertas == []                     # sem janela
+    motor = MotorFalso.criados[0]
+    assert motor.tocando and motor.caminho == "/p/5.ogg"
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))   # pausa
+    assert not motor.tocando and len(MotorFalso.criados) == 1
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))   # continua
+    assert motor.tocando
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))   # para; a conversa continua
+    assert motor.fechado and j.atual is not None and j.audio is None
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))   # agora fecha a conversa
+    assert j.atual is None
+
+
+def test_audio_com_opcao_janela_abre_o_player(jm_midia, monkeypatch):
+    j = jm_midia
+    j.cfg.set("audio_janela", "janela")
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [voz("5")]))
+    j.midias.prontas[("t1", "10", "5")] = "/p/5.ogg"
+    selecionar(j, "5")
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert [a[0] for a in j.abertas] == ["5"] and j.audio is None
+
+
+def test_formato_que_o_app_nao_toca_abre_a_janela(jm_midia, monkeypatch):
+    j = jm_midia
+    monkeypatch.setattr(jm, "Reprodutor", lambda c: (_ for _ in ()).throw(
+        jm.FormatoNaoSuportado("m4a")))
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [voz("5")]))
+    j.midias.prontas[("t1", "10", "5")] = "/p/5.m4a"
+    selecionar(j, "5")
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert [a[0] for a in j.abertas] == ["5"]

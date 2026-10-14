@@ -29,6 +29,8 @@ Etapa 3a: receber e abrir mídias.
   dos downloads.
 - Janela: Esc fecha a conversa (só as conversas ficam); a caixa de digitar
   fica visível enquanto a conversa está aberta e o rascunho é guardado ao sair.
+- Opção `audio_janela`: Enter em áudio/voz toca sem janela (padrão) ou abre o
+  player em janela; Enter pausa, Esc para.
 - Lista de conversas só é refeita quando algo muda (o NVDA repetia o foco
   durante a sincronia).
 - WhatsApp: se a conexão cair sem pedido, reconecta sozinho (esperas de 3 a

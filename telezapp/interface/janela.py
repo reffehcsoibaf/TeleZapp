@@ -19,6 +19,7 @@ from telezapp import NOME, VERSAO, config
 from telezapp.acessibilidade.fala import Fala, bipe
 from telezapp.interface import dialogos, visualizadores
 from telezapp.midia import armazem
+from telezapp.midia.reprodutor import FormatoNaoSuportado, Reprodutor
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import paginas
@@ -119,6 +120,7 @@ class Janela(wx.Frame):
         self.resposta_a = None
         self.locais = 0               # contador de mensagens "enviando"
         self.sincronia = {}           # conta_id -> (percentual, quando)
+        self.audio = None             # (chave, Reprodutor) tocando sem janela
         self.interrompidas = {}       # conta_id -> % em que a sincronia parou
         self.progresso_midias = {}    # chave da midia -> percentual
         self.abrindo = None           # chave da midia que abre ao baixar
@@ -189,6 +191,7 @@ class Janela(wx.Frame):
             self.Bind(wx.EVT_MENU,
                       lambda e, v=valor: self._mudar_baixar(v), it)
         m_mid.AppendSeparator()
+        item(m_mid, "audio_janela", "&Enter em áudio...")
         item(m_mid, "midias_limite", "&Limite do download automático...")
         item(m_mid, "midias_confirmar", "&Confirmar downloads grandes...")
         item(m_mid, "midias_espaco", "&Espaço usado pelas mídias")
@@ -242,6 +245,7 @@ class Janela(wx.Frame):
             "abrir_midia": lambda e: self._abrir_midia(),
             "baixar_midia": lambda e: self._abrir_midia(abrir=False),
             "salvar_midia": lambda e: self._salvar_midia(),
+            "audio_janela": lambda e: self._escolher_opcao("audio_janela"),
             "midias_limite": lambda e: self._escolher_opcao(
                 "midias_limite_auto_mb"),
             "midias_confirmar": lambda e: self._escolher_opcao(
@@ -775,7 +779,8 @@ class Janela(wx.Frame):
                     self._sair_da_caixa()
                     return
                 if foco is self.lista_msgs:
-                    if not self._cancelar_download():
+                    if not self._cancelar_download() and \
+                            not self._parar_audio():
                         self._fechar_conversa()
                     return
             if k in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) and sem_mod:
@@ -1131,7 +1136,55 @@ class Janela(wx.Frame):
             return True
         return False
 
+    def _tocar_sem_janela(self, x, caminho):
+        """Enter em audio sem janela: toca ao fundo. Enter de novo na mesma
+        mensagem pausa e continua; Esc para. False se o formato exige a
+        janela (que usa o player do Windows)."""
+        if self.audio is not None and self.audio[0] == x.chave and \
+                not self.audio[1].terminou:
+            motor = self.audio[1]
+            motor.alternar()
+            self.fala.falar("Tocando" if motor.tocando else "Pausado",
+                            interromper=True)
+            return True
+        self._parar_audio(falar=False)
+        try:
+            motor = Reprodutor(caminho)
+        except FormatoNaoSuportado:
+            return False
+        motor.tocar()
+        self.audio = (x.chave, motor)
+        self.fala.falar("Tocando", interromper=True)
+        wx.CallLater(500, self._vigiar_audio, motor)
+        return True
+
+    def _vigiar_audio(self, motor):
+        """Libera o dispositivo de som quando o audio acaba."""
+        if self.audio is None or self.audio[1] is not motor:
+            return
+        if motor.terminou:
+            self._parar_audio(falar=False)
+            return
+        wx.CallLater(500, self._vigiar_audio, motor)
+
+    def _parar_audio(self, falar=True):
+        if self.audio is None:
+            return False
+        motor = self.audio[1]
+        self.audio = None
+        try:
+            motor.fechar()
+        except Exception:
+            log.exception("erro ao parar o áudio")
+        if falar:
+            self.fala.falar("Áudio parado.", interromper=True)
+        return True
+
     def _mostrar_midia(self, x, caminho):
+        if visualizadores.escolher(x.tipo, caminho) == visualizadores.AUDIO \
+                and self.cfg.get("audio_janela") == "sem" and \
+                self._tocar_sem_janela(x, caminho):
+            return
         conv = self.indice.get((x.conta_id, x.conversa_id))
         visualizadores.abrir(self, x, caminho, self.fala,
                              conv.nome if conv else "")
@@ -1306,6 +1359,7 @@ class Janela(wx.Frame):
     def _ao_fechar(self, evt):
         log.info("fechando a janela")
         self.Hide()
+        self._parar_audio(falar=False)
         try:
             if self.contas is not None:
                 self.contas.parar_todos()

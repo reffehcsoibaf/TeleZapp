@@ -107,6 +107,12 @@ OPCOES = (
           "mensagens.",
           ((1, "Autor e hora primeiro"), (2, "Conteúdo primeiro"),
            (3, "Autor só quando muda"))),
+    Opcao("audio_janela", "Enter em áudio e mensagem de voz", "Mídias", "sem",
+          "Só tocar começa a tocar sem abrir janela: Enter de novo pausa e "
+          "continua, e Esc para. O player em janela tem avançar, voltar e "
+          "posição.",
+          (("sem", "Só tocar, sem janela"),
+           ("janela", "Abrir a janela do player"))),
     Opcao("midias_baixar", "Quando baixar as mídias", "Mídias", "demanda",
           "Sob demanda baixa só quando você abre a mídia. Automático baixa "
           "ao receber, até o limite escolhido.",
