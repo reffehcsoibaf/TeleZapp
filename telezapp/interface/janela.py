@@ -681,9 +681,10 @@ class Janela(wx.Frame):
         self._mesclar(chave, [msg])
         if aberta:
             no_fim = self._selecionado_no_fim()
-            self._preencher_mensagens("ultima" if no_fim and
-                                      self.FindFocus() is not self.lista_msgs
-                                      else None)
+            # mensagem minha nunca tira a pessoa de onde ela esta
+            self._preencher_mensagens(
+                "ultima" if no_fim and not msg.minha and
+                self.FindFocus() is not self.lista_msgs else None)
             if not msg.minha and self.IsActive():
                 p = self.contas.provedor(msg.conta_id)
                 if p is not None:
@@ -1077,7 +1078,8 @@ class Janela(wx.Frame):
         if self.resposta_a is not None:
             self.resposta_a = None
             self.rot_caixa.SetLabel("Digite sua mensagem")
-        self._preencher_mensagens("ultima")
+        # a selecao fica na mensagem em que a pessoa estava
+        self._preencher_mensagens()
         self.caixa.SetFocus()
         p.enviar_texto(conversa_id, texto, resposta)
         log.info("texto enviado para a fila (%d caracteres)", len(texto))

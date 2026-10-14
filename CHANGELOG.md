@@ -29,6 +29,7 @@ Etapa 3a: receber e abrir mídias.
   dos downloads.
 - Janela: Esc fecha a conversa (só as conversas ficam); a caixa de digitar
   fica visível enquanto a conversa está aberta e o rascunho é guardado ao sair.
+- Enviar mensagem não move a seleção da lista de mensagens.
 - Opção `audio_janela`: Enter em áudio/voz toca sem janela (padrão) ou abre o
   player em janela; Enter pausa, Esc para.
 - Lista de conversas só é refeita quando algo muda (o NVDA repetia o foco

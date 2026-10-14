@@ -664,3 +664,18 @@ def test_formato_que_o_app_nao_toca_abre_a_janela(jm_midia, monkeypatch):
     selecionar(j, "5")
     j._char_hook(Tecla(wx_falso.WXK_RETURN))
     assert [a[0] for a in j.abertas] == ["5"]
+
+
+def test_enviar_mantem_a_selecao_na_mensagem_atual(jm_midia):
+    j = jm_midia
+    selecionar(j, "1")                       # mensagem antiga
+    j.caixa.SetValue("oi")
+    j._enviar_texto()
+    assert j._chave_selecionada() == "1"
+    # a confirmacao do servico tambem nao move a selecao
+    j.b.publicar(ev.MensagemNova(
+        msg("9", "oi", conversa="10", minha=True, data=AGORA + 99),
+        j.indice[("t1", "10")], enviada_daqui=True)) \
+        if "enviada_daqui" in ev.MensagemNova.__dataclass_fields__ else None
+    assert j._chave_selecionada() == "1"
+    assert wx_falso._foco[0] is j.caixa
