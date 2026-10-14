@@ -206,7 +206,7 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None):
     """
     cont = conteudo(m).replace("\r", " ").replace("\n", " ")
     if m.tipo not in (TEXTO, VOZ, FIGURINHA) and tem_links(m):
-        cont = _juntar(cont, "com link (Alt+Enter)")
+        cont = _juntar(cont, "com link (Enter)")
     if m.resposta_a:
         if isinstance(respondida, Mensagem):
             quem = "você" if respondida.minha else (

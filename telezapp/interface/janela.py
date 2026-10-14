@@ -53,7 +53,8 @@ F5: atualizar a lista de conversas
 Control Shift R: responder à mensagem selecionada
 Control Shift C: copiar o texto da mensagem selecionada
 Alt Enter: ver os detalhes e o texto completo da mensagem selecionada
-Control O: abrir a mídia da mensagem (baixa antes, se preciso)
+Control O: abrir a mídia da mensagem (baixa antes, se preciso), mesmo
+quando a legenda tem link
 Control B: baixar a mídia sem abrir
 Tecla Aplicativos ou Shift F10: menu da mensagem selecionada
 
@@ -65,7 +66,9 @@ das mensagens não lidas", se houver não lidas, ou para a última mensagem.
 NA LISTA DE MENSAGENS
 Esc: fecha a conversa e volta para a lista de conversas.
 Enter: mostra os detalhes e o texto completo da mensagem. Numa mensagem com
-foto, vídeo, áudio, voz ou documento, abre a mídia. Esc cancela um download.
+foto, vídeo, áudio, voz ou documento, abre a mídia, menos quando a legenda
+tem link: aí o Enter mostra os detalhes, com os links (Control O abre a mídia).
+Esc cancela um download.
 
 NO LEITOR DE ÁUDIO E VÍDEO
 Espaço: tocar ou pausar. Seta para a direita e para a esquerda: avançar e
@@ -1108,7 +1111,7 @@ class Janela(wx.Frame):
             return
         x = self._mensagem_selecionada()
         if x is not None and x.tipo in armazem.BAIXAVEIS and \
-                not x.id.startswith("local-"):
+                not x.id.startswith("local-") and not m.tem_links(x):
             self._abrir_midia()
             return
         self._detalhes()

@@ -1025,10 +1025,30 @@ def test_foto_com_link_na_legenda_avisa_na_lista_e_detalhes_traz_o_link(
     j.b.publicar(ev.MensagensCarregadas("t1", "10", [x]))
     linhas = [j.lista_msgs.GetString(i)
               for i in range(j.lista_msgs.GetCount())]
-    assert any("com link (Alt+Enter)" in l for l in linhas), linhas
+    assert any("com link (Enter)" in l for l in linhas), linhas
     chamadas = []
     monkeypatch.setattr(jm.dialogos, "mostrar_texto",
                         lambda *a, **k: chamadas.append(k) or None)
     selecionar(j, "5")
     j._detalhes()
     assert chamadas[0]["links"] == [("https://a.com/x", "https://a.com/x")]
+
+
+def test_enter_em_foto_com_link_mostra_detalhes_e_ctrl_o_abre_a_midia(
+        j, monkeypatch):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    x = msg("5", "veja https://a.com/x", conversa="10")
+    x.tipo = m.FOTO
+    sem = msg("6", "so a foto", conversa="10")
+    sem.tipo = m.FOTO
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [x, sem]))
+    abertas, detalhes = [], []
+    monkeypatch.setattr(j, "_abrir_midia", lambda *a, **k: abertas.append(1))
+    monkeypatch.setattr(j, "_detalhes", lambda: detalhes.append(1))
+    selecionar(j, "5")
+    j._detalhes_ou_marcador()
+    assert detalhes and not abertas
+    selecionar(j, "6")
+    j._detalhes_ou_marcador()
+    assert abertas

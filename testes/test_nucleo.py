@@ -240,7 +240,7 @@ def test_abrir_link_so_http(monkeypatch):
 def test_midia_com_link_na_legenda_avisa_e_texto_nao_muda():
     foto = msg(texto="veja https://x.com/a", tipo=m.FOTO)
     assert m.tem_links(foto)
-    assert "com link (Alt+Enter)" in m.formatar(foto, m.ESTILO_CONTEUDO_PRIMEIRO)
+    assert "com link (Enter)" in m.formatar(foto, m.ESTILO_CONTEUDO_PRIMEIRO)
     sem = msg(texto="oi", tipo=m.FOTO)
     assert not m.tem_links(sem)
     assert "com link" not in m.formatar(sem, m.ESTILO_CONTEUDO_PRIMEIRO)
