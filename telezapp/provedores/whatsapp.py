@@ -1284,9 +1284,12 @@ class ProvedorWhatsApp(Provedor):
     def responder_acao(self, msg, acao):
         """Toca um botao de resposta (ou escolhe uma opcao de lista) de uma
         mensagem de empresa: manda a resposta citando a mensagem."""
+        descricao = "tipo=%s id=%r indice=%s" % (
+            acao.get("tipo"), acao.get("id"), acao.get("indice"))
+        log.info("resposta de botão: %s", descricao)
         self._fila.put(lambda: self._enviar(
             msg.conversa_id, acao.get("rotulo", ""), msg.id,
-            lambda: self._mensagem_de_acao(msg, acao)))
+            lambda: self._mensagem_de_acao(msg, acao), descricao))
 
     def _mensagem_de_acao(self, msg, acao):
         from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (
@@ -1326,7 +1329,8 @@ class ProvedorWhatsApp(Provedor):
             return Message(interactiveResponseMessage=resp)
         raise ValueError("ação desconhecida: %s" % tipo)
 
-    def _enviar(self, conversa_id, texto, resposta_a, construir=None):
+    def _enviar(self, conversa_id, texto, resposta_a, construir=None,
+                descricao_acao=""):
         inicio = time.perf_counter()
         try:
             if not self._conectada:
@@ -1336,7 +1340,10 @@ class ProvedorWhatsApp(Provedor):
                 construir() if construir is not None else
                 self._mensagem_de_texto(conversa_id, texto, resposta_a))
         except Exception as e:
-            log.warning("envio falhou: %s", type(e).__name__)
+            log.warning("envio falhou: %s: %s%s", type(e).__name__,
+                        str(e)[:300],
+                        (" (resposta de botão %s)" % descricao_acao)
+                        if descricao_acao else "", exc_info=True)
             motivo = "sem conexão" if isinstance(e, ConnectionError) else \
                 "erro do WhatsApp (%s)" % type(e).__name__
             self.barramento.publicar(ev.EnvioFalhou(

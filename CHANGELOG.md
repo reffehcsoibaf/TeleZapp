@@ -3,6 +3,11 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.14.12
+
+- Log de envio falhado agora traz o tipo, a mensagem e o traceback do erro e,
+  nas respostas de botão, o tipo/id/índice do botão ("resposta de botão: ...").
+
 ## 2026.10.14.11
 
 PR #12: menu Depurar.
