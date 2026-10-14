@@ -1014,3 +1014,21 @@ def test_mencao_sem_id_avisa_e_nao_abre(j):
     x = msg("4", "oi", conversa="10")
     j._abrir_conversa_da_mencao(x, {"nome": "Bia"})
     assert j.atual is None and "Não consegui localizar" in ditas[-1]
+
+
+def test_foto_com_link_na_legenda_avisa_na_lista_e_detalhes_traz_o_link(
+        j, monkeypatch):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    x = msg("5", "veja https://a.com/x", conversa="10")
+    x.tipo = m.FOTO
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [x]))
+    linhas = [j.lista_msgs.GetString(i)
+              for i in range(j.lista_msgs.GetCount())]
+    assert any("com link (Alt+Enter)" in l for l in linhas), linhas
+    chamadas = []
+    monkeypatch.setattr(jm.dialogos, "mostrar_texto",
+                        lambda *a, **k: chamadas.append(k) or None)
+    selecionar(j, "5")
+    j._detalhes()
+    assert chamadas[0]["links"] == [("https://a.com/x", "https://a.com/x")]
