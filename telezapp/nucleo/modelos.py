@@ -206,6 +206,25 @@ def rotulo_conversa(c):
     return base
 
 
+_LINK = re.compile(r"(?:https?://|www\.)[^\s<>\"']+", re.IGNORECASE)
+_FIM_DE_LINK = ".,;:!?)]}»”’'\""
+
+
+def extrair_links(texto):
+    """Links (http, https e www) de um texto, na ordem, sem repetir.
+    Devolve [(endereco_para_abrir, como_aparece_no_texto)]."""
+    achados, vistos = [], set()
+    for t in _LINK.findall(texto or ""):
+        t = t.rstrip(_FIM_DE_LINK)
+        if len(t) < 5:
+            continue
+        url = t if t.lower().startswith("http") else "https://" + t
+        if url not in vistos:
+            vistos.add(url)
+            achados.append((url, t))
+    return achados
+
+
 def texto_marcador(n):
     return "Início das mensagens não lidas: %d %s" % (
         n, "mensagem" if n == 1 else "mensagens")

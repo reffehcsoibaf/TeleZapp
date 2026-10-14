@@ -1127,7 +1127,8 @@ class Janela(wx.Frame):
         dialogos.mostrar_texto(self, "Detalhes da mensagem",
                                m.detalhes(x, conv.nome if conv else "",
                                           recibos=recibos, midia=midia),
-                               "Detalhes e texto completo")
+                               "Detalhes e texto completo",
+                               links=m.extrair_links(x.texto))
 
     def _responder(self):
         x = self._mensagem_selecionada()

@@ -110,8 +110,18 @@ def pedir_credenciais_telegram(pai, validar):
                       wx.OK | wx.ICON_WARNING, pai)
 
 
-def mostrar_texto(pai, titulo, texto, rotulo):
-    """Texto longo somente leitura, navegavel pelas setas."""
+def abrir_link(url):
+    """Abre no navegador padrao; so enderecos http e https."""
+    if not url.lower().startswith(("http://", "https://")):
+        return False
+    return wx.LaunchDefaultBrowser(url)
+
+
+def mostrar_texto(pai, titulo, texto, rotulo, links=()):
+    """Texto longo somente leitura, navegavel pelas setas. Se houver links
+    ([(endereco, texto)]), aparecem numa lista depois do texto: Tab chega
+    nela, as setas passam de um link a outro e Enter ou Espaco abre o link
+    no navegador padrao."""
     dlg = wx.Dialog(pai, title=titulo, size=(620, 460),
                     style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
     rot = wx.StaticText(dlg, label=rotulo)
@@ -122,6 +132,31 @@ def mostrar_texto(pai, titulo, texto, rotulo):
     lay = wx.BoxSizer(wx.VERTICAL)
     lay.Add(rot, 0, wx.ALL, 8)
     lay.Add(caixa, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
+    lista = None
+    if links:
+        rot_l = "Links da mensagem (%d). Enter ou Espaço abre no navegador" \
+            % len(links)
+        lay.Add(wx.StaticText(dlg, label=rot_l), 0, wx.ALL, 8)
+        lista = wx.ListBox(dlg, choices=[t for _, t in links], name=rot_l)
+        lista.SetSelection(0)
+        lay.Add(lista, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
+
+        def abrir_selecionado(evt=None):
+            i = lista.GetSelection()
+            if 0 <= i < len(links):
+                abrir_link(links[i][0])
+
+        def tecla(evt):
+            k = evt.GetKeyCode()
+            if dlg.FindFocus() is lista and k in (
+                    wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER, wx.WXK_SPACE) and \
+                    not (evt.AltDown() or evt.ControlDown()
+                         or evt.ShiftDown()):
+                abrir_selecionado()
+                return
+            evt.Skip()
+        dlg.Bind(wx.EVT_CHAR_HOOK, tecla)
+        lista.Bind(wx.EVT_LISTBOX_DCLICK, abrir_selecionado)
     lay.Add(ok, 0, wx.ALL | wx.ALIGN_RIGHT, 8)
     dlg.SetSizer(lay)
     dlg.SetEscapeId(wx.ID_OK)

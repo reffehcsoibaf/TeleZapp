@@ -29,6 +29,8 @@ Etapa 3a: receber e abrir mídias.
   dos downloads.
 - Janela: Esc fecha a conversa (só as conversas ficam); a caixa de digitar
   fica visível enquanto a conversa está aberta e o rascunho é guardado ao sair.
+- Detalhes da mensagem: lista de links (http, https, www) que abrem no
+  navegador padrão com Enter ou Espaço.
 - Menu de contexto/Mensagem: Ir para a mensagem respondida (busca no banco
   se estiver fora da lista); Esc volta para a resposta.
 - Respostas citam um trecho da mensagem original (do banco, se fora da
