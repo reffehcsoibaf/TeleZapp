@@ -181,6 +181,7 @@ class ClienteFalso:
             raise RuntimeError("erro")
         if getattr(self, "recusar_479", 0) > 0 and (
                 mensagem.HasField("buttonsResponseMessage") or
+                mensagem.HasField("documentWithCaptionMessage") or
                 mensagem.HasField("templateButtonReplyMessage")):
             self.recusar_479 -= 1
             raise RuntimeError("server returned error 479")
@@ -971,7 +972,10 @@ def test_escolher_opcao_de_lista_e_botoes_simples(amb):
     amb.p.responder_acao(recebida, {"tipo": "botoes", "rotulo": "Sim",
                                     "id": "1"})
     esperar(amb.fila, ev.MensagemNova)
-    b = amb.c.enviadas[-1][1].buttonsResponseMessage
+    # 1a variante, experimental: a resposta vai dentro de um documento com
+    # legenda (assim a biblioteca nao poe o no <biz><buttons_response/>)
+    b = amb.c.enviadas[-1][1].documentWithCaptionMessage.message \
+        .buttonsResponseMessage
     assert (b.selectedButtonID, b.selectedDisplayText) == ("1", "Sim")
 
 
@@ -1037,12 +1041,12 @@ def test_resposta_de_botao_tenta_variantes_quando_o_servidor_recusa(amb):
     recebida = esperar(amb.fila, ev.MensagemNova).mensagem
     recebida.remetente = "94476496285751@lid"
     acao = m.extras_de(recebida)["acoes"][1]
-    amb.c.recusar_479 = 1                    # a primeira variante e recusada
+    amb.c.recusar_479 = 2                    # a experimental e a do celular
     amb.p.responder_acao(recebida, acao)
     esperar(amb.fila, ev.MensagemNova)
     destino, proto = amb.c.enviadas[-1]
     r = proto.buttonsResponseMessage
-    assert destino == "5551988887777@s.whatsapp.net"      # 2a variante
+    assert destino == "5551988887777@s.whatsapp.net"      # 3a variante
     assert (r.selectedButtonID, r.selectedDisplayText) == ("2", "Residência")
     assert r.contextInfo.quotedMessage.HasField("buttonsMessage")
     assert r.contextInfo.participant == "94476496285751@lid"
@@ -1059,4 +1063,20 @@ def test_resposta_de_botao_so_falha_se_todas_as_variantes_forem_recusadas(
     amb.p.responder_acao(recebida, m.extras_de(recebida)["acoes"][0])
     falha = esperar(amb.fila, ev.EnvioFalhou)
     assert "erro do WhatsApp" in falha.motivo and not falha.devolver_texto
-    assert amb.c.recusar_479 == 99 - 3       # tentou as 3 variantes
+    assert amb.c.recusar_479 == 99 - 4       # tentou as 4 variantes
+
+
+def test_resposta_de_botao_tenta_primeiro_a_variante_experimental(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento("O5", _buttons_message()))
+    recebida = esperar(amb.fila, ev.MensagemNova).mensagem
+    recebida.remetente = "94476496285751@lid"
+    amb.p.responder_acao(recebida, m.extras_de(recebida)["acoes"][1])
+    esperar(amb.fila, ev.MensagemNova)
+    destino, proto = amb.c.enviadas[-1]
+    assert destino == "94476496285751@lid"
+    assert not proto.HasField("buttonsResponseMessage")
+    r = proto.documentWithCaptionMessage.message.buttonsResponseMessage
+    assert (r.selectedButtonID, r.selectedDisplayText) == ("2", "Residência")
+    assert r.contextInfo.stanzaID == "O5"

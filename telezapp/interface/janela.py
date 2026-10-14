@@ -33,6 +33,7 @@ TEXTO_SEM_MENSAGENS = "Esta conversa ainda não tem mensagens."
 TEXTO_CARREGANDO = "Carregando mensagens..."
 TEXTO_SEM_CONTAS = "Nenhuma conversa ainda. Aperte Alt e use Contas, no " \
                    "menu, para adicionar uma conta do Telegram ou do WhatsApp."
+MAX_BOTOES_ACAO = 12     # botoes de resposta que cabem na ordem de Tab
 LIMITE_CACHE = 100        # mensagens lidas do banco ao abrir a conversa
 LIMITE_MEMORIA = 1200     # mensagens mantidas na memoria por conversa
 
@@ -115,6 +116,7 @@ class Janela(wx.Frame):
         self.conversas = []           # ordenadas pela ultima mensagem
         self._chaves_conv = []        # chave de cada item da lista
         self._rotulos_conv = []       # texto de cada item da lista
+        self._acoes_enviadas = []     # respostas de botao esperando resultado
         self.rascunhos = {}           # texto nao enviado de cada conversa
         self.indice = {}              # chave -> Conversa
         self.cache = {}               # chave da conversa -> [Mensagem]
@@ -316,6 +318,16 @@ class Janela(wx.Frame):
         self.rot_msgs = wx.StaticText(painel, label="Mensagens")
         self.lista_msgs = wx.ListBox(painel, style=wx.LB_SINGLE | wx.LB_HSCROLL,
                                      name="Mensagens")
+        # botoes de resposta da mensagem selecionada: controles de verdade,
+        # criados aqui para ficarem na ordem de Tab logo depois da lista
+        # (so aparecem quando a mensagem selecionada tem botoes ou opcoes)
+        self.botoes_acao, self._acoes_atuais = [], []
+        self._msg_das_acoes, self._botoes_chave = None, None
+        for i in range(MAX_BOTOES_ACAO):
+            b = wx.Button(painel, label="Botão")
+            b.Show(False)
+            b.Bind(wx.EVT_BUTTON, seguro(lambda e, k=i: self._tocar_botao(k)))
+            self.botoes_acao.append(b)
         self.rot_caixa = wx.StaticText(painel, label="Digite sua mensagem")
         self.caixa = wx.TextCtrl(painel, style=wx.TE_MULTILINE,
                                  name="Digite sua mensagem")
@@ -327,6 +339,10 @@ class Janela(wx.Frame):
         dir_ = wx.BoxSizer(wx.VERTICAL)
         dir_.Add(self.rot_msgs, 0, wx.BOTTOM, 4)
         dir_.Add(self.lista_msgs, 3, wx.EXPAND)
+        linha_acoes = wx.WrapSizer(wx.HORIZONTAL)
+        for b in self.botoes_acao:
+            linha_acoes.Add(b, 0, wx.RIGHT, 6)
+        dir_.Add(linha_acoes, 0, wx.TOP, 4)
         dir_.Add(self.rot_caixa, 0, wx.TOP | wx.BOTTOM, 4)
         dir_.Add(self.caixa, 1, wx.EXPAND)
         dir_.Add(self.botao_enviar, 0, wx.TOP, 6)
@@ -339,6 +355,8 @@ class Janela(wx.Frame):
                              seguro(lambda e: self._abrir_selecionada_na_lista()))
         self.lista_msgs.Bind(wx.EVT_CONTEXT_MENU, seguro(self._menu_mensagem))
         self.lista_msgs.Bind(wx.EVT_KEY_DOWN, self._tecla_mensagens)
+        self.lista_msgs.Bind(wx.EVT_LISTBOX,
+                             seguro(lambda e: self._atualizar_botoes()))
         self.botao_enviar.Bind(wx.EVT_BUTTON,
                                seguro(lambda e: self._enviar_texto()))
         self._mostrar_conversa(False, False)
@@ -350,7 +368,41 @@ class Janela(wx.Frame):
             w.Show(mensagens)
         for w in (self.rot_caixa, self.caixa, self.botao_enviar):
             w.Show(escrever)
+        if not mensagens:
+            self._botoes_chave = None
+            for b in self.botoes_acao:
+                b.Show(False)
         self.painel.Layout()
+
+    def _atualizar_botoes(self):
+        """Mostra, logo depois da lista, um botao para cada botao/opcao da
+        mensagem selecionada (Tab vai de um ao outro). Nao mexe no foco, a
+        nao ser que o botao focado deixe de existir."""
+        x = self._mensagem_selecionada() if self.atual else None
+        acoes = m.extras_de(x)["acoes"][:MAX_BOTOES_ACAO] if x else []
+        chave = (x.id if x else None,
+                 tuple(a.get("rotulo", "") for a in acoes))
+        if chave == self._botoes_chave:
+            return
+        self._botoes_chave = chave
+        self._acoes_atuais, self._msg_das_acoes = acoes, x
+        perdeu_foco = False
+        for i, b in enumerate(self.botoes_acao):
+            if i < len(acoes):
+                b.SetLabel((acoes[i].get("rotulo") or "Botão")
+                           .replace("&", "&&"))
+                b.Show(True)
+            else:
+                perdeu_foco = perdeu_foco or b.HasFocus()
+                b.Show(False)
+        if perdeu_foco:
+            self.lista_msgs.SetFocus()
+        self.painel.Layout()
+
+    @seguro
+    def _tocar_botao(self, i):
+        if 0 <= i < len(self._acoes_atuais) and self._msg_das_acoes:
+            self._tocar_acao(self._msg_das_acoes, self._acoes_atuais[i])
 
     def _atualizar_titulo(self):
         """Titulo da janela: conversa aberta e o que esta em andamento
@@ -733,7 +785,10 @@ class Janela(wx.Frame):
         self._ordenar()
         self._preencher_conversas()
         if e.enviada_daqui:
-            self._tirar_local(chave, msg.texto)
+            if self._acao_concluida(chave, msg.texto, True):
+                self.fala.falar("Enviado: " + msg.texto, interromper=True)
+            else:
+                self._tirar_local(chave, msg.texto)
         self._mesclar(chave, [msg])
         if aberta:
             # nada tira a pessoa de onde ela esta por conta propria
@@ -770,6 +825,7 @@ class Janela(wx.Frame):
 
     def _ev_falha(self, e):
         chave = (e.conta_id, e.conversa_id)
+        self._acao_concluida(chave, e.texto, False)
         for x in self.cache.get(chave, []):
             if x.id.startswith("local-") and x.texto == e.texto and \
                     x.estado == m.ENVIANDO:
@@ -1032,6 +1088,7 @@ class Janela(wx.Frame):
                     self.lista_msgs.SetString(k, b)
             for texto in itens[len(velho_mapa):]:
                 self.lista_msgs.Append(texto)
+            self._atualizar_botoes()
             return
         i_antes = self.lista_msgs.GetSelection()
         self.lista_msgs.Set(itens)
@@ -1050,6 +1107,7 @@ class Janela(wx.Frame):
             elif i_antes >= 0:
                 sel = min(i_antes, len(itens) - 1)   # perto de onde estava
         self.lista_msgs.SetSelection(sel)
+        self._atualizar_botoes()
 
     def _destino_inicial(self):
         """Onde a selecao cai ao abrir a conversa: no marcador, se ha nao
@@ -1181,28 +1239,31 @@ class Janela(wx.Frame):
 
     @seguro
     def _tocar_acao(self, x, acao):
-        """Confirma e envia a resposta de um botao/opcao de uma mensagem."""
+        """Envia a resposta de um botao/opcao de uma mensagem, direto, sem
+        confirmar. O resultado e falado quando chega: "Enviado" (a resposta
+        aparece na conversa) ou o aviso de falha."""
         prov = self.contas.provedores.get(x.conta_id)
-        conv = self.indice.get((x.conta_id, x.conversa_id))
-        nome = conv.nome if conv else "esta conversa"
-        rotulo = acao.get("rotulo", "")
-        o_que = "a opção" if acao.get("tipo") == "lista" else "o botão"
         if prov is None:
             bipe("erro")
             self.fala.falar("Esta conta não está disponível agora.")
             return
-        r = wx.MessageBox("Enviar %s \"%s\" para %s?" % (o_que, rotulo, nome),
-                          "Confirmar", wx.YES_NO | wx.NO_DEFAULT |
-                          wx.ICON_QUESTION, self)
-        if r != wx.YES:
-            return
+        rotulo = acao.get("rotulo", "")
+        self._acoes_enviadas.append((x.conta_id, x.conversa_id, rotulo))
         try:
             prov.responder_acao(x, acao)
         except NotImplementedError:
+            self._acoes_enviadas.pop()
             bipe("erro")
             self.fala.falar("Este serviço ainda não responde a botões.")
-            return
-        self.fala.falar("Enviando: " + rotulo)
+
+    def _acao_concluida(self, chave, texto, sucesso):
+        """Tira da lista de respostas de botao esperando resultado; True se
+        era uma delas."""
+        item = (chave[0], chave[1], texto)
+        if item in self._acoes_enviadas:
+            self._acoes_enviadas.remove(item)
+            return True
+        return False
 
     @seguro
     def _abrir_conversa_da_mencao(self, x, pessoa):

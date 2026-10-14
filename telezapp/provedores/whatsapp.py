@@ -1353,8 +1353,23 @@ class ProvedorWhatsApp(Provedor):
                                msg.conversa_id, original, False))
         candidatas.append(("citação simples", msg.conversa_id, simples,
                            False))
-        return [(nome, dest, self._mensagem_de_acao(msg, acao, citada), segredo)
-                for nome, dest, citada, segredo in candidatas]
+        variantes = [(nome, dest, self._mensagem_de_acao(msg, acao, citada),
+                      segredo)
+                     for nome, dest, citada, segredo in candidatas]
+        if acao.get("tipo") == "botoes" and variantes:
+            # EXPERIMENTAL: o servidor recusa (479) a resposta de botão com
+            # o no <biz><buttons_response/> que a biblioteca poe sozinha; o
+            # celular nao manda esse no. A biblioteca so o poe quando
+            # reconhece a mensagem, e nao olha dentro do envelope de
+            # "documento com legenda".
+            from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (
+                FutureProofMessage)
+            nome, dest, interna, segredo = variantes[0]
+            variantes.insert(0, (
+                "experimental: dentro de documento com legenda", dest,
+                Message(documentWithCaptionMessage=FutureProofMessage(
+                    message=interna)), segredo))
+        return variantes
 
     def _mensagem_de_acao(self, msg, acao, citada=None):
         from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (

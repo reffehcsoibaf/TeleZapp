@@ -216,6 +216,12 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None):
     cont = conteudo(m).replace("\r", " ").replace("\n", " ")
     if m.tipo not in (TEXTO, VOZ, FIGURINHA) and tem_links(m):
         cont = _juntar(cont, "com link (Enter)")
+    acoes = extras_de(m)["acoes"]
+    if acoes:
+        so_opcoes = all(a.get("tipo") == "lista" for a in acoes)
+        cont = _juntar(cont, "com %d %s (Tab)" % (
+            len(acoes), ("opção" if len(acoes) == 1 else "opções")
+            if so_opcoes else ("botão" if len(acoes) == 1 else "botões")))
     if m.resposta_a:
         if isinstance(respondida, Mensagem):
             quem = "você" if respondida.minha else (

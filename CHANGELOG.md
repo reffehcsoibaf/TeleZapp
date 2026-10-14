@@ -3,6 +3,25 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.14.15
+
+- Botões de resposta viram controles de verdade (`wx.Button`, até 12, criados
+  logo depois da lista de mensagens para ficarem na ordem de Tab). Aparecem só
+  quando a mensagem selecionada tem botões/opções (`_atualizar_botoes`, chamado
+  ao mudar a seleção e ao refazer a lista); o foco só é movido se o botão
+  focado deixar de existir. A linha da mensagem ganha "com N botões (Tab)".
+- Sem janela de confirmação, também no caminho pelos Detalhes. O resultado é
+  falado quando chega: "Enviado: X" (a resposta aparece na conversa) ou o aviso
+  de falha de sempre (`_acoes_enviadas` casa conta, conversa e rótulo).
+- Variante EXPERIMENTAL tentada antes das outras para `buttonsMessage`: a
+  resposta vai dentro de `documentWithCaptionMessage`. Motivo: o pacote do
+  celular, como o servidor o repassou (log DEBUG de 20:29), traz `<biz>` vazio,
+  sem o filho `<buttons_response/>` que o whatsmeow acrescenta ao nosso, e o
+  servidor preserva filhos do `<biz>` em outras mensagens (`<buttons/>`,
+  `<interactive>`). O whatsmeow só olha dentro de ViewOnce/ViewOnceV2/Ephemeral.
+  NÃO verificado: se o servidor aceita, se o tipo/mediatype calculado muda e se
+  a empresa entende a resposta embrulhada. O log nomeia a variante aceita.
+
 ## 2026.10.14.14
 
 - Teste real: modelo (`templateButtonReplyMessage`) foi aceito e entendido;
