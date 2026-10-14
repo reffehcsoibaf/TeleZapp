@@ -208,6 +208,39 @@ def botoes_do_whatsapp(interna):
     return botoes
 
 
+CAMPOS_INTERATIVOS = ("buttonsMessage", "templateMessage", "interactiveMessage",
+                      "listMessage", "buttonsResponseMessage",
+                      "listResponseMessage", "templateButtonReplyMessage",
+                      "interactiveResponseMessage")
+
+
+def estrutura_interativa(interna):
+    """Formato (sem textos longos nem imagens) de uma mensagem de empresa
+    com botoes ou lista, para o registro: serve para implementarmos o toque
+    nos botoes com dados reais. None se nao e deste tipo."""
+    from google.protobuf.json_format import MessageToDict
+    for nome in CAMPOS_INTERATIVOS:
+        try:
+            if not interna.HasField(nome):
+                continue
+            dados = MessageToDict(getattr(interna, nome))
+        except Exception:
+            continue
+
+        def limpar(x):
+            if isinstance(x, dict):
+                return {k: limpar(v) for k, v in x.items()
+                        if k not in ("JPEGThumbnail", "jpegThumbnail",
+                                     "contextInfo", "mediaKey", "thumbnail")}
+            if isinstance(x, list):
+                return [limpar(v) for v in x]
+            if isinstance(x, str) and len(x) > 80:
+                return x[:80] + "…"
+            return x
+        return {nome: limpar(dados)}
+    return None
+
+
 def nome_verificado(info):
     """Nome verificado de empresa que vem junto da mensagem, ou ''."""
     try:
@@ -275,6 +308,10 @@ def converter(evento, conta_id, conversa_id, autor=""):
     origem = info.MessageSource
     minha = bool(origem.IsFromMe)
     ctx = _contexto(interna)
+    forma = estrutura_interativa(interna)
+    if forma:
+        log.info("mensagem interativa: %s", json.dumps(forma,
+                                                       ensure_ascii=False))
     msg = m.Mensagem(
         conta_id=conta_id, conversa_id=conversa_id, id=info.ID,
         autor="" if minha else (autor or info.Pushname or

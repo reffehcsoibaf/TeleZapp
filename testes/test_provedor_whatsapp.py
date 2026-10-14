@@ -823,3 +823,16 @@ def test_conversa_so_com_telefone_pergunta_o_nome_da_empresa_ao_whatsapp(amb):
             break
         threading.Event().wait(0.02)
     assert amb.p.banco.conversas(amb.p.conta.id)[0].nome == "99 Pay"
+
+
+def test_estrutura_interativa_descreve_botoes_sem_imagem_nem_texto_longo():
+    nf = E.InteractiveMessage.NativeFlowMessage(buttons=[
+        E.InteractiveMessage.NativeFlowMessage.NativeFlowButton(
+            name="quick_reply", buttonParamsJSON='{"id":"1","display_text":"Sim"}')])
+    inter = E.InteractiveMessage(
+        body=E.InteractiveMessage.Body(text="x" * 200), nativeFlowMessage=nf)
+    forma = wa.estrutura_interativa(E.Message(interactiveMessage=inter))
+    botao = forma["interactiveMessage"]["nativeFlowMessage"]["buttons"][0]
+    assert botao["name"] == "quick_reply"
+    assert len(forma["interactiveMessage"]["body"]["text"]) <= 81
+    assert wa.estrutura_interativa(E.Message(conversation="oi")) is None
