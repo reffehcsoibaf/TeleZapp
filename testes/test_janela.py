@@ -1097,3 +1097,32 @@ def test_enter_em_botao_de_resposta_confirma_e_envia(j, monkeypatch):
     j._detalhes()
     assert ("acao", "8", "Sim") in j.contas.p.pedidos
     assert "Enviar o botão \"Sim\"" in wx_falso.mensagens[-1]
+
+
+def test_depurar_mensagem_abre_a_janela_com_o_texto(j, monkeypatch):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    x = msg("9", "oi", conversa="10")
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [x]))
+    chamadas = []
+    monkeypatch.setattr(jm.dialogos, "mostrar_depuracao",
+                        lambda *a: chamadas.append(a))
+    selecionar(j, "9")
+    j._depurar_mensagem()
+    assert "DEPURAÇÃO DE MENSAGEM" in chamadas[0][2]
+    assert "Ligue o Modo de depuração" in chamadas[0][2]
+
+
+def test_modo_de_depuracao_liga_desliga_e_salva_em_arquivo(j, tmp_path,
+                                                           monkeypatch):
+    monkeypatch.setenv("TELEZAPP_PASTA_DEPURACAO", str(tmp_path))
+    j._modo_depuracao(True)
+    assert j.banco.depuracao is True and j.cfg.get("depuracao") is True
+    j.banco.guardar_depuracao("t1", "10", "9", "{}")
+    j._salvar_depuracao("conteudo de teste")
+    arquivos = list(tmp_path.glob("telezapp_depuracao_*.txt"))
+    assert len(arquivos) == 1 and \
+        arquivos[0].read_text(encoding="utf-8") == "conteudo de teste"
+    j._modo_depuracao(False)
+    assert j.banco.depuracao is False
+    assert j.banco.depuracao_de("t1", "10", "9") == ""

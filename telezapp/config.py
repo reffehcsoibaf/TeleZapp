@@ -70,6 +70,19 @@ def mascarar_telefone(telefone):
     return t[:3] + "..." + t[-4:] if len(t) > 7 else "..."
 
 
+def pasta_depuracao():
+    """Onde a depuracao grava os textos salvos: C:\\logs no Windows (a
+    pasta que a pessoa ja usa para os logs), senao a pasta de logs do app."""
+    especial = os.environ.get("TELEZAPP_PASTA_DEPURACAO")
+    if especial:
+        os.makedirs(especial, exist_ok=True)
+        return especial
+    if os.name == "nt":
+        os.makedirs("C:\\logs", exist_ok=True)
+        return "C:\\logs"
+    return pasta("logs")
+
+
 def pasta_temporaria():
     """Arquivos temporarios do app: so aqui, nunca no %temp% do Windows."""
     return pasta("temp")
@@ -102,6 +115,10 @@ OPCOES = (
           "O leitor de tela fala o autor e o conteúdo de cada mensagem nova."),
     Opcao("confirmar_envio", "Confirmar envio por voz", "Avisos", True,
           "Fala Enviada depois que uma mensagem sai."),
+    Opcao("depuracao", "Modo de depuração", "Avançado", False,
+          "Guarda, no seu computador, a estrutura original das últimas 500 "
+          "mensagens do WhatsApp para o menu Depurar mostrar. Contém o texto "
+          "e os telefones dessas mensagens. Ao desligar, tudo é apagado."),
     Opcao("estilo", "Como cada mensagem é lida", "Leitura", 1,
           "A ordem em que autor, hora e conteúdo aparecem na lista de "
           "mensagens.",

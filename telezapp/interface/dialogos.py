@@ -219,6 +219,35 @@ def mostrar_texto(pai, titulo, texto, rotulo, links=(), botoes=(),
     return escolhida[0]
 
 
+def mostrar_depuracao(pai, titulo, texto, copiar, salvar):
+    """Texto de depuracao somente leitura, com os botoes Copiar tudo e
+    Salvar em arquivo. `copiar(texto)` e `salvar(texto)` fazem o trabalho e
+    avisam a pessoa; a janela so os chama."""
+    dlg = wx.Dialog(pai, title=titulo, size=(700, 560),
+                    style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+    rot = wx.StaticText(dlg, label="Texto de depuração")
+    caixa = wx.TextCtrl(dlg, value=texto, name="Texto de depuração",
+                        style=wx.TE_MULTILINE | wx.TE_READONLY)
+    b_copiar = wx.Button(dlg, wx.ID_ANY, "&Copiar tudo")
+    b_salvar = wx.Button(dlg, wx.ID_ANY, "&Salvar em arquivo")
+    b_fechar = wx.Button(dlg, wx.ID_OK, "&Fechar")
+    b_fechar.SetDefault()
+    b_copiar.Bind(wx.EVT_BUTTON, lambda e: copiar(texto))
+    b_salvar.Bind(wx.EVT_BUTTON, lambda e: salvar(texto))
+    linha = wx.BoxSizer(wx.HORIZONTAL)
+    for b in (b_copiar, b_salvar, b_fechar):
+        linha.Add(b, 0, wx.RIGHT, 8)
+    lay = wx.BoxSizer(wx.VERTICAL)
+    lay.Add(rot, 0, wx.ALL, 8)
+    lay.Add(caixa, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
+    lay.Add(linha, 0, wx.ALL | wx.ALIGN_RIGHT, 8)
+    dlg.SetSizer(lay)
+    dlg.SetEscapeId(wx.ID_OK)
+    caixa.SetFocus()
+    dlg.ShowModal()
+    dlg.Destroy()
+
+
 # ------------------------------------------------------- pareamento WhatsApp
 INSTRUCOES_CODIGO = (
     "No celular, abra o WhatsApp, vá em Configurações, Dispositivos "

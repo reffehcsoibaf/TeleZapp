@@ -3,6 +3,22 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.14.11
+
+PR #12: menu Depurar.
+
+- `nucleo/depuracao.py`: `texto_mensagem` e `texto_conversa`.
+- Tabela `depuracao` (esquema 7) e `Banco.depuracao` (modo, `config.depuracao`,
+  padrão desligado): `guardar_depuracao` mantém as 500 mais recentes;
+  desligar apaga (`limpar_depuracao`).
+- WhatsApp: `estrutura_bruta` (sem miniaturas nem chaves de mídia) guardada
+  no caminho ao vivo e no histórico; `depurar_conversa` mostra como o nome foi
+  achado. Telegram ainda sem estrutura original.
+- Janela: menu Depurar (mensagem Ctrl+Shift+D, conversa, modo);
+  `dialogos.mostrar_depuracao` com Copiar tudo e Salvar em arquivo
+  (`config.pasta_depuracao`: C:\logs no Windows).
+- `estrutura_interativa` passou a usar `_limpar`, compartilhado.
+
 ## 2026.10.14.10
 
 PR #11: tocar nos botões de resposta e nas listas do WhatsApp.

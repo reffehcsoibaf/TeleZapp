@@ -327,6 +327,41 @@ CAMPOS_INTERATIVOS = ("buttonsMessage", "templateMessage", "interactiveMessage",
                       "interactiveResponseMessage")
 
 
+_CAMPOS_PESADOS = ("JPEGThumbnail", "jpegThumbnail", "contextInfo",
+                   "mediaKey", "thumbnail", "fileEncSHA256", "fileSHA256",
+                   "mediaKeyTimestamp", "directPath", "fileEncSha256",
+                   "fileSha256", "streamingSidecar")
+
+
+def _limpar(x, truncar=0, manter=()):
+    """Tira miniaturas e chaves de midia de uma estrutura (dict/list) e, se
+    `truncar`, corta textos maiores que isso."""
+    if isinstance(x, dict):
+        return {k: _limpar(v, truncar, manter) for k, v in x.items()
+                if k not in _CAMPOS_PESADOS or k in manter}
+    if isinstance(x, list):
+        return [_limpar(v, truncar, manter) for v in x]
+    if truncar and isinstance(x, str) and len(x) > truncar:
+        return x[:truncar] + "…"
+    return x
+
+
+def estrutura_bruta(mensagem, info=None):
+    """Estrutura original (JSON, sem miniaturas nem chaves) de uma mensagem
+    do WhatsApp, para o menu Depurar. `mensagem` e o protobuf Message ou
+    WebMessageInfo; `info` (opcional) e o Info do evento ao vivo."""
+    from google.protobuf.json_format import MessageToDict
+    saida = {}
+    try:
+        if info is not None:
+            saida["info"] = _limpar(MessageToDict(info))
+        saida["mensagem"] = _limpar(MessageToDict(mensagem), manter=(
+            "contextInfo",))
+    except Exception as e:
+        saida["erro"] = "não consegui ler a estrutura: %s" % type(e).__name__
+    return json.dumps(saida, ensure_ascii=False, indent=2, default=str)
+
+
 def estrutura_interativa(interna):
     """Formato (sem textos longos nem imagens) de uma mensagem de empresa
     com botoes ou lista, para o registro: serve para implementarmos o toque
@@ -340,17 +375,7 @@ def estrutura_interativa(interna):
         except Exception:
             continue
 
-        def limpar(x):
-            if isinstance(x, dict):
-                return {k: limpar(v) for k, v in x.items()
-                        if k not in ("JPEGThumbnail", "jpegThumbnail",
-                                     "contextInfo", "mediaKey", "thumbnail")}
-            if isinstance(x, list):
-                return [limpar(v) for v in x]
-            if isinstance(x, str) and len(x) > 80:
-                return x[:80] + "…"
-            return x
-        return {nome: limpar(dados)}
+        return {nome: _limpar(dados, 80)}
     return None
 
 
@@ -897,6 +922,35 @@ class ProvedorWhatsApp(Provedor):
             return "+" + alvo.User
         return SEM_NOME
 
+    def depurar_conversa(self, conversa_id):
+        """Como o nome da conversa foi achado (menu Depurar)."""
+        dados = {"conversa_id": conversa_id}
+        if self.cliente is None or "@" not in (conversa_id or ""):
+            return dados
+        try:
+            usuario, servidor = jid_de_texto(conversa_id)
+            jid = _jid_obj(usuario, servidor)
+            alvo = self._numero_do_jid(jid)
+            dados["servidor"] = servidor
+            dados["numero"] = "%s@%s" % (alvo.User, alvo.Server)
+            dados["apelido_visto_nas_mensagens"] = self._apelidos.get(
+                conversa_id, "")
+            for tentativa in (alvo, jid) if alvo is not jid else (jid,):
+                try:
+                    info = self.cliente.contact.get_contact(tentativa)
+                except Exception as e:
+                    dados["contato_%s" % tentativa.Server] = \
+                        "erro: %s" % type(e).__name__
+                    continue
+                dados["contato_%s" % tentativa.Server] = {
+                    "nome_na_agenda": info.FullName or info.FirstName,
+                    "nome_no_perfil": info.PushName,
+                    "nome_verificado_da_empresa": info.BusinessName}
+            dados["nome_escolhido"] = self._nome_contato(jid)
+        except Exception as e:
+            dados["erro"] = type(e).__name__
+        return dados
+
     def nome_de_participante(self, participante_id):
         """Nome de quem entregou/leu uma mensagem, para os detalhes."""
         if self.cliente is None or "@" not in (participante_id or ""):
@@ -1102,6 +1156,10 @@ class ProvedorWhatsApp(Provedor):
             if msg is None:
                 return
             self._enriquecer_mencoes(msg)
+            if self.banco.depuracao:
+                self.banco.guardar_depuracao(
+                    self.conta.id, cid, msg.id,
+                    estrutura_bruta(evento.Message, info))
             if cid in IGNORAR_CONVERSAS:
                 self._guardar_status(msg, origem, info.Pushname)
                 return
@@ -1426,6 +1484,9 @@ class ProvedorWhatsApp(Provedor):
                 if x is None or (limite and x.data < limite):
                     continue
                 self._enriquecer_mencoes(x)
+                if self.banco.depuracao:
+                    self.banco.guardar_depuracao(
+                        self.conta.id, cid, x.id, estrutura_bruta(h.message))
                 novas.append(x)
                 if x.tipo in armazem.BAIXAVEIS and \
                         h.message.HasField("message"):

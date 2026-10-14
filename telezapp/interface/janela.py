@@ -20,6 +20,7 @@ from telezapp.acessibilidade.fala import Fala, bipe
 from telezapp.interface import dialogos, visualizadores
 from telezapp.midia import armazem
 from telezapp.midia.reprodutor import FormatoNaoSuportado, Reprodutor
+from telezapp.nucleo import depuracao
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import paginas
@@ -53,6 +54,7 @@ F5: atualizar a lista de conversas
 Control Shift R: responder à mensagem selecionada
 Control Shift C: copiar o texto da mensagem selecionada
 Alt Enter: ver os detalhes e o texto completo da mensagem selecionada
+Control Shift D: depurar a mensagem selecionada (menu Depurar)
 Control O: abrir a mídia da mensagem (baixa antes, se preciso), mesmo
 quando a legenda tem link
 Control B: baixar a mídia sem abrir
@@ -219,6 +221,13 @@ class Janela(wx.Frame):
         for chave in ("som", "falar_novas", "confirmar_envio"):
             item(m_exib, chave, rotulos[chave], "check")
 
+        m_dep = wx.Menu()
+        item(m_dep, "dep_msg", "Depurar esta &mensagem\tCtrl+Shift+D")
+        item(m_dep, "dep_conv", "Depurar esta &conversa")
+        m_dep.AppendSeparator()
+        item(m_dep, "depuracao", "&Modo de depuração (guardar a estrutura "
+                                 "das mensagens novas)", "check")
+
         m_aj = wx.Menu()
         item(m_aj, "guia", "&Guia de uso\tF1")
         item(m_aj, "ajuda", "&Teclas de atalho\tShift+F1")
@@ -229,6 +238,7 @@ class Janela(wx.Frame):
         for submenu, rotulo in ((m_contas, "&Contas"), (m_conv, "C&onversa"),
                                 (m_msg, "&Mensagem"), (m_mid, "Mí&dias"),
                                 (m_exib, "&Exibição"),
+                                (m_dep, "&Depurar"),
                                 (m_aj, "A&juda")):
             raiz.AppendSubMenu(submenu, rotulo)
         raiz.AppendSeparator()
@@ -254,6 +264,8 @@ class Janela(wx.Frame):
             "copiar": lambda e: self._copiar(),
             "ir_respondida": lambda e: self._ir_para_respondida(),
             "detalhes": lambda e: self._detalhes(),
+            "dep_msg": lambda e: self._depurar_mensagem(),
+            "dep_conv": lambda e: self._depurar_conversa(),
             "ajuda": lambda e: dialogos.mostrar_texto(
                 self, "Teclas de atalho", AJUDA, "Teclas de atalho"),
             "abrir_midia": lambda e: self._abrir_midia(),
@@ -273,6 +285,11 @@ class Janela(wx.Frame):
         }
         for chave, tratador in ligacoes.items():
             self.Bind(wx.EVT_MENU, seguro(tratador), self.itens[chave])
+        self.banco.depuracao = bool(self.cfg.get("depuracao"))
+        self.itens["depuracao"].Check(self.banco.depuracao)
+        self.Bind(wx.EVT_MENU,
+                  lambda e: self._modo_depuracao(e.IsChecked()),
+                  self.itens["depuracao"])
         for chave in ("som", "falar_novas", "confirmar_envio"):
             self.itens[chave].Check(bool(self.cfg.get(chave)))
             self.Bind(wx.EVT_MENU,
@@ -1233,6 +1250,72 @@ class Janela(wx.Frame):
             finally:
                 wx.TheClipboard.Close()
         self.fala.falar("Texto copiado.")
+
+    # ------------------------------------------------------------ depurar
+    def _modo_depuracao(self, ligado):
+        self.cfg.set("depuracao", bool(ligado))
+        self.banco.depuracao = bool(ligado)
+        if ligado:
+            self.fala.falar("Modo de depuração ligado. As mensagens novas do "
+                            "WhatsApp passam a ter a estrutura guardada.")
+        else:
+            self.banco.limpar_depuracao()
+            self.fala.falar("Modo de depuração desligado. As estruturas "
+                            "guardadas foram apagadas.")
+
+    def _area_de_transferencia(self, texto):
+        if wx.TheClipboard.Open():
+            try:
+                wx.TheClipboard.SetData(wx.TextDataObject(texto))
+            finally:
+                wx.TheClipboard.Close()
+        self.fala.falar("Texto de depuração copiado.")
+
+    def _salvar_depuracao(self, texto):
+        nome = time.strftime("telezapp_depuracao_%Y%m%d_%H%M%S.txt")
+        try:
+            caminho = os.path.join(config.pasta_depuracao(), nome)
+            with open(caminho, "w", encoding="utf-8") as f:
+                f.write(texto)
+        except OSError:
+            bipe("erro")
+            self.fala.falar("Não consegui salvar o arquivo.")
+            return
+        self.fala.falar("Salvo em " + caminho)
+
+    def _depurar_mensagem(self):
+        x = self._mensagem_selecionada()
+        if x is None:
+            self.fala.falar("Nenhuma mensagem selecionada.")
+            return
+        conv = self.indice.get((x.conta_id, x.conversa_id))
+        recibos = self.banco.recibos(x.conta_id, x.conversa_id, x.id)
+        texto = depuracao.texto_mensagem(
+            x, conv, self.banco.depuracao_de(x.conta_id, x.conversa_id, x.id),
+            recibos, VERSAO, bool(self.cfg.get("depuracao")))
+        dialogos.mostrar_depuracao(
+            self, "Depurar mensagem", texto, self._area_de_transferencia,
+            self._salvar_depuracao)
+
+    def _depurar_conversa(self):
+        conv = self.indice.get(self.atual) if self.atual else None
+        if conv is None:
+            i = self.lista_conv.GetSelection()
+            if 0 <= i < len(self._chaves_conv):
+                conv = self.indice.get(self._chaves_conv[i])
+        if conv is None:
+            self.fala.falar("Nenhuma conversa selecionada.")
+            return
+        prov = self.contas.provedores.get(conv.conta_id)
+        try:
+            dados = prov.depurar_conversa(conv.id) if prov else {}
+        except Exception:
+            dados = {"erro": "o serviço não conseguiu informar"}
+        msgs = self.banco.mensagens(conv.conta_id, conv.id, 500)
+        texto = depuracao.texto_conversa(conv, msgs, dados, VERSAO)
+        dialogos.mostrar_depuracao(
+            self, "Depurar conversa", texto, self._area_de_transferencia,
+            self._salvar_depuracao)
 
     def _ler_ultima(self):
         msgs = self._mensagens_atuais()

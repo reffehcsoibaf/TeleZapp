@@ -23,6 +23,7 @@
 <li><a href="#mensagens">Ler e enviar mensagens</a></li>
 <li><a href="#midias">Fotos, vídeos, áudios e documentos</a></li>
 <li><a href="#detalhes">Dados de uma mensagem</a></li>
+<li><a href="#depurar">Depurar: ver o que o WhatsApp mandou</a></li>
 <li><a href="#dados">Onde ficam os seus dados</a></li>
 </ul>
 </nav>
@@ -31,7 +32,7 @@
 <p>O TeleZapp reúne o WhatsApp e o Telegram numa só janela do Windows, pensada para quem usa leitor de tela, como o NVDA. Todos os controles são os do próprio Windows, sem telas desenhadas à mão.</p>
 
 <h2 id="menu">O menu</h2>
-<p>Aperte Alt para abrir o Menu. Ele tem um submenu para cada assunto: Contas, Conversa, Mensagem, Exibição e Ajuda, e no fim o item Sair. Use a seta para baixo para percorrer, a seta para a direita para entrar num submenu, a seta para a esquerda para voltar e Esc para fechar.</p>
+<p>Aperte Alt para abrir o Menu. Ele tem um submenu para cada assunto: Contas, Conversa, Mensagem, Mídias, Exibição, Depurar e Ajuda, e no fim o item Sair. Use a seta para baixo para percorrer, a seta para a direita para entrar num submenu, a seta para a esquerda para voltar e Esc para fechar.</p>
 
 <h2 id="contas">Adicionar e remover contas</h2>
 <p>No Menu, em Contas, escolha adicionar uma conta do Telegram ou do WhatsApp.</p>
@@ -83,6 +84,11 @@
 
 <h2 id="detalhes">Dados de uma mensagem</h2>
 <p>Alt Enter mostra, num texto que você lê com as setas, a conversa, o autor, a data, o tipo e o texto completo. Nas mensagens que você enviou pelo WhatsApp, aparece também quando cada pessoa recebeu e leu. No Telegram, em grupos, só se sabe até que mensagem alguém leu, sem a hora.</p>
+
+<h2 id="depurar">Depurar: ver o que o WhatsApp mandou</h2>
+<p>O menu Depurar serve para entender uma mensagem ou conversa que apareceu errada, sem precisar de arquivos de log. Depurar esta mensagem (Control Shift D) abre um texto com tudo que o TeleZapp guardou sobre a mensagem selecionada e, se o Modo de depuração estava ligado quando ela chegou, a estrutura original enviada pelo WhatsApp. Depurar esta conversa mostra como o nome foi escolhido (agenda, perfil, empresa ou telefone) e um resumo das mensagens.</p>
+<p>A janela tem os botões Copiar tudo, para colar numa conversa de suporte, e Salvar em arquivo, que grava em C:\logs. O texto contém mensagens e telefones, mas nunca senhas ou chaves de acesso.</p>
+<p>O Modo de depuração fica desligado. Ligado, guarda no seu computador a estrutura das últimas 500 mensagens do WhatsApp que chegarem; ao desligar, tudo é apagado.</p>
 
 <h2 id="dados">Onde ficam os seus dados</h2>
 <p>Tudo fica na pasta TeleZapp dentro de AppData\Roaming do seu usuário: configurações, sessões, conversas guardadas e registros de funcionamento (logs), sem o texto das suas mensagens. As mídias baixadas ficam na subpasta midias, e são apagadas junto com a conta quando você a remove. Arquivos temporários ficam numa subpasta do próprio programa e são apagados ao abrir e ao fechar.</p>

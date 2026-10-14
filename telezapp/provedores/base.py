@@ -64,6 +64,11 @@ class Provedor(ABC):
         Por padrao o servico nao tem isso."""
         raise NotImplementedError
 
+    def depurar_conversa(self, conversa_id):
+        """Dados do servico sobre a conversa, para o menu Depurar (como o
+        nome foi achado, identificadores). Dicionario; vazio se nao houver."""
+        return {}
+
     def nome_de_participante(self, participante_id):
         """Nome para mostrar de quem aparece num recibo (entregue, lida);
         vazio se nao souber."""

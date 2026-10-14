@@ -976,3 +976,28 @@ def test_falha_ao_tocar_botao_nao_devolve_texto_para_a_caixa(amb):
                                     "id": "1"})
     falha = esperar(amb.fila, ev.EnvioFalhou)
     assert falha.motivo == "sem conexão" and not falha.devolver_texto
+
+
+def test_modo_de_depuracao_guarda_a_estrutura_original(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento("D0", E.Message(conversation="antes")))
+    esperar(amb.fila, ev.MensagemNova)
+    cid = "5551988887777@s.whatsapp.net"
+    assert amb.banco.depuracao_de("w1", cid, "D0") == ""     # modo desligado
+    amb.banco.depuracao = True
+    amb.f["Message"](amb.c, evento("D1", _modelo_com_botoes()))
+    esperar(amb.fila, ev.MensagemNova)
+    bruto = amb.banco.depuracao_de("w1", cid, "D1")
+    assert "Você confirma a consulta?" in bruto and "quickReplyButton" in bruto
+    assert "info" in bruto and "mensagem" in bruto
+
+
+def test_depurar_conversa_explica_como_o_nome_foi_achado(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    dados = amb.p.depurar_conversa("5551988887777@s.whatsapp.net")
+    assert dados["numero"] == "5551988887777@s.whatsapp.net"
+    assert "nome_escolhido" in dados
+    assert amb.p.depurar_conversa("sem-arroba") == {
+        "conversa_id": "sem-arroba"}
