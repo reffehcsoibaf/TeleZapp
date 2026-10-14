@@ -99,10 +99,12 @@ def extras_de(msg):
     return {"links": list(dados.get("links") or []),
             "botoes": list(dados.get("botoes") or []),
             "mencoes": list(dados.get("mencoes") or []),
-            "acoes": list(dados.get("acoes") or [])}
+            "acoes": list(dados.get("acoes") or []),
+            "original": dados.get("original") or ""}
 
 
-def guardar_extras(msg, links=(), botoes=(), mencoes=(), acoes=()):
+def guardar_extras(msg, links=(), botoes=(), mencoes=(), acoes=(),
+                   original=""):
     """Poe links, botoes, mencoes e acoes (botoes de resposta e opcoes de
     lista que podem ser tocados) na mensagem (nada, se tudo vazio)."""
     dados = {}
@@ -114,6 +116,8 @@ def guardar_extras(msg, links=(), botoes=(), mencoes=(), acoes=()):
         dados["mencoes"] = [dict(x) for x in mencoes]
     if acoes:
         dados["acoes"] = [dict(x) for x in acoes]
+    if original:
+        dados["original"] = original    # JSON da mensagem com botoes
     msg.extras = json.dumps(dados, ensure_ascii=False) if dados else ""
     return msg
 

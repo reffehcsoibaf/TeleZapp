@@ -3,6 +3,18 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.14.13
+
+- Resposta de botão: o servidor devolveu 479 (formato recusado) ao enviar um
+  `buttonsResponseMessage` citando só o texto. O celular cita a mensagem
+  inteira (`quotedMessage.buttonsMessage` com os botões), responde na conversa
+  LID e inclui `messageSecret`. Agora a mensagem com botões guarda
+  `extras.original` (JSON sem miniaturas) e a resposta tenta, nesta ordem,
+  "como o celular (conversa LID)", "citando a mensagem inteira" e "citação
+  simples", passando à seguinte só se o erro for 479. O log diz qual variante
+  foi aceita ou recusada. Só vale para mensagens que chegarem depois desta
+  versão (as antigas só têm a citação simples).
+
 ## 2026.10.14.12
 
 - Log de envio falhado agora traz o tipo, a mensagem e o traceback do erro e,

@@ -346,6 +346,20 @@ def _limpar(x, truncar=0, manter=()):
     return x
 
 
+def original_com_acoes(interna, acoes):
+    """JSON (sem miniaturas) da mensagem que tem botoes/opcoes, guardado
+    para citar a mensagem inteira ao responder, como faz o celular. Vazio
+    se nao ha acoes."""
+    if not acoes:
+        return ""
+    from google.protobuf.json_format import MessageToDict
+    try:
+        return json.dumps(_limpar(MessageToDict(interna)), ensure_ascii=False,
+                          separators=(",", ":"))
+    except Exception:
+        return ""
+
+
 def estrutura_bruta(mensagem, info=None):
     """Estrutura original (JSON, sem miniaturas nem chaves) de uma mensagem
     do WhatsApp, para o menu Depurar. `mensagem` e o protobuf Message ou
@@ -467,9 +481,10 @@ def converter(evento, conta_id, conversa_id, autor=""):
                     else ""),
         remetente="" if minha else jid_texto(origem.Sender))
     interna_ = desembrulhar(evento.Message)
+    acoes_ = acoes_do_whatsapp(interna_)
     m.guardar_extras(msg, botoes=botoes_do_whatsapp(interna_),
-                     mencoes=mencoes_do_contexto(ctx),
-                     acoes=acoes_do_whatsapp(interna_))
+                     mencoes=mencoes_do_contexto(ctx), acoes=acoes_,
+                     original=original_com_acoes(interna_, acoes_))
     return msg, msg.remetente
 
 
@@ -546,9 +561,10 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
                     else ""),
         remetente="" if minha else _sem_aparelho(remetente))
     interna_ = desembrulhar(wmi.message)
+    acoes_ = acoes_do_whatsapp(interna_)
     m.guardar_extras(msg, botoes=botoes_do_whatsapp(interna_),
-                     mencoes=mencoes_do_contexto(ctx),
-                     acoes=acoes_do_whatsapp(interna_))
+                     mencoes=mencoes_do_contexto(ctx), acoes=acoes_,
+                     original=original_com_acoes(interna_, acoes_))
     return msg, remetente
 
 
@@ -1003,7 +1019,8 @@ class ProvedorWhatsApp(Provedor):
                            lambda _: "@" + nome, texto)
         msg.texto = texto
         m.guardar_extras(msg, extras["links"], extras["botoes"],
-                         extras["mencoes"], extras["acoes"])
+                         extras["mencoes"], extras["acoes"],
+                         extras["original"])
 
     def _conversa(self, conversa_id, chat, pushname, grupo, data):
         canal = chat.Server == "newsletter"
@@ -1289,9 +1306,38 @@ class ProvedorWhatsApp(Provedor):
         log.info("resposta de botão: %s", descricao)
         self._fila.put(lambda: self._enviar(
             msg.conversa_id, acao.get("rotulo", ""), msg.id,
-            lambda: self._mensagem_de_acao(msg, acao), descricao))
+            lambda: self._variantes_da_acao(msg, acao), descricao))
 
-    def _mensagem_de_acao(self, msg, acao):
+    def _variantes_da_acao(self, msg, acao):
+        """[(nome, destino, Message, add_msg_secret)]: do mais parecido com o
+        que o celular envia ao mais simples. O servidor recusa (479) o que
+        considera invalido; as variantes seguintes so sao tentadas nesse
+        caso, e nada foi entregue quando ele recusa."""
+        from google.protobuf.json_format import ParseDict
+        from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import Message
+        original = None
+        bruto = m.extras_de(msg)["original"]
+        if bruto:
+            try:
+                original = ParseDict(json.loads(bruto), Message(),
+                                     ignore_unknown_fields=True)
+            except Exception:
+                original = None
+        simples = Message(conversation=msg.texto or m.conteudo(msg))
+        lid = msg.remetente if msg.remetente.endswith("@lid") else ""
+        candidatas = []
+        if original is not None:
+            if lid:
+                candidatas.append(("como o celular (conversa LID)", lid,
+                                   original, True))
+            candidatas.append(("citando a mensagem inteira",
+                               msg.conversa_id, original, False))
+        candidatas.append(("citação simples", msg.conversa_id, simples,
+                           False))
+        return [(nome, dest, self._mensagem_de_acao(msg, acao, citada), segredo)
+                for nome, dest, citada, segredo in candidatas]
+
+    def _mensagem_de_acao(self, msg, acao, citada=None):
         from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (
             ButtonsResponseMessage, ContextInfo, InteractiveResponseMessage,
             ListResponseMessage, Message, TemplateButtonReplyMessage)
@@ -1299,8 +1345,9 @@ class ProvedorWhatsApp(Provedor):
         tipo = acao.get("tipo", "")
         remetente = msg.remetente or (
             "" if msg.conversa_id.endswith("@g.us") else msg.conversa_id)
-        ctx = ContextInfo(stanzaID=msg.id, quotedMessage=Message(
-            conversation=msg.texto or m.conteudo(msg)))
+        if citada is None:
+            citada = Message(conversation=msg.texto or m.conteudo(msg))
+        ctx = ContextInfo(stanzaID=msg.id, quotedMessage=citada)
         if remetente:
             ctx.participant = remetente
         if tipo == "modelo":
@@ -1329,16 +1376,35 @@ class ProvedorWhatsApp(Provedor):
             return Message(interactiveResponseMessage=resp)
         raise ValueError("ação desconhecida: %s" % tipo)
 
+    def _enviar_variantes(self, variantes):
+        """Tenta cada variante enquanto o servidor responder 479 (recusou o
+        formato); qualquer outro erro, ou a ultima recusa, sobe."""
+        for i, (nome, destino, mensagem, segredo) in enumerate(variantes):
+            try:
+                resp = self.cliente.send_message(
+                    self._jid(destino), mensagem, add_msg_secret=segredo)
+            except Exception as e:
+                if i + 1 < len(variantes) and "479" in str(e):
+                    log.info("resposta de botão recusada (479) na variante "
+                             "'%s'; tentando a próxima", nome)
+                    continue
+                log.info("resposta de botão recusada na variante '%s'", nome)
+                raise
+            log.info("resposta de botão aceita na variante '%s'", nome)
+            return resp
+
     def _enviar(self, conversa_id, texto, resposta_a, construir=None,
                 descricao_acao=""):
         inicio = time.perf_counter()
         try:
             if not self._conectada:
                 raise ConnectionError("sem conexão")
-            resp = self.cliente.send_message(
-                self._jid(conversa_id),
-                construir() if construir is not None else
-                self._mensagem_de_texto(conversa_id, texto, resposta_a))
+            if construir is None:
+                resp = self.cliente.send_message(
+                    self._jid(conversa_id),
+                    self._mensagem_de_texto(conversa_id, texto, resposta_a))
+            else:
+                resp = self._enviar_variantes(construir())
         except Exception as e:
             log.warning("envio falhou: %s: %s%s", type(e).__name__,
                         str(e)[:300],
