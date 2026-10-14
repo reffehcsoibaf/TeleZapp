@@ -120,6 +120,7 @@ class Janela(wx.Frame):
         self.selecao_automatica = True
         self._itens_msgs = []         # texto de cada item da lista
         self.alvo_inicial = None      # ponto guardado da conversa aberta
+        self.volta_para = []          # ids de onde a pessoa pulou (Esc volta)
         self.carga_inicial = False
         self.aguardando_foco = False  # esperando o servico para dar o foco
         self.mapa = [None]            # por item da lista: msg id, MARCADOR...
@@ -805,7 +806,8 @@ class Janela(wx.Frame):
                     return
                 if foco is self.lista_msgs:
                     if not self._cancelar_download() and \
-                            not self._parar_audio():
+                            not self._parar_audio() and \
+                            not self._voltar_da_respondida():
                         self._fechar_conversa()
                     return
             if k in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) and sem_mod:
@@ -906,6 +908,7 @@ class Janela(wx.Frame):
             self._cancelar_resposta()
         self._guardar_posicao()
         self._guardar_lista()
+        self.volta_para = []
         texto = self.caixa.GetValue()
         if texto.strip():
             self.rascunhos[self.atual] = texto
@@ -1182,8 +1185,19 @@ class Janela(wx.Frame):
             self._mesclar(self.atual, [o])
             self._preencher_mensagens(x.id)
         self.selecao_automatica = False
+        self.volta_para.append(x.id)
         self.lista_msgs.SetSelection(self.mapa.index(x.resposta_a))
         self.lista_msgs.SetFocus()
+
+    def _voltar_da_respondida(self):
+        """Esc depois de ir para a mensagem respondida: volta para a resposta
+        de onde a pessoa saiu. False se nao ha para onde voltar."""
+        while self.volta_para:
+            id_ = self.volta_para.pop()
+            if id_ in self.mapa:
+                self.lista_msgs.SetSelection(self.mapa.index(id_))
+                return True
+        return False
 
     def _menu_mensagem(self, evt):
         if self._mensagem_selecionada() is None:

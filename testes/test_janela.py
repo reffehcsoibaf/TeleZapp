@@ -937,3 +937,20 @@ def test_ir_para_respondida_fora_da_lista_busca_no_banco(j):
     j._preencher_mensagens("ultima")
     j._ir_para_respondida()                       # nao existe: avisa e fica
     assert j._chave_selecionada() == "40"
+
+
+def test_esc_volta_da_mensagem_respondida(j):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    r = msg("4", "concordo", conversa="10")
+    r.resposta_a = "2"
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg("1", "a", conversa="10"), msg("2", "alvo", conversa="10"),
+        msg("3", "b", conversa="10"), r]))
+    selecionar(j, "4")
+    j._ir_para_respondida()
+    assert j._chave_selecionada() == "2"
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))      # volta para a resposta
+    assert j._chave_selecionada() == "4" and j.atual is not None
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))      # agora fecha a conversa
+    assert j.atual is None

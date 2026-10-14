@@ -30,7 +30,7 @@ Etapa 3a: receber e abrir mídias.
 - Janela: Esc fecha a conversa (só as conversas ficam); a caixa de digitar
   fica visível enquanto a conversa está aberta e o rascunho é guardado ao sair.
 - Menu de contexto/Mensagem: Ir para a mensagem respondida (busca no banco
-  se estiver fora da lista).
+  se estiver fora da lista); Esc volta para a resposta.
 - Respostas citam um trecho da mensagem original (do banco, se fora da
   lista). Opção `audio_sequencia` (padrão sim): ao fim de um áudio sem janela
   toca o próximo áudio/voz da conversa.
