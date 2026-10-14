@@ -17,7 +17,8 @@ import wx
 
 from telezapp import NOME, VERSAO, config
 from telezapp.acessibilidade.fala import Fala, bipe
-from telezapp.interface import dialogos
+from telezapp.interface import dialogos, visualizadores
+from telezapp.midia import armazem
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import paginas
@@ -48,6 +49,8 @@ F5: atualizar a lista de conversas
 Control Shift R: responder à mensagem selecionada
 Control Shift C: copiar o texto da mensagem selecionada
 Alt Enter: ver os detalhes e o texto completo da mensagem selecionada
+Control O: abrir a mídia da mensagem (baixa antes, se preciso)
+Control B: baixar a mídia sem abrir
 Tecla Aplicativos ou Shift F10: menu da mensagem selecionada
 
 NA LISTA DE CONVERSAS
@@ -57,7 +60,12 @@ das mensagens não lidas", se houver não lidas, ou para a última mensagem.
 
 NA LISTA DE MENSAGENS
 Esc: volta para a lista de conversas (também funciona na caixa de digitação).
-Enter: mostra os detalhes e o texto completo da mensagem.
+Enter: mostra os detalhes e o texto completo da mensagem. Numa mensagem com
+foto, vídeo, áudio, voz ou documento, abre a mídia. Esc cancela um download.
+
+NO LEITOR DE ÁUDIO E VÍDEO
+Espaço: tocar ou pausar. Seta para a direita e para a esquerda: avançar e
+voltar 5 segundos (com Shift, 30). Home: voltar ao início. Esc: fechar.
 
 NA CAIXA DE DIGITAÇÃO
 Enter: envia. Shift Enter: nova linha. Esc: cancela a resposta, se houver,
@@ -93,6 +101,7 @@ class Janela(wx.Frame):
         self.cfg = cfg
         self.banco = banco
         self.contas = None            # definido por quem cria a janela
+        self.midias = None            # gerente de downloads (idem)
         self.fala = Fala()
         self.conversas = []           # ordenadas pela ultima mensagem
         self._chaves_conv = []        # chave de cada item da lista
@@ -106,6 +115,9 @@ class Janela(wx.Frame):
         self.mapa = [None]            # por item da lista: msg id, MARCADOR...
         self.resposta_a = None
         self.locais = 0               # contador de mensagens "enviando"
+        self.abrindo = None           # chave da midia que abre ao baixar
+        self.abrindo_abrir = True     # False: so baixar, sem abrir
+        self.progresso_falado = 0
         self.estados = {}             # conta_id -> estado
         self.pareamentos = {}         # conta_id -> DialogoPareamento
         self.pareamento_recusado = set()
@@ -159,6 +171,21 @@ class Janela(wx.Frame):
         item(m_msg, "responder", "&Responder\tCtrl+Shift+R")
         item(m_msg, "copiar", "&Copiar texto\tCtrl+Shift+C")
         item(m_msg, "detalhes", "&Detalhes\tAlt+Enter")
+        m_msg.AppendSeparator()
+        item(m_msg, "abrir_midia", "&Abrir mídia\tCtrl+O")
+        item(m_msg, "baixar_midia", "&Baixar mídia sem abrir\tCtrl+B")
+        item(m_msg, "salvar_midia", "Salvar c&ópia da mídia...")
+
+        m_mid = wx.Menu()
+        for valor, nome in next(o for o in config.OPCOES
+                                if o.chave == "midias_baixar").escolhas:
+            it = item(m_mid, "baixar_" + valor, nome, "radio")
+            self.Bind(wx.EVT_MENU,
+                      lambda e, v=valor: self._mudar_baixar(v), it)
+        m_mid.AppendSeparator()
+        item(m_mid, "midias_limite", "&Limite do download automático...")
+        item(m_mid, "midias_confirmar", "&Confirmar downloads grandes...")
+        item(m_mid, "midias_espaco", "&Espaço usado pelas mídias")
 
         m_exib = wx.Menu()
         for est, nome in m.NOMES_ESTILOS.items():
@@ -178,7 +205,8 @@ class Janela(wx.Frame):
         item(m_aj, "sobre", "&Sobre o %s" % NOME)
 
         for submenu, rotulo in ((m_contas, "&Contas"), (m_conv, "C&onversa"),
-                                (m_msg, "&Mensagem"), (m_exib, "&Exibição"),
+                                (m_msg, "&Mensagem"), (m_mid, "Mí&dias"),
+                                (m_exib, "&Exibição"),
                                 (m_aj, "A&juda")):
             raiz.AppendSubMenu(submenu, rotulo)
         raiz.AppendSeparator()
@@ -205,6 +233,14 @@ class Janela(wx.Frame):
             "detalhes": lambda e: self._detalhes(),
             "ajuda": lambda e: dialogos.mostrar_texto(
                 self, "Teclas de atalho", AJUDA, "Teclas de atalho"),
+            "abrir_midia": lambda e: self._abrir_midia(),
+            "baixar_midia": lambda e: self._abrir_midia(abrir=False),
+            "salvar_midia": lambda e: self._salvar_midia(),
+            "midias_limite": lambda e: self._escolher_opcao(
+                "midias_limite_auto_mb"),
+            "midias_confirmar": lambda e: self._escolher_opcao(
+                "midias_confirmar_mb"),
+            "midias_espaco": lambda e: self._espaco_midias(),
             "guia": lambda e: self._abrir_pagina("guia.html"),
             "novidades": lambda e: self._abrir_pagina("novidades.html"),
             "sobre": lambda e: self._sobre(),
@@ -217,6 +253,8 @@ class Janela(wx.Frame):
                       lambda e, k=chave: self._opcao(k, e.IsChecked()),
                       self.itens[chave])
         self.itens["estilo%d" % self.estilo].Check(True)
+        self.itens.get("baixar_" + str(self.cfg.get("midias_baixar")),
+                       self.itens["baixar_demanda"]).Check(True)
 
     def _criar_controles(self):
         painel = wx.Panel(self)
@@ -452,6 +490,8 @@ class Janela(wx.Frame):
             ev.QrPareamento: self._ev_qr,
             ev.CodigoPareamento: self._ev_codigo,
             ev.SincronizacaoConcluida: self._ev_sincronia,
+            ev.ProgressoMidia: self._ev_progresso_midia,
+            ev.MidiaBaixada: self._ev_midia_baixada,
         }.get(type(e))
         if tratador is not None and self:
             tratador(e)
@@ -664,6 +704,8 @@ class Janela(wx.Frame):
                 if foco is self.caixa and self.resposta_a is not None:
                     self._cancelar_resposta()
                     return
+                if foco is self.lista_msgs and self._cancelar_download():
+                    return
                 if foco in (self.lista_msgs, self.caixa, self.botao_enviar):
                     self._voltar_para_conversas()
                     return
@@ -825,6 +867,11 @@ class Janela(wx.Frame):
             self.fala.falar("Marcador. As mensagens não lidas começam na "
                             "próxima.")
             return
+        x = self._mensagem_selecionada()
+        if x is not None and x.tipo in armazem.BAIXAVEIS and \
+                not x.id.startswith("local-"):
+            self._abrir_midia()
+            return
         self._detalhes()
 
     def _detalhes(self):
@@ -835,9 +882,12 @@ class Janela(wx.Frame):
         recibos = []
         if x.minha and self.banco is not None and not x.id.startswith("local-"):
             recibos = self.banco.recibos(x.conta_id, x.conversa_id, x.id)
+        midia = None
+        if x.tipo in armazem.BAIXAVEIS and self.midias is not None:
+            midia = "baixada" if self.midias.caminho(x) else "não baixada"
         dialogos.mostrar_texto(self, "Detalhes da mensagem",
                                m.detalhes(x, conv.nome if conv else "",
-                                          recibos=recibos),
+                                          recibos=recibos, midia=midia),
                                "Detalhes e texto completo")
 
     def _responder(self):
@@ -939,6 +989,128 @@ class Janela(wx.Frame):
         bipe("enviada")
         if self.cfg.get("confirmar_envio"):
             self.fala.falar("Enviada.")
+
+    # =============================================================== midias
+    def _abrir_midia(self, abrir=True):
+        x = self._mensagem_selecionada()
+        if x is None or self.midias is None:
+            return
+        if x.tipo not in armazem.BAIXAVEIS:
+            self.fala.falar("Esta mensagem não tem mídia.")
+            return
+        if x.id.startswith("local-"):
+            return
+        caminho = self.midias.caminho(x)
+        if caminho:
+            if abrir:
+                self._mostrar_midia(x, caminho)
+            else:
+                self.fala.falar("Esta mídia já está baixada.")
+            return
+        limite = int(self.cfg.get("midias_confirmar_mb") or 0) * 1048576
+        if x.tamanho and x.tamanho > limite:
+            r = wx.MessageBox(
+                "Esta mídia tem %s. Baixar mesmo?" % m.tamanho_legivel(
+                    x.tamanho), NOME, wx.YES_NO | wx.ICON_QUESTION, self)
+            if r != wx.YES:
+                return
+        self.abrindo = x.chave
+        self.abrindo_abrir = abrir
+        self.progresso_falado = 0
+        self.midias.baixar(x)
+        tam = (", " + m.tamanho_legivel(x.tamanho)) if x.tamanho else ""
+        self.fala.falar("Baixando %s%s. Esc cancela." % (
+            m.NOMES_TIPOS.get(x.tipo, "mídia"), tam), interromper=True)
+
+    def _cancelar_download(self):
+        if self.abrindo is not None and self.midias is not None and \
+                self.midias.baixando(self.abrindo):
+            self.midias.cancelar(self.abrindo)
+            self.fala.falar("Cancelando o download.", interromper=True)
+            return True
+        return False
+
+    def _mostrar_midia(self, x, caminho):
+        conv = self.indice.get((x.conta_id, x.conversa_id))
+        visualizadores.abrir(self, x, caminho, self.fala,
+                             conv.nome if conv else "")
+
+    def _salvar_midia(self):
+        x = self._mensagem_selecionada()
+        if x is None or self.midias is None or \
+                x.tipo not in armazem.BAIXAVEIS:
+            return
+        caminho = self.midias.caminho(x)
+        if not caminho:
+            self.fala.falar("Baixe a mídia antes, com Control B.")
+            return
+        visualizadores.salvar_copia(self, x, caminho, self.fala)
+
+    def _mudar_baixar(self, valor):
+        self.cfg.set("midias_baixar", valor)
+        nomes = dict(next(o for o in config.OPCOES
+                          if o.chave == "midias_baixar").escolhas)
+        self.fala.falar("Mídias: " + nomes[valor])
+
+    def _escolher_opcao(self, chave):
+        o = next(o for o in config.OPCOES if o.chave == chave)
+        atual = self.cfg.get(chave)
+        dlg = wx.SingleChoiceDialog(self, o.descricao, o.rotulo,
+                                    [r for _, r in o.escolhas])
+        try:
+            dlg.SetSelection([v for v, _ in o.escolhas].index(atual))
+        except ValueError:
+            pass
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            valor = o.escolhas[dlg.GetSelection()][0]
+        finally:
+            dlg.Destroy()
+        self.cfg.set(chave, valor)
+        self.fala.falar("%s: %s" % (o.rotulo, o.escolhas[
+            [v for v, _ in o.escolhas].index(valor)][1]))
+
+    def _espaco_midias(self):
+        self.fala.falar("As mídias baixadas ocupam %s." % m.tamanho_legivel(
+            armazem.tamanho_da_pasta()))
+
+    def _ev_progresso_midia(self, e):
+        if (e.conta_id, e.conversa_id, e.mensagem_id) != self.abrindo:
+            return
+        marco = e.percentual // 25 * 25
+        if 0 < marco < 100 and marco > self.progresso_falado:
+            self.progresso_falado = marco
+            self.fala.falar("%d por cento" % marco)
+        self.SetStatusText("Baixando mídia: %d%%" % e.percentual)
+
+    def _ev_midia_baixada(self, e):
+        chave = (e.conta_id, e.conversa_id, e.mensagem_id)
+        pedida = chave == self.abrindo
+        if pedida:
+            self.abrindo = None
+        if e.cancelada:
+            if pedida:
+                self.fala.falar("Download cancelado.", interromper=True)
+            return
+        if e.erro:
+            if pedida or not e.automatica:
+                bipe("erro")
+                self.fala.falar(e.erro, interromper=True)
+                wx.MessageBox(e.erro, NOME, wx.OK | wx.ICON_WARNING, self)
+            return
+        self.SetStatusText("Mídia baixada.")
+        if not pedida:
+            return
+        if not self.abrindo_abrir:
+            self.fala.falar("Mídia baixada.", interromper=True)
+            return
+        lista = self.cache.get((e.conta_id, e.conversa_id)) or \
+            self.banco.mensagens(e.conta_id, e.conversa_id, LIMITE_MEMORIA)
+        for x in lista:
+            if x.id == e.mensagem_id:
+                self._mostrar_midia(x, e.caminho)
+                return
 
     # ============================================================== opcoes
     def _mudar_estilo(self, estilo):

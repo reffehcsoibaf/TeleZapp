@@ -16,7 +16,7 @@ from telezapp.nucleo.modelos import ORDEM_ESTADOS, Conversa, Mensagem
 
 log = logging.getLogger("telezapp.banco")
 
-VERSAO_ESQUEMA = 3
+VERSAO_ESQUEMA = 4
 
 ESQUEMA = """
 CREATE TABLE IF NOT EXISTS conversas (
@@ -73,6 +73,14 @@ CREATE TABLE IF NOT EXISTS status (
     nome_arquivo TEXT NOT NULL DEFAULT '',
     tamanho INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (conta_id, id)
+);
+-- WhatsApp: o que o servico exige para baixar uma midia (chaves, caminho).
+CREATE TABLE IF NOT EXISTS fichas (
+    conta_id TEXT NOT NULL,
+    conversa_id TEXT NOT NULL,
+    mensagem_id TEXT NOT NULL,
+    dados BLOB NOT NULL,
+    PRIMARY KEY (conta_id, conversa_id, mensagem_id)
 );
 -- Arquivos de midia baixados (base da limpeza de conversas).
 CREATE TABLE IF NOT EXISTS midias (
@@ -144,7 +152,8 @@ class Banco:
         with self._trava, self._con:
             self._con.execute("DELETE FROM conversas WHERE conta_id=?",
                               (conta_id,))
-            for tabela in ("mensagens", "recibos", "status", "midias"):
+            for tabela in ("mensagens", "recibos", "status", "midias",
+                           "fichas"):
                 self._con.execute(
                     "DELETE FROM %s WHERE conta_id=?" % tabela, (conta_id,))
 
@@ -260,6 +269,28 @@ class Banco:
             args.append(conversa_id)
         with self._trava:
             return self._con.execute(sql + " ORDER BY data", args).fetchall()
+
+    def midia(self, conta_id, conversa_id, mensagem_id):
+        """(caminho, tamanho) da midia baixada, ou None."""
+        with self._trava:
+            return self._con.execute(
+                "SELECT caminho, tamanho FROM midias WHERE conta_id=? AND "
+                "conversa_id=? AND mensagem_id=?",
+                (conta_id, conversa_id, mensagem_id)).fetchone()
+
+    def salvar_fichas(self, fichas):
+        """fichas: [(conta_id, conversa_id, mensagem_id, bytes)]"""
+        with self._trava, self._con:
+            self._con.executemany(
+                "INSERT OR REPLACE INTO fichas VALUES (?,?,?,?)", fichas)
+
+    def ficha(self, conta_id, conversa_id, mensagem_id):
+        with self._trava:
+            linha = self._con.execute(
+                "SELECT dados FROM fichas WHERE conta_id=? AND "
+                "conversa_id=? AND mensagem_id=?",
+                (conta_id, conversa_id, mensagem_id)).fetchone()
+        return bytes(linha[0]) if linha else None
 
     def esquecer_midia(self, conta_id, conversa_id, mensagem_id):
         with self._trava, self._con:

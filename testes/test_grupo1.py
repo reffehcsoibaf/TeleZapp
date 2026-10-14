@@ -100,3 +100,9 @@ def test_detalhes_mostram_quem_recebeu_e_leu():
     assert "Texto completo:" in txt
     outra = m.Mensagem("c", "v", "2", minha=False, texto="x")
     assert "Lida a" not in m.detalhes(outra, "G", recibos=[("a", "lida", 1)])
+
+
+def test_detalhes_mostram_se_a_midia_esta_baixada():
+    x = m.Mensagem("c", "v", "1", tipo=m.FOTO, data=100)
+    assert "Mídia: baixada" in m.detalhes(x, "G", midia="baixada")
+    assert "Mídia" not in m.detalhes(x, "G")

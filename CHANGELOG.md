@@ -3,6 +3,27 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.14.0
+
+Etapa 3a: receber e abrir mídias.
+
+- `midia/armazem.py`: mídias só em `%APPDATA%\TeleZapp\midias\<conta>\
+  <hash da conversa>\<id>_<nome>`; apagadas com a conta.
+- `nucleo/midias.py` (`GerenteMidias`): downloads em threads próprias, com
+  progresso, cancelamento e registro na tabela `midias`; baixa ao receber
+  conforme a opção `midias_baixar` (`demanda` ou `automatico`, limite
+  `midias_limite_auto_mb`).
+- Provedores: `baixar_arquivo()` no Telegram (`download_media`) e no WhatsApp
+  (`download_any` com a ficha guardada); arquivo escrito como `.parte` e
+  renomeado ao fim.
+- Banco, esquema 4: tabela `fichas` (dados de download do WhatsApp, sem
+  miniatura nem citação), gravada para mensagens novas e do histórico.
+- `midia/reprodutor.py`: áudio com soundfile + sounddevice, lendo aos poucos;
+  `interface/visualizadores.py`: imagem, áudio, vídeo (`wx.media.MediaCtrl`),
+  texto e documento, todos em janelas do app.
+- Menu: Mensagem (abrir, baixar, salvar cópia) e submenu Mídias.
+- Dependências novas: soundfile, sounddevice.
+
 ## 2026.10.13.0
 
 - Menu único "Menu" com submenus (`wx.Menu.AppendSubMenu`); atalhos mantidos.

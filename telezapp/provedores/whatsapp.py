@@ -20,9 +20,10 @@ import threading
 import time
 
 from telezapp import config
+from telezapp.midia import armazem
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import modelos as m
-from telezapp.provedores.base import Provedor
+from telezapp.provedores.base import DownloadCancelado, ErroMidia, Provedor
 
 log = logging.getLogger("telezapp.whatsapp")
 
@@ -167,6 +168,40 @@ def converter(evento, conta_id, conversa_id, autor=""):
                     else ""),
         remetente="" if minha else jid_texto(origem.Sender))
     return msg, msg.remetente
+
+
+CAMPOS_MIDIA = ("imageMessage", "videoMessage", "audioMessage",
+                "documentMessage", "stickerMessage")
+
+
+def ficha_de(interna):
+    """O minimo que o WhatsApp exige para baixar a midia depois (chaves e
+    caminho), sem miniatura nem resposta citada. None se nao ha midia."""
+    from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import Message
+    for nome in CAMPOS_MIDIA:
+        try:
+            if not interna.HasField(nome):
+                continue
+        except (ValueError, AttributeError):
+            continue
+        sub = type(getattr(interna, nome))()
+        sub.CopyFrom(getattr(interna, nome))
+        for campo in ("contextInfo", "JPEGThumbnail", "caption"):
+            try:
+                sub.ClearField(campo)
+            except ValueError:
+                pass
+        return Message(**{nome: sub}).SerializeToString()
+    return None
+
+
+def mime_da_ficha(dados):
+    from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import Message
+    interna = Message.FromString(dados)
+    for nome in CAMPOS_MIDIA:
+        if interna.HasField(nome):
+            return getattr(interna, nome).mimetype
+    return ""
 
 
 def jid_de_texto(texto):
@@ -553,6 +588,11 @@ class ProvedorWhatsApp(Provedor):
             if cid in IGNORAR_CONVERSAS:
                 self._guardar_status(msg, origem, info.Pushname)
                 return
+            if msg.tipo in armazem.BAIXAVEIS:
+                ficha = ficha_de(desembrulhar(evento.Message))
+                if ficha:
+                    self.banco.salvar_fichas(
+                        [(self.conta.id, cid, msg.id, ficha)])
             conv = self._conversa(cid, origem.Chat, info.Pushname, grupo,
                                   msg.data)
             with self._trava:
@@ -571,6 +611,39 @@ class ProvedorWhatsApp(Provedor):
                                                      silenciosa=silenciosa))
         except Exception:
             log.exception("erro ao tratar mensagem recebida")
+
+    def baixar_arquivo(self, msg, base, progresso, cancelado):
+        dados = self.banco.ficha(msg.conta_id, msg.conversa_id, msg.id)
+        if dados is None:
+            raise ErroMidia(
+                "Esta mídia chegou antes do TeleZapp guardar os dados para "
+                "baixá-la. Só as mídias recebidas daqui para a frente, ou do "
+                "histórico de um novo pareamento, podem ser baixadas.")
+        if not self._conectada or self.cliente is None:
+            raise ErroMidia("Sem conexão com o WhatsApp.")
+        from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import Message
+        caminho = armazem.com_extensao(base, armazem.extensao(
+            mime_da_ficha(dados), msg.tipo, msg.nome_arquivo))
+        parcial = caminho + ".parte"
+        if cancelado():
+            raise DownloadCancelado()
+        progresso(0)
+        try:
+            self.cliente.download_any(Message.FromString(dados), parcial)
+            if cancelado():
+                raise DownloadCancelado()
+            os.replace(parcial, caminho)
+        except (DownloadCancelado, ErroMidia):
+            raise
+        except Exception as e:
+            log.warning("download falhou: %s", type(e).__name__)
+            raise ErroMidia("O WhatsApp não entregou a mídia (%s). Ela pode "
+                            "ter expirado no servidor." % type(e).__name__)
+        finally:
+            if os.path.exists(parcial):
+                os.remove(parcial)
+        progresso(100)
+        return caminho
 
     def _guardar_status(self, msg, origem, pushname):
         """Status (stories) nao sao conversas: ficam numa tabela a parte,
@@ -752,7 +825,7 @@ class ProvedorWhatsApp(Provedor):
         dias = OPCOES_HISTORICO.get(self.historico,
                                     OPCOES_HISTORICO["recentes"])[1]
         limite = time.time() - dias * 86400 if dias else 0
-        convs, msgs = [], []
+        convs, msgs, fichas = [], [], []
         for c in dados.conversations:
             cid = self._normalizar_id(c.ID)
             if not cid or cid in IGNORAR_CONVERSAS or \
@@ -771,6 +844,11 @@ class ProvedorWhatsApp(Provedor):
                 if x is None or (limite and x.data < limite):
                     continue
                 novas.append(x)
+                if x.tipo in armazem.BAIXAVEIS and \
+                        h.message.HasField("message"):
+                    ficha = ficha_de(desembrulhar(h.message.message))
+                    if ficha:
+                        fichas.append((self.conta.id, cid, x.id, ficha))
                 if not x.minha:
                     self._remetentes[x.id] = (rem, x.texto)
             if novas:
@@ -802,6 +880,8 @@ class ProvedorWhatsApp(Provedor):
             self.banco.salvar_conversas(convs)
         if msgs:
             self.banco.salvar_mensagens(msgs)
+            if fichas:
+                self.banco.salvar_fichas(fichas)
         log.info("histórico guardado: %d conversas e %d mensagens em %.2fs",
                  len(convs), len(msgs), time.perf_counter() - inicio)
         if convs:

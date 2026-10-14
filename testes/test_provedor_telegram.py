@@ -5,6 +5,7 @@ Roda o provedor de verdade, na thread dele, e confere os eventos que chegam
 a 'interface' e o que fica gravado no banco.
 """
 import datetime
+import os
 import queue
 import types
 
@@ -154,6 +155,22 @@ class ClienteFalso:
             raise errors.ChatWriteForbiddenError(None)
         self.enviadas.append((ent, texto, reply_to))
         return mensagem(99, texto, out=True)
+
+    async def get_messages(self, ent, ids=None):
+        if ids == 404:
+            return None
+        return mensagem(ids, media=object(), photo=object(),
+                        file=types.SimpleNamespace(mime_type="image/png"))
+
+    async def download_media(self, msg, file=None, progress_callback=None):
+        if self.falha_download:
+            raise OSError("rede")
+        progress_callback(50, 100)
+        progress_callback(100, 100)
+        with open(file, "wb") as f:
+            f.write(b"png")
+
+    falha_download = False
 
     async def send_read_acknowledge(self, ent):
         self.lidas.append(ent)
@@ -305,5 +322,37 @@ def test_mensagem_recebida_e_leitura(ambiente):
         assert nova.conversa.nao_lidas == 1
         leitura = esperar(ambiente.fila, ev.LeituraConfirmada)
         assert (leitura.conversa_id, leitura.ate_id) == ("10", 4)
+    finally:
+        p.parar()
+
+
+def test_baixar_arquivo(ambiente, tmp_path, monkeypatch):
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path / "dados"))
+    from telezapp.midia import armazem
+    cliente = ClienteFalso()
+    p = ambiente.criar(cliente)
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ConversasAtualizadas)
+        x = m.Mensagem("t1", "10", "7", tipo=m.FOTO)
+        feitos = []
+        caminho = p.baixar_arquivo(x, armazem.caminho_base(x), feitos.append,
+                                   lambda: False)
+        assert caminho.endswith(".png") and open(caminho, "rb").read() == \
+            b"png"
+        assert feitos == [0, 50, 100, 100]
+        assert not os.path.exists(caminho + ".parte")
+
+        with pytest.raises(base.DownloadCancelado):
+            p.baixar_arquivo(x, armazem.caminho_base(x), lambda v: None,
+                             lambda: True)
+        with pytest.raises(base.ErroMidia, match="não tem mais"):
+            p.baixar_arquivo(m.Mensagem("t1", "10", "404", tipo=m.FOTO),
+                             armazem.caminho_base(x), lambda v: None,
+                             lambda: False)
+        cliente.falha_download = True
+        with pytest.raises(base.ErroMidia, match="não entregou"):
+            p.baixar_arquivo(x, armazem.caminho_base(x) + "2",
+                             lambda v: None, lambda: False)
     finally:
         p.parar()

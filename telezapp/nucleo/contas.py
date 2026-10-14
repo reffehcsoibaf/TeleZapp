@@ -12,6 +12,7 @@ import time
 import uuid
 
 from telezapp import config
+from telezapp.midia import armazem
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo.modelos import Conta
 
@@ -141,6 +142,7 @@ class Contas:
         if self.banco is not None:
             self.banco.apagar_conta(conta_id)
         apagar_sessao(conta_id)
+        armazem.apagar_conta(conta_id)
         log.info("conta %s removida", conta_id)
 
     def provedor(self, conta_id):

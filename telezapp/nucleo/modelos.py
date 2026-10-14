@@ -192,7 +192,8 @@ def texto_marcador(n):
         n, "mensagem" if n == 1 else "mensagens")
 
 
-def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None):
+def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
+             midia=None):
     linhas = [
         "Conversa: %s" % nome_conversa,
         "De: %s" % ("Você" if m.minha else (m.autor or "Desconhecido")),
@@ -208,6 +209,8 @@ def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None):
         linhas.append("Duração: %s" % duracao_legivel(m.segundos))
     if m.minha and m.estado:
         linhas.append("Estado: %s" % m.estado)
+    if midia:
+        linhas.append("Mídia: %s" % midia)
     if m.minha and recibos:
         nomes = nomes or {}
         rotulos = {"entregue": "Entregue", "lida": "Lida",

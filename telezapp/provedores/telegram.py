@@ -12,10 +12,12 @@ import threading
 import time
 
 from telezapp import NOME, VERSAO, config
+from telezapp.midia import armazem
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import modelos as m
 from telezapp.provedores.base import (PEDIR_CODIGO, PEDIR_SENHA,
-                                      PEDIR_TELEFONE, Provedor)
+                                      PEDIR_TELEFONE, DownloadCancelado,
+                                      ErroMidia, Provedor)
 
 log = logging.getLogger("telezapp.telegram")
 
@@ -357,6 +359,48 @@ class ProvedorTelegram(Provedor):
         log.info("mensagens carregadas: %d", len(msgs))
         self.barramento.publicar(
             ev.MensagensCarregadas(self.conta.id, conversa_id, msgs))
+
+    def baixar_arquivo(self, msg, base, progresso, cancelado):
+        if self._loop is None or self._loop.is_closed() or \
+                self.cliente is None:
+            raise ErroMidia("Sem conexão com o Telegram.")
+        futuro = asyncio.run_coroutine_threadsafe(
+            self._baixar(msg, base, progresso, cancelado), self._loop)
+        return futuro.result()
+
+    async def _baixar(self, msg, base, progresso, cancelado):
+        ent = await self._entidade(msg.conversa_id)
+        original = await self.cliente.get_messages(ent, ids=int(msg.id))
+        if original is None or not getattr(original, "media", None):
+            raise ErroMidia("O Telegram não tem mais a mídia desta mensagem.")
+        arquivo = getattr(original, "file", None)
+        caminho = armazem.com_extensao(base, armazem.extensao(
+            getattr(arquivo, "mime_type", ""), msg.tipo, msg.nome_arquivo))
+        parcial = caminho + ".parte"
+
+        def andamento(feito, total):
+            if cancelado():
+                raise DownloadCancelado()
+            if total:
+                progresso(int(feito * 100 / total))
+        try:
+            progresso(0)
+            await self.cliente.download_media(
+                original, file=parcial, progress_callback=andamento)
+            if cancelado():
+                raise DownloadCancelado()
+            os.replace(parcial, caminho)
+        except (DownloadCancelado, ErroMidia):
+            raise
+        except Exception as e:
+            log.warning("download falhou: %s", type(e).__name__)
+            raise ErroMidia("O Telegram não entregou a mídia (%s)."
+                            % type(e).__name__)
+        finally:
+            if os.path.exists(parcial):
+                os.remove(parcial)
+        progresso(100)
+        return caminho
 
     def enviar_texto(self, conversa_id, texto, resposta_a=""):
         self._agendar(self._enviar(conversa_id, texto, resposta_a))

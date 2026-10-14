@@ -87,6 +87,28 @@ class EstadosMensagens:
 
 
 @dataclass
+class ProgressoMidia:
+    """Um download de midia andou: `percentual` de 0 a 100."""
+    conta_id: str
+    conversa_id: str
+    mensagem_id: str
+    percentual: int
+
+
+@dataclass
+class MidiaBaixada:
+    """Fim de um download: `caminho` se deu certo; senao `erro` ou
+    `cancelada`. `automatica`: baixada sem a pessoa pedir."""
+    conta_id: str
+    conversa_id: str
+    mensagem_id: str
+    caminho: str = ""
+    erro: str = ""
+    cancelada: bool = False
+    automatica: bool = False
+
+
+@dataclass
 class QrPareamento:
     """WhatsApp: um novo QR Code para parear (troca a cada ~20 s)."""
     conta_id: str

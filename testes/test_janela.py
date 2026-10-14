@@ -407,3 +407,114 @@ def test_mensagens_da_sincronia_sem_aviso_e_resumo(j):
     assert not j.status.startswith("Nova mensagem")
     j.b.publicar(ev.SincronizacaoConcluida("t1", 10))
     assert j.status.startswith("10 mensagens novas chegaram no WhatsApp")
+
+
+class MidiasFalsas:
+    def __init__(self):
+        self.baixados, self.cancelados, self.prontas = [], [], {}
+        self.ativo = False
+
+    def caminho(self, x):
+        return self.prontas.get(x.chave)
+
+    def baixar(self, x, automatica=False):
+        self.baixados.append(x.id)
+        self.ativo = True
+
+    def baixando(self, chave):
+        return self.ativo
+
+    def cancelar(self, chave):
+        self.cancelados.append(chave)
+        self.ativo = False
+
+
+def foto(id, tamanho=1000):
+    return m.Mensagem("t1", "10", id, autor="Ana", tipo=m.FOTO,
+                      tamanho=tamanho, data=AGORA + int(id))
+
+
+@pytest.fixture
+def jm_midia(j, monkeypatch):
+    j.midias = MidiasFalsas()
+    abertas = []
+    monkeypatch.setattr(jm.visualizadores, "abrir",
+                        lambda pai, x, caminho, fala, nome="": abertas.append(
+                            (x.id, caminho, nome)))
+    j.lista_conv.SetFocus()
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg("1", "texto"), foto("2"), foto("3", tamanho=200 * 1048576)]))
+    j.abertas = abertas
+    return j
+
+
+def selecionar(j, id):
+    j.lista_msgs.SetSelection(j.mapa.index(id))
+    j.lista_msgs.SetFocus()
+
+
+def test_enter_em_midia_baixa_e_abre_quando_chega(jm_midia):
+    j = jm_midia
+    selecionar(j, "2")
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert j.midias.baixados == ["2"] and j.abrindo == ("t1", "10", "2")
+    j.b.publicar(ev.ProgressoMidia("t1", "10", "2", 60))
+    j.b.publicar(ev.MidiaBaixada("t1", "10", "2", "/p/2.jpg"))
+    assert j.abertas == [("2", "/p/2.jpg", "Ana")] and j.abrindo is None
+
+
+def test_midia_ja_baixada_abre_direto_e_texto_mostra_detalhes(jm_midia):
+    j = jm_midia
+    j.midias.prontas[("t1", "10", "2")] = "/p/2.jpg"
+    selecionar(j, "2")
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert j.abertas == [("2", "/p/2.jpg", "Ana")] and not j.midias.baixados
+    selecionar(j, "1")                  # texto: continua mostrando detalhes
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert j.abertas == [("2", "/p/2.jpg", "Ana")]
+
+
+def test_esc_cancela_o_download_antes_de_voltar(jm_midia):
+    j = jm_midia
+    selecionar(j, "2")
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))
+    assert j.midias.cancelados == [("t1", "10", "2")]
+    assert wx_falso._foco[0] is j.lista_msgs          # nao saiu da lista
+    j.b.publicar(ev.MidiaBaixada("t1", "10", "2", cancelada=True))
+    assert j.abertas == []
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))          # agora volta
+    assert wx_falso._foco[0] is j.lista_conv
+
+
+def test_midia_grande_pede_confirmacao(jm_midia, monkeypatch):
+    j = jm_midia
+    respostas = []
+    monkeypatch.setattr(jm.wx, "MessageBox",
+                        lambda *a, **k: respostas.append(a[0]) or jm.wx.NO)
+    selecionar(j, "3")
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert "200" in respostas[0] and j.midias.baixados == []
+
+
+def test_erro_de_download_e_baixar_sem_abrir(jm_midia, monkeypatch):
+    j = jm_midia
+    avisos = []
+    monkeypatch.setattr(jm.wx, "MessageBox",
+                        lambda *a, **k: avisos.append(a[0]))
+    selecionar(j, "2")
+    j._abrir_midia()
+    j.b.publicar(ev.MidiaBaixada("t1", "10", "2", erro="não tem mais"))
+    assert avisos == ["não tem mais"] and j.abertas == []
+    j._abrir_midia(abrir=False)
+    j.b.publicar(ev.MidiaBaixada("t1", "10", "2", "/p/2.jpg"))
+    assert j.abertas == []                              # so baixou
+
+
+def test_menu_de_midias_muda_a_opcao(j):
+    j.midias = MidiasFalsas()
+    assert j.cfg.get("midias_baixar") == "demanda"
+    j._mudar_baixar("automatico")
+    assert j.cfg.get("midias_baixar") == "automatico"

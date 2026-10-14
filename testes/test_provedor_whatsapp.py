@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Provedor do WhatsApp com mensagens protobuf de verdade do neonize e um
 cliente simulado (sem rede)."""
+import os
 import queue
 import threading
 import types
@@ -17,7 +18,7 @@ from neonize.proto.waHistorySync import (  # noqa: E402
 from telezapp.armazenamento.banco import Banco  # noqa: E402
 from telezapp.nucleo import eventos as ev  # noqa: E402
 from telezapp.nucleo import modelos as m  # noqa: E402
-from telezapp.provedores import whatsapp as wa  # noqa: E402
+from telezapp.provedores import base, whatsapp as wa  # noqa: E402
 
 TS = 1792000000
 
@@ -160,8 +161,22 @@ class ClienteFalso:
         self.enviadas.append((wa.jid_texto(para), mensagem))
         return N.SendResponse(ID="EU1", Timestamp=TS + 60)
 
+    def download_any(self, mensagem, path=None):
+        self.baixadas = getattr(self, "baixadas", [])
+        self.baixadas.append(mensagem)
+        if getattr(self, "falha_download", False):
+            raise RuntimeError("expirou")
+        with open(path, "wb") as f:
+            f.write(b"conteudo")
+
     def mark_read(self, *ids, chat, sender, receipt):
         self.lidas.append((list(ids), wa.jid_texto(chat), sender.User))
+
+
+@pytest.fixture
+def dados_midia(tmp_path, monkeypatch):
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path / "dados"))
+    return tmp_path / "dados"
 
 
 @pytest.fixture
@@ -444,3 +459,71 @@ def test_recibos_por_participante_e_status_guardado(amb):
     st = amb.banco.status("w1")
     assert [(s["id"], s["texto"]) for s in st] == [("S1", "meu status")]
     assert all("status" not in c.id for c in amb.banco.conversas("w1"))
+
+
+def msg_foto(id, legenda="olha"):
+    return E.Message(imageMessage=E.ImageMessage(
+        mimetype="image/jpeg", fileLength=8, caption=legenda,
+        JPEGThumbnail=b"miniatura", mediaKey=b"k" * 32,
+        directPath="/v/t62/abc",
+        contextInfo=E.ContextInfo(stanzaID="X")))
+
+
+def test_ficha_guarda_so_o_necessario_e_baixa(amb, dados_midia):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento("F1", msg_foto("F1")))
+    nova = esperar(amb.fila, ev.MensagemNova).mensagem
+    assert nova.tipo == m.FOTO and nova.texto == "olha"
+    ficha = amb.banco.ficha("w1", nova.conversa_id, "F1")
+    assert ficha and b"miniatura" not in ficha and b"olha" not in ficha
+    assert wa.mime_da_ficha(ficha) == "image/jpeg"
+
+    progressos = []
+    caminho = amb.p.baixar_arquivo(nova, base_de(nova), progressos.append,
+                                   lambda: False)
+    assert caminho.endswith(".jpg") and open(caminho, "rb").read() == \
+        b"conteudo"
+    assert not os.path.exists(caminho + ".parte")
+    assert progressos == [0, 100]
+    chave = amb.c.baixadas[0].imageMessage
+    assert chave.directPath == "/v/t62/abc"
+
+
+def test_download_cancelado_com_falha_ou_sem_ficha(amb, dados_midia):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento("F2", msg_foto("F2")))
+    nova = esperar(amb.fila, ev.MensagemNova).mensagem
+    with pytest.raises(base.DownloadCancelado):
+        amb.p.baixar_arquivo(nova, base_de(nova), lambda p: None,
+                             lambda: True)
+    amb.c.falha_download = True
+    with pytest.raises(base.ErroMidia, match="expirado"):
+        amb.p.baixar_arquivo(nova, base_de(nova), lambda p: None,
+                             lambda: False)
+    assert not any(n.endswith(".parte") for _, _, ns in os.walk(
+        str(dados_midia)) for n in ns)
+    velha = m.Mensagem("w1", "c@s.whatsapp.net", "SEM", tipo=m.FOTO)
+    with pytest.raises(base.ErroMidia, match="chegou antes"):
+        amb.p.baixar_arquivo(velha, base_de(velha), lambda p: None,
+                             lambda: False)
+
+
+def test_historico_guarda_a_ficha_das_midias(amb):
+    from neonize.proto.waWeb import WAWebProtobufsWeb_pb2 as W
+    from neonize.proto.waCommon import WACommon_pb2 as C
+    import time as t
+    agora = int(t.time())
+    info = W.WebMessageInfo(
+        key=C.MessageKey(remoteJID="5551988887777@s.whatsapp.net", ID="H9"),
+        message=msg_foto("H9"), messageTimestamp=agora, pushName="Ana")
+    amb.p.guardar_historico(H.HistorySync(syncType=3, conversations=[
+        H.Conversation(ID="5551988887777@s.whatsapp.net",
+                       messages=[H.HistorySyncMsg(message=info)])]))
+    assert amb.banco.ficha("w1", "5551988887777@s.whatsapp.net", "H9")
+
+
+def base_de(msg):
+    from telezapp.midia import armazem
+    return armazem.caminho_base(msg)
