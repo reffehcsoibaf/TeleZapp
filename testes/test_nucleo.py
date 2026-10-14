@@ -55,12 +55,12 @@ def test_conteudo_de_midias():
 def test_resposta():
     r = msg(id="5", texto="sim", resposta_a="1")
     assert m.formatar(r, 1, agora=AGORA, respondida="Bruno") == \
-        "Ana, 14:59: em resposta a Bruno: sim"
-    assert "em resposta a uma mensagem mais antiga: sim" in m.formatar(
+        "Ana, 14:59: sim, em resposta a Bruno"
+    assert "sim, em resposta a uma mensagem mais antiga" in m.formatar(
         r, 1, agora=AGORA)
     original = msg(id="1", texto="você vai hoje?")
     assert m.formatar(r, 1, agora=AGORA, respondida=original) == \
-        'Ana, 14:59: em resposta a Ana, "você vai hoje?": sim'
+        'Ana, 14:59: sim, em resposta a Ana: "você vai hoje?"'
 
 
 def test_rotulo_conversa():

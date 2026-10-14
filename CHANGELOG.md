@@ -33,7 +33,7 @@ Etapa 3a: receber e abrir mídias.
   navegador padrão com Enter ou Espaço.
 - Menu de contexto/Mensagem: Ir para a mensagem respondida (busca no banco
   se estiver fora da lista); Esc volta para a resposta.
-- Respostas citam um trecho da mensagem original (do banco, se fora da
+- Respostas citam, depois do texto, um trecho da original (do banco, se fora da
   lista). Opção `audio_sequencia` (padrão sim): ao fim de um áudio sem janela
   toca o próximo áudio/voz da conversa.
 - Conversa com não lidas abre sempre no marcador (mesmo com uma só); sem não

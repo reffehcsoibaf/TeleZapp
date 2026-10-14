@@ -178,12 +178,12 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None):
         if isinstance(respondida, Mensagem):
             quem = "você" if respondida.minha else (
                 respondida.autor or "mensagem")
-            cont = 'em resposta a %s, "%s": %s' % (
-                quem, citacao(respondida), cont)
+            cont = _juntar(cont, 'em resposta a %s: "%s"' % (
+                quem, citacao(respondida)))
         elif respondida:
-            cont = "em resposta a %s: %s" % (respondida, cont)
+            cont = _juntar(cont, "em resposta a %s" % respondida)
         else:
-            cont = "em resposta a uma mensagem mais antiga: " + cont
+            cont = _juntar(cont, "em resposta a uma mensagem mais antiga")
     autor = "Você" if m.minha else (m.autor or "Desconhecido")
     estado = m.estado if (m.minha and m.estado) else ""
     hora = hora_legivel(m.data, agora)

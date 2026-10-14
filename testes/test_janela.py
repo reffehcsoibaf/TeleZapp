@@ -844,8 +844,8 @@ def test_resposta_mostra_a_mensagem_original(j):
     j.b.publicar(ev.MensagensCarregadas("t1", "10", [
         msg("3", longa, conversa="10"), r]))
     linha = [x for x in j.lista_msgs.itens if "concordo" in x][0]
-    assert 'em resposta a Ana, "texto muito comprido' in linha
-    assert "…" in linha and linha.endswith("concordo") or "concordo" in linha
+    assert 'concordo, em resposta a Ana: "texto muito comprido' in linha
+    assert linha.endswith('…"')
     assert len(linha) < 200
 
 
