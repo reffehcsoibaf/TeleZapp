@@ -21,6 +21,7 @@
 <li><a href="#janela">A janela principal</a></li>
 <li><a href="#atalhos">Teclas de atalho</a></li>
 <li><a href="#mensagens">Ler e enviar mensagens</a></li>
+<li><a href="#midias">Fotos, vídeos, áudios e documentos</a></li>
 <li><a href="#detalhes">Dados de uma mensagem</a></li>
 <li><a href="#dados">Onde ficam os seus dados</a></li>
 </ul>
@@ -42,34 +43,48 @@
 <p>Em Contas, Remover uma conta apaga a sessão e as conversas guardadas daquela conta neste computador. Nada é apagado nos serviços.</p>
 
 <h2 id="janela">A janela principal</h2>
-<p>Com a tecla Tab você passa por três áreas: a lista de Conversas, a lista de Mensagens e a caixa Digite sua mensagem, seguida do botão Enviar.</p>
+<p>Sem conversa aberta, só a lista de Conversas aparece. Enter abre a conversa e leva você à lista de Mensagens, e Esc fecha a conversa. Com a conversa aberta, a caixa para escrever fica logo abaixo das mensagens, e Esc fecha a conversa e esconde as duas. Se a conversa tem mensagens não lidas, ela abre com o foco no marcador, mesmo que seja só uma. Sem não lidas, reabre no ponto em que você parou (na última mensagem, se parou no fim). Alt 2 leva ao marcador de não lidas.</p>
 
 <h2 id="atalhos">Teclas de atalho</h2>
 <ul>
-<li>Control 1: lista de conversas.</li>
-<li>Control 2: lista de mensagens.</li>
-<li>Control 3: caixa de digitação.</li>
-<li>Control U: próxima conversa com mensagens não lidas.</li>
+<li>Alt 1: lista de conversas.</li>
+<li>Alt 2: na lista de conversas, vai para a próxima conversa com mensagens não lidas; dentro da conversa, vai para o marcador de mensagens não lidas.</li>
+<li>Alt 3: lista de mensagens.</li>
+<li>End: fim da lista. Home: início da lista.</li>
+<li>Control E: ir para a caixa de digitação.</li>
 <li>Control R: ouvir a última mensagem da conversa aberta.</li>
 <li>F5: atualizar a lista de conversas.</li>
 <li>Control Shift R: responder à mensagem selecionada.</li>
 <li>Control Shift C: copiar o texto da mensagem selecionada.</li>
 <li>Alt Enter: dados e texto completo da mensagem selecionada.</li>
+<li>Control O: abrir a mídia da mensagem. Control B: só baixar.</li>
 <li>Tecla Aplicativos ou Shift F10: menu da mensagem selecionada.</li>
 <li>F1: este guia. Shift F1: resumo das teclas.</li>
 <li>Control Q: sair.</li>
 </ul>
 
 <h2 id="mensagens">Ler e enviar mensagens</h2>
-<p>Na lista de conversas, Enter abre a conversa e leva você às mensagens: ao item Início das mensagens não lidas, se houver, ou à última mensagem. Esc volta para as conversas.</p>
-<p>Na caixa de digitação, Enter envia e Shift Enter faz uma nova linha. Para responder a uma mensagem, selecione-a e use Control Shift R; Esc cancela a resposta.</p>
+<p>Na lista de conversas, Enter abre a conversa e leva você às mensagens: ao item Início das mensagens não lidas, se houver, ou à última mensagem. O leitor de tela fala esse item uma vez só, com a contagem, e a seta para baixo lê a primeira mensagem não lida. Esc fecha a conversa e volta para as conversas.</p>
+<p>Na caixa de digitação, Enter envia e Shift Enter faz uma nova linha. Esc fecha a conversa, e o que você digitou e não enviou fica guardado como rascunho. Para responder a uma mensagem, selecione-a e use Control Shift R; Esc cancela a resposta.</p>
 <p>Em Exibição você escolhe a ordem em que cada mensagem é lida (autor e hora primeiro, conteúdo primeiro, ou autor só quando muda) e liga ou desliga o som e a fala das mensagens novas.</p>
+
+<h2 id="midias">Fotos, vídeos, áudios e documentos</h2>
+<p>Numa mensagem com mídia, Enter (ou Control O) abre a mídia dentro do TeleZapp. Se ela ainda não foi baixada, o TeleZapp baixa primeiro e avisa o andamento pelo leitor de tela; Esc cancela. Control B baixa sem abrir.</p>
+<p>Em áudios e mensagens de voz, o padrão é só tocar, sem abrir janela: Enter de novo na mesma mensagem pausa e continua, e Esc para o áudio. Se preferir o player em janela, com avançar, voltar e posição, mude em Menu, Mídias, Enter em áudio. Formatos que o TeleZapp não toca sozinho, como m4a, sempre abrem a janela.</p>
+<p>Por padrão, quando um áudio ou mensagem de voz termina, o próximo áudio da conversa toca em seguida (baixando antes, se precisar), e o leitor de tela fala "Próximo áudio" com o nome de quem enviou. Esc para tudo. Você desliga isso em Menu, Mídias, Áudios em sequência. A sequência só vale para o modo sem janela.</p>
+<p>Uma resposta mostra, depois do texto dela, um trecho da mensagem original: a resposta, em resposta a Ana: "o texto da mensagem". Se a mensagem original é muito antiga e não está guardada, a linha diz que é uma resposta a uma mensagem mais antiga.</p>
+<p>Enter numa mensagem de texto abre a janela de detalhes. Se a mensagem tem links, eles aparecem numa lista logo depois do texto: Tab chega até ela, as setas passam de um link a outro, e Enter ou Espaço abre o link no navegador padrão do Windows. Só endereços http e https são abertos.</p>
+<p>No menu de contexto de uma resposta (tecla Aplicações ou Shift F10), e em Menu, Mensagem, o item Ir para a mensagem respondida leva a seleção até a mensagem original, e Esc volta para a resposta de onde você saiu. Um novo Esc fecha a conversa.</p>
+<p>Fotos e figurinhas aparecem numa janela com a descrição. Áudios, mensagens de voz e vídeos tocam numa janela com estes comandos: Espaço toca e pausa, seta para a direita avança 5 segundos, seta para a esquerda volta 5 (com Shift, 30), Home volta ao início e Esc fecha. Textos pequenos são mostrados na própria janela. Outros documentos têm o botão Abrir com o programa do Windows, que é a única forma de sair do TeleZapp; o arquivo continua na pasta do programa.</p>
+<p>Em Mensagem, Salvar cópia da mídia grava uma cópia onde você escolher.</p>
+<h3>Baixar sozinho ou sob demanda</h3>
+<p>No menu Mídias você escolhe: baixar só quando você abrir, ou automaticamente ao receber, até um limite de tamanho que você define (5, 10, 20, 50 ou 100 MB). Mídias maiores que o limite de confirmação perguntam antes de baixar. O item Espaço usado pelas mídias fala quanto espaço elas ocupam.</p>
 
 <h2 id="detalhes">Dados de uma mensagem</h2>
 <p>Alt Enter mostra, num texto que você lê com as setas, a conversa, o autor, a data, o tipo e o texto completo. Nas mensagens que você enviou pelo WhatsApp, aparece também quando cada pessoa recebeu e leu. No Telegram, em grupos, só se sabe até que mensagem alguém leu, sem a hora.</p>
 
 <h2 id="dados">Onde ficam os seus dados</h2>
-<p>Tudo fica na pasta TeleZapp dentro de AppData\Roaming do seu usuário: configurações, sessões, conversas guardadas e registros de funcionamento (logs), sem o texto das suas mensagens. Arquivos temporários ficam numa subpasta do próprio programa e são apagados ao abrir e ao fechar.</p>
+<p>Tudo fica na pasta TeleZapp dentro de AppData\Roaming do seu usuário: configurações, sessões, conversas guardadas e registros de funcionamento (logs), sem o texto das suas mensagens. As mídias baixadas ficam na subpasta midias, e são apagadas junto com a conta quando você a remove. Arquivos temporários ficam numa subpasta do próprio programa e são apagados ao abrir e ao fechar.</p>
 </main>
 <footer>
 <p>TeleZapp versão {{versao}}. Software livre, licença GNU GPL versão 3 ou posterior. Desenvolvido pelos contribuidores do TeleZapp. Site e downloads: <a href="{{site}}">{{site}}</a></p>

@@ -55,8 +55,12 @@ def test_conteudo_de_midias():
 def test_resposta():
     r = msg(id="5", texto="sim", resposta_a="1")
     assert m.formatar(r, 1, agora=AGORA, respondida="Bruno") == \
-        "Ana, 14:59: em resposta a Bruno: sim"
-    assert "em resposta: sim" in m.formatar(r, 1, agora=AGORA)
+        "Ana, 14:59: sim, em resposta a Bruno"
+    assert "sim, em resposta a uma mensagem mais antiga" in m.formatar(
+        r, 1, agora=AGORA)
+    original = msg(id="1", texto="você vai hoje?")
+    assert m.formatar(r, 1, agora=AGORA, respondida=original) == \
+        'Ana, 14:59: sim, em resposta a Ana: "você vai hoje?"'
 
 
 def test_rotulo_conversa():
@@ -209,3 +213,25 @@ def test_banco_antigo_ganha_a_coluna_remetente(tmp_path):
                             remetente="555@s.whatsapp.net")])
     assert b.mensagens("w1", "c")[-1].remetente == "555@s.whatsapp.net"
     b.fechar()
+
+
+def test_extrair_links():
+    t = ("veja https://exemplo.com/a?b=1, e (www.site.org/x). "
+         "De novo: https://exemplo.com/a?b=1! e HTTP://OUTRO.com.")
+    assert m.extrair_links(t) == [
+        ("https://exemplo.com/a?b=1", "https://exemplo.com/a?b=1"),
+        ("https://www.site.org/x", "www.site.org/x"),
+        ("HTTP://OUTRO.com", "HTTP://OUTRO.com")]
+    assert m.extrair_links("sem link, só www. e texto") == []
+    assert m.extrair_links("") == [] and m.extrair_links(None) == []
+
+
+def test_abrir_link_so_http(monkeypatch):
+    from telezapp.interface import dialogos
+    abertos = []
+    monkeypatch.setattr(dialogos.wx, "LaunchDefaultBrowser",
+                        lambda u: abertos.append(u) or True, raising=False)
+    assert dialogos.abrir_link("https://a.com") is True
+    assert dialogos.abrir_link("file:///c:/windows/x.exe") is False
+    assert dialogos.abrir_link("javascript:alert(1)") is False
+    assert abertos == ["https://a.com"]

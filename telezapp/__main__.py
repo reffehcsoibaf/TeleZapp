@@ -41,6 +41,7 @@ def main():
         from telezapp.interface.janela import Janela
         from telezapp.nucleo.contas import Contas
         from telezapp.nucleo.eventos import Barramento
+        from telezapp.nucleo.midias import GerenteMidias
     except Exception:
         log.error("falha ao carregar os componentes:\n%s",
                   traceback.format_exc())
@@ -64,9 +65,12 @@ def main():
     janela = Janela(cfg, banco, barramento)
     janela.contas = Contas(cfg, banco, barramento, janela.pedir,
                            janela.obter_credenciais_telegram)
+    janela.midias = GerenteMidias(cfg, banco, barramento,
+                                  janela.contas.provedor)
     janela.Show()
     wx.CallAfter(janela.comecar)
     app.MainLoop()
+    janela.midias.parar()
     banco.fechar()
     config.limpar_temporarios()
     log.info("encerrado normalmente")

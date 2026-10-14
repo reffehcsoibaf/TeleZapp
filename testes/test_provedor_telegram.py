@@ -5,6 +5,7 @@ Roda o provedor de verdade, na thread dele, e confere os eventos que chegam
 a 'interface' e o que fica gravado no banco.
 """
 import datetime
+import os
 import queue
 import types
 
@@ -154,6 +155,36 @@ class ClienteFalso:
             raise errors.ChatWriteForbiddenError(None)
         self.enviadas.append((ent, texto, reply_to))
         return mensagem(99, texto, out=True)
+
+    async def get_messages(self, ent, ids=None):
+        if ids == 404:
+            return None
+        grande = ids == 500
+        return mensagem(ids, media=object(), photo=object(),
+                        file=types.SimpleNamespace(
+                            mime_type="video/mp4" if grande else "image/png",
+                            size=len(self.conteudo_grande) if grande else 0))
+
+    async def download_media(self, msg, file=None, progress_callback=None):
+        if self.falha_download:
+            raise OSError("rede")
+        progress_callback(50, 100)
+        progress_callback(100, 100)
+        with open(file, "wb") as f:
+            f.write(b"png")
+
+    falha_download = False
+    conteudo_grande = bytes((i * 7) % 251 for i in range(
+        5 * 512 * 1024 + 1000))        # 5 partes e meia
+
+    async def iter_download(self, media, offset=0, stride=None,
+                            chunk_size=None, request_size=None, limit=None,
+                            file_size=None):
+        self.pedidos_partes = getattr(self, "pedidos_partes", [])
+        for k in range(limit):
+            ini = offset + k * stride
+            self.pedidos_partes.append(ini)
+            yield self.conteudo_grande[ini:ini + chunk_size]
 
     async def send_read_acknowledge(self, ent):
         self.lidas.append(ent)
@@ -305,5 +336,65 @@ def test_mensagem_recebida_e_leitura(ambiente):
         assert nova.conversa.nao_lidas == 1
         leitura = esperar(ambiente.fila, ev.LeituraConfirmada)
         assert (leitura.conversa_id, leitura.ate_id) == ("10", 4)
+    finally:
+        p.parar()
+
+
+def test_baixar_arquivo(ambiente, tmp_path, monkeypatch):
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path / "dados"))
+    from telezapp.midia import armazem
+    cliente = ClienteFalso()
+    p = ambiente.criar(cliente)
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ConversasAtualizadas)
+        x = m.Mensagem("t1", "10", "7", tipo=m.FOTO)
+        feitos = []
+        caminho = p.baixar_arquivo(x, armazem.caminho_base(x), feitos.append,
+                                   lambda: False)
+        assert caminho.endswith(".png") and open(caminho, "rb").read() == \
+            b"png"
+        assert feitos == [0, 50, 100, 100]
+        assert not os.path.exists(caminho + ".parte")
+
+        with pytest.raises(base.DownloadCancelado):
+            p.baixar_arquivo(x, armazem.caminho_base(x), lambda v: None,
+                             lambda: True)
+        with pytest.raises(base.ErroMidia, match="não tem mais"):
+            p.baixar_arquivo(m.Mensagem("t1", "10", "404", tipo=m.FOTO),
+                             armazem.caminho_base(x), lambda v: None,
+                             lambda: False)
+        cliente.falha_download = True
+        with pytest.raises(base.ErroMidia, match="não entregou"):
+            p.baixar_arquivo(x, armazem.caminho_base(x) + "2",
+                             lambda v: None, lambda: False)
+    finally:
+        p.parar()
+
+
+def test_baixar_arquivo_grande_em_partes_paralelas(ambiente, tmp_path,
+                                                   monkeypatch):
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path / "dados"))
+    from telezapp.midia import armazem
+    cliente = ClienteFalso()
+    p = ambiente.criar(cliente)
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ConversasAtualizadas)
+        x = m.Mensagem("t1", "10", "500", tipo=m.VIDEO)
+        feitos = []
+        caminho = p.baixar_arquivo(x, armazem.caminho_base(x), feitos.append,
+                                   lambda: False)
+        assert caminho.endswith(".mp4")
+        assert open(caminho, "rb").read() == ClienteFalso.conteudo_grande
+        assert sorted(cliente.pedidos_partes) == [
+            k * tg.PARTE_DOWNLOAD for k in range(6)]
+        assert feitos[0] == 0 and feitos[-1] == 100
+        assert feitos == sorted(feitos)
+        with pytest.raises(base.DownloadCancelado):
+            p.baixar_arquivo(x, armazem.caminho_base(x) + "b",
+                             lambda v: None, lambda: True)
+        assert not [n for _, _, ns in os.walk(str(tmp_path / "dados"))
+                    for n in ns if n.endswith(".parte")]
     finally:
         p.parar()

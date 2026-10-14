@@ -17,7 +17,9 @@ import wx
 
 from telezapp import NOME, VERSAO, config
 from telezapp.acessibilidade.fala import Fala, bipe
-from telezapp.interface import dialogos
+from telezapp.interface import dialogos, visualizadores
+from telezapp.midia import armazem
+from telezapp.midia.reprodutor import FormatoNaoSuportado, Reprodutor
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import paginas
@@ -35,19 +37,24 @@ LIMITE_MEMORIA = 1200     # mensagens mantidas na memoria por conversa
 
 AJUDA = """\
 ESTRUTURA DA JANELA
-A janela tem três áreas, nesta ordem de Tab: Conversas, Mensagens e a caixa
-Digite sua mensagem, seguida do botão Enviar.
+Sem conversa aberta, só a lista de Conversas aparece. Enter abre a conversa e
+leva você à lista de Mensagens; Esc fecha a conversa. Com a conversa aberta, a caixa
+para escrever fica logo abaixo das mensagens.
 
 ATALHOS
-Control 1: ir para a lista de conversas
-Control 2: ir para a lista de mensagens
-Control 3: ir para a caixa de digitação
-Control U: ir para a próxima conversa com mensagens não lidas
+Alt 1: ir para a lista de conversas
+Alt 2: na lista de conversas, a próxima conversa com mensagens não lidas;
+dentro da conversa, o marcador de mensagens não lidas
+Alt 3: ir para a lista de mensagens
+End: ir para o fim da lista (Home: para o início)
+Control E: ir para a caixa de digitação
 Control R: ouvir a última mensagem da conversa aberta
 F5: atualizar a lista de conversas
 Control Shift R: responder à mensagem selecionada
 Control Shift C: copiar o texto da mensagem selecionada
 Alt Enter: ver os detalhes e o texto completo da mensagem selecionada
+Control O: abrir a mídia da mensagem (baixa antes, se preciso)
+Control B: baixar a mídia sem abrir
 Tecla Aplicativos ou Shift F10: menu da mensagem selecionada
 
 NA LISTA DE CONVERSAS
@@ -56,12 +63,17 @@ Enter: abre a conversa e leva o foco para as mensagens: para o item "Início
 das mensagens não lidas", se houver não lidas, ou para a última mensagem.
 
 NA LISTA DE MENSAGENS
-Esc: volta para a lista de conversas (também funciona na caixa de digitação).
-Enter: mostra os detalhes e o texto completo da mensagem.
+Esc: fecha a conversa e volta para a lista de conversas.
+Enter: mostra os detalhes e o texto completo da mensagem. Numa mensagem com
+foto, vídeo, áudio, voz ou documento, abre a mídia. Esc cancela um download.
+
+NO LEITOR DE ÁUDIO E VÍDEO
+Espaço: tocar ou pausar. Seta para a direita e para a esquerda: avançar e
+voltar 5 segundos (com Shift, 30). Home: voltar ao início. Esc: fechar.
 
 NA CAIXA DE DIGITAÇÃO
-Enter: envia. Shift Enter: nova linha. Esc: cancela a resposta, se houver,
-ou volta para a lista de conversas.
+Enter: envia e esconde a caixa. Shift Enter: nova linha. Esc: cancela a
+resposta, se houver, esconde a caixa e volta para as mensagens.
 
 MENU
 Aperte Alt para abrir o Menu. Ele tem submenus (Contas, Conversa, Mensagem,
@@ -93,9 +105,12 @@ class Janela(wx.Frame):
         self.cfg = cfg
         self.banco = banco
         self.contas = None            # definido por quem cria a janela
+        self.midias = None            # gerente de downloads (idem)
         self.fala = Fala()
         self.conversas = []           # ordenadas pela ultima mensagem
         self._chaves_conv = []        # chave de cada item da lista
+        self._rotulos_conv = []       # texto de cada item da lista
+        self.rascunhos = {}           # texto nao enviado de cada conversa
         self.indice = {}              # chave -> Conversa
         self.cache = {}               # chave da conversa -> [Mensagem]
         self.atual = None             # chave da conversa aberta
@@ -103,9 +118,21 @@ class Janela(wx.Frame):
         self.marcador_id = None       # id da 1a nao lida (quando conhecido)
         self.esperando_servidor = False
         self.selecao_automatica = True
+        self._itens_msgs = []         # texto de cada item da lista
+        self.alvo_inicial = None      # ponto guardado da conversa aberta
+        self.volta_para = []          # ids de onde a pessoa pulou (Esc volta)
+        self.carga_inicial = False
+        self.aguardando_foco = False  # esperando o servico para dar o foco
         self.mapa = [None]            # por item da lista: msg id, MARCADOR...
         self.resposta_a = None
         self.locais = 0               # contador de mensagens "enviando"
+        self.sincronia = {}           # conta_id -> (percentual, quando)
+        self.audio = None             # (chave, Reprodutor) tocando sem janela
+        self.interrompidas = {}       # conta_id -> % em que a sincronia parou
+        self.progresso_midias = {}    # chave da midia -> percentual
+        self.abrindo = None           # chave da midia que abre ao baixar
+        self.abrindo_abrir = True     # False: so baixar, sem abrir
+        self.progresso_falado = 0
         self.estados = {}             # conta_id -> estado
         self.pareamentos = {}         # conta_id -> DialogoPareamento
         self.pareamento_recusado = set()
@@ -146,12 +173,13 @@ class Janela(wx.Frame):
         item(m_contas, "remover", "&Remover uma conta...")
 
         m_conv = wx.Menu()
-        item(m_conv, "ir_conv", "Ir para a lista de &conversas\tCtrl+1")
-        item(m_conv, "ir_msgs", "Ir para a lista de &mensagens\tCtrl+2")
-        item(m_conv, "ir_caixa", "Ir para a caixa de &digitação\tCtrl+3")
+        item(m_conv, "ir_conv", "Ir para a lista de &conversas\tAlt+1")
+        item(m_conv, "nao_lidas", "Mensagens &não lidas (marcador ou próxima "
+                                  "conversa)\tAlt+2")
+        item(m_conv, "ir_msgs", "Ir para a lista de &mensagens\tAlt+3")
+        item(m_conv, "ir_caixa", "&Escrever mensagem\tCtrl+E")
         m_conv.AppendSeparator()
         item(m_conv, "abrir_conv", "&Abrir a conversa selecionada")
-        item(m_conv, "proxima", "Próxima conversa &não lida\tCtrl+U")
         item(m_conv, "ler_ultima", "&Ouvir a última mensagem\tCtrl+R")
         item(m_conv, "atualizar", "A&tualizar a lista de conversas\tF5")
 
@@ -159,6 +187,24 @@ class Janela(wx.Frame):
         item(m_msg, "responder", "&Responder\tCtrl+Shift+R")
         item(m_msg, "copiar", "&Copiar texto\tCtrl+Shift+C")
         item(m_msg, "detalhes", "&Detalhes\tAlt+Enter")
+        item(m_msg, "ir_respondida", "Ir para a mensagem respondi&da")
+        m_msg.AppendSeparator()
+        item(m_msg, "abrir_midia", "&Abrir mídia\tCtrl+O")
+        item(m_msg, "baixar_midia", "&Baixar mídia sem abrir\tCtrl+B")
+        item(m_msg, "salvar_midia", "Salvar c&ópia da mídia...")
+
+        m_mid = wx.Menu()
+        for valor, nome in next(o for o in config.OPCOES
+                                if o.chave == "midias_baixar").escolhas:
+            it = item(m_mid, "baixar_" + valor, nome, "radio")
+            self.Bind(wx.EVT_MENU,
+                      lambda e, v=valor: self._mudar_baixar(v), it)
+        m_mid.AppendSeparator()
+        item(m_mid, "audio_janela", "&Enter em áudio...")
+        item(m_mid, "audio_sequencia", "Áudios em &sequência...")
+        item(m_mid, "midias_limite", "&Limite do download automático...")
+        item(m_mid, "midias_confirmar", "&Confirmar downloads grandes...")
+        item(m_mid, "midias_espaco", "&Espaço usado pelas mídias")
 
         m_exib = wx.Menu()
         for est, nome in m.NOMES_ESTILOS.items():
@@ -178,7 +224,8 @@ class Janela(wx.Frame):
         item(m_aj, "sobre", "&Sobre o %s" % NOME)
 
         for submenu, rotulo in ((m_contas, "&Contas"), (m_conv, "C&onversa"),
-                                (m_msg, "&Mensagem"), (m_exib, "&Exibição"),
+                                (m_msg, "&Mensagem"), (m_mid, "Mí&dias"),
+                                (m_exib, "&Exibição"),
                                 (m_aj, "A&juda")):
             raiz.AppendSubMenu(submenu, rotulo)
         raiz.AppendSeparator()
@@ -195,16 +242,28 @@ class Janela(wx.Frame):
             "sair": lambda e: self.Close(),
             "ir_conv": lambda e: self._ir_para(self.lista_conv, "conversas"),
             "ir_msgs": lambda e: self._ir_para(self.lista_msgs, "mensagens"),
-            "ir_caixa": lambda e: self._ir_para(self.caixa, "caixa"),
+            "ir_caixa": lambda e: self._mostrar_caixa(),
             "abrir_conv": lambda e: self._abrir_selecionada_na_lista(),
-            "proxima": lambda e: self._proxima_nao_lida(),
+            "nao_lidas": lambda e: self._ir_nao_lidas(),
             "ler_ultima": lambda e: self._ler_ultima(),
             "atualizar": lambda e: self._atualizar_conversas(),
             "responder": lambda e: self._responder(),
             "copiar": lambda e: self._copiar(),
+            "ir_respondida": lambda e: self._ir_para_respondida(),
             "detalhes": lambda e: self._detalhes(),
             "ajuda": lambda e: dialogos.mostrar_texto(
                 self, "Teclas de atalho", AJUDA, "Teclas de atalho"),
+            "abrir_midia": lambda e: self._abrir_midia(),
+            "baixar_midia": lambda e: self._abrir_midia(abrir=False),
+            "salvar_midia": lambda e: self._salvar_midia(),
+            "audio_janela": lambda e: self._escolher_opcao("audio_janela"),
+            "audio_sequencia": lambda e: self._escolher_opcao(
+                "audio_sequencia"),
+            "midias_limite": lambda e: self._escolher_opcao(
+                "midias_limite_auto_mb"),
+            "midias_confirmar": lambda e: self._escolher_opcao(
+                "midias_confirmar_mb"),
+            "midias_espaco": lambda e: self._espaco_midias(),
             "guia": lambda e: self._abrir_pagina("guia.html"),
             "novidades": lambda e: self._abrir_pagina("novidades.html"),
             "sobre": lambda e: self._sobre(),
@@ -217,9 +276,12 @@ class Janela(wx.Frame):
                       lambda e, k=chave: self._opcao(k, e.IsChecked()),
                       self.itens[chave])
         self.itens["estilo%d" % self.estilo].Check(True)
+        self.itens.get("baixar_" + str(self.cfg.get("midias_baixar")),
+                       self.itens["baixar_demanda"]).Check(True)
 
     def _criar_controles(self):
         painel = wx.Panel(self)
+        self.painel = painel
         rot_conv = wx.StaticText(painel, label="Conversas")
         self.lista_conv = wx.ListBox(painel, style=wx.LB_SINGLE | wx.LB_HSCROLL,
                                      name="Conversas")
@@ -251,6 +313,46 @@ class Janela(wx.Frame):
         self.lista_msgs.Bind(wx.EVT_KEY_DOWN, self._tecla_mensagens)
         self.botao_enviar.Bind(wx.EVT_BUTTON,
                                seguro(lambda e: self._enviar_texto()))
+        self._mostrar_conversa(False, False)
+
+    def _mostrar_conversa(self, mensagens, escrever):
+        """Sem conversa aberta so a lista de conversas aparece; com a
+        conversa aberta aparecem as mensagens e a caixa de digitar."""
+        for w in (self.rot_msgs, self.lista_msgs):
+            w.Show(mensagens)
+        for w in (self.rot_caixa, self.caixa, self.botao_enviar):
+            w.Show(escrever)
+        self.painel.Layout()
+
+    def _atualizar_titulo(self):
+        """Titulo da janela: conversa aberta e o que esta em andamento
+        (sincronia do historico, downloads de midia)."""
+        base = NOME
+        conv = self.indice.get(self.atual) if self.atual else None
+        if conv is not None:
+            base = "%s: %s" % (NOME, conv.nome)
+        extras = []
+        agora = time.time()
+        for cid, (pct, quando) in list(self.sincronia.items()):
+            if agora - quando > 90:      # o celular parou de mandar
+                del self.sincronia[cid]
+                continue
+            servico = m.SERVICOS.get(self.contas.servico(cid), "") \
+                if self.contas else ""
+            extras.append("%s sincronizando %d%%" % (servico, pct))
+        for cid, pct in self.interrompidas.items():
+            servico = m.SERVICOS.get(self.contas.servico(cid), "") \
+                if self.contas else ""
+            extras.append("%s sincronia interrompida em %d%%" % (servico,
+                                                                  pct))
+        n = len(self.progresso_midias)
+        if n == 1:
+            pct = next(iter(self.progresso_midias.values()))
+            extras.append("baixando mídia %d%%" % pct if pct > 0
+                          else "baixando mídia")
+        elif n > 1:
+            extras.append("baixando %d mídias" % n)
+        self.SetTitle(base + (" - " + ", ".join(extras) if extras else ""))
 
     # ============================================================== inicio
     def comecar(self):
@@ -265,7 +367,11 @@ class Janela(wx.Frame):
             wx.CallLater(400, self._oferecer_primeira_conta)
         self.lista_conv.SetFocus()
         if self.lista_conv.GetCount():
-            self.lista_conv.SetSelection(0)
+            ultima = self.cfg.get("ultima_conversa")
+            chave = tuple(ultima) if isinstance(ultima, list) else None
+            self.lista_conv.SetSelection(
+                self._chaves_conv.index(chave)
+                if chave in self._chaves_conv else 0)
         log.info("fala direta pelo NVDA: %s", self.fala.ativa())
 
     @seguro
@@ -354,12 +460,15 @@ class Janela(wx.Frame):
         if self.atual and self.atual[0] == conta_id:
             self.atual = None
             self.lista_msgs.Set([TEXTO_SEM_CONVERSA])
+            self._mostrar_conversa(False, False)
+            self._atualizar_titulo()
         self.estados.pop(conta_id, None)
         self._ordenar()
         if self.conversas:
             self._preencher_conversas()
         else:
             self._chaves_conv = []
+            self._rotulos_conv = []
             self.lista_conv.Set([TEXTO_SEM_CONTAS])
         self.fala.falar("Conta removida.")
 
@@ -452,6 +561,9 @@ class Janela(wx.Frame):
             ev.QrPareamento: self._ev_qr,
             ev.CodigoPareamento: self._ev_codigo,
             ev.SincronizacaoConcluida: self._ev_sincronia,
+            ev.ProgressoSincronia: self._ev_progresso_sincronia,
+            ev.ProgressoMidia: self._ev_progresso_midia,
+            ev.MidiaBaixada: self._ev_midia_baixada,
         }.get(type(e))
         if tratador is not None and self:
             tratador(e)
@@ -465,6 +577,8 @@ class Janela(wx.Frame):
             if self.contas else ""
         if e.estado == ev.CONECTADA and antes != ev.CONECTADA:
             self.fala.falar("%s conectado." % servico)
+            if self.interrompidas.pop(e.conta_id, None) is not None:
+                self._atualizar_titulo()
         elif e.estado == ev.PRECISA_LOGIN:
             self.fala.falar("%s: %s." % (servico, e.detalhe or e.estado))
             if e.detalhe == "desconectada pelo celular":
@@ -519,8 +633,23 @@ class Janela(wx.Frame):
         antes = None
         if 0 <= i < len(self._chaves_conv):
             antes = self._chaves_conv[i]
-        self._chaves_conv = [c.chave for c in self.conversas]
-        self.lista_conv.Set([m.rotulo_conversa(c) for c in self.conversas])
+        chaves = [c.chave for c in self.conversas]
+        rotulos = [m.rotulo_conversa(c) for c in self.conversas]
+        if chaves == self._chaves_conv and \
+                rotulos == self._rotulos_conv:
+            return      # nada mudou: mexer na lista faz o NVDA repetir o foco
+        if chaves == self._chaves_conv and \
+                len(rotulos) == self.lista_conv.GetCount():
+            # mesma ordem: troca so os textos que mudaram
+            for k, (velho, novo) in enumerate(zip(self._rotulos_conv,
+                                                  rotulos)):
+                if velho != novo:
+                    self.lista_conv.SetString(k, novo)
+            self._rotulos_conv = rotulos
+            return
+        self._chaves_conv = chaves
+        self._rotulos_conv = rotulos
+        self.lista_conv.Set(rotulos)
         if antes in self._chaves_conv:
             self.lista_conv.SetSelection(self._chaves_conv.index(antes))
         elif self._chaves_conv:
@@ -531,16 +660,27 @@ class Janela(wx.Frame):
         lista = self._mesclar(chave, e.mensagens)
         if chave != self.atual:
             return
+        primeira = self.esperando_servidor
         if self.esperando_servidor:
             self.esperando_servidor = False
             if self.marcador_n > 0:
                 recebidas = [x for x in lista if not x.minha]
                 n = min(self.marcador_n, len(recebidas))
                 self.marcador_id = recebidas[-n].id if n else None
+        inicial = primeira or self.carga_inicial or self.mapa == [None]
+        self.carga_inicial = False
         destino = None
-        if self.selecao_automatica:
-            destino = MARCADOR if self.marcador_id else "ultima"
+        if self.selecao_automatica and inicial:
+            # so na primeira carga da conversa recem-aberta
+            destino = self._destino_inicial()
         self._preencher_mensagens(destino)
+        if primeira and self.alvo_inicial and \
+                self.alvo_inicial not in self.mapa:
+            self.fala.falar("Não achei o ponto em que você parou; abri no "
+                            "%s." % ("marcador de não lidas"
+                                     if self.marcador_id else "fim"))
+        if primeira:
+            self._dar_foco_as_mensagens()
 
     def _mesclar(self, chave, novas):
         """Junta mensagens ao cache da conversa, sem repetir, em ordem."""
@@ -568,10 +708,8 @@ class Janela(wx.Frame):
             self._tirar_local(chave, msg.texto)
         self._mesclar(chave, [msg])
         if aberta:
-            no_fim = self._selecionado_no_fim()
-            self._preencher_mensagens("ultima" if no_fim and
-                                      self.FindFocus() is not self.lista_msgs
-                                      else None)
+            # nada tira a pessoa de onde ela esta por conta propria
+            self._preencher_mensagens()
             if not msg.minha and self.IsActive():
                 p = self.contas.provedor(msg.conta_id)
                 if p is not None:
@@ -615,6 +753,8 @@ class Janela(wx.Frame):
                 self.caixa.SetValue(e.texto)
         bipe("erro")
         texto = "Não foi possível enviar: %s." % e.motivo
+        if chave == self.atual:
+            texto += " O texto voltou para a caixa de digitação."
         self.fala.falar(texto, interromper=True)
         self.SetStatusText(texto)
         log.info("envio falhou (%s)", e.motivo)
@@ -661,11 +801,14 @@ class Janela(wx.Frame):
             sem_mod = not (evt.AltDown() or evt.ControlDown()
                            or evt.ShiftDown())
             if k == wx.WXK_ESCAPE and sem_mod:
-                if foco is self.caixa and self.resposta_a is not None:
-                    self._cancelar_resposta()
+                if foco in (self.caixa, self.botao_enviar):
+                    self._sair_da_caixa()
                     return
-                if foco in (self.lista_msgs, self.caixa, self.botao_enviar):
-                    self._voltar_para_conversas()
+                if foco is self.lista_msgs:
+                    if not self._cancelar_download() and \
+                            not self._parar_audio() and \
+                            not self._voltar_da_respondida():
+                        self._fechar_conversa()
                     return
             if k in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) and sem_mod:
                 if foco is self.lista_conv:
@@ -710,6 +853,8 @@ class Janela(wx.Frame):
         self.marcador_n = conv.nao_lidas
         self.marcador_id = None
         self.selecao_automatica = True
+        self.alvo_inicial = self.banco.posicao(conv.conta_id, conv.id)
+        self.carga_inicial = True     # a 1a resposta do servico ainda e a abertura
         guardadas = self.banco.mensagens(conv.conta_id, conv.id, LIMITE_CACHE)
         lista = self._mesclar(conv.chave, guardadas)
         if self.marcador_n > 0 or not lista:
@@ -718,7 +863,9 @@ class Janela(wx.Frame):
             self.esperando_servidor = True
         self.rot_msgs.SetLabel("Mensagens de " + conv.nome)
         self.rot_caixa.SetLabel("Digite sua mensagem")
-        self.SetTitle("%s: %s" % (NOME, conv.nome))
+        self.caixa.SetValue(self.rascunhos.get(conv.chave, ""))
+        self._mostrar_conversa(True, True)
+        self._atualizar_titulo()
         p = self.contas.provedor(conv.conta_id)
         if p is not None:
             # no WhatsApp o historico e local e rapido: carrega todas as nao
@@ -731,20 +878,67 @@ class Janela(wx.Frame):
                 p.marcar_como_lida(conv.id)
         conv.nao_lidas = 0
         self._preencher_conversas()
-        self._preencher_mensagens("ultima")
+        self._preencher_mensagens(self._destino_inicial())
         log.info("conversa aberta (%d no cache, %d não lidas)", len(lista),
                  self.marcador_n)
-        self.lista_msgs.SetFocus()
+        if self.marcador_n > 0:
+            # o foco espera o servico responder: assim o leitor de tela fala
+            # uma vez so, no marcador de nao lidas
+            self.aguardando_foco = True
+            wx.CallLater(3000, self._dar_foco_as_mensagens, conv.chave)
+        else:
+            self.lista_msgs.SetFocus()
 
-    def _voltar_para_conversas(self):
+    def _dar_foco_as_mensagens(self, chave=None):
+        """Leva o foco para as mensagens depois que a selecao esta no lugar
+        certo (assim o leitor de tela fala uma vez so)."""
+        if not self.aguardando_foco or self.atual is None or \
+                (chave is not None and chave != self.atual):
+            return
+        self.aguardando_foco = False
+        if self.FindFocus() in (self.lista_conv, None):
+            self.lista_msgs.SetFocus()
+
+    def _fechar_conversa(self):
+        """Esc na lista de mensagens: fecha a conversa e volta para a lista
+        de conversas. Mensagens que chegarem depois contam como novas."""
         if self.atual in self._chaves_conv:
             self.lista_conv.SetSelection(self._chaves_conv.index(self.atual))
-        if self.marcador_id is not None:
-            self.marcador_id = None
-            self.marcador_n = 0
-            if self.atual is not None:
-                self._preencher_mensagens()
+        if self.resposta_a is not None:
+            self._cancelar_resposta()
+        self._guardar_posicao()
+        self._guardar_lista()
+        self.volta_para = []
+        texto = self.caixa.GetValue()
+        if texto.strip():
+            self.rascunhos[self.atual] = texto
+        else:
+            self.rascunhos.pop(self.atual, None)
+        self.caixa.Clear()
+        self.marcador_id = None
+        self.marcador_n = 0
+        self.atual = None
+        self.mapa = [None]
+        self._itens_msgs = []
+        self.rot_msgs.SetLabel("Mensagens")
+        self.lista_msgs.Set([TEXTO_SEM_CONVERSA])
+        self._mostrar_conversa(False, False)
+        self._atualizar_titulo()
         self.lista_conv.SetFocus()
+
+    def _mostrar_caixa(self):
+        if self.atual is None:
+            self.fala.falar(TEXTO_SEM_CONVERSA)
+            return
+        self.caixa.SetFocus()
+
+    def _sair_da_caixa(self):
+        """Esc na caixa: primeiro cancela a resposta em andamento; sem
+        resposta, fecha a conversa (o rascunho fica guardado)."""
+        if self.resposta_a is not None:
+            self._cancelar_resposta()
+            return
+        self._fechar_conversa()
 
     def _proxima_nao_lida(self):
         n = len(self._chaves_conv)
@@ -782,7 +976,7 @@ class Janela(wx.Frame):
             return
         msgs = self._mensagens_atuais()
         antes = self._chave_selecionada()
-        nomes = {x.id: ("Você" if x.minha else x.autor) for x in msgs}
+        porid = {x.id: x for x in msgs}
         itens, mapa = [], []
         anterior = None
         for x in msgs:
@@ -790,21 +984,108 @@ class Janela(wx.Frame):
                 itens.append(m.texto_marcador(self.marcador_n))
                 mapa.append(MARCADOR)
             itens.append(m.formatar(x, self.estilo, anterior,
-                                    respondida=nomes.get(x.resposta_a)))
+                                    respondida=self._original(x, porid)))
             mapa.append(x.id)
             anterior = x
         if not itens:
             itens = [TEXTO_CARREGANDO if self.esperando_servidor
                      else TEXTO_SEM_MENSAGENS]
             mapa = [None]
+        velho_mapa, velhos = self.mapa, self._itens_msgs
         self.mapa = mapa
+        self._itens_msgs = itens
+        if destino is None and mapa[:len(velho_mapa)] == velho_mapa \
+                and velho_mapa != [None] and \
+                self.lista_msgs.GetCount() == len(velho_mapa):
+            # so mudou o fim ou o texto de algum item: mexe so no que mudou
+            # e nao toca na selecao (o leitor de tela nao anuncia nada)
+            for k, (a, b) in enumerate(zip(velhos, itens)):
+                if a != b:
+                    self.lista_msgs.SetString(k, b)
+            for texto in itens[len(velho_mapa):]:
+                self.lista_msgs.Append(texto)
+            return
+        i_antes = self.lista_msgs.GetSelection()
         self.lista_msgs.Set(itens)
         sel = len(itens) - 1
-        if destino == MARCADOR and MARCADOR in mapa:
-            sel = mapa.index(MARCADOR)
-        elif destino is None and antes in mapa:
-            sel = mapa.index(antes)
+        if destino == MARCADOR:
+            if MARCADOR in mapa:
+                sel = mapa.index(MARCADOR)
+        elif destino not in (None, "ultima"):
+            if destino in mapa:
+                sel = mapa.index(destino)
+            elif MARCADOR in mapa:
+                sel = mapa.index(MARCADOR)
+        elif destino is None:
+            if antes in mapa:
+                sel = mapa.index(antes)
+            elif i_antes >= 0:
+                sel = min(i_antes, len(itens) - 1)   # perto de onde estava
         self.lista_msgs.SetSelection(sel)
+
+    def _destino_inicial(self):
+        """Onde a selecao cai ao abrir a conversa: no marcador, se ha nao
+        lidas; senao no ponto em que a pessoa parou (ou no fim)."""
+        alvo = self.alvo_inicial
+        if self.marcador_n > 0:
+            return MARCADOR      # com nao lidas, abre sempre no marcador
+        if alvo == "":
+            return "ultima"
+        if alvo:
+            return alvo      # se nao estiver na lista, cai no marcador/fim
+        return MARCADOR if self.marcador_id else "ultima"
+
+    def _guardar_posicao(self):
+        """Grava onde a selecao esta (no fim da lista: ''), para reabrir a
+        conversa no mesmo ponto."""
+        if self.atual is None or self.mapa == [None]:
+            return
+        i = self.lista_msgs.GetSelection()
+        if i < 0:
+            return
+        if i >= len(self.mapa) - 1:
+            alvo = ""
+        else:
+            alvo = self.mapa[i]
+            if alvo == MARCADOR:
+                alvo = self.mapa[i + 1]
+        try:
+            self.banco.salvar_posicao(self.atual[0], self.atual[1], alvo or "")
+        except Exception:
+            log.exception("erro ao guardar a posição da conversa")
+
+    def _guardar_lista(self):
+        i = self.lista_conv.GetSelection()
+        if 0 <= i < len(self._chaves_conv):
+            self.cfg.set("ultima_conversa", list(self._chaves_conv[i]))
+
+    def _ir_nao_lidas(self):
+        """Alt 2: na lista de conversas, a proxima conversa com nao lidas;
+        dentro da conversa, o marcador de mensagens nao lidas."""
+        if self.FindFocus() is self.lista_conv or self.atual is None:
+            self._proxima_nao_lida()
+            return
+        if MARCADOR in self.mapa:
+            self.lista_msgs.SetSelection(self.mapa.index(MARCADOR))
+            self.selecao_automatica = False
+            self.lista_msgs.SetFocus()
+            return
+        self.lista_msgs.SetFocus()
+        bipe("erro")
+        self.fala.falar("Nenhuma mensagem não lida nesta conversa.",
+                        interromper=True)
+
+    def _original(self, x, porid):
+        """A mensagem que `x` responde: da lista ou, se ficou fora dela, do
+        banco de dados."""
+        if not x.resposta_a:
+            return None
+        o = porid.get(x.resposta_a)
+        if o is None and self.banco is not None:
+            o = self.banco.mensagem(x.conta_id, x.conversa_id, x.resposta_a)
+            if o is not None:
+                porid[o.id] = o
+        return o
 
     def _chave_selecionada(self):
         i = self.lista_msgs.GetSelection()
@@ -825,6 +1106,11 @@ class Janela(wx.Frame):
             self.fala.falar("Marcador. As mensagens não lidas começam na "
                             "próxima.")
             return
+        x = self._mensagem_selecionada()
+        if x is not None and x.tipo in armazem.BAIXAVEIS and \
+                not x.id.startswith("local-"):
+            self._abrir_midia()
+            return
         self._detalhes()
 
     def _detalhes(self):
@@ -835,10 +1121,14 @@ class Janela(wx.Frame):
         recibos = []
         if x.minha and self.banco is not None and not x.id.startswith("local-"):
             recibos = self.banco.recibos(x.conta_id, x.conversa_id, x.id)
+        midia = None
+        if x.tipo in armazem.BAIXAVEIS and self.midias is not None:
+            midia = "baixada" if self.midias.caminho(x) else "não baixada"
         dialogos.mostrar_texto(self, "Detalhes da mensagem",
                                m.detalhes(x, conv.nome if conv else "",
-                                          recibos=recibos),
-                               "Detalhes e texto completo")
+                                          recibos=recibos, midia=midia),
+                               "Detalhes e texto completo",
+                               links=m.extrair_links(x.texto))
 
     def _responder(self):
         x = self._mensagem_selecionada()
@@ -849,7 +1139,7 @@ class Janela(wx.Frame):
         self.rot_caixa.SetLabel("Respondendo a %s. Digite sua resposta"
                                 % autor)
         self.fala.falar("Respondendo a %s. Esc cancela a resposta." % autor)
-        self.caixa.SetFocus()
+        self._mostrar_caixa()
 
     def _cancelar_resposta(self):
         self.resposta_a = None
@@ -877,13 +1167,50 @@ class Janela(wx.Frame):
         self.fala.falar(m.formatar(msgs[-1], m.ESTILO_AUTOR_PRIMEIRO),
                         interromper=True)
 
+    def _ir_para_respondida(self):
+        """Leva a selecao para a mensagem a que a selecionada responde."""
+        x = self._mensagem_selecionada()
+        if x is None:
+            return
+        if not x.resposta_a:
+            self.fala.falar("Esta mensagem não é uma resposta.")
+            return
+        if x.resposta_a not in self.mapa:
+            # fora da lista aberta: tenta trazer do banco de dados
+            o = self.banco.mensagem(x.conta_id, x.conversa_id, x.resposta_a)
+            if o is None:
+                bipe("erro")
+                self.fala.falar("A mensagem original não está guardada no "
+                                "TeleZapp.")
+                return
+            self._mesclar(self.atual, [o])
+            self._preencher_mensagens(x.id)
+        self.selecao_automatica = False
+        self.volta_para.append(x.id)
+        self.lista_msgs.SetSelection(self.mapa.index(x.resposta_a))
+        self.lista_msgs.SetFocus()
+
+    def _voltar_da_respondida(self):
+        """Esc depois de ir para a mensagem respondida: volta para a resposta
+        de onde a pessoa saiu. False se nao ha para onde voltar."""
+        while self.volta_para:
+            id_ = self.volta_para.pop()
+            if id_ in self.mapa:
+                self.lista_msgs.SetSelection(self.mapa.index(id_))
+                return True
+        return False
+
     def _menu_mensagem(self, evt):
         if self._mensagem_selecionada() is None:
             return
         menu = wx.Menu()
-        for rotulo, tratador in (("Responder", self._responder),
-                                 ("Copiar texto", self._copiar),
-                                 ("Detalhes", self._detalhes)):
+        opcoes = [("Responder", self._responder),
+                  ("Copiar texto", self._copiar),
+                  ("Detalhes", self._detalhes)]
+        if self._mensagem_selecionada().resposta_a:
+            opcoes.insert(1, ("Ir para a mensagem respondida",
+                              self._ir_para_respondida))
+        for rotulo, tratador in opcoes:
             it = menu.Append(wx.ID_ANY, rotulo)
             self.Bind(wx.EVT_MENU, seguro(lambda e, t=tratador: t()), it)
         pos = evt.GetPosition()
@@ -924,7 +1251,9 @@ class Janela(wx.Frame):
         if self.resposta_a is not None:
             self.resposta_a = None
             self.rot_caixa.SetLabel("Digite sua mensagem")
-        self._preencher_mensagens("ultima")
+        # a selecao fica na mensagem em que a pessoa estava
+        self._preencher_mensagens()
+        self.caixa.SetFocus()
         p.enviar_texto(conversa_id, texto, resposta)
         log.info("texto enviado para a fila (%d caracteres)", len(texto))
 
@@ -940,6 +1269,243 @@ class Janela(wx.Frame):
         if self.cfg.get("confirmar_envio"):
             self.fala.falar("Enviada.")
 
+    # =============================================================== midias
+    def _abrir_midia(self, abrir=True, x=None):
+        if x is None:
+            x = self._mensagem_selecionada()
+        if x is None or self.midias is None:
+            return
+        if x.tipo not in armazem.BAIXAVEIS:
+            self.fala.falar("Esta mensagem não tem mídia.")
+            return
+        if x.id.startswith("local-"):
+            return
+        caminho = self.midias.caminho(x)
+        if caminho:
+            if abrir:
+                self._mostrar_midia(x, caminho)
+            else:
+                self.fala.falar("Esta mídia já está baixada.")
+            return
+        limite = int(self.cfg.get("midias_confirmar_mb") or 0) * 1048576
+        if x.tamanho and x.tamanho > limite:
+            r = wx.MessageBox(
+                "Esta mídia tem %s. Baixar mesmo?" % m.tamanho_legivel(
+                    x.tamanho), NOME, wx.YES_NO | wx.ICON_QUESTION, self)
+            if r != wx.YES:
+                return
+        self.abrindo = x.chave
+        self.progresso_midias[x.chave] = 0
+        self._atualizar_titulo()
+        self.abrindo_abrir = abrir
+        self.progresso_falado = 0
+        self.midias.baixar(x)
+        tam = (", " + m.tamanho_legivel(x.tamanho)) if x.tamanho else ""
+        self.fala.falar("Baixando %s%s. Esc cancela." % (
+            m.NOMES_TIPOS.get(x.tipo, "mídia"), tam), interromper=True)
+
+    def _cancelar_download(self):
+        if self.abrindo is not None and self.midias is not None and \
+                self.midias.baixando(self.abrindo):
+            self.midias.cancelar(self.abrindo)
+            self.fala.falar("Cancelando o download.", interromper=True)
+            return True
+        return False
+
+    def _tocar_sem_janela(self, x, caminho):
+        """Enter em audio sem janela: toca ao fundo. Enter de novo na mesma
+        mensagem pausa e continua; Esc para. False se o formato exige a
+        janela (que usa o player do Windows)."""
+        if self.audio is not None and self.audio[0] == x.chave and \
+                not self.audio[1].terminou:
+            motor = self.audio[1]
+            motor.alternar()
+            self.fala.falar("Tocando" if motor.tocando else "Pausado",
+                            interromper=True)
+            return True
+        self._parar_audio(falar=False)
+        try:
+            motor = Reprodutor(caminho)
+        except FormatoNaoSuportado:
+            return False
+        motor.tocar()
+        self.audio = (x.chave, motor)
+        self.fala.falar("Tocando", interromper=True)
+        wx.CallLater(500, self._vigiar_audio, motor)
+        return True
+
+    def _vigiar_audio(self, motor):
+        """Libera o dispositivo de som quando o audio acaba."""
+        if self.audio is None or self.audio[1] is not motor:
+            return
+        if motor.terminou:
+            chave = self.audio[0]
+            self._parar_audio(falar=False)
+            if self.cfg.get("audio_sequencia") == "sim":
+                self._tocar_proximo_audio(chave)
+            return
+        wx.CallLater(500, self._vigiar_audio, motor)
+
+    def _tocar_proximo_audio(self, chave):
+        """Acabou um audio: segue para o proximo audio ou voz da conversa
+        (baixando antes, se preciso). Nao mexe na selecao da lista."""
+        lista = self.cache.get((chave[0], chave[1]), [])
+        achou = False
+        for x in lista:
+            if achou and x.tipo in (m.VOZ, m.AUDIO) and \
+                    not x.id.startswith("local-"):
+                autor = "você" if x.minha else (x.autor or "")
+                self.fala.falar("Próximo áudio" + (", de " + autor
+                                                   if autor else ""),
+                                interromper=True)
+                self._abrir_midia(x=x)
+                return
+            if x.chave == chave:
+                achou = True
+
+    def _parar_audio(self, falar=True):
+        if self.audio is None:
+            return False
+        motor = self.audio[1]
+        self.audio = None
+        try:
+            motor.fechar()
+        except Exception:
+            log.exception("erro ao parar o áudio")
+        if falar:
+            self.fala.falar("Áudio parado.", interromper=True)
+        return True
+
+    def _mostrar_midia(self, x, caminho):
+        if visualizadores.escolher(x.tipo, caminho) == visualizadores.AUDIO \
+                and self.cfg.get("audio_janela") == "sem" and \
+                self._tocar_sem_janela(x, caminho):
+            return
+        conv = self.indice.get((x.conta_id, x.conversa_id))
+        visualizadores.abrir(self, x, caminho, self.fala,
+                             conv.nome if conv else "")
+
+    def _salvar_midia(self):
+        x = self._mensagem_selecionada()
+        if x is None or self.midias is None or \
+                x.tipo not in armazem.BAIXAVEIS:
+            return
+        caminho = self.midias.caminho(x)
+        if not caminho:
+            self.fala.falar("Baixe a mídia antes, com Control B.")
+            return
+        visualizadores.salvar_copia(self, x, caminho, self.fala)
+
+    def _mudar_baixar(self, valor):
+        self.cfg.set("midias_baixar", valor)
+        nomes = dict(next(o for o in config.OPCOES
+                          if o.chave == "midias_baixar").escolhas)
+        self.fala.falar("Mídias: " + nomes[valor])
+
+    def _escolher_opcao(self, chave):
+        o = next(o for o in config.OPCOES if o.chave == chave)
+        atual = self.cfg.get(chave)
+        dlg = wx.SingleChoiceDialog(self, o.descricao, o.rotulo,
+                                    [r for _, r in o.escolhas])
+        try:
+            dlg.SetSelection([v for v, _ in o.escolhas].index(atual))
+        except ValueError:
+            pass
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            valor = o.escolhas[dlg.GetSelection()][0]
+        finally:
+            dlg.Destroy()
+        self.cfg.set(chave, valor)
+        self.fala.falar("%s: %s" % (o.rotulo, o.escolhas[
+            [v for v, _ in o.escolhas].index(valor)][1]))
+
+    def _espaco_midias(self):
+        self.fala.falar("As mídias baixadas ocupam %s." % m.tamanho_legivel(
+            armazem.tamanho_da_pasta()))
+
+    def _ev_progresso_sincronia(self, e):
+        if e.interrompida:
+            self.sincronia.pop(e.conta_id, None)
+            self.interrompidas[e.conta_id] = e.percentual
+            servico = m.SERVICOS.get(self.contas.servico(e.conta_id), "") \
+                if self.contas else ""
+            texto = ("%s: a sincronia do histórico foi interrompida em %d%%. "
+                     "O TeleZapp está tentando reconectar." %
+                     (servico, e.percentual))
+            self.SetStatusText(texto)
+            self.fala.falar(texto, interromper=True)
+            self._atualizar_titulo()
+            wx.CallAfter(self._oferecer_historico_de_novo, e.conta_id,
+                         e.percentual)
+            return
+        self.interrompidas.pop(e.conta_id, None)
+        if e.percentual >= 100:
+            self.sincronia.pop(e.conta_id, None)
+        else:
+            self.sincronia[e.conta_id] = (e.percentual, time.time())
+            wx.CallLater(91000, self._atualizar_titulo)
+        self._atualizar_titulo()
+
+    @seguro
+    def _oferecer_historico_de_novo(self, conta_id, percentual):
+        if self.contas is None or self.contas.provedor(conta_id) is None:
+            return
+        r = wx.MessageBox(
+            "A sincronia do histórico da conta %s parou em %d%% porque a "
+            "conexão caiu. O WhatsApp só envia o histórico uma vez, logo "
+            "depois do pareamento. Para receber o resto, é preciso "
+            "conectar a conta de novo (as conversas já guardadas "
+            "continuam). Quer conectar de novo agora?"
+            % (self.contas.nome(conta_id), percentual), NOME,
+            wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
+        if r == wx.YES:
+            self._parear_whatsapp_de_novo(conta_id)
+
+    def _ev_progresso_midia(self, e):
+        chave = (e.conta_id, e.conversa_id, e.mensagem_id)
+        if self.progresso_midias.get(chave) != e.percentual:
+            self.progresso_midias[chave] = e.percentual
+            self._atualizar_titulo()
+        if chave != self.abrindo:
+            return
+        marco = e.percentual // 25 * 25
+        if 0 < marco < 100 and marco > self.progresso_falado:
+            self.progresso_falado = marco
+            self.fala.falar("%d por cento" % marco)
+        self.SetStatusText("Baixando mídia: %d%%" % e.percentual)
+
+    def _ev_midia_baixada(self, e):
+        chave = (e.conta_id, e.conversa_id, e.mensagem_id)
+        if self.progresso_midias.pop(chave, None) is not None:
+            self._atualizar_titulo()
+        pedida = chave == self.abrindo
+        if pedida:
+            self.abrindo = None
+        if e.cancelada:
+            if pedida:
+                self.fala.falar("Download cancelado.", interromper=True)
+            return
+        if e.erro:
+            if pedida or not e.automatica:
+                bipe("erro")
+                self.fala.falar(e.erro, interromper=True)
+                wx.MessageBox(e.erro, NOME, wx.OK | wx.ICON_WARNING, self)
+            return
+        self.SetStatusText("Mídia baixada.")
+        if not pedida:
+            return
+        if not self.abrindo_abrir:
+            self.fala.falar("Mídia baixada.", interromper=True)
+            return
+        lista = self.cache.get((e.conta_id, e.conversa_id)) or \
+            self.banco.mensagens(e.conta_id, e.conversa_id, LIMITE_MEMORIA)
+        for x in lista:
+            if x.id == e.mensagem_id:
+                self._mostrar_midia(x, e.caminho)
+                return
+
     # ============================================================== opcoes
     def _mudar_estilo(self, estilo):
         self.estilo = estilo
@@ -953,6 +1519,9 @@ class Janela(wx.Frame):
         log.info("opção %s = %s", chave, valor)
 
     def _ir_para(self, controle, nome):
+        if self.atual is None and controle is self.lista_msgs:
+            self.fala.falar(TEXTO_SEM_CONVERSA)
+            return
         controle.SetFocus()
 
     def _abrir_pagina(self, nome):
@@ -986,6 +1555,9 @@ class Janela(wx.Frame):
     def _ao_fechar(self, evt):
         log.info("fechando a janela")
         self.Hide()
+        self._guardar_posicao()
+        self._guardar_lista()
+        self._parar_audio(falar=False)
         try:
             if self.contas is not None:
                 self.contas.parar_todos()

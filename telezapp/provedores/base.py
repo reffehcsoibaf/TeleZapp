@@ -17,6 +17,14 @@ PEDIR_CODIGO = "codigo"
 PEDIR_SENHA = "senha"
 
 
+class ErroMidia(Exception):
+    """Falha esperada ao baixar uma midia; o texto e dito a pessoa."""
+
+
+class DownloadCancelado(Exception):
+    """A pessoa cancelou o download."""
+
+
 class Provedor(ABC):
     servico = ""
 
@@ -49,3 +57,12 @@ class Provedor(ABC):
     @abstractmethod
     def marcar_como_lida(self, conversa_id):
         """Avisa o servico que a pessoa leu a conversa."""
+
+    def baixar_arquivo(self, msg, base, progresso, cancelado):
+        """Baixa a midia da mensagem e devolve o caminho do arquivo.
+
+        Bloqueia ate terminar: roda numa thread do gerente de midias, nunca
+        na da interface. `base` e o caminho sem extensao; `progresso(p)`
+        recebe 0 a 100; `cancelado()` diz se a pessoa desistiu. Levanta
+        ErroMidia (texto para a pessoa) ou DownloadCancelado."""
+        raise ErroMidia("Este serviço ainda não baixa mídias.")

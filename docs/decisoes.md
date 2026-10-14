@@ -148,10 +148,32 @@ Aprovado pelo responsável. As ideias foram divididas pelo efeito na base.
 | Listas de transmissão | Incerto: suporte limitado da whatsmeow |
 | Chamadas de áudio e vídeo | Fora por enquanto: o neonize não tem; no Telegram exigiria componente pesado |
 
+## Etapa 3a: receber e abrir mídias (14/10/2026)
+
+Decisões do responsável: tudo roda dentro do app (como nos clientes do
+gênero), as mídias ficam contidas no programa e baixar ao sincronizar ou sob
+demanda é configurável.
+
+- **Onde**: `%APPDATA%\TeleZapp\midias\<conta>\<conversa>`; apagadas com a
+  conta. Nada vai para Documentos nem para o `%temp%`.
+- **Quando baixar**: opção "sob demanda" (padrão) ou "automático" até um
+  limite (5 a 100 MB). Mídias do histórico do WhatsApp sempre sob demanda.
+- **Como abrir**: leitor próprio. Imagem em janela; áudio e voz com
+  soundfile + sounddevice (validados no experimento de voz); vídeo, e áudio
+  que a libsndfile não abre (m4a/aac), com o `wx.media.MediaCtrl` do Windows.
+  Documentos: texto pequeno no app; os demais têm um botão explícito para o
+  programa do Windows (única saída do app).
+- **WhatsApp**: o download exige a mensagem original; passa-se a guardar uma
+  "ficha" mínima por mídia (sem miniatura). Mídias recebidas antes não têm
+  ficha e não baixam.
+- **Não verificado nos testes automáticos**: o `MediaCtrl` e as janelas reais
+  (só no Windows). Velocidade de reprodução e envio de arquivos ficam para a
+  etapa 3b.
+
 ## Próximos passos sugeridos
 
 1. Grupo 1 do plano acima.
-2. Etapa 3: mídias (foto, vídeo, documento e nota de voz).
+2. Etapa 3b: enviar arquivos e gravar nota de voz (a 3a, receber e abrir, está pronta para teste).
 3. Adicionar o aviso de licença nos arquivos e conferir as licenças pendentes.
 4. Etapa 4 (ver o plano): configurações, sons, instalador, atualização e
    assinatura.

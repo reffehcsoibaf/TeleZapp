@@ -3,6 +3,60 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.14.0
+
+Etapa 3a: receber e abrir mídias.
+
+- `midia/armazem.py`: mídias só em `%APPDATA%\TeleZapp\midias\<conta>\
+  <hash da conversa>\<id>_<nome>`; apagadas com a conta.
+- `nucleo/midias.py` (`GerenteMidias`): downloads em threads próprias, com
+  progresso, cancelamento e registro na tabela `midias`; baixa ao receber
+  conforme a opção `midias_baixar` (`demanda` ou `automatico`, limite
+  `midias_limite_auto_mb`).
+- Provedores: `baixar_arquivo()` no Telegram (`download_media`) e no WhatsApp
+  (`download_any` com a ficha guardada); arquivo escrito como `.parte` e
+  renomeado ao fim.
+- Banco, esquema 4: tabela `fichas` (dados de download do WhatsApp, sem
+  miniatura nem citação), gravada para mensagens novas e do histórico.
+- `midia/reprodutor.py`: áudio com soundfile + sounddevice, lendo aos poucos;
+  `interface/visualizadores.py`: imagem, áudio, vídeo (`wx.media.MediaCtrl`),
+  texto e documento, todos em janelas do app.
+- Menu: Mensagem (abrir, baixar, salvar cópia) e submenu Mídias.
+- Dependências novas: soundfile, sounddevice.
+- Telegram: download em partes de 512 KB, 8 em paralelo; log com a velocidade.
+- Vídeo (MediaCtrl) começa a tocar sozinho mesmo sem o aviso de "carregou".
+- Título da janela mostra o progresso da sincronia (`ProgressoSincronia`) e
+  dos downloads.
+- Janela: Esc fecha a conversa (só as conversas ficam); a caixa de digitar
+  fica visível enquanto a conversa está aberta e o rascunho é guardado ao sair.
+- Detalhes da mensagem: lista de links (http, https, www) que abrem no
+  navegador padrão com Enter ou Espaço.
+- Menu de contexto/Mensagem: Ir para a mensagem respondida (busca no banco
+  se estiver fora da lista); Esc volta para a resposta.
+- Respostas citam, depois do texto, um trecho da original (do banco, se fora da
+  lista). Opção `audio_sequencia` (padrão sim): ao fim de um áudio sem janela
+  toca o próximo áudio/voz da conversa.
+- Conversa com não lidas abre sempre no marcador (mesmo com uma só); sem não
+  lidas, reabre no ponto em que você parou (na última, se parou no fim). Banco na versão 5
+  (tabela `posicoes`). A lista de conversas lembra a conversa selecionada.
+- Atalhos: Alt+1 conversas, Alt+2 marcador de não lidas (na conversa) ou
+  próxima conversa com não lidas (na lista), Alt+3 mensagens. Saem Ctrl+1,
+  Ctrl+2 e Ctrl+U; Ctrl+N fica reservado para nova conversa.
+- Vídeo (MediaCtrl) não repete mais: a nova tentativa de Play só vale antes
+  de o vídeo andar; ao acabar e voltar ao início, marca como terminado.
+- Conversa com não lidas abre com o foco no item "Início das mensagens não
+  lidas" (com a contagem); seta para baixo lê a primeira. O foco só vai para a
+  lista depois que a seleção está no lugar (uma fala só).
+- Nada move a seleção da lista de mensagens sozinho (envio, mensagens
+  novas, recargas): mensagens novas são só acrescentadas ao fim da lista.
+- Opção `audio_janela`: Enter em áudio/voz toca sem janela (padrão) ou abre o
+  player em janela; Enter pausa, Esc para.
+- Lista de conversas só é refeita quando algo muda (o NVDA repetia o foco
+  durante a sincronia).
+- WhatsApp: se a conexão cair sem pedido, reconecta sozinho (esperas de 3 a
+  120 s); se o histórico estava chegando, avisa "sincronia interrompida em N%"
+  (título, fala) e oferece conectar de novo.
+
 ## 2026.10.13.0
 
 - Menu único "Menu" com submenus (`wx.Menu.AppendSubMenu`); atalhos mantidos.

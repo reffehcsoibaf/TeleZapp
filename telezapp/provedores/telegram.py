@@ -12,14 +12,20 @@ import threading
 import time
 
 from telezapp import NOME, VERSAO, config
+from telezapp.midia import armazem
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import modelos as m
 from telezapp.provedores.base import (PEDIR_CODIGO, PEDIR_SENHA,
-                                      PEDIR_TELEFONE, Provedor)
+                                      PEDIR_TELEFONE, DownloadCancelado,
+                                      ErroMidia, Provedor)
 
 log = logging.getLogger("telezapp.telegram")
 
 LIMITE_CONVERSAS = 300
+# Download em partes de 512 KB, 8 ao mesmo tempo: nos testes foi de 0,6 para
+# cerca de 10 MB/s (docs/resultados-experimentos.md)
+PARTE_DOWNLOAD = 512 * 1024
+DOWNLOADS_PARALELOS = 8
 
 
 # ----------------------------------------------------- conversao (testavel)
@@ -357,6 +363,94 @@ class ProvedorTelegram(Provedor):
         log.info("mensagens carregadas: %d", len(msgs))
         self.barramento.publicar(
             ev.MensagensCarregadas(self.conta.id, conversa_id, msgs))
+
+    def baixar_arquivo(self, msg, base, progresso, cancelado):
+        if self._loop is None or self._loop.is_closed() or \
+                self.cliente is None:
+            raise ErroMidia("Sem conexão com o Telegram.")
+        futuro = asyncio.run_coroutine_threadsafe(
+            self._baixar(msg, base, progresso, cancelado), self._loop)
+        return futuro.result()
+
+    async def _baixar(self, msg, base, progresso, cancelado):
+        ent = await self._entidade(msg.conversa_id)
+        original = await self.cliente.get_messages(ent, ids=int(msg.id))
+        if original is None or not getattr(original, "media", None):
+            raise ErroMidia("O Telegram não tem mais a mídia desta mensagem.")
+        arquivo = getattr(original, "file", None)
+        caminho = armazem.com_extensao(base, armazem.extensao(
+            getattr(arquivo, "mime_type", ""), msg.tipo, msg.nome_arquivo))
+        parcial = caminho + ".parte"
+
+        def andamento(feito, total):
+            if cancelado():
+                raise DownloadCancelado()
+            if total:
+                progresso(int(feito * 100 / total))
+        tamanho = int(getattr(arquivo, "size", 0) or 0)
+        try:
+            progresso(0)
+            inicio = time.perf_counter()
+            if tamanho >= 2 * PARTE_DOWNLOAD:
+                await self._baixar_em_partes(original, parcial, tamanho,
+                                             andamento)
+            else:
+                await self.cliente.download_media(
+                    original, file=parcial, progress_callback=andamento)
+            gasto = max(time.perf_counter() - inicio, 0.001)
+            log.info("mídia do Telegram: %s em %.1fs (%.2f MB/s)",
+                     m.tamanho_legivel(tamanho), gasto,
+                     tamanho / 1048576 / gasto)
+            if cancelado():
+                raise DownloadCancelado()
+            os.replace(parcial, caminho)
+        except (DownloadCancelado, ErroMidia):
+            raise
+        except Exception as e:
+            log.warning("download falhou: %s", type(e).__name__)
+            raise ErroMidia("O Telegram não entregou a mídia (%s)."
+                            % type(e).__name__)
+        finally:
+            if os.path.exists(parcial):
+                os.remove(parcial)
+        progresso(100)
+        return caminho
+
+    async def _baixar_em_partes(self, original, destino, tamanho, andamento):
+        """Varios trechos em andamento juntos: o trabalhador i baixa as
+        partes i, i+N, i+2N... e grava cada uma na posicao certa."""
+        n = DOWNLOADS_PARALELOS
+        total = (tamanho + PARTE_DOWNLOAD - 1) // PARTE_DOWNLOAD
+        feitos = [0]
+        with open(destino, "wb") as f:
+            f.truncate(tamanho)
+        f = open(destino, "r+b")
+        try:
+            async def trabalhador(i):
+                limite = (total - i + n - 1) // n
+                if limite <= 0:
+                    return
+                k = 0
+                async for dados in self.cliente.iter_download(
+                        original.media, offset=i * PARTE_DOWNLOAD,
+                        stride=n * PARTE_DOWNLOAD, chunk_size=PARTE_DOWNLOAD,
+                        request_size=PARTE_DOWNLOAD, limit=limite,
+                        file_size=tamanho):
+                    f.seek((i + k * n) * PARTE_DOWNLOAD)
+                    f.write(dados)
+                    k += 1
+                    feitos[0] += len(dados)
+                    andamento(feitos[0], tamanho)
+            tarefas = [asyncio.ensure_future(trabalhador(i))
+                       for i in range(n)]
+            try:
+                await asyncio.gather(*tarefas)
+            except BaseException:
+                for t in tarefas:
+                    t.cancel()
+                raise
+        finally:
+            f.close()
 
     def enviar_texto(self, conversa_id, texto, resposta_a=""):
         self._agendar(self._enviar(conversa_id, texto, resposta_a))

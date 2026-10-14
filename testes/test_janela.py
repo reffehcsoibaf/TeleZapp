@@ -134,28 +134,31 @@ def test_lista_de_conversas(j):
                                   "Bruno, Telegram"]
 
 
-def test_abrir_conversa_com_nao_lidas_poe_o_marcador(j):
+def test_abrir_conversa_com_nao_lidas_foca_o_marcador(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
     j.lista_conv.SetFocus()
     j.lista_conv.SetSelection(0)
     j._char_hook(Tecla(wx_falso.WXK_RETURN))
-    assert j.lista_msgs.itens == [jm.TEXTO_CARREGANDO]
+    assert ditas == []                              # nada falado a parte
     assert ("carregar", "10", 50) in j.contas.p.pedidos
     assert ("lida", "10") in j.contas.p.pedidos
     assert j.lista_conv.itens[0] == "Ana, Telegram"
-    assert wx_falso._foco[0] is j.lista_msgs
+    assert wx_falso._foco[0] is j.lista_conv        # espera o servico
 
     j.b.publicar(ev.MensagensCarregadas("t1", "10", [
         msg("1", "antiga"), msg("2", "minha", minha=True),
         msg("3", "nova 1"), msg("4", "nova 2")]))
     itens = j.lista_msgs.itens
-    assert itens[2] == "Início das mensagens não lidas: 2 mensagens"
-    assert j.lista_msgs.selecionado() == itens[2]
-    assert itens[3].endswith("nova 1")
+    assert j.lista_msgs.selecionado() == \
+        "Início das mensagens não lidas: 2 mensagens"
+    assert itens[itens.index(j.lista_msgs.selecionado()) + 1].endswith(
+        "nova 1")                                    # seta para baixo: 1a
+    assert wx_falso._foco[0] is j.lista_msgs         # foco uma vez so
+    assert ditas == []
 
-    # Esc volta para as conversas e tira o marcador
-    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))         # Esc volta
     assert wx_falso._foco[0] is j.lista_conv
-    assert not any("Início" in x for x in j.lista_msgs.itens)
 
 
 def test_enviar_trocar_pela_confirmada_e_falha(j):
@@ -229,12 +232,91 @@ def test_responder_e_cancelar(j):
     j._responder()
     assert j.rot_caixa.label.startswith("Respondendo a Ana")
     assert wx_falso._foco[0] is j.caixa
-    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))   # cancela a resposta
-    assert j.resposta_a is None and wx_falso._foco[0] is j.caixa
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))   # cancela so a resposta
+    assert j.resposta_a is None and j.atual is not None
+    assert j.caixa.visivel is True
     j._responder()
+    assert j.caixa.visivel is True
     j.caixa.SetValue("sim")
     j._enviar_texto()
     assert ("enviar", "20", "sim", "3") in j.contas.p.pedidos
+    assert j.caixa.visivel is True and wx_falso._foco[0] is j.caixa
+    assert j.caixa.GetValue() == ""
+
+
+def test_caixa_fica_visivel_com_a_conversa_aberta(j):
+    assert j.lista_msgs.visivel is False and j.caixa.visivel is False
+    j._mostrar_caixa()                        # sem conversa: so avisa
+    assert j.caixa.visivel is False
+    j._abrir_conversa(j.indice[("t1", "20")])
+    assert j.lista_msgs.visivel is True and j.caixa.visivel is True
+    assert j.GetTitle() == "TeleZapp: Bruno"
+    j._mostrar_caixa()                        # Control E leva o foco
+    assert wx_falso._foco[0] is j.caixa
+    j.caixa.SetValue("rascunho")
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))  # Esc fecha a conversa
+    assert j.atual is None and j.caixa.visivel is False
+    assert j.lista_msgs.visivel is False
+    assert j.caixa.GetValue() == ""
+    j._abrir_conversa(j.indice[("t1", "20")])  # o rascunho volta
+    assert j.caixa.GetValue() == "rascunho"
+
+
+def test_lista_de_conversas_nao_e_refeita_sem_mudanca(j):
+    antes = list(j.lista_conv.itens)
+    chamadas = []
+    original = j.lista_conv.Set
+    j.lista_conv.Set = lambda itens: (chamadas.append(1), original(itens))
+    j._preencher_conversas()
+    j._preencher_conversas()
+    assert chamadas == [] and j.lista_conv.itens == antes   # NVDA nao repete
+
+
+def test_sincronia_interrompida_avisa_e_oferece_parear(j, monkeypatch):
+    perguntas = []
+    monkeypatch.setattr(jm.wx, "MessageBox",
+                        lambda *a, **k: perguntas.append(a[0]) or jm.wx.NO,
+                        raising=False)
+    j.contas.provedores["w1"] = j.contas.p
+    ditas = []
+    j.fala.falar = lambda texto, interromper=False: ditas.append(texto)
+    j.b.publicar(ev.ProgressoSincronia("w1", 57))
+    j.b.publicar(ev.ProgressoSincronia("w1", 57, interrompida=True))
+    assert "sincronia interrompida em 57%" in j.GetTitle()
+    assert any("interrompida em 57%" in d for d in ditas)
+    assert perguntas and "57%" in perguntas[0]
+    j.b.publicar(ev.EstadoConta("w1", ev.CONECTADA))
+    assert "interrompida" not in j.GetTitle()
+
+
+def test_esc_fecha_a_conversa(j):
+    j._abrir_conversa(j.indice[("t1", "20")])
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))
+    assert j.atual is None and wx_falso._foco[0] is j.lista_conv
+    assert j.lista_msgs.visivel is False and j.GetTitle() == "TeleZapp"
+    assert j.lista_msgs.itens == [jm.TEXTO_SEM_CONVERSA]
+    # mensagem que chega na conversa fechada conta como nao lida
+    c = j.indice[("t1", "20")]
+    c.nao_lidas = 1                       # o provedor soma antes de avisar
+    j.b.publicar(ev.MensagemNova(msg("9", "oi", conversa="20"), c))
+    assert j.lista_conv.itens[1] == "Bruno, Telegram, 1 não lida"
+
+
+def test_titulo_mostra_sincronia_e_downloads(j):
+    j.b.publicar(ev.ProgressoSincronia("w1", 40))
+    assert j.GetTitle() == "TeleZapp - WhatsApp sincronizando 40%"
+    j.b.publicar(ev.ProgressoSincronia("w1", 100))
+    assert j.GetTitle() == "TeleZapp"
+    j.b.publicar(ev.ProgressoMidia("t1", "10", "1", 45))
+    assert j.GetTitle() == "TeleZapp - baixando mídia 45%"
+    j.b.publicar(ev.ProgressoMidia("t1", "10", "2", 10))
+    assert j.GetTitle() == "TeleZapp - baixando 2 mídias"
+    j.b.publicar(ev.MidiaBaixada("t1", "10", "1", "/p/1.jpg"))
+    j.b.publicar(ev.MidiaBaixada("t1", "10", "2", cancelada=True))
+    assert j.GetTitle() == "TeleZapp"
+    j.sincronia["w1"] = (30, time.time() - 120)   # celular parou de mandar
+    j._atualizar_titulo()
+    assert j.GetTitle() == "TeleZapp" and not j.sincronia
 
 
 def test_sem_conexao_nao_envia(j):
@@ -407,3 +489,468 @@ def test_mensagens_da_sincronia_sem_aviso_e_resumo(j):
     assert not j.status.startswith("Nova mensagem")
     j.b.publicar(ev.SincronizacaoConcluida("t1", 10))
     assert j.status.startswith("10 mensagens novas chegaram no WhatsApp")
+
+
+class MidiasFalsas:
+    def __init__(self):
+        self.baixados, self.cancelados, self.prontas = [], [], {}
+        self.ativo = False
+
+    def caminho(self, x):
+        return self.prontas.get(x.chave)
+
+    def baixar(self, x, automatica=False):
+        self.baixados.append(x.id)
+        self.ativo = True
+
+    def baixando(self, chave):
+        return self.ativo
+
+    def cancelar(self, chave):
+        self.cancelados.append(chave)
+        self.ativo = False
+
+
+def foto(id, tamanho=1000):
+    return m.Mensagem("t1", "10", id, autor="Ana", tipo=m.FOTO,
+                      tamanho=tamanho, data=AGORA + int(id))
+
+
+@pytest.fixture
+def jm_midia(j, monkeypatch):
+    j.midias = MidiasFalsas()
+    abertas = []
+    monkeypatch.setattr(jm.visualizadores, "abrir",
+                        lambda pai, x, caminho, fala, nome="": abertas.append(
+                            (x.id, caminho, nome)))
+    j.lista_conv.SetFocus()
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg("1", "texto"), foto("2"), foto("3", tamanho=200 * 1048576)]))
+    j.abertas = abertas
+    return j
+
+
+def selecionar(j, id):
+    j.lista_msgs.SetSelection(j.mapa.index(id))
+    j.lista_msgs.SetFocus()
+
+
+def test_enter_em_midia_baixa_e_abre_quando_chega(jm_midia):
+    j = jm_midia
+    selecionar(j, "2")
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert j.midias.baixados == ["2"] and j.abrindo == ("t1", "10", "2")
+    j.b.publicar(ev.ProgressoMidia("t1", "10", "2", 60))
+    j.b.publicar(ev.MidiaBaixada("t1", "10", "2", "/p/2.jpg"))
+    assert j.abertas == [("2", "/p/2.jpg", "Ana")] and j.abrindo is None
+
+
+def test_midia_ja_baixada_abre_direto_e_texto_mostra_detalhes(jm_midia):
+    j = jm_midia
+    j.midias.prontas[("t1", "10", "2")] = "/p/2.jpg"
+    selecionar(j, "2")
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert j.abertas == [("2", "/p/2.jpg", "Ana")] and not j.midias.baixados
+    selecionar(j, "1")                  # texto: continua mostrando detalhes
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert j.abertas == [("2", "/p/2.jpg", "Ana")]
+
+
+def test_esc_cancela_o_download_antes_de_voltar(jm_midia):
+    j = jm_midia
+    selecionar(j, "2")
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))
+    assert j.midias.cancelados == [("t1", "10", "2")]
+    assert wx_falso._foco[0] is j.lista_msgs          # nao saiu da lista
+    j.b.publicar(ev.MidiaBaixada("t1", "10", "2", cancelada=True))
+    assert j.abertas == []
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))          # agora volta
+    assert wx_falso._foco[0] is j.lista_conv
+
+
+def test_midia_grande_pede_confirmacao(jm_midia, monkeypatch):
+    j = jm_midia
+    respostas = []
+    monkeypatch.setattr(jm.wx, "MessageBox",
+                        lambda *a, **k: respostas.append(a[0]) or jm.wx.NO)
+    selecionar(j, "3")
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert "200" in respostas[0] and j.midias.baixados == []
+
+
+def test_erro_de_download_e_baixar_sem_abrir(jm_midia, monkeypatch):
+    j = jm_midia
+    avisos = []
+    monkeypatch.setattr(jm.wx, "MessageBox",
+                        lambda *a, **k: avisos.append(a[0]))
+    selecionar(j, "2")
+    j._abrir_midia()
+    j.b.publicar(ev.MidiaBaixada("t1", "10", "2", erro="não tem mais"))
+    assert avisos == ["não tem mais"] and j.abertas == []
+    j._abrir_midia(abrir=False)
+    j.b.publicar(ev.MidiaBaixada("t1", "10", "2", "/p/2.jpg"))
+    assert j.abertas == []                              # so baixou
+
+
+def test_menu_de_midias_muda_a_opcao(j):
+    j.midias = MidiasFalsas()
+    assert j.cfg.get("midias_baixar") == "demanda"
+    j._mudar_baixar("automatico")
+    assert j.cfg.get("midias_baixar") == "automatico"
+
+
+class MotorFalso:
+    criados = []
+
+    def __init__(self, caminho):
+        self.caminho, self.tocando, self.terminou = caminho, False, False
+        self.fechado = False
+        MotorFalso.criados.append(self)
+
+    def tocar(self):
+        self.tocando = True
+
+    def alternar(self):
+        self.tocando = not self.tocando
+
+    def fechar(self):
+        self.fechado, self.tocando = True, False
+
+
+def voz(id):
+    return m.Mensagem("t1", "10", id, autor="Ana", tipo=m.VOZ,
+                      tamanho=1000, data=AGORA + int(id))
+
+
+def test_enter_em_voz_toca_sem_janela_pausa_e_esc_para(jm_midia, monkeypatch):
+    j = jm_midia
+    MotorFalso.criados = []
+    monkeypatch.setattr(jm, "Reprodutor", MotorFalso)
+    monkeypatch.setattr(jm.wx, "CallLater", lambda *a, **k: None,
+                        raising=False)
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [voz("5")]))
+    j.midias.prontas[("t1", "10", "5")] = "/p/5.ogg"
+    selecionar(j, "5")
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert j.abertas == []                     # sem janela
+    motor = MotorFalso.criados[0]
+    assert motor.tocando and motor.caminho == "/p/5.ogg"
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))   # pausa
+    assert not motor.tocando and len(MotorFalso.criados) == 1
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))   # continua
+    assert motor.tocando
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))   # para; a conversa continua
+    assert motor.fechado and j.atual is not None and j.audio is None
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))   # agora fecha a conversa
+    assert j.atual is None
+
+
+def test_audio_com_opcao_janela_abre_o_player(jm_midia, monkeypatch):
+    j = jm_midia
+    j.cfg.set("audio_janela", "janela")
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [voz("5")]))
+    j.midias.prontas[("t1", "10", "5")] = "/p/5.ogg"
+    selecionar(j, "5")
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert [a[0] for a in j.abertas] == ["5"] and j.audio is None
+
+
+def test_formato_que_o_app_nao_toca_abre_a_janela(jm_midia, monkeypatch):
+    j = jm_midia
+    monkeypatch.setattr(jm, "Reprodutor", lambda c: (_ for _ in ()).throw(
+        jm.FormatoNaoSuportado("m4a")))
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [voz("5")]))
+    j.midias.prontas[("t1", "10", "5")] = "/p/5.m4a"
+    selecionar(j, "5")
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert [a[0] for a in j.abertas] == ["5"]
+
+
+def test_enviar_mantem_a_selecao_na_mensagem_atual(jm_midia):
+    j = jm_midia
+    selecionar(j, "1")                       # mensagem antiga
+    j.caixa.SetValue("oi")
+    j._enviar_texto()
+    assert j._chave_selecionada() == "1"
+    # a confirmacao do servico tambem nao move a selecao
+    j.b.publicar(ev.MensagemNova(
+        msg("9", "oi", conversa="10", minha=True, data=AGORA + 99),
+        j.indice[("t1", "10")], enviada_daqui=True)) \
+        if "enviada_daqui" in ev.MensagemNova.__dataclass_fields__ else None
+    assert j._chave_selecionada() == "1"
+    assert wx_falso._foco[0] is j.caixa
+
+
+def test_nada_move_a_selecao_sozinho(jm_midia):
+    j = jm_midia
+    for onde in ("1", "3"):                  # no meio e no fim
+        selecionar(j, onde)
+        antes = j._chave_selecionada()
+        i = j.lista_msgs.GetSelection()
+        # mensagem de outra pessoa chega com o foco na lista e fora dela
+        j.caixa.SetFocus()
+        c = j.indice[("t1", "10")]
+        j.b.publicar(ev.MensagemNova(msg("7" + onde, "nova", conversa="10",
+                                         data=AGORA + 70 + int(onde)), c))
+        assert j._chave_selecionada() == antes
+        assert j.lista_msgs.GetSelection() == i
+        # o servidor devolve mensagens de novo (recarga)
+        j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+            msg("1", "texto")]))
+        assert j._chave_selecionada() == antes
+
+
+def test_lista_de_mensagens_so_acrescenta_no_fim(jm_midia):
+    j = jm_midia
+    selecionar(j, "2")
+    chamadas = []
+    original = j.lista_msgs.Set
+    j.lista_msgs.Set = lambda itens: (chamadas.append(1), original(itens))
+    c = j.indice[("t1", "10")]
+    j.b.publicar(ev.MensagemNova(msg("8", "nova", conversa="10",
+                                     data=AGORA + 99), c))
+    assert chamadas == []                  # nao refez a lista: sem anuncio
+    assert j.lista_msgs.itens[-1].endswith("nova") or "nova" in \
+        j.lista_msgs.itens[-1]
+    assert j._chave_selecionada() == "2"
+
+
+def _abrir_ana(j, n=6):
+    j.lista_conv.SetFocus()
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg(str(i), "texto %d" % i, conversa="10") for i in range(1, n + 1)]))
+
+
+def test_reabre_no_ponto_em_que_parou(j):
+    _abrir_ana(j)
+    j.lista_msgs.SetSelection(j.mapa.index("2"))
+    j.selecao_automatica = False
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))          # fecha a conversa
+    assert j.banco.posicao("t1", "10") == "2"
+    _abrir_ana(j)
+    assert j._chave_selecionada() == "2"
+
+
+def test_parou_no_fim_com_novas_abre_no_marcador(j):
+    _abrir_ana(j)
+    j.lista_msgs.SetSelection(j.lista_msgs.GetCount() - 1)
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))
+    assert j.banco.posicao("t1", "10") == ""
+    # chegaram mensagens novas enquanto estava fora
+    j.indice[("t1", "10")].nao_lidas = 2
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg(str(i), "texto %d" % i, conversa="10") for i in range(1, 9)]))
+    assert j._chave_selecionada() == jm.MARCADOR     # com nao lidas: marcador
+
+
+def test_primeira_vez_continua_no_marcador(j):
+    assert j.banco.posicao("t1", "10") is None
+    _abrir_ana(j)
+    assert j._chave_selecionada() == jm.MARCADOR and j.marcador_id == "5"
+
+
+def test_ponto_que_sumiu_cai_no_marcador_ou_fim(j):
+    j.banco.salvar_posicao("t1", "20", "999")
+    j.lista_conv.SetSelection(1)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", [
+        msg("1", "a", conversa="20"), msg("2", "b", conversa="20")]))
+    assert j._chave_selecionada() == "2"
+
+
+def test_alt2_marcador_na_conversa_e_proxima_na_lista(j):
+    _abrir_ana(j)
+    j.lista_msgs.SetSelection(0)
+    j.selecao_automatica = False
+    j.caixa.SetFocus()
+    j._ir_nao_lidas()
+    assert j._chave_selecionada() == jm.MARCADOR
+    assert wx_falso._foco[0] is j.lista_msgs
+    # sem marcador: avisa
+    j.marcador_id = None
+    j._preencher_mensagens()
+    j._ir_nao_lidas()
+    # na lista de conversas: proxima com nao lidas
+    j.indice[("t1", "20")].nao_lidas = 4
+    j.lista_conv.SetFocus()
+    j.lista_conv.SetSelection(0)
+    j._ir_nao_lidas()
+    assert j._conversa_selecionada().id == "20"
+
+
+def test_lista_de_conversas_lembra_onde_parou(j):
+    j.lista_conv.SetSelection(1)
+    j._guardar_lista()
+    assert j.cfg.get("ultima_conversa") == ["t1", "20"]
+    j.lista_conv.SetSelection(0)
+    j.comecar()
+    assert j.lista_conv.GetSelection() == 1
+
+
+def test_foco_vem_mesmo_se_o_servico_demora(j):
+    j.lista_conv.SetFocus()
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert wx_falso._foco[0] is j.lista_conv
+    j._dar_foco_as_mensagens(j.atual)               # passou o tempo limite
+    assert wx_falso._foco[0] is j.lista_msgs
+    j._dar_foco_as_mensagens(j.atual)               # nao repete
+
+
+def test_com_uma_so_nao_lida_abre_no_marcador_mesmo_se_parou_no_fim(j):
+    j.banco.salvar_posicao("t1", "10", "")          # tinha parado no fim
+    j.indice[("t1", "10")].nao_lidas = 1
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg("1", "antiga", conversa="10"), msg("2", "nova", conversa="10")]))
+    assert j._chave_selecionada() == jm.MARCADOR
+    assert j.lista_msgs.selecionado().startswith("Início das mensagens")
+
+
+def test_sem_nao_lidas_abre_no_ponto_guardado(j):
+    j.banco.salvar_posicao("t1", "20", "1")
+    j.lista_conv.SetSelection(1)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", [
+        msg("1", "a", conversa="20"), msg("2", "b", conversa="20")]))
+    assert j._chave_selecionada() == "1"
+
+
+def test_parou_no_fim_sem_novas_abre_na_ultima(j):
+    _abrir_ana(j)
+    j.lista_msgs.SetSelection(j.lista_msgs.GetCount() - 1)
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg(str(i), "texto %d" % i, conversa="10") for i in range(1, 8)]))
+    assert j._chave_selecionada() == "7"
+
+
+def test_resposta_mostra_a_mensagem_original(j):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    longa = "texto muito comprido " * 10
+    r = msg("4", "concordo", conversa="10")
+    r.resposta_a = "3"
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg("3", longa, conversa="10"), r]))
+    linha = [x for x in j.lista_msgs.itens if "concordo" in x][0]
+    assert 'concordo, em resposta a Ana: "texto muito comprido' in linha
+    assert linha.endswith('…"')
+    assert len(linha) < 200
+
+
+def test_resposta_a_mensagem_fora_da_lista_usa_o_banco(j):
+    j.banco.salvar_mensagens([msg("1", "pergunta antiga", conversa="10")])
+    r = msg("40", "sim", conversa="10")
+    r.resposta_a = "1"
+    j._mesclar(("t1", "10"), [r])
+    j.atual = ("t1", "10")
+    j._preencher_mensagens()
+    assert any('"pergunta antiga"' in x for x in j.lista_msgs.itens)
+    r.resposta_a = "999"                              # nao existe em lugar algum
+    j._preencher_mensagens()
+    assert any("em resposta a uma mensagem mais antiga" in x
+               for x in j.lista_msgs.itens)
+
+
+def _preparar_sequencia(j, monkeypatch):
+    MotorFalso.criados = []
+    monkeypatch.setattr(jm, "Reprodutor", MotorFalso)
+    monkeypatch.setattr(jm.wx, "CallLater", lambda *a, **k: None,
+                        raising=False)
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        voz("5"), msg("6", "texto"), voz("7"), foto("8")]))
+    for i in ("5", "7"):
+        j.midias.prontas[("t1", "10", i)] = "/p/%s.ogg" % i
+    selecionar(j, "5")
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    return MotorFalso.criados[0]
+
+
+def test_audios_tocam_em_sequencia(jm_midia, monkeypatch):
+    j = jm_midia
+    primeiro = _preparar_sequencia(j, monkeypatch)
+    primeiro.terminou = True
+    j._vigiar_audio(primeiro)                    # acabou o primeiro
+    assert len(MotorFalso.criados) == 2          # pulou o texto, tocou o 7
+    assert MotorFalso.criados[1].caminho == "/p/7.ogg"
+    assert j._chave_selecionada() == "5"         # selecao nao se mexeu
+    segundo = MotorFalso.criados[1]
+    segundo.terminou = True
+    j._vigiar_audio(segundo)                     # nao ha mais audios
+    assert len(MotorFalso.criados) == 2 and j.audio is None
+
+
+def test_sequencia_desligada_para_no_fim(jm_midia, monkeypatch):
+    j = jm_midia
+    j.cfg.set("audio_sequencia", "nao")
+    primeiro = _preparar_sequencia(j, monkeypatch)
+    primeiro.terminou = True
+    j._vigiar_audio(primeiro)
+    assert len(MotorFalso.criados) == 1 and j.audio is None
+
+
+def test_sequencia_baixa_o_proximo_se_preciso(jm_midia, monkeypatch):
+    j = jm_midia
+    primeiro = _preparar_sequencia(j, monkeypatch)
+    del j.midias.prontas[("t1", "10", "7")]
+    primeiro.terminou = True
+    j._vigiar_audio(primeiro)
+    assert j.midias.baixados[-1] == "7"
+
+
+def test_ir_para_a_mensagem_respondida(j):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    r = msg("4", "concordo", conversa="10")
+    r.resposta_a = "2"
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg("1", "a", conversa="10"), msg("2", "alvo", conversa="10"),
+        msg("3", "b", conversa="10"), r]))
+    selecionar(j, "4")
+    j._ir_para_respondida()
+    assert j._chave_selecionada() == "2"
+    j._ir_para_respondida()                       # nao e resposta
+    assert j._chave_selecionada() == "2"
+
+
+def test_ir_para_respondida_fora_da_lista_busca_no_banco(j):
+    j.banco.salvar_mensagens([msg("1", "velha", conversa="10")])
+    r = msg("40", "sim", conversa="10")
+    r.resposta_a = "1"
+    j._mesclar(("t1", "10"), [r])
+    j.atual = ("t1", "10")
+    j._preencher_mensagens("ultima")
+    j._ir_para_respondida()
+    assert j._chave_selecionada() == "1"
+    r.resposta_a = "999"
+    j._preencher_mensagens("ultima")
+    j._ir_para_respondida()                       # nao existe: avisa e fica
+    assert j._chave_selecionada() == "40"
+
+
+def test_esc_volta_da_mensagem_respondida(j):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    r = msg("4", "concordo", conversa="10")
+    r.resposta_a = "2"
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg("1", "a", conversa="10"), msg("2", "alvo", conversa="10"),
+        msg("3", "b", conversa="10"), r]))
+    selecionar(j, "4")
+    j._ir_para_respondida()
+    assert j._chave_selecionada() == "2"
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))      # volta para a resposta
+    assert j._chave_selecionada() == "4" and j.atual is not None
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))      # agora fecha a conversa
+    assert j.atual is None

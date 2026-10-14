@@ -107,6 +107,31 @@ OPCOES = (
           "mensagens.",
           ((1, "Autor e hora primeiro"), (2, "Conteúdo primeiro"),
            (3, "Autor só quando muda"))),
+    Opcao("audio_janela", "Enter em áudio e mensagem de voz", "Mídias", "sem",
+          "Só tocar começa a tocar sem abrir janela: Enter de novo pausa e "
+          "continua, e Esc para. O player em janela tem avançar, voltar e "
+          "posição.",
+          (("sem", "Só tocar, sem janela"),
+           ("janela", "Abrir a janela do player"))),
+    Opcao("audio_sequencia", "Áudios em sequência", "Mídias", "sim",
+          "Quando um áudio ou mensagem de voz termina (sem janela), toca o "
+          "próximo áudio da conversa, baixando antes se preciso. Esc para.",
+          (("sim", "Tocar os áudios em sequência"),
+           ("nao", "Parar quando o áudio terminar"))),
+    Opcao("midias_baixar", "Quando baixar as mídias", "Mídias", "demanda",
+          "Sob demanda baixa só quando você abre a mídia. Automático baixa "
+          "ao receber, até o limite escolhido.",
+          (("demanda", "Só quando eu abrir"),
+           ("automatico", "Automaticamente ao receber"))),
+    Opcao("midias_limite_auto_mb", "Limite do download automático", "Mídias",
+          20, "Mídias maiores que isto (em MB) não baixam sozinhas.",
+          ((5, "5 MB"), (10, "10 MB"), (20, "20 MB"), (50, "50 MB"),
+           (100, "100 MB"))),
+    Opcao("midias_confirmar_mb", "Confirmar downloads grandes", "Mídias", 100,
+          "Pergunta antes de baixar, a seu pedido, uma mídia maior que isto "
+          "(em MB).",
+          ((50, "50 MB"), (100, "100 MB"), (500, "500 MB"),
+           (100000, "Nunca perguntar"))),
 )
 
 

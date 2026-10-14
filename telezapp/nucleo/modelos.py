@@ -156,15 +156,34 @@ def _juntar(cont, resto):
     return cont + (" " if final in ".!?…" else ", ") + resto
 
 
+LIMITE_CITACAO = 80
+
+
+def citacao(original, max_caracteres=LIMITE_CITACAO):
+    """Trecho curto de uma mensagem para mostrar numa resposta."""
+    texto = " ".join(conteudo(original).split())
+    if len(texto) > max_caracteres:
+        texto = texto[:max_caracteres].rsplit(" ", 1)[0].rstrip(" ,;:.") + "…"
+    return texto
+
+
 def formatar(m, estilo, anterior=None, agora=None, respondida=None):
     """Uma linha da lista de mensagens, no estilo escolhido.
 
-    respondida: autor da mensagem respondida, se conhecido.
+    respondida: a mensagem respondida (Mensagem), se conhecida; ou só o nome
+    do autor (texto).
     """
     cont = conteudo(m).replace("\r", " ").replace("\n", " ")
     if m.resposta_a:
-        cont = ("em resposta a %s: " % respondida if respondida
-                else "em resposta: ") + cont
+        if isinstance(respondida, Mensagem):
+            quem = "você" if respondida.minha else (
+                respondida.autor or "mensagem")
+            cont = _juntar(cont, 'em resposta a %s: "%s"' % (
+                quem, citacao(respondida)))
+        elif respondida:
+            cont = _juntar(cont, "em resposta a %s" % respondida)
+        else:
+            cont = _juntar(cont, "em resposta a uma mensagem mais antiga")
     autor = "Você" if m.minha else (m.autor or "Desconhecido")
     estado = m.estado if (m.minha and m.estado) else ""
     hora = hora_legivel(m.data, agora)
@@ -187,12 +206,32 @@ def rotulo_conversa(c):
     return base
 
 
+_LINK = re.compile(r"(?:https?://|www\.)[^\s<>\"']+", re.IGNORECASE)
+_FIM_DE_LINK = ".,;:!?)]}»”’'\""
+
+
+def extrair_links(texto):
+    """Links (http, https e www) de um texto, na ordem, sem repetir.
+    Devolve [(endereco_para_abrir, como_aparece_no_texto)]."""
+    achados, vistos = [], set()
+    for t in _LINK.findall(texto or ""):
+        t = t.rstrip(_FIM_DE_LINK)
+        if len(t) < 5:
+            continue
+        url = t if t.lower().startswith("http") else "https://" + t
+        if url not in vistos:
+            vistos.add(url)
+            achados.append((url, t))
+    return achados
+
+
 def texto_marcador(n):
     return "Início das mensagens não lidas: %d %s" % (
         n, "mensagem" if n == 1 else "mensagens")
 
 
-def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None):
+def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
+             midia=None):
     linhas = [
         "Conversa: %s" % nome_conversa,
         "De: %s" % ("Você" if m.minha else (m.autor or "Desconhecido")),
@@ -208,6 +247,8 @@ def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None):
         linhas.append("Duração: %s" % duracao_legivel(m.segundos))
     if m.minha and m.estado:
         linhas.append("Estado: %s" % m.estado)
+    if midia:
+        linhas.append("Mídia: %s" % midia)
     if m.minha and recibos:
         nomes = nomes or {}
         rotulos = {"entregue": "Entregue", "lida": "Lida",

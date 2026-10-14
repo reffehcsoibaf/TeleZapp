@@ -10,6 +10,7 @@ _foco = [None]
 ID_ANY, ID_OK, ID_CANCEL = -1, 5100, 5101
 YES, NO, OK, CANCEL = 2, 8, 4, 16
 YES_NO = YES | NO
+NO_DEFAULT = 0
 ICON_WARNING = ICON_QUESTION = ICON_INFORMATION = 0
 DEFAULT_DIALOG_STYLE = RESIZE_BORDER = 0
 LB_SINGLE = LB_HSCROLL = TE_MULTILINE = TE_PASSWORD = TE_READONLY = 0
@@ -54,6 +55,12 @@ class Janela:
     def Bind(self, *a, **k):
         pass
 
+    def Show(self, v=True):
+        self.visivel = v
+
+    def Layout(self):
+        pass
+
     def SetFocus(self):
         _foco[0] = self
 
@@ -64,6 +71,9 @@ class Janela:
 class Frame(Janela):
     def SetTitle(self, t):
         self.titulo = t
+
+    def GetTitle(self):
+        return self.titulo
 
     def CreateStatusBar(self):
         self.status = ""
@@ -225,6 +235,12 @@ class ListBox(Janela):
 
     def Set(self, itens):
         self.itens, self.sel = list(itens), -1
+
+    def SetString(self, i, texto):
+        self.itens[i] = texto
+
+    def Append(self, texto):
+        self.itens.append(texto)
 
     def GetCount(self):
         return len(self.itens)

@@ -20,9 +20,10 @@ import threading
 import time
 
 from telezapp import config
+from telezapp.midia import armazem
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import modelos as m
-from telezapp.provedores.base import Provedor
+from telezapp.provedores.base import DownloadCancelado, ErroMidia, Provedor
 
 log = logging.getLogger("telezapp.whatsapp")
 
@@ -38,6 +39,8 @@ RECIBO_ENTREGUE, RECIBO_LIDO, RECIBO_LIDO_POR_MIM, RECIBO_OUVIDO = 1, 4, 5, 6
 MAX_GUARDADAS = 2000
 # Sem o aviso de fim da sincronia, os avisos voltam depois deste tempo
 TEMPO_MAX_SINCRONIA = 45
+# espera (segundos) antes de cada nova tentativa de conexao; a ultima repete
+ESPERAS_RECONEXAO = (3, 10, 30, 60, 120)
 # Status de mensagem no historico (WebMessageInfo.Status)
 HIST_ENTREGUE, HIST_LIDA, HIST_OUVIDA = 3, 4, 5
 # Conversas que nao sao conversas para a pessoa
@@ -169,6 +172,40 @@ def converter(evento, conta_id, conversa_id, autor=""):
     return msg, msg.remetente
 
 
+CAMPOS_MIDIA = ("imageMessage", "videoMessage", "audioMessage",
+                "documentMessage", "stickerMessage")
+
+
+def ficha_de(interna):
+    """O minimo que o WhatsApp exige para baixar a midia depois (chaves e
+    caminho), sem miniatura nem resposta citada. None se nao ha midia."""
+    from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import Message
+    for nome in CAMPOS_MIDIA:
+        try:
+            if not interna.HasField(nome):
+                continue
+        except (ValueError, AttributeError):
+            continue
+        sub = type(getattr(interna, nome))()
+        sub.CopyFrom(getattr(interna, nome))
+        for campo in ("contextInfo", "JPEGThumbnail", "caption"):
+            try:
+                sub.ClearField(campo)
+            except ValueError:
+                pass
+        return Message(**{nome: sub}).SerializeToString()
+    return None
+
+
+def mime_da_ficha(dados):
+    from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import Message
+    interna = Message.FromString(dados)
+    for nome in CAMPOS_MIDIA:
+        if interna.HasField(nome):
+            return getattr(interna, nome).mimetype
+    return ""
+
+
 def jid_de_texto(texto):
     """'usuario@servidor' -> (usuario, servidor)."""
     if "@" not in (texto or ""):
@@ -252,6 +289,7 @@ class ProvedorWhatsApp(Provedor):
         super().__init__(conta, barramento, banco, pedir)
         self.historico = historico
         self._desligada = False     # desconectada pelo celular
+        self._nao_reconectar = False  # banida ou aberta em outro lugar
         self._lid_para_numero = {}  # do pacote de historico
         self._apelidos = {}         # jid -> nome de perfil (pushname)
         self.pasta_sessoes = pasta_sessoes or config.pasta("sessoes")
@@ -267,6 +305,7 @@ class ProvedorWhatsApp(Provedor):
         self._nomes_grupo_pedidos = set()
         self._conectada = False
         self._sincronizando = False
+        self._progresso_historico = 0   # 0 = nada em andamento
         self._recebidas_na_sincronia = 0
         self._trava = threading.RLock()
 
@@ -295,6 +334,41 @@ class ProvedorWhatsApp(Provedor):
                                                 detalhe))
 
     def _conectar(self):
+        """Mantem a conexao: se o connect() terminar sem que ninguem tenha
+        pedido (queda de rede, websocket fechado), avisa e tenta de novo
+        com espera crescente."""
+        tentativa = 0
+        while not self._parar.is_set():
+            inicio = time.monotonic()
+            if not self._uma_conexao():
+                return          # erro de configuracao: nao adianta repetir
+            if self._parar.is_set() or self._desligada \
+                    or self._nao_reconectar:
+                return
+            if time.monotonic() - inicio > 300:
+                tentativa = 0   # ficou conectada um bom tempo
+            self._conectada = False
+            self._avisar_sincronia_interrompida()
+            espera = ESPERAS_RECONEXAO[min(tentativa,
+                                           len(ESPERAS_RECONEXAO) - 1)]
+            tentativa += 1
+            log.warning("conexão do WhatsApp encerrada sem pedido; nova "
+                        "tentativa em %ds (tentativa %d)", espera, tentativa)
+            self._estado(ev.DESCONECTADA, "reconectando")
+            if self._parar.wait(espera):
+                return
+
+    def _avisar_sincronia_interrompida(self):
+        """Se o historico estava chegando, diz em quantos por cento parou."""
+        pct = self._progresso_historico
+        if 0 < pct < 100:
+            self._progresso_historico = 0
+            self.barramento.publicar(ev.ProgressoSincronia(
+                self.conta.id, pct, interrompida=True))
+
+    def _uma_conexao(self):
+        """Cria o cliente e conecta (bloqueia ate a conexao acabar).
+        Devolve False se houve erro que nao adianta repetir."""
         try:
             import neonize.events as nev
             self.cliente = self.fabrica_cliente()
@@ -323,12 +397,14 @@ class ProvedorWhatsApp(Provedor):
             self._inicio = time.perf_counter()
             self.cliente.connect()   # bloqueia ate parar()
             log.info("connect() retornou")
+            return True
         except Exception:
             if not self._parar.is_set():
                 log.exception("erro na conexão do WhatsApp")
                 self._estado(ev.ERRO, "falha na conexão")
                 self._avisar("Erro na conexão do WhatsApp. Os detalhes estão "
                              "no log.", True)
+            return False
 
     def _trabalhar(self):
         while not self._parar.is_set():
@@ -445,6 +521,7 @@ class ProvedorWhatsApp(Provedor):
         if self._parar.is_set():
             return
         self._conectada = False
+        self._avisar_sincronia_interrompida()
         self._estado(ev.DESCONECTADA, "reconectando")
 
     def _ao_banimento(self, cliente, e):
@@ -453,6 +530,7 @@ class ProvedorWhatsApp(Provedor):
 
     def _ao_substituida(self, cliente, e):
         log.warning("sessão substituída por outro aparelho")
+        self._nao_reconectar = True
         self._estado(ev.ERRO, "aberta em outro lugar")
         self._avisar("Esta sessão do WhatsApp foi aberta em outro lugar.",
                      True)
@@ -553,6 +631,11 @@ class ProvedorWhatsApp(Provedor):
             if cid in IGNORAR_CONVERSAS:
                 self._guardar_status(msg, origem, info.Pushname)
                 return
+            if msg.tipo in armazem.BAIXAVEIS:
+                ficha = ficha_de(desembrulhar(evento.Message))
+                if ficha:
+                    self.banco.salvar_fichas(
+                        [(self.conta.id, cid, msg.id, ficha)])
             conv = self._conversa(cid, origem.Chat, info.Pushname, grupo,
                                   msg.data)
             with self._trava:
@@ -571,6 +654,39 @@ class ProvedorWhatsApp(Provedor):
                                                      silenciosa=silenciosa))
         except Exception:
             log.exception("erro ao tratar mensagem recebida")
+
+    def baixar_arquivo(self, msg, base, progresso, cancelado):
+        dados = self.banco.ficha(msg.conta_id, msg.conversa_id, msg.id)
+        if dados is None:
+            raise ErroMidia(
+                "Esta mídia chegou antes do TeleZapp guardar os dados para "
+                "baixá-la. Só as mídias recebidas daqui para a frente, ou do "
+                "histórico de um novo pareamento, podem ser baixadas.")
+        if not self._conectada or self.cliente is None:
+            raise ErroMidia("Sem conexão com o WhatsApp.")
+        from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import Message
+        caminho = armazem.com_extensao(base, armazem.extensao(
+            mime_da_ficha(dados), msg.tipo, msg.nome_arquivo))
+        parcial = caminho + ".parte"
+        if cancelado():
+            raise DownloadCancelado()
+        progresso(0)
+        try:
+            self.cliente.download_any(Message.FromString(dados), parcial)
+            if cancelado():
+                raise DownloadCancelado()
+            os.replace(parcial, caminho)
+        except (DownloadCancelado, ErroMidia):
+            raise
+        except Exception as e:
+            log.warning("download falhou: %s", type(e).__name__)
+            raise ErroMidia("O WhatsApp não entregou a mídia (%s). Ela pode "
+                            "ter expirado no servidor." % type(e).__name__)
+        finally:
+            if os.path.exists(parcial):
+                os.remove(parcial)
+        progresso(100)
+        return caminho
 
     def _guardar_status(self, msg, origem, pushname):
         """Status (stories) nao sao conversas: ficam numa tabela a parte,
@@ -737,6 +853,10 @@ class ProvedorWhatsApp(Provedor):
             log.info("pacote de histórico: %s", ", ".join(
                 "%s=%s" % kv for kv in resumo_historico(e.Data).items()))
             self.guardar_historico(e.Data)
+            pct = min(100, int(e.Data.progress))
+            self._progresso_historico = 0 if pct >= 100 else pct
+            self.barramento.publicar(ev.ProgressoSincronia(
+                self.conta.id, pct))
         except Exception:
             log.exception("erro ao ler o pacote de histórico")
 
@@ -752,7 +872,7 @@ class ProvedorWhatsApp(Provedor):
         dias = OPCOES_HISTORICO.get(self.historico,
                                     OPCOES_HISTORICO["recentes"])[1]
         limite = time.time() - dias * 86400 if dias else 0
-        convs, msgs = [], []
+        convs, msgs, fichas = [], [], []
         for c in dados.conversations:
             cid = self._normalizar_id(c.ID)
             if not cid or cid in IGNORAR_CONVERSAS or \
@@ -771,6 +891,11 @@ class ProvedorWhatsApp(Provedor):
                 if x is None or (limite and x.data < limite):
                     continue
                 novas.append(x)
+                if x.tipo in armazem.BAIXAVEIS and \
+                        h.message.HasField("message"):
+                    ficha = ficha_de(desembrulhar(h.message.message))
+                    if ficha:
+                        fichas.append((self.conta.id, cid, x.id, ficha))
                 if not x.minha:
                     self._remetentes[x.id] = (rem, x.texto)
             if novas:
@@ -802,6 +927,8 @@ class ProvedorWhatsApp(Provedor):
             self.banco.salvar_conversas(convs)
         if msgs:
             self.banco.salvar_mensagens(msgs)
+            if fichas:
+                self.banco.salvar_fichas(fichas)
         log.info("histórico guardado: %d conversas e %d mensagens em %.2fs",
                  len(convs), len(msgs), time.perf_counter() - inicio)
         if convs:
