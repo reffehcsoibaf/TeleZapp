@@ -186,6 +186,7 @@ class Janela(wx.Frame):
         item(m_msg, "responder", "&Responder\tCtrl+Shift+R")
         item(m_msg, "copiar", "&Copiar texto\tCtrl+Shift+C")
         item(m_msg, "detalhes", "&Detalhes\tAlt+Enter")
+        item(m_msg, "ir_respondida", "Ir para a mensagem respondi&da")
         m_msg.AppendSeparator()
         item(m_msg, "abrir_midia", "&Abrir mídia\tCtrl+O")
         item(m_msg, "baixar_midia", "&Baixar mídia sem abrir\tCtrl+B")
@@ -247,6 +248,7 @@ class Janela(wx.Frame):
             "atualizar": lambda e: self._atualizar_conversas(),
             "responder": lambda e: self._responder(),
             "copiar": lambda e: self._copiar(),
+            "ir_respondida": lambda e: self._ir_para_respondida(),
             "detalhes": lambda e: self._detalhes(),
             "ajuda": lambda e: dialogos.mostrar_texto(
                 self, "Teclas de atalho", AJUDA, "Teclas de atalho"),
@@ -1161,13 +1163,39 @@ class Janela(wx.Frame):
         self.fala.falar(m.formatar(msgs[-1], m.ESTILO_AUTOR_PRIMEIRO),
                         interromper=True)
 
+    def _ir_para_respondida(self):
+        """Leva a selecao para a mensagem a que a selecionada responde."""
+        x = self._mensagem_selecionada()
+        if x is None:
+            return
+        if not x.resposta_a:
+            self.fala.falar("Esta mensagem não é uma resposta.")
+            return
+        if x.resposta_a not in self.mapa:
+            # fora da lista aberta: tenta trazer do banco de dados
+            o = self.banco.mensagem(x.conta_id, x.conversa_id, x.resposta_a)
+            if o is None:
+                bipe("erro")
+                self.fala.falar("A mensagem original não está guardada no "
+                                "TeleZapp.")
+                return
+            self._mesclar(self.atual, [o])
+            self._preencher_mensagens(x.id)
+        self.selecao_automatica = False
+        self.lista_msgs.SetSelection(self.mapa.index(x.resposta_a))
+        self.lista_msgs.SetFocus()
+
     def _menu_mensagem(self, evt):
         if self._mensagem_selecionada() is None:
             return
         menu = wx.Menu()
-        for rotulo, tratador in (("Responder", self._responder),
-                                 ("Copiar texto", self._copiar),
-                                 ("Detalhes", self._detalhes)):
+        opcoes = [("Responder", self._responder),
+                  ("Copiar texto", self._copiar),
+                  ("Detalhes", self._detalhes)]
+        if self._mensagem_selecionada().resposta_a:
+            opcoes.insert(1, ("Ir para a mensagem respondida",
+                              self._ir_para_respondida))
+        for rotulo, tratador in opcoes:
             it = menu.Append(wx.ID_ANY, rotulo)
             self.Bind(wx.EVT_MENU, seguro(lambda e, t=tratador: t()), it)
         pos = evt.GetPosition()

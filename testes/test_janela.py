@@ -907,3 +907,33 @@ def test_sequencia_baixa_o_proximo_se_preciso(jm_midia, monkeypatch):
     primeiro.terminou = True
     j._vigiar_audio(primeiro)
     assert j.midias.baixados[-1] == "7"
+
+
+def test_ir_para_a_mensagem_respondida(j):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    r = msg("4", "concordo", conversa="10")
+    r.resposta_a = "2"
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg("1", "a", conversa="10"), msg("2", "alvo", conversa="10"),
+        msg("3", "b", conversa="10"), r]))
+    selecionar(j, "4")
+    j._ir_para_respondida()
+    assert j._chave_selecionada() == "2"
+    j._ir_para_respondida()                       # nao e resposta
+    assert j._chave_selecionada() == "2"
+
+
+def test_ir_para_respondida_fora_da_lista_busca_no_banco(j):
+    j.banco.salvar_mensagens([msg("1", "velha", conversa="10")])
+    r = msg("40", "sim", conversa="10")
+    r.resposta_a = "1"
+    j._mesclar(("t1", "10"), [r])
+    j.atual = ("t1", "10")
+    j._preencher_mensagens("ultima")
+    j._ir_para_respondida()
+    assert j._chave_selecionada() == "1"
+    r.resposta_a = "999"
+    j._preencher_mensagens("ultima")
+    j._ir_para_respondida()                       # nao existe: avisa e fica
+    assert j._chave_selecionada() == "40"
