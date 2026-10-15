@@ -36,6 +36,8 @@ TEXTO_CARREGANDO = "Carregando mensagens..."
 TEXTO_SEM_CONTAS = "Nenhuma conversa ainda. Aperte Alt e use Contas, no " \
                    "menu, para adicionar uma conta do Telegram ou do WhatsApp."
 MAX_BOTOES_ACAO = 12     # botoes de resposta que cabem na ordem de Tab
+MAX_BOTOES_LINK = 12     # links e botoes de endereco, tambem na ordem de Tab
+LIMITE_ROTULO_LINK = 80  # caracteres do rotulo de um botao de link
 LIMITE_CACHE = 100        # mensagens lidas do banco ao abrir a conversa
 LIMITE_MEMORIA = 1200     # mensagens mantidas na memoria por conversa
 
@@ -61,6 +63,8 @@ Control Shift D: depurar a mensagem selecionada (menu Depurar)
 Control O: abrir a mídia da mensagem (baixa antes, se preciso), mesmo
 quando a legenda tem link
 Control B: baixar a mídia sem abrir
+Tab (na mensagem): vai aos botões de resposta e depois aos links e botões
+de endereço da mensagem; Espaço ou Enter abre
 Control Shift A: anexar e enviar um arquivo (foto, vídeo, áudio, documento)
 Control Shift M: gravar uma nota de voz pelo microfone
 Control Shift S: gravar o som do computador e enviar como nota de voz
@@ -73,9 +77,10 @@ das mensagens não lidas", se houver não lidas, ou para a última mensagem.
 
 NA LISTA DE MENSAGENS
 Esc: fecha a conversa e volta para a lista de conversas.
-Enter: mostra os detalhes e o texto completo da mensagem. Numa mensagem com
-foto, vídeo, áudio, voz ou documento, abre a mídia, menos quando a legenda
-tem link: aí o Enter mostra os detalhes, com os links (Control O abre a mídia).
+Enter: numa mensagem com foto, vídeo, áudio, voz ou documento, abre a mídia
+(toca o áudio e o vídeo), mesmo com link na legenda. Numa mensagem só de
+texto, abre o texto numa caixa somente leitura, com os botões Copiar texto e
+Fechar (Esc também fecha). Alt Enter mostra os detalhes de qualquer mensagem.
 Esc cancela um download.
 
 NO LEITOR DE ÁUDIO E VÍDEO
@@ -343,6 +348,15 @@ class Janela(wx.Frame):
             b.Show(False)
             b.Bind(wx.EVT_BUTTON, seguro(lambda e, k=i: self._tocar_botao(k)))
             self.botoes_acao.append(b)
+        # links do texto ou da legenda e botoes de endereco: mesma ideia,
+        # logo depois dos botoes de resposta
+        self.botoes_link, self._links_atuais = [], []
+        for i in range(MAX_BOTOES_LINK):
+            b = wx.Button(painel, label="Link")
+            b.Show(False)
+            b.Bind(wx.EVT_BUTTON,
+                   seguro(lambda e, k=i: self._abrir_botao_link(k)))
+            self.botoes_link.append(b)
         self.rot_caixa = wx.StaticText(painel, label="Digite sua mensagem")
         self.caixa = wx.TextCtrl(painel, style=wx.TE_MULTILINE,
                                  name="Digite sua mensagem")
@@ -364,6 +378,10 @@ class Janela(wx.Frame):
         for b in self.botoes_acao:
             linha_acoes.Add(b, 0, wx.RIGHT, 6)
         dir_.Add(linha_acoes, 0, wx.TOP, 4)
+        linha_links = wx.WrapSizer(wx.HORIZONTAL)
+        for b in self.botoes_link:
+            linha_links.Add(b, 0, wx.RIGHT, 6)
+        dir_.Add(linha_links, 0, wx.TOP, 4)
         dir_.Add(self.rot_caixa, 0, wx.TOP | wx.BOTTOM, 4)
         dir_.Add(self.caixa, 1, wx.EXPAND)
         linha_envio = wx.WrapSizer(wx.HORIZONTAL)
@@ -400,7 +418,7 @@ class Janela(wx.Frame):
             w.Show(escrever)
         if not mensagens:
             self._botoes_chave = None
-            for b in self.botoes_acao:
+            for b in self.botoes_acao + self.botoes_link:
                 b.Show(False)
         self.painel.Layout()
 
@@ -410,12 +428,15 @@ class Janela(wx.Frame):
         nao ser que o botao focado deixe de existir."""
         x = self._mensagem_selecionada() if self.atual else None
         acoes = m.extras_de(x)["acoes"][:MAX_BOTOES_ACAO] if x else []
+        links = m.itens_de_link(x)[:MAX_BOTOES_LINK] if x else []
         chave = (x.id if x else None,
-                 tuple(a.get("rotulo", "") for a in acoes))
+                 tuple(a.get("rotulo", "") for a in acoes),
+                 tuple(links))
         if chave == self._botoes_chave:
             return
         self._botoes_chave = chave
         self._acoes_atuais, self._msg_das_acoes = acoes, x
+        self._links_atuais = links
         perdeu_foco = False
         for i, b in enumerate(self.botoes_acao):
             if i < len(acoes):
@@ -425,9 +446,29 @@ class Janela(wx.Frame):
             else:
                 perdeu_foco = perdeu_foco or b.HasFocus()
                 b.Show(False)
+        for i, b in enumerate(self.botoes_link):
+            if i < len(links):
+                rotulo = links[i][0]
+                if len(rotulo) > LIMITE_ROTULO_LINK:
+                    rotulo = rotulo[:LIMITE_ROTULO_LINK - 1] + "…"
+                b.SetLabel(rotulo.replace("&", "&&"))
+                b.Show(True)
+            else:
+                perdeu_foco = perdeu_foco or b.HasFocus()
+                b.Show(False)
         if perdeu_foco:
             self.lista_msgs.SetFocus()
         self.painel.Layout()
+
+    @seguro
+    def _abrir_botao_link(self, i):
+        if 0 <= i < len(self._links_atuais):
+            url = self._links_atuais[i][1]
+            if dialogos.abrir_link(url):
+                self.fala.falar("Abrindo no navegador.", interromper=True)
+            else:
+                self.fala.falar("Não consegui abrir o link.",
+                                interromper=True)
 
     @seguro
     def _tocar_botao(self, i):
@@ -1222,11 +1263,31 @@ class Janela(wx.Frame):
                             "próxima.")
             return
         x = self._mensagem_selecionada()
-        if x is not None and x.tipo in armazem.BAIXAVEIS and \
-                not x.id.startswith("local-") and not m.tem_links(x):
-            self._abrir_midia()
+        if x is not None and not x.id.startswith("local-"):
+            if x.tipo in armazem.BAIXAVEIS:
+                # mesmo com link na legenda: os links sao botoes (Tab)
+                self._abrir_midia()
+                return
+            self._mostrar_texto(x)
             return
         self._detalhes()
+
+    def _mostrar_texto(self, x):
+        """Enter numa mensagem so de texto: o texto numa caixa somente
+        leitura, com Copiar texto e Fechar (Esc fecha). Os detalhes seguem em
+        Alt Enter."""
+        autor = "você" if x.minha else (x.autor or "mensagem")
+        dialogos.mostrar_mensagem(
+            self, "Mensagem de %s" % autor, x.texto or m.conteudo(x),
+            self._copiar_texto)
+
+    def _copiar_texto(self, texto):
+        if wx.TheClipboard.Open():
+            try:
+                wx.TheClipboard.SetData(wx.TextDataObject(texto))
+            finally:
+                wx.TheClipboard.Close()
+        self.fala.falar("Texto copiado.")
 
     def _detalhes(self):
         x = self._mensagem_selecionada()
@@ -1341,13 +1402,7 @@ class Janela(wx.Frame):
         x = self._mensagem_selecionada()
         if x is None:
             return
-        texto = x.texto or m.conteudo(x)
-        if wx.TheClipboard.Open():
-            try:
-                wx.TheClipboard.SetData(wx.TextDataObject(texto))
-            finally:
-                wx.TheClipboard.Close()
-        self.fala.falar("Texto copiado.")
+        self._copiar_texto(x.texto or m.conteudo(x))
 
     # ------------------------------------------------------------ depurar
     def _modo_depuracao(self, ligado):

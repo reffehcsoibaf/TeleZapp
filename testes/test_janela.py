@@ -1032,7 +1032,7 @@ def test_foto_com_link_na_legenda_avisa_na_lista_e_detalhes_traz_o_link(
     j.b.publicar(ev.MensagensCarregadas("t1", "10", [x]))
     linhas = [j.lista_msgs.GetString(i)
               for i in range(j.lista_msgs.GetCount())]
-    assert any("com link (Enter)" in l for l in linhas), linhas
+    assert any("com 1 link (Tab)" in l for l in linhas), linhas
     chamadas = []
     monkeypatch.setattr(jm.dialogos, "mostrar_texto",
                         lambda *a, **k: chamadas.append(k) or None)
@@ -1041,7 +1041,7 @@ def test_foto_com_link_na_legenda_avisa_na_lista_e_detalhes_traz_o_link(
     assert chamadas[0]["links"] == [("https://a.com/x", "https://a.com/x")]
 
 
-def test_enter_em_foto_com_link_mostra_detalhes_e_ctrl_o_abre_a_midia(
+def test_enter_abre_a_midia_mesmo_com_link_e_texto_abre_caixa_somente_leitura(
         j, monkeypatch):
     j.lista_conv.SetSelection(0)
     j._char_hook(Tecla(wx_falso.WXK_RETURN))
@@ -1049,16 +1049,46 @@ def test_enter_em_foto_com_link_mostra_detalhes_e_ctrl_o_abre_a_midia(
     x.tipo = m.FOTO
     sem = msg("6", "so a foto", conversa="10")
     sem.tipo = m.FOTO
-    j.b.publicar(ev.MensagensCarregadas("t1", "10", [x, sem]))
-    abertas, detalhes = [], []
+    txt = msg("7", "texto inteiro da mensagem", conversa="10")
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [x, sem, txt]))
+    abertas, detalhes, caixas = [], [], []
     monkeypatch.setattr(j, "_abrir_midia", lambda *a, **k: abertas.append(1))
     monkeypatch.setattr(j, "_detalhes", lambda: detalhes.append(1))
-    selecionar(j, "5")
+    monkeypatch.setattr(
+        jm.dialogos, "mostrar_mensagem",
+        lambda pai, titulo, texto, copiar: caixas.append(
+            (titulo, texto, copiar)))
+    selecionar(j, "5")                    # foto com link: abre a midia
     j._detalhes_ou_marcador()
-    assert detalhes and not abertas
+    assert len(abertas) == 1 and not detalhes and not caixas
     selecionar(j, "6")
     j._detalhes_ou_marcador()
-    assert abertas
+    assert len(abertas) == 2
+    selecionar(j, "7")                    # so texto: caixa somente leitura
+    j._detalhes_ou_marcador()
+    assert len(abertas) == 2 and not detalhes
+    assert caixas == [("Mensagem de Ana", "texto inteiro da mensagem",
+                       j._copiar_texto)]
+
+
+def test_copiar_texto_da_caixa_fala_e_vai_para_a_area_de_transferencia(
+        j, monkeypatch):
+    ditas, copiados = [], []
+
+    class Area:
+        def Open(self):
+            return True
+
+        def SetData(self, d):
+            copiados.append(d)
+
+        def Close(self):
+            pass
+    monkeypatch.setattr(jm.wx, "TheClipboard", Area(), raising=False)
+    monkeypatch.setattr(jm.wx, "TextDataObject", lambda t: t, raising=False)
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._copiar_texto("conteudo")
+    assert copiados == ["conteudo"] and ditas == ["Texto copiado."]
 
 
 def test_detalhes_pedem_ao_provedor_o_nome_de_quem_recebeu(j, monkeypatch):
@@ -1306,3 +1336,50 @@ def test_sem_conexao_nao_anexa(j, monkeypatch):
                         lambda *a, **k: chamado.append(1))
     j._anexar_arquivo()
     assert not chamado
+
+
+# ------------------------------------------------- links por Tab
+def _com_links(id_, tipo=m.TEXTO, texto="", links=(), botoes=()):
+    x = m.Mensagem("t1", "20", id_, autor="Ana", data=AGORA + int(id_),
+                   tipo=tipo, texto=texto)
+    return m.guardar_extras(x, links=links, botoes=botoes)
+
+
+def test_links_e_botoes_de_endereco_viram_botoes_na_ordem_do_tab(
+        j, monkeypatch):
+    j._abrir_conversa(j.indice[("t1", "20")])
+    foto = _com_links("5", m.FOTO, "veja https://a.com/x",
+                      botoes=[("Site oficial", "https://s.com")])
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", [
+        _com_links("4", texto="sem nada"), foto]))
+    selecionar(j, "5")
+    j._atualizar_botoes()
+    visiveis = [(b.GetLabel(), b.visivel) for b in j.botoes_link
+                if getattr(b, "visivel", False)]
+    assert [r for r, _ in visiveis] == ["Link: https://a.com/x",
+                                        "Botão: Site oficial"]
+    aberto, ditas = [], []
+    monkeypatch.setattr(jm.dialogos, "abrir_link",
+                        lambda url: aberto.append(url) or True)
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._abrir_botao_link(1)
+    assert aberto == ["https://s.com"] and ditas == ["Abrindo no navegador."]
+
+    selecionar(j, "4")                     # mensagem sem links: somem
+    j._atualizar_botoes()
+    assert not any(getattr(b, "visivel", False) for b in j.botoes_link)
+    j._abrir_botao_link(0)                 # indice sem botao: nada
+    assert aberto == ["https://s.com"]
+
+
+def test_link_que_nao_abre_e_avisado(j, monkeypatch):
+    j._abrir_conversa(j.indice[("t1", "20")])
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", [
+        _com_links("5", texto="https://a.com")]))
+    selecionar(j, "5")
+    j._atualizar_botoes()
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    monkeypatch.setattr(jm.dialogos, "abrir_link", lambda url: False)
+    j._abrir_botao_link(0)
+    assert ditas == ["Não consegui abrir o link."]

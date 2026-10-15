@@ -214,8 +214,10 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None):
     do autor (texto).
     """
     cont = conteudo(m).replace("\r", " ").replace("\n", " ")
-    if m.tipo not in (TEXTO, VOZ, FIGURINHA) and tem_links(m):
-        cont = _juntar(cont, "com link (Enter)")
+    n_links = len(itens_de_link(m))
+    if n_links:
+        cont = _juntar(cont, "com %d %s (Tab)" % (
+            n_links, "link" if n_links == 1 else "links"))
     acoes = extras_de(m)["acoes"]
     if acoes:
         so_opcoes = all(a.get("tipo") == "lista" for a in acoes)
@@ -271,6 +273,27 @@ def extrair_links(texto):
             vistos.add(url)
             achados.append((url, t))
     return achados
+
+
+def itens_de_link(m):
+    """O que a janela mostra como botoes para abrir no navegador, na ordem:
+    os links do texto ou da legenda e os botoes de endereco (Telegram).
+    [(rotulo, endereco)]; so http e https, sem repetir endereco."""
+    extras = extras_de(m)
+    itens, vistos = [], set()
+
+    def juntar(rotulo, url):
+        ok = url and url.lower().startswith(("http://", "https://"))
+        if ok and url not in vistos:
+            vistos.add(url)
+            itens.append((rotulo, url))
+    for url, texto in extras["links"]:
+        juntar("Link: " + (texto or url), url)
+    for url, texto in extrair_links(m.texto):
+        juntar("Link: " + (texto or url), url)
+    for rotulo, url in extras["botoes"]:
+        juntar("Botão: " + (rotulo or url), url)
+    return itens
 
 
 def tem_links(m):
