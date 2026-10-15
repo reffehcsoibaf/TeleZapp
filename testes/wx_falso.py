@@ -227,6 +227,9 @@ class StaticText(Janela):
     def SetLabel(self, t):
         self.label = t
 
+    def GetLabel(self):
+        return self.label
+
     def Wrap(self, n):
         pass
 

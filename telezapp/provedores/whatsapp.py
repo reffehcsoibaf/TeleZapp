@@ -726,6 +726,8 @@ class ProvedorWhatsApp(Provedor):
                 "LoggedOutEv": self._ao_sair,
                 "DisconnectedEv": self._ao_desconectar,
                 "MessageEv": self._ao_receber,
+                "GroupInfoEv": self._ao_grupo_mudou,
+                "JoinedGroupEv": self._ao_entrou_no_grupo,
                 "ReceiptEv": self._ao_recibo,
                 "HistorySyncEv": self._ao_historico,
                 "TemporaryBanEv": self._ao_banimento,
@@ -1155,6 +1157,36 @@ class ProvedorWhatsApp(Provedor):
             if conv is None:
                 return
             conv.nome = nome
+        self.banco.salvar_conversas([conv])
+        self._publicar_conversas()
+
+    def _ao_grupo_mudou(self, cliente, evento):
+        """Alguem mudou os dados do grupo; aqui so o nome interessa."""
+        try:
+            if evento.HasField("Name"):
+                self._renomear_grupo(jid_texto(evento.JID), evento.Name.Name)
+        except Exception:
+            log.exception("erro ao tratar mudança no grupo")
+
+    def _ao_entrou_no_grupo(self, cliente, evento):
+        """O WhatsApp reenvia os dados do grupo (nome atual) ao entrar nele
+        ou ao reconectar depois de ficar fora."""
+        try:
+            info = evento.GroupInfo
+            self._renomear_grupo(jid_texto(info.JID), info.GroupName.Name)
+        except Exception:
+            log.exception("erro ao tratar entrada no grupo")
+
+    def _renomear_grupo(self, conversa_id, nome):
+        """Troca o nome de um grupo ja conhecido; so avisa se mudou."""
+        if not conversa_id or not nome:
+            return
+        with self._trava:
+            conv = self._conversas.get(conversa_id)
+            if conv is None or conv.nome == nome:
+                return
+            conv.nome = nome
+        log.info("grupo renomeado")
         self.banco.salvar_conversas([conv])
         self._publicar_conversas()
 

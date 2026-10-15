@@ -689,6 +689,12 @@ class Janela(wx.Frame):
     def _ev_conversas(self, e):
         self._juntar_conversas(e.conta_id, e.conversas)
         self._preencher_conversas()
+        conv = self.indice.get(self.atual) if self.atual else None
+        if conv is not None and e.conta_id == conv.conta_id and \
+                self.rot_msgs.GetLabel() != "Mensagens de " + conv.nome:
+            # a conversa aberta mudou de nome (ex.: grupo renomeado)
+            self.rot_msgs.SetLabel("Mensagens de " + conv.nome)
+            self._atualizar_titulo()
 
     def _juntar_conversas(self, conta_id, conversas):
         aberta = self.atual

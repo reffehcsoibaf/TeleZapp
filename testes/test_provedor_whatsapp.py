@@ -301,6 +301,40 @@ def test_grupo_busca_o_nome_e_lid_vira_numero(amb):
         "5551977776666@s.whatsapp.net"
 
 
+def test_grupo_renomeado_atualiza_a_conversa(amb):
+    amb.f["Message"](amb.c, evento(
+        "G9", E.Message(conversation="oi"), chat="12345", grupo=True,
+        remetente="5551988887777"))
+    esperar(amb.fila, ev.MensagemNova)
+    assert esperar(amb.fila, ev.ConversasAtualizadas).conversas[0].nome == \
+        "Família"
+    cid = "12345@g.us"
+
+    amb.f["GroupInfoEvent"](amb.c, N.GroupInfoEvent(
+        JID=jid("12345", "g.us"), Name=N.GroupName(Name="Família da Ana")))
+    lista = esperar(amb.fila, ev.ConversasAtualizadas).conversas
+    assert [c.nome for c in lista if c.id == cid] == ["Família da Ana"]
+    assert [c.nome for c in amb.banco.conversas("w1") if c.id == cid] == \
+        ["Família da Ana"]
+
+    # o mesmo nome de novo, ou uma mudanca que nao e de nome: nada
+    amb.f["GroupInfoEvent"](amb.c, N.GroupInfoEvent(
+        JID=jid("12345", "g.us"), Name=N.GroupName(Name="Família da Ana")))
+    amb.f["GroupInfoEvent"](amb.c, N.GroupInfoEvent(
+        JID=jid("12345", "g.us"), Topic=N.GroupTopic(Topic="novo assunto")))
+    assert amb.fila.empty()
+
+    # ao entrar de novo no grupo o WhatsApp manda o nome atual
+    amb.f["JoinedGroup"](amb.c, N.JoinedGroup(GroupInfo=N.GroupInfo(
+        JID=jid("12345", "g.us"), GroupName=N.GroupName(Name="Os Silva"))))
+    lista = esperar(amb.fila, ev.ConversasAtualizadas).conversas
+    assert [c.nome for c in lista if c.id == cid] == ["Os Silva"]
+    # grupo que ainda nao tem conversa: ignora
+    amb.f["GroupInfoEvent"](amb.c, N.GroupInfoEvent(
+        JID=jid("777", "g.us"), Name=N.GroupName(Name="Outro")))
+    assert amb.fila.empty()
+
+
 def test_falha_de_envio_e_lida_em_outro_aparelho(amb):
     amb.p.enviar_texto("5551@s.whatsapp.net", "sem conexão ainda")
     assert esperar(amb.fila, ev.EnvioFalhou).motivo == "sem conexão"

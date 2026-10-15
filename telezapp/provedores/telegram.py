@@ -320,6 +320,8 @@ class ProvedorTelegram(Provedor):
         self.cliente.add_event_handler(self._ao_receber, events.NewMessage())
         self.cliente.add_event_handler(
             self._ao_ler, events.MessageRead(inbox=False))
+        self.cliente.add_event_handler(self._ao_acao_no_chat,
+                                       events.ChatAction())
         self._estado(ev.CONECTADA)
         self._pronto.set()
         await self._atualizar_conversas()
@@ -638,6 +640,25 @@ class ProvedorTelegram(Provedor):
             self.barramento.publicar(ev.MensagemNova(nova, conv))
         except Exception:
             log.exception("erro ao tratar mensagem recebida")
+
+    async def _ao_acao_no_chat(self, evento):
+        """Mudanca no grupo ou canal; aqui so a troca de nome interessa."""
+        try:
+            novo = getattr(evento, "new_title", None)
+            if not novo:
+                return
+            cid = str(evento.chat_id)
+            conv = self._conversas.get(cid)
+            if conv is None or conv.nome == novo:
+                return
+            conv.nome = novo
+            log.info("grupo ou canal renomeado")
+            self.banco.salvar_conversas([conv])
+            self.barramento.publicar(ev.ConversasAtualizadas(
+                self.conta.id, sorted(self._conversas.values(),
+                                      key=lambda c: -c.data)))
+        except Exception:
+            log.exception("erro ao tratar mudança no chat")
 
     async def _ao_ler(self, evento):
         try:

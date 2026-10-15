@@ -3,6 +3,19 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.15.1
+
+- Grupo renomeado não aparecia no TeleZapp: o nome só era buscado enquanto
+  estava como "Grupo". WhatsApp: passa a ouvir `GroupInfoEv` (campo `Name`)
+  e `JoinedGroupEv` (`GroupInfo.GroupName`, reenviado ao entrar/reconectar) e
+  troca o nome da conversa já conhecida (`_renomear_grupo`). Telegram: passa a
+  ouvir `events.ChatAction` e usa `new_title`. A janela atualiza o rótulo
+  "Mensagens de ..." e o título quando a conversa aberta muda de nome.
+- Só vale para mudanças que acontecerem com o TeleZapp aberto (ou que o
+  WhatsApp reenviar ao reconectar). Não verificado com um WhatsApp real: os
+  campos foram conferidos nas definições do neonize, e a entrega do evento
+  `GroupInfoEv` depende do servidor.
+
 ## 2026.10.14.15
 
 - Botões de resposta viram controles de verdade (`wx.Button`, até 12, criados
