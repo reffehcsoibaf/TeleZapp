@@ -83,3 +83,46 @@ def test_formato_que_nao_abre(tmp_path):
 def test_formatar_tempo():
     assert r.formatar_tempo(5) == "0:05" and r.formatar_tempo(65.4) == "1:05"
     assert r.formatar_tempo(3725) == "1:02:05"
+
+
+def test_velocidade_dobra_o_ritmo_e_a_posicao_acompanha(tmp_path):
+    p, saidas = criar(tmp_path, "v.wav", segundos=4)
+    p.velocidade = 2.0
+    p.tocar()
+    total = 0
+    for _ in range(10):
+        bloco = saidas[0].puxar(4800)
+        total += 4800
+    # 10 blocos de 0,1 s tocados a 2x consumiram ~2 s do arquivo
+    assert abs(p.posicao - 2.0) < 0.15
+    assert p.tocando
+    # voltar a 1x continua do mesmo ponto
+    p.velocidade = 1.0
+    assert abs(p.posicao - 2.0) < 0.15
+    saidas[0].puxar(4800)
+    assert abs(p.posicao - 2.1) < 0.15
+
+
+def test_velocidade_toca_ate_o_fim_e_avisa(tmp_path):
+    p, saidas = criar(tmp_path, "w.wav", segundos=1)
+    p.velocidade = 3.0
+    p.tocar()
+    for _ in range(20):
+        saidas[0].puxar(4800)
+        if p.terminou:
+            break
+    assert p.terminou and not p.tocando
+    # tocar de novo recomeca do inicio na mesma velocidade
+    p.tocar()
+    assert p.posicao < 0.1 and p.tocando and p.velocidade == 3.0
+
+
+def test_ir_para_com_velocidade(tmp_path):
+    p, saidas = criar(tmp_path, "x.wav", segundos=4)
+    p.velocidade = 1.5
+    p.tocar()
+    saidas[0].puxar(2400)
+    p.ir_para(3.0)
+    assert abs(p.posicao - 3.0) < 0.05
+    saidas[0].puxar(4800)
+    assert abs(p.posicao - 3.15) < 0.15

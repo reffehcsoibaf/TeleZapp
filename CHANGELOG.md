@@ -3,6 +3,28 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.15.1
+
+Velocidade do áudio.
+
+- `midia/velocidade.py`: escala de 0,25x a 3x, em passos de 0,25, 0,5 ou 1
+  (`valores`, `ajustar`, `proxima`, `rotulo`) e `Esticador` (WSOLA em numpy:
+  trechos de 32 ms, corte escolhido por correlação normalizada; muda o
+  tempo sem mudar o tom). Custo de ~1% de CPU; medido só com senoides e a
+  amostra de voz, sem ouvido humano.
+- `Reprodutor.velocidade`: 1,0 lê direto do arquivo; outro valor passa pelo
+  esticador, vale na hora (tocando ou não); posição, `ir_para` e fim de
+  arquivo acompanham. No MediaCtrl (vídeo, m4a) usa `SetPlaybackRate`, e o
+  tom pode acompanhar.
+- Opções `audio_passo_velocidade` (0,25 / 0,5 / 1) e `audio_velocidade`
+  (padrão 1x); trocar o passo leva a velocidade ao valor mais próximo
+  permitido.
+- Janela: Menu, Mídias, Áudio mais rápido (Ctrl+Shift+Up), mais lento
+  (Ctrl+Shift+Down), Velocidade normal (Ctrl+Shift+0), Velocidade do áudio...
+  e Passo da velocidade do áudio... Vale também para o áudio que já está
+  tocando. No player: botões Mais rápido e Mais lento e as teclas + e -.
+- A velocidade é única (vale para todos os áudios) e fica entre sessões.
+
 ## 2026.10.15.0
 
 Links e botões de endereço pelo Tab.
