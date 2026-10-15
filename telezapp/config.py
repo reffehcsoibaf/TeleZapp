@@ -113,7 +113,7 @@ OPCOES = (
           "Toca um som curto quando chega uma mensagem nova."),
     Opcao("falar_novas", "Falar mensagens novas", "Avisos", True,
           "O leitor de tela fala o autor e o conteúdo de cada mensagem nova."),
-    Opcao("confirmar_envio", "Confirmar envio por voz", "Avisos", True,
+    Opcao("confirmar_envio", "Falar mensagem enviada", "Avisos", True,
           "Fala Enviada depois que uma mensagem sai."),
     Opcao("depuracao", "Modo de depuração", "Avançado", False,
           "Guarda, no seu computador, a estrutura original das últimas 500 "
@@ -130,6 +130,11 @@ OPCOES = (
           "mensagens.",
           ((1, "Autor e hora primeiro"), (2, "Conteúdo primeiro"),
            (3, "Autor só quando muda"))),
+    Opcao("falar_descricoes", "Falar a descrição de cada opção",
+          "Leitura", True,
+          "Na janela de configurações, o TeleZapp fala a explicação de cada "
+          "opção logo depois que você chega nela. Desmarcada, a explicação "
+          "só é falada com F1."),
     Opcao("audio_janela", "Enter em áudio e mensagem de voz", "Mídias", "sem",
           "Só tocar começa a tocar sem abrir janela: Enter de novo pausa e "
           "continua, e Esc para. O player em janela tem avançar, voltar e "

@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Modelo da janela de configuracoes (sem wx)."""
+import pytest
+
+from telezapp import config
+from telezapp.nucleo.configuracoes import (CATEGORIA_BUSCA,
+                                           ModeloConfiguracoes, categorias)
+
+
+@pytest.fixture
+def mod(tmp_path, monkeypatch):
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path))
+    return ModeloConfiguracoes(config.Config())
+
+
+def test_categorias_sem_repeticao_e_com_todas_as_opcoes(mod):
+    cats = categorias()
+    assert len(cats) == len(set(cats))
+    todas = [o for c in cats for o in mod.opcoes(c)]
+    assert sorted(todas, key=config.OPCOES.index) ==         sorted(config.OPCOES, key=config.OPCOES.index)
+    assert len(todas) == len(config.OPCOES)
+    assert cats[-1] == "Avançado"
+
+
+def test_busca_acrescenta_categoria_de_resultados(mod):
+    assert CATEGORIA_BUSCA not in mod.lista_de_categorias()
+    mod.busca = "velocidade audio"
+    cats = mod.lista_de_categorias()
+    assert cats[0] == CATEGORIA_BUSCA
+    chaves = [o.chave for o in mod.opcoes(CATEGORIA_BUSCA)]
+    assert "audio_velocidade" in chaves and "som" not in chaves
+
+
+def test_pendentes_so_valem_ao_aplicar_e_voltar_ao_atual_desfaz(mod):
+    mod.definir("estilo", 2)
+    assert mod.valor("estilo") == 2
+    assert mod.cfg.get("estilo") == 1
+    mod.definir("estilo", 1)
+    assert mod.mudancas() == []
+
+
+def test_aplicar_na_ordem_das_opcoes_e_zera(mod):
+    mod.definir("audio_velocidade", 2.0)
+    mod.definir("audio_passo_velocidade", 0.5)
+    mod.definir("som", False)
+    feitas = []
+    quais = mod.aplicar(lambda c, v: feitas.append((c, v)))
+    assert [c for c, _ in feitas] == ["som", "audio_passo_velocidade",
+                                      "audio_velocidade"]
+    assert quais == [c for c, _ in feitas]
+    assert mod.pendentes == {}
+
+
+def test_indice_da_escolha(mod):
+    o = next(o for o in config.OPCOES if o.chave == "estilo")
+    assert mod.indice_da_escolha(o) == 0
+    mod.definir("estilo", 3)
+    assert mod.indice_da_escolha(o) == 2
+
+
+def test_velocidades_seguem_o_passo_pendente(mod):
+    o = next(o for o in config.OPCOES if o.chave == "audio_velocidade")
+    assert len(mod.escolhas(o)) == 12
+    mod.definir("audio_velocidade", 1.75)
+    mod.definir("audio_passo_velocidade", 1.0)
+    assert [v for v, _ in mod.escolhas(o)] == [1.0, 2.0, 3.0]
+    assert mod.valor("audio_velocidade") in (1.0, 2.0)
+    assert mod.indice_da_escolha(o) in (0, 1)
+    mod.definir("audio_passo_velocidade", 0.5)
+    assert [v for v, _ in mod.escolhas(o)][:3] == [0.5, 1.0, 1.5]
+
+
+def test_falar_descricoes_e_opcao_de_leitura_ligada_por_padrao(mod):
+    o = next(o for o in config.OPCOES if o.chave == "falar_descricoes")
+    assert o.categoria == "Leitura" and o.padrao is True
+    assert mod.valor("falar_descricoes") is True
+    mod.definir("falar_descricoes", False)
+    assert mod.valor("falar_descricoes") is False   # vale ja na janela

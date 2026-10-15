@@ -3,6 +3,31 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.15.2
+
+Janela de configurações (etapa 4).
+
+- `nucleo/configuracoes.py`: `ModeloConfiguracoes`, sem wx: categorias (com
+  "Avançado" por último), busca por `config.buscar_opcoes`, valores
+  pendentes (voltar ao valor atual desfaz) e `aplicar`, que entrega as
+  mudanças na ordem de `config.OPCOES` (o passo da velocidade antes da
+  velocidade).
+- `interface/configuracoes.py`: `DialogoConfiguracoes`. Busca no alto,
+  categorias numa lista vertical, opções da categoria como CheckBox ou
+  Choice; a descrição é falada pelo programa 0,4 s depois do foco (F1
+  repete; a opção `falar_descricoes`, padrão ligada, desliga a fala
+  automática), e não é um texto da janela: o NVDA lê todos os textos fixos ao
+  abrir a janela. `wx.Accessible` foi tentado e derrubou o processo. OK,
+  Cancelar e Aplicar. Com
+  busca, a categoria "Resultados da busca" aparece primeiro.
+- Janela principal: Menu, Configurações... (Ctrl+,). `_aplicar_opcao` usa os
+  mesmos efeitos e avisos falados dos menus e mantém os itens de menu
+  marcados. Os menus de hoje continuam.
+- Cobre só as opções que já existem em `config.OPCOES`; sons de eventos,
+  backup e ordem das informações entram nas próximas versões.
+- Não verificado com leitor de tela: a ordem de Tab e a leitura dos
+  controles foram conferidas só por teste de fumaça com o wx real.
+
 ## 2026.10.15.1
 
 Velocidade do áudio.
