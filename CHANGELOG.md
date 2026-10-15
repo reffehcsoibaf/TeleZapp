@@ -3,6 +3,42 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.14.16
+
+Etapa 3b: enviar arquivos e gravar nota de voz.
+
+- `midia/gravador.py`: `Gravador` (iniciar/parar/cancelar) com duas fontes.
+  Microfone: sounddevice, mono, 48 kHz (ou a taxa padrão, reamostrada).
+  Som interno: loopback do WASAPI pela `soundcard` (a sounddevice do Windows
+  não tem loopback), downmix para mono. A fonte abre dentro da thread da
+  gravação (COM e PortAudio numa thread só). Grava em WAV temporário e, ao
+  parar, converte em blocos para Ogg/Opus 48 kHz mono. Sem limite de memória;
+  `maximo_segundos` para sozinho. Medida: saída muda < -50 dBFS é avisada.
+- `midia/envio.py`: `preparar` devolve `Anexo` (tipo, MIME, duração,
+  dimensões, tamanho). MP4/MOV pelo leitor próprio (`mp4.ler`), HEVC avisa,
+  MKV/AVI/BMP/HEIC/GIF vão como documento, limite de 2 GB, voz exige Ogg/Opus.
+- `Provedor.enviar_arquivo(conversa_id, anexo, legenda)`. WhatsApp: foto e
+  documento pelo neonize; vídeo e áudio/voz montados à mão com `upload`
+  (como nos experimentos); roda numa thread própria para o upload não travar
+  a fila de texto. Telegram: `send_file` (voz com `DocumentAttributeAudio`,
+  vídeo com `DocumentAttributeVideo`). O arquivo enviado é copiado para o
+  armazém da conversa (gravações temporárias são movidas) e registrado em
+  `midias`, para abrir sem baixar. `_registrar_enviada` é o trecho comum de
+  `_enviar` no WhatsApp e no Telegram.
+- `EnvioFalhou.tipo`: a janela casa a mensagem local "enviando" pelo texto e
+  pelo tipo (numa mídia, aceita outro tipo de mídia se o serviço classificar
+  diferente).
+- Janela: botões Anexar arquivo, Gravar do microfone e Gravar som do
+  computador depois de Enviar (sem tecla de acesso: Alt abre o Menu); itens
+  em Menu, Mídias (Ctrl+Shift+A, M, S). O texto da caixa vira legenda de
+  foto, vídeo e documento. `dialogos.gravar_voz`: grava ao abrir, Parar,
+  Ouvir, Enviar, Gravar de novo, Descartar (Esc).
+- Mídia enviada não cita a mensagem respondida (a resposta continua
+  pendente para o próximo texto). NÃO verificado no WhatsApp/Telegram reais:
+  só testes com clientes simulados; o loopback foi verificado no computador
+  de desenvolvimento (tom de 440 Hz tocado e recuperado a 440 Hz).
+- Dependências novas: soundcard, numpy (já vinha com o neonize).
+
 ## 2026.10.14.15
 
 - Botões de resposta viram controles de verdade (`wx.Button`, até 12, criados

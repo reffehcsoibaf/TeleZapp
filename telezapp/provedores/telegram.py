@@ -576,7 +576,55 @@ class ProvedorTelegram(Provedor):
                 self.conta.id, conversa_id, texto, _motivo(e)))
             return
         log.info("texto enviado em %.2fs", time.perf_counter() - inicio)
+        await self._registrar_enviada(enviada, conversa_id)
+
+    def enviar_arquivo(self, conversa_id, anexo, legenda=""):
+        self._agendar(self._enviar_arquivo(conversa_id, anexo, legenda))
+
+    async def _enviar_arquivo(self, conversa_id, anexo, legenda):
+        from telethon.tl import types
+        inicio = time.perf_counter()
+        try:
+            ent = await self._entidade(conversa_id)
+            extra = {}
+            if anexo.tipo == m.VOZ:
+                extra = dict(voice_note=True, attributes=[
+                    types.DocumentAttributeAudio(duration=anexo.segundos,
+                                                 voice=True)])
+            elif anexo.tipo == m.AUDIO:
+                extra = dict(attributes=[types.DocumentAttributeAudio(
+                    duration=anexo.segundos, title=anexo.nome)])
+            elif anexo.tipo == m.VIDEO:
+                extra = dict(attributes=[types.DocumentAttributeVideo(
+                    duration=anexo.segundos, w=anexo.largura,
+                    h=anexo.altura, supports_streaming=True)])
+            enviada = await self.cliente.send_file(
+                ent, anexo.caminho, caption=legenda or None,
+                force_document=anexo.tipo == m.DOCUMENTO, **extra)
+        except Exception as e:
+            log.warning("envio de %s falhou: %s", anexo.tipo,
+                        type(e).__name__)
+            self.barramento.publicar(ev.EnvioFalhou(
+                self.conta.id, conversa_id, legenda, _motivo(e),
+                devolver_texto=False, tipo=anexo.tipo))
+            return
+        log.info("%s enviado em %.2fs (%d bytes)", anexo.tipo,
+                 time.perf_counter() - inicio, anexo.tamanho)
+        await self._registrar_enviada(
+            enviada, conversa_id,
+            arquivo=(anexo.caminho, anexo.temporario))
+
+    async def _registrar_enviada(self, enviada, conversa_id, arquivo=None):
         msg = converter(enviada, self.conta.id, conversa_id)
+        if arquivo is not None and msg is not None:
+            try:
+                destino = armazem.guardar_enviada(msg, *arquivo)
+                self.banco.registrar_midia(
+                    msg.conta_id, msg.conversa_id, msg.id, msg.tipo,
+                    destino, os.path.getsize(destino), time.time())
+            except OSError:
+                log.warning("não consegui guardar a cópia da mídia enviada",
+                            exc_info=True)
         conv = self._conversas.get(conversa_id)
         if conv is None:
             # primeira mensagem de uma conversa nova (ex.: aberta por uma

@@ -19,6 +19,8 @@ from telezapp import NOME, VERSAO, config
 from telezapp.acessibilidade.fala import Fala, bipe
 from telezapp.interface import dialogos, visualizadores
 from telezapp.midia import armazem
+from telezapp.midia import envio
+from telezapp.midia.gravador import MICROFONE, SOM_INTERNO, Gravador
 from telezapp.midia.reprodutor import FormatoNaoSuportado, Reprodutor
 from telezapp.nucleo import depuracao
 from telezapp.nucleo import eventos as ev
@@ -59,6 +61,9 @@ Control Shift D: depurar a mensagem selecionada (menu Depurar)
 Control O: abrir a mídia da mensagem (baixa antes, se preciso), mesmo
 quando a legenda tem link
 Control B: baixar a mídia sem abrir
+Control Shift A: anexar e enviar um arquivo (foto, vídeo, áudio, documento)
+Control Shift M: gravar uma nota de voz pelo microfone
+Control Shift S: gravar o som do computador e enviar como nota de voz
 Tecla Aplicativos ou Shift F10: menu da mensagem selecionada
 
 NA LISTA DE CONVERSAS
@@ -80,6 +85,8 @@ voltar 5 segundos (com Shift, 30). Home: voltar ao início. Esc: fechar.
 NA CAIXA DE DIGITAÇÃO
 Enter: envia e esconde a caixa. Shift Enter: nova linha. Esc: cancela a
 resposta, se houver, esconde a caixa e volta para as mensagens.
+Depois do botão Enviar há três botões: Anexar arquivo, Gravar do microfone
+e Gravar som do computador. O texto da caixa vai como legenda do arquivo.
 
 MENU
 Aperte Alt para abrir o Menu. Ele tem submenus (Contas, Conversa, Mensagem,
@@ -207,6 +214,11 @@ class Janela(wx.Frame):
             self.Bind(wx.EVT_MENU,
                       lambda e, v=valor: self._mudar_baixar(v), it)
         m_mid.AppendSeparator()
+        item(m_mid, "anexar", "&Anexar arquivo...	Ctrl+Shift+A")
+        item(m_mid, "gravar_mic", "Gravar do &microfone...	Ctrl+Shift+M")
+        item(m_mid, "gravar_som",
+             "Gravar o &som do computador...	Ctrl+Shift+S")
+        m_mid.AppendSeparator()
         item(m_mid, "audio_janela", "&Enter em áudio...")
         item(m_mid, "audio_sequencia", "Áudios em &sequência...")
         item(m_mid, "midias_limite", "&Limite do download automático...")
@@ -273,6 +285,9 @@ class Janela(wx.Frame):
             "dep_conv": lambda e: self._depurar_conversa(),
             "ajuda": lambda e: dialogos.mostrar_texto(
                 self, "Teclas de atalho", AJUDA, "Teclas de atalho"),
+            "anexar": lambda e: self._anexar_arquivo(),
+            "gravar_mic": lambda e: self._gravar(MICROFONE),
+            "gravar_som": lambda e: self._gravar(SOM_INTERNO),
             "abrir_midia": lambda e: self._abrir_midia(),
             "baixar_midia": lambda e: self._abrir_midia(abrir=False),
             "salvar_midia": lambda e: self._salvar_midia(),
@@ -332,6 +347,12 @@ class Janela(wx.Frame):
         self.caixa = wx.TextCtrl(painel, style=wx.TE_MULTILINE,
                                  name="Digite sua mensagem")
         self.botao_enviar = wx.Button(painel, label="&Enviar")
+        # sem tecla de acesso: Alt abre o Menu e as letras ja estao em uso
+        self.botao_anexar = wx.Button(painel, label="Anexar arquivo")
+        self.botao_mic = wx.Button(painel, label="Gravar do microfone")
+        self.botao_som = wx.Button(painel, label="Gravar som do computador")
+        self.botoes_envio = (self.botao_enviar, self.botao_anexar,
+                             self.botao_mic, self.botao_som)
 
         esq = wx.BoxSizer(wx.VERTICAL)
         esq.Add(rot_conv, 0, wx.BOTTOM, 4)
@@ -345,7 +366,10 @@ class Janela(wx.Frame):
         dir_.Add(linha_acoes, 0, wx.TOP, 4)
         dir_.Add(self.rot_caixa, 0, wx.TOP | wx.BOTTOM, 4)
         dir_.Add(self.caixa, 1, wx.EXPAND)
-        dir_.Add(self.botao_enviar, 0, wx.TOP, 6)
+        linha_envio = wx.WrapSizer(wx.HORIZONTAL)
+        for b in self.botoes_envio:
+            linha_envio.Add(b, 0, wx.RIGHT, 6)
+        dir_.Add(linha_envio, 0, wx.TOP, 6)
         raiz = wx.BoxSizer(wx.HORIZONTAL)
         raiz.Add(esq, 1, wx.EXPAND | wx.ALL, 8)
         raiz.Add(dir_, 2, wx.EXPAND | wx.ALL, 8)
@@ -359,6 +383,12 @@ class Janela(wx.Frame):
                              seguro(lambda e: self._atualizar_botoes()))
         self.botao_enviar.Bind(wx.EVT_BUTTON,
                                seguro(lambda e: self._enviar_texto()))
+        self.botao_anexar.Bind(wx.EVT_BUTTON,
+                               seguro(lambda e: self._anexar_arquivo()))
+        self.botao_mic.Bind(wx.EVT_BUTTON,
+                            seguro(lambda e: self._gravar(MICROFONE)))
+        self.botao_som.Bind(wx.EVT_BUTTON,
+                            seguro(lambda e: self._gravar(SOM_INTERNO)))
         self._mostrar_conversa(False, False)
 
     def _mostrar_conversa(self, mensagens, escrever):
@@ -366,7 +396,7 @@ class Janela(wx.Frame):
         conversa aberta aparecem as mensagens e a caixa de digitar."""
         for w in (self.rot_msgs, self.lista_msgs):
             w.Show(mensagens)
-        for w in (self.rot_caixa, self.caixa, self.botao_enviar):
+        for w in (self.rot_caixa, self.caixa) + self.botoes_envio:
             w.Show(escrever)
         if not mensagens:
             self._botoes_chave = None
@@ -788,7 +818,7 @@ class Janela(wx.Frame):
             if self._acao_concluida(chave, msg.texto, True):
                 self.fala.falar("Enviado: " + msg.texto, interromper=True)
             else:
-                self._tirar_local(chave, msg.texto)
+                self._tirar_local(chave, msg.texto, msg.tipo)
         self._mesclar(chave, [msg])
         if aberta:
             # nada tira a pessoa de onde ela esta por conta propria
@@ -826,11 +856,10 @@ class Janela(wx.Frame):
     def _ev_falha(self, e):
         chave = (e.conta_id, e.conversa_id)
         self._acao_concluida(chave, e.texto, False)
-        for x in self.cache.get(chave, []):
-            if x.id.startswith("local-") and x.texto == e.texto and \
-                    x.estado == m.ENVIANDO:
-                x.estado = m.FALHOU
-                break
+        achada = self._local_enviando(self.cache.get(chave, []), e.texto,
+                                      getattr(e, "tipo", m.TEXTO))
+        if achada is not None:
+            achada.estado = m.FALHOU
         if chave == self.atual:
             self._preencher_mensagens()
             if e.devolver_texto and not self.caixa.GetValue():
@@ -885,7 +914,7 @@ class Janela(wx.Frame):
             sem_mod = not (evt.AltDown() or evt.ControlDown()
                            or evt.ShiftDown())
             if k == wx.WXK_ESCAPE and sem_mod:
-                if foco in (self.caixa, self.botao_enviar):
+                if foco is self.caixa or foco in self.botoes_envio:
                     self._sair_da_caixa()
                     return
                 if foco is self.lista_msgs:
@@ -1492,17 +1521,118 @@ class Janela(wx.Frame):
         p.enviar_texto(conversa_id, texto, resposta)
         log.info("texto enviado para a fila (%d caracteres)", len(texto))
 
-    def _tirar_local(self, chave, texto):
+    def _tirar_local(self, chave, texto, tipo=m.TEXTO):
         """Troca a mensagem 'enviando' pela confirmada pelo servico."""
         lista = self.cache.get(chave, [])
-        for i, x in enumerate(lista):
-            if x.id.startswith("local-") and x.texto == texto and \
-                    x.estado == m.ENVIANDO:
-                del lista[i]
-                break
+        achada = self._local_enviando(lista, texto, tipo)
+        if achada is not None:
+            lista.remove(achada)
         bipe("enviada")
         if self.cfg.get("confirmar_envio"):
             self.fala.falar("Enviada.")
+
+    @staticmethod
+    def _local_enviando(lista, texto, tipo):
+        """A mensagem local 'enviando' que o servico acabou de confirmar (ou
+        que falhou): do mesmo tipo; numa midia, serve outro tipo de midia,
+        porque o servico pode classificar de outro jeito."""
+        locais = [x for x in lista if x.id.startswith("local-") and
+                  x.estado == m.ENVIANDO and x.texto == texto]
+        for x in locais:
+            if x.tipo == tipo:
+                return x
+        if tipo != m.TEXTO:
+            for x in locais:
+                if x.tipo != m.TEXTO:
+                    return x
+        return None
+
+    # ====================================================== anexos e voz
+    def _destino_do_envio(self):
+        """(conta_id, conversa_id, provedor) se da para enviar agora; senao
+        avisa a pessoa e devolve None."""
+        if self.atual is None:
+            bipe("erro")
+            self.fala.falar(TEXTO_SEM_CONVERSA)
+            return None
+        conta_id, conversa_id = self.atual
+        p = self.contas.provedor(conta_id)
+        if p is None or self.estados.get(conta_id) != ev.CONECTADA:
+            bipe("erro")
+            self.fala.falar("A conta não está conectada. Nada foi enviado.",
+                            interromper=True)
+            return None
+        return conta_id, conversa_id, p
+
+    def _anexar_arquivo(self):
+        if self._destino_do_envio() is None:
+            return
+        caminho = dialogos.escolher_arquivo(
+            self, self.cfg.get("pasta_anexos") or "")
+        if not caminho:
+            return
+        self.cfg.set("pasta_anexos", os.path.dirname(caminho))
+        self._enviar_arquivo(caminho)
+
+    def _gravar(self, origem):
+        if self._destino_do_envio() is None:
+            return
+        pasta = config.pasta_temporaria()
+        if origem == MICROFONE:
+            titulo = "Gravar nota de voz do microfone"
+            instrucao = ("Fale perto do microfone. A gravação já começou. "
+                         "Aperte Enter para parar; depois você pode ouvir, "
+                         "gravar de novo ou enviar. Esc descarta.")
+        else:
+            titulo = "Gravar o som do computador"
+            instrucao = ("Vai ser gravado tudo o que o computador tocar, "
+                         "inclusive a voz do leitor de tela, se ele falar. "
+                         "A gravação já começou. Aperte Enter para parar; "
+                         "depois você pode ouvir, gravar de novo ou enviar. "
+                         "Esc descarta.")
+        gravacao = dialogos.gravar_voz(
+            self, lambda: Gravador(pasta, origem, maximo_segundos=3600),
+            titulo, instrucao, self.fala)
+        if gravacao is None:
+            return
+        log.info("gravação (%s) de %.0fs pronta para enviar", origem,
+                 gravacao.segundos)
+        self._enviar_arquivo(gravacao.caminho, voz=True, temporario=True)
+
+    def _enviar_arquivo(self, caminho, voz=False, temporario=False):
+        destino = self._destino_do_envio()
+        if destino is None:
+            return
+        conta_id, conversa_id, p = destino
+        try:
+            anexo = envio.preparar(caminho, voz=voz, temporario=temporario)
+        except envio.ErroEnvio as e:
+            bipe("erro")
+            self.fala.falar(str(e), interromper=True)
+            return
+        legenda = "" if anexo.tipo in (m.VOZ, m.AUDIO) else \
+            self.caixa.GetValue().strip()
+        self.locais += 1
+        ultima = max((x.data for x in self._mensagens_atuais()), default=0)
+        local = m.Mensagem(conta_id, conversa_id, "local-%d" % self.locais,
+                           minha=True, data=max(time.time(), ultima + 0.001),
+                           texto=legenda, tipo=anexo.tipo,
+                           segundos=anexo.segundos, nome_arquivo=anexo.nome,
+                           tamanho=anexo.tamanho, estado=m.ENVIANDO)
+        self._mesclar(self.atual, [local])
+        if legenda:
+            self.caixa.Clear()
+        self._preencher_mensagens()
+        texto = "Enviando %s, %s." % (m.NOMES_TIPOS[anexo.tipo],
+                                      m.tamanho_legivel(anexo.tamanho))
+        if anexo.aviso:
+            texto += " " + anexo.aviso
+        if self.resposta_a is not None:
+            texto += " A mídia vai sem citar a mensagem respondida."
+        self.fala.falar(texto, interromper=True)
+        p.enviar_arquivo(conversa_id, anexo, legenda)
+        log.info("arquivo (%s, %d bytes) enviado para a fila", anexo.tipo,
+                 anexo.tamanho)
 
     # =============================================================== midias
     def _abrir_midia(self, abrir=True, x=None):

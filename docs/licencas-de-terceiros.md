@@ -17,6 +17,8 @@ cabeçalhos dos arquivos. Não é parecer jurídico. O TeleZapp usa a
 | wxPython 4.3.1 | Interface | wxWindows Library License | Sim (permite distribuir programas sob outras licenças) |
 | soundfile 0.14.0 | Gravar e ler Ogg/Opus | BSD-3-Clause | Sim |
 | sounddevice 0.5.6 | Microfone e reprodução | MIT | Sim |
+| soundcard 0.4.6 | Captura do som interno do computador (loopback do WASAPI) | BSD-3-Clause | Sim |
+| cffi 2.1.1 (da soundcard) | Ligação com as DLLs do Windows | MIT-0 | Sim |
 | libsndfile 1.2.2 (dentro do soundfile) | Decodificar Ogg/Opus, MP3, WAV, FLAC | LGPL-2.1 | Sim, como biblioteca dinâmica separada; manter o aviso e indicar onde obter o código-fonte |
 | numpy | Áudio | BSD-3-Clause (e outras permissivas) | Sim |
 | protobuf | Mensagens do WhatsApp | BSD-3-Clause | Sim |

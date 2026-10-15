@@ -188,6 +188,26 @@ class ClienteFalso:
         self.enviadas.append((wa.jid_texto(para), mensagem))
         return N.SendResponse(ID="EU1", Timestamp=TS + 60)
 
+    def upload(self, dados, media_type=None):
+        self.uploads = getattr(self, "uploads", [])
+        self.uploads.append(len(dados))
+        return types.SimpleNamespace(
+            url="https://mmg/x", DirectPath="/d", FileEncSHA256=b"e",
+            FileLength=len(dados), FileSHA256=b"s", MediaKey=b"k")
+
+    def send_image(self, para, arquivo, caption=None, **kw):
+        self.enviadas.append((wa.jid_texto(para), ("imagem", arquivo,
+                                                   caption)))
+        return N.SendResponse(ID="IMG1", Timestamp=TS + 60)
+
+    def send_document(self, para, arquivo, caption=None, filename=None,
+                      mimetype=None, **kw):
+        if caption == "falhar":
+            raise RuntimeError("erro")
+        self.enviadas.append((wa.jid_texto(para), (
+            "documento", arquivo, caption, filename, mimetype)))
+        return N.SendResponse(ID="DOC1", Timestamp=TS + 60)
+
     def download_any(self, mensagem, path=None):
         self.baixadas = getattr(self, "baixadas", [])
         self.baixadas.append(mensagem)
@@ -1080,3 +1100,47 @@ def test_resposta_de_botao_tenta_primeiro_a_variante_experimental(amb):
     r = proto.documentWithCaptionMessage.message.buttonsResponseMessage
     assert (r.selectedButtonID, r.selectedDisplayText) == ("2", "Residência")
     assert r.contextInfo.stanzaID == "O5"
+
+
+def test_enviar_voz_foto_e_documento(amb, dados_midia, tmp_path):
+    from telezapp.midia import envio
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    cid = "5551988887777@s.whatsapp.net"
+    ogg = tmp_path / "voz-1.ogg"
+    ogg.write_bytes(open(os.path.join(os.path.dirname(__file__), "amostras",
+                                      "voz.ogg"), "rb").read())
+    voz = envio.preparar(str(ogg), voz=True, temporario=True)
+    amb.p.enviar_arquivo(cid, voz)
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.enviada_daqui and nova.mensagem.tipo == m.VOZ
+    assert nova.mensagem.segundos == voz.segundos
+    audio = amb.c.enviadas[-1][1].audioMessage
+    assert audio.PTT and audio.seconds == voz.segundos
+    assert audio.mimetype == "audio/ogg; codecs=opus" and audio.URL
+    assert not ogg.exists()                       # movida para o armazem
+    reg = amb.banco.midia("w1", cid, nova.mensagem.id)
+    assert reg and os.path.isfile(reg[0])
+
+    foto = tmp_path / "f.jpg"
+    foto.write_bytes(b"\xff\xd8\xff")
+    amb.p.enviar_arquivo(cid, envio.preparar(str(foto)), "olha")
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.mensagem.tipo == m.FOTO and nova.mensagem.texto == "olha"
+    assert amb.c.enviadas[-1][1] == ("imagem", str(foto), "olha")
+    assert foto.exists()
+
+    pdf = tmp_path / "r.pdf"
+    pdf.write_bytes(b"%PDF")
+    amb.p.enviar_arquivo(cid, envio.preparar(str(pdf)), "falhar")
+    falha = esperar(amb.fila, ev.EnvioFalhou)
+    assert falha.tipo == m.DOCUMENTO and not falha.devolver_texto
+    assert "erro do WhatsApp" in falha.motivo
+
+
+def test_enviar_arquivo_sem_conexao(amb, tmp_path):
+    from telezapp.midia import envio
+    pdf = tmp_path / "r.pdf"
+    pdf.write_bytes(b"%PDF")
+    amb.p.enviar_arquivo("5551@s.whatsapp.net", envio.preparar(str(pdf)))
+    assert esperar(amb.fila, ev.EnvioFalhou).motivo == "sem conexão"
