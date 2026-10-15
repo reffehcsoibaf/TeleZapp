@@ -71,6 +71,7 @@ Control Shift M: gravar uma nota de voz pelo microfone
 Control Shift S: gravar o som do computador e enviar como nota de voz
 Control Shift Seta para cima e para baixo: áudio mais rápido e mais lento
 (0,25x a 3x); Control Shift 0: velocidade normal
+Control vírgula: abrir as configurações (busca, categorias e opções)
 Tecla Aplicativos ou Shift F10: menu da mensagem selecionada
 
 NA LISTA DE CONVERSAS
@@ -273,6 +274,7 @@ class Janela(wx.Frame):
                                 (m_aj, "A&juda")):
             raiz.AppendSubMenu(submenu, rotulo)
         raiz.AppendSeparator()
+        item(raiz, "configuracoes", "C&onfigurações...	Ctrl+,")
         item(raiz, "sair", "&Sair\tCtrl+Q")
         barra.Append(raiz, "&Menu")
         self.SetMenuBar(barra)
@@ -284,6 +286,7 @@ class Janela(wx.Frame):
             "remover": lambda e: self._remover_conta(),
             "logs": lambda e: self._abrir_logs(),
             "sair": lambda e: self.Close(),
+            "configuracoes": lambda e: self._configuracoes(),
             "ir_conv": lambda e: self._ir_para(self.lista_conv, "conversas"),
             "ir_msgs": lambda e: self._ir_para(self.lista_msgs, "mensagens"),
             "ir_caixa": lambda e: self._mostrar_caixa(),
@@ -2002,6 +2005,44 @@ class Janela(wx.Frame):
     def _opcao(self, chave, valor):
         self.cfg.set(chave, bool(valor))
         log.info("opção %s = %s", chave, valor)
+
+    def _configuracoes(self):
+        from telezapp.interface.configuracoes import DialogoConfiguracoes
+        dlg = DialogoConfiguracoes(self, self.cfg, self._aplicar_opcao,
+                                   fala=self.fala)
+        try:
+            dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+
+    def _aplicar_opcao(self, chave, valor):
+        """Aplica uma opcao vinda da janela de configuracoes, com os mesmos
+        efeitos e avisos dos menus, e mantem os itens de menu em dia."""
+        if chave == "depuracao":
+            self._modo_depuracao(valor)
+            self.itens["depuracao"].Check(bool(valor))
+        elif chave == "log_detalhado_whatsapp":
+            self._log_detalhado(valor)
+            self.itens["log_detalhado"].Check(bool(valor))
+        elif chave == "estilo":
+            self._mudar_estilo(valor)
+            self.itens["estilo%d" % valor].Check(True)
+        elif chave == "midias_baixar":
+            self._mudar_baixar(valor)
+            self.itens["baixar_" + str(valor)].Check(True)
+        elif chave == "audio_velocidade":
+            self._aplicar_velocidade(vel.ajustar(valor,
+                                                 self._passo_velocidade()))
+        elif chave == "audio_passo_velocidade":
+            self.cfg.set(chave, valor)
+            atual = self._velocidade()
+            if atual != self.cfg.get("audio_velocidade"):
+                self._aplicar_velocidade(atual)
+        elif chave in ("som", "falar_novas", "confirmar_envio"):
+            self._opcao(chave, valor)
+            self.itens[chave].Check(bool(valor))
+        else:
+            self.cfg.set(chave, valor)
 
     def _ir_para(self, controle, nome):
         if self.atual is None and controle is self.lista_msgs:

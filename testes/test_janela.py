@@ -1434,3 +1434,17 @@ def test_trocar_o_passo_leva_a_velocidade_ao_valor_permitido(j, monkeypatch):
     monkeypatch.setattr(j, "_escolher_opcao", escolher)
     j._escolher_passo()
     assert j.cfg.get("audio_velocidade") == 2.0     # 1,75 -> 2 (o mais proximo)
+
+
+def test_configuracoes_aplicam_com_os_efeitos_dos_menus(j):
+    j._aplicar_opcao("estilo", 2)
+    assert j.estilo == 2 and j.cfg.get("estilo") == 2
+    j._aplicar_opcao("midias_baixar", "automatico")
+    assert j.cfg.get("midias_baixar") == "automatico"
+    j._aplicar_opcao("som", False)
+    assert j.cfg.get("som") is False
+    j._aplicar_opcao("depuracao", True)
+    assert j.banco.depuracao is True
+    j._aplicar_opcao("audio_passo_velocidade", 1.0)
+    j._aplicar_opcao("audio_velocidade", 1.75)       # nao existe de 1 em 1
+    assert j.cfg.get("audio_velocidade") in (1.0, 2.0)
