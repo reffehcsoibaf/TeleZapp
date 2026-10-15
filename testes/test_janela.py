@@ -528,7 +528,7 @@ def jm_midia(j, monkeypatch):
     j.midias = MidiasFalsas()
     abertas = []
     monkeypatch.setattr(jm.visualizadores, "abrir",
-                        lambda pai, x, caminho, fala, nome="": abertas.append(
+                        lambda pai, x, caminho, fala, nome="", cfg=None: abertas.append(
                             (x.id, caminho, nome)))
     j.lista_conv.SetFocus()
     j.lista_conv.SetSelection(0)
@@ -1383,3 +1383,54 @@ def test_link_que_nao_abre_e_avisado(j, monkeypatch):
     monkeypatch.setattr(jm.dialogos, "abrir_link", lambda url: False)
     j._abrir_botao_link(0)
     assert ditas == ["Não consegui abrir o link."]
+
+
+# -------------------------------------------------- velocidade do audio
+class MotorComVelocidade:
+    def __init__(self):
+        self.velocidade = 1.0
+        self.terminou = False
+        self.tocando = True
+
+    def fechar(self):
+        pass
+
+
+def test_mais_rapido_e_mais_lento_respeitam_o_passo(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    assert j._velocidade() == 1.0
+    j._mudar_velocidade(+1)
+    assert j.cfg.get("audio_velocidade") == 1.25
+    assert ditas[-1] == "Velocidade 1,25x"
+    j.cfg.set("audio_passo_velocidade", 0.5)
+    j._mudar_velocidade(+1)
+    assert j.cfg.get("audio_velocidade") == 1.5
+    j.cfg.set("audio_passo_velocidade", 1.0)
+    j._mudar_velocidade(+1)
+    assert j.cfg.get("audio_velocidade") == 2.0
+    j._mudar_velocidade(+1)
+    j._mudar_velocidade(+1)             # 3x e o limite
+    assert j.cfg.get("audio_velocidade") == 3.0
+    j._aplicar_velocidade(1.0)
+    assert j._velocidade() == 1.0 and ditas[-1] == "Velocidade 1x"
+
+
+def test_velocidade_vale_para_o_audio_que_esta_tocando(j):
+    motor = MotorComVelocidade()
+    j.audio = (("t1", "10", "9"), motor)
+    j._mudar_velocidade(+1)
+    assert motor.velocidade == 1.25
+    j._mudar_velocidade(-1)
+    j._mudar_velocidade(-1)
+    assert motor.velocidade == 0.75
+
+
+def test_trocar_o_passo_leva_a_velocidade_ao_valor_permitido(j, monkeypatch):
+    j.cfg.set("audio_velocidade", 1.75)
+
+    def escolher(chave):
+        j.cfg.set(chave, 1.0)
+    monkeypatch.setattr(j, "_escolher_opcao", escolher)
+    j._escolher_passo()
+    assert j.cfg.get("audio_velocidade") == 2.0     # 1,75 -> 2 (o mais proximo)

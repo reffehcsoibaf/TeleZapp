@@ -20,6 +20,7 @@ from telezapp.acessibilidade.fala import Fala, bipe
 from telezapp.interface import dialogos, visualizadores
 from telezapp.midia import armazem
 from telezapp.midia import envio
+from telezapp.midia import velocidade as vel
 from telezapp.midia.gravador import MICROFONE, SOM_INTERNO, Gravador
 from telezapp.midia.reprodutor import FormatoNaoSuportado, Reprodutor
 from telezapp.nucleo import depuracao
@@ -68,6 +69,8 @@ de endereço da mensagem; Espaço ou Enter abre
 Control Shift A: anexar e enviar um arquivo (foto, vídeo, áudio, documento)
 Control Shift M: gravar uma nota de voz pelo microfone
 Control Shift S: gravar o som do computador e enviar como nota de voz
+Control Shift Seta para cima e para baixo: áudio mais rápido e mais lento
+(0,25x a 3x); Control Shift 0: velocidade normal
 Tecla Aplicativos ou Shift F10: menu da mensagem selecionada
 
 NA LISTA DE CONVERSAS
@@ -85,7 +88,8 @@ Esc cancela um download.
 
 NO LEITOR DE ÁUDIO E VÍDEO
 Espaço: tocar ou pausar. Seta para a direita e para a esquerda: avançar e
-voltar 5 segundos (com Shift, 30). Home: voltar ao início. Esc: fechar.
+voltar 5 segundos (com Shift, 30). Home: voltar ao início. + e -: mais
+rápido e mais lento. Esc: fechar.
 
 NA CAIXA DE DIGITAÇÃO
 Enter: envia e esconde a caixa. Shift Enter: nova linha. Esc: cancela a
@@ -226,6 +230,11 @@ class Janela(wx.Frame):
         m_mid.AppendSeparator()
         item(m_mid, "audio_janela", "&Enter em áudio...")
         item(m_mid, "audio_sequencia", "Áudios em &sequência...")
+        item(m_mid, "vel_mais", "Áudio mais &rápido\tCtrl+Shift+Up")
+        item(m_mid, "vel_menos", "Áudio mais le&nto\tCtrl+Shift+Down")
+        item(m_mid, "vel_normal", "&Velocidade normal do áudio\tCtrl+Shift+0")
+        item(m_mid, "vel_escolher", "Velocidade do áu&dio...")
+        item(m_mid, "vel_passo", "&Passo da velocidade do áudio...")
         item(m_mid, "midias_limite", "&Limite do download automático...")
         item(m_mid, "midias_confirmar", "&Confirmar downloads grandes...")
         item(m_mid, "midias_espaco", "&Espaço usado pelas mídias")
@@ -299,6 +308,11 @@ class Janela(wx.Frame):
             "audio_janela": lambda e: self._escolher_opcao("audio_janela"),
             "audio_sequencia": lambda e: self._escolher_opcao(
                 "audio_sequencia"),
+            "vel_mais": lambda e: self._mudar_velocidade(+1),
+            "vel_menos": lambda e: self._mudar_velocidade(-1),
+            "vel_normal": lambda e: self._aplicar_velocidade(1.0),
+            "vel_escolher": lambda e: self._escolher_velocidade(),
+            "vel_passo": lambda e: self._escolher_passo(),
             "midias_limite": lambda e: self._escolher_opcao(
                 "midias_limite_auto_mb"),
             "midias_confirmar": lambda e: self._escolher_opcao(
@@ -1748,9 +1762,12 @@ class Janela(wx.Frame):
             motor = Reprodutor(caminho)
         except FormatoNaoSuportado:
             return False
+        motor.velocidade = self._velocidade()
         motor.tocar()
         self.audio = (x.chave, motor)
-        self.fala.falar("Tocando", interromper=True)
+        self.fala.falar("Tocando" if motor.velocidade == 1.0 else
+                        "Tocando a %s" % vel.rotulo(motor.velocidade),
+                        interromper=True)
         wx.CallLater(500, self._vigiar_audio, motor)
         return True
 
@@ -1803,7 +1820,7 @@ class Janela(wx.Frame):
             return
         conv = self.indice.get((x.conta_id, x.conversa_id))
         visualizadores.abrir(self, x, caminho, self.fala,
-                             conv.nome if conv else "")
+                             conv.nome if conv else "", cfg=self.cfg)
 
     def _salvar_midia(self):
         x = self._mensagem_selecionada()
@@ -1815,6 +1832,54 @@ class Janela(wx.Frame):
             self.fala.falar("Baixe a mídia antes, com Control B.")
             return
         visualizadores.salvar_copia(self, x, caminho, self.fala)
+
+    # ------------------------------------------------ velocidade do audio
+    def _passo_velocidade(self):
+        return vel.passo_valido(self.cfg.get("audio_passo_velocidade"))
+
+    def _velocidade(self):
+        return vel.ajustar(self.cfg.get("audio_velocidade"),
+                           self._passo_velocidade())
+
+    def _aplicar_velocidade(self, valor):
+        self.cfg.set("audio_velocidade", valor)
+        if self.audio is not None:
+            self.audio[1].velocidade = valor
+        self.fala.falar("Velocidade %s" % vel.rotulo(valor),
+                        interromper=True)
+
+    def _mudar_velocidade(self, direcao):
+        self._aplicar_velocidade(vel.proxima(
+            self._velocidade(), self._passo_velocidade(), direcao))
+
+    def _escolher_velocidade(self):
+        valores = vel.valores(self._passo_velocidade())
+        dlg = wx.SingleChoiceDialog(
+            self, "Velocidade de reprodução dos áudios e mensagens de voz.",
+            "Velocidade do áudio", [vel.rotulo(v) for v in valores])
+        try:
+            dlg.SetSelection(valores.index(self._velocidade()))
+        except ValueError:
+            pass
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            escolhida = valores[dlg.GetSelection()]
+        finally:
+            dlg.Destroy()
+        self._aplicar_velocidade(escolhida)
+
+    def _escolher_passo(self):
+        """Muda o passo e leva a velocidade ao valor mais proximo que ele
+        permite (de 0,25 em 0,25, de 0,5 em 0,5 ou de 1 em 1)."""
+        antes = self._passo_velocidade()
+        self._escolher_opcao("audio_passo_velocidade")
+        depois = self._passo_velocidade()
+        if depois == antes:
+            return
+        atual = self._velocidade()
+        if atual != self.cfg.get("audio_velocidade"):
+            self._aplicar_velocidade(atual)
 
     def _mudar_baixar(self, valor):
         self.cfg.set("midias_baixar", valor)

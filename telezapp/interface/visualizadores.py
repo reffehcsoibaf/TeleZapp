@@ -15,6 +15,7 @@ import wx
 from telezapp import NOME
 from telezapp.midia.reprodutor import (FormatoNaoSuportado, Reprodutor,
                                        formatar_tempo)
+from telezapp.midia import velocidade as vel
 from telezapp.nucleo import modelos as m
 
 try:
@@ -68,8 +69,9 @@ def nome_para_salvar(msg, caminho):
 
 
 # ------------------------------------------------------------ dispatcher
-def abrir(pai, msg, caminho, fala, nome_conversa=""):
-    """Mostra a midia no leitor certo; volta quando a janela fecha."""
+def abrir(pai, msg, caminho, fala, nome_conversa="", cfg=None):
+    """Mostra a midia no leitor certo; volta quando a janela fecha. `cfg`
+    guarda a velocidade do audio entre uma vez e outra."""
     kind = escolher(msg.tipo, caminho)
     texto = descricao(msg, nome_conversa)
     try:
@@ -79,11 +81,13 @@ def abrir(pai, msg, caminho, fala, nome_conversa=""):
             try:
                 motor = Reprodutor(caminho)
             except FormatoNaoSuportado:
-                _reproducao(pai, msg, caminho, texto, fala, None, False)
+                _reproducao(pai, msg, caminho, texto, fala, None, False,
+                            cfg)
             else:
-                _reproducao(pai, msg, caminho, texto, fala, motor, False)
+                _reproducao(pai, msg, caminho, texto, fala, motor, False,
+                            cfg)
         elif kind == VIDEO:
-            _reproducao(pai, msg, caminho, texto, fala, None, True)
+            _reproducao(pai, msg, caminho, texto, fala, None, True, cfg)
         elif kind == TEXTO:
             _texto(pai, msg, caminho, texto)
         else:
@@ -214,6 +218,7 @@ class _MotorMediaCtrl:
     def __init__(self, ctrl):
         self.ctrl = ctrl
         self.terminou = False
+        self._velocidade = 1.0
 
     @property
     def duracao(self):
@@ -247,6 +252,20 @@ class _MotorMediaCtrl:
     def avancar(self, delta):
         self.ir_para(self.posicao + delta)
 
+    @property
+    def velocidade(self):
+        return self._velocidade
+
+    @velocidade.setter
+    def velocidade(self, valor):
+        """O MediaCtrl do Windows muda o ritmo como o codec permitir (o tom
+        pode acompanhar)."""
+        self._velocidade = float(valor)
+        try:
+            self.ctrl.SetPlaybackRate(self._velocidade)
+        except Exception:
+            pass
+
     def fechar(self):
         try:
             self.ctrl.Stop()
@@ -254,7 +273,7 @@ class _MotorMediaCtrl:
             pass
 
 
-def _reproducao(pai, msg, caminho, texto, fala, motor, video):
+def _reproducao(pai, msg, caminho, texto, fala, motor, video, cfg=None):
     """motor: Reprodutor pronto, ou None para usar o MediaCtrl do Windows."""
     estado = {"motor": motor, "ctrl": None}
     rotulo = "Vídeo" if video else "Áudio"
@@ -286,8 +305,29 @@ def _reproducao(pai, msg, caminho, texto, fala, motor, video):
     inicio = wx.Button(dlg, wx.ID_ANY, "&Início")
     dlg.Bind(wx.EVT_BUTTON, lambda e: (mo.ir_para(0), dizer()), inicio)
     barra.Add(inicio, 0, wx.RIGHT, 8)
+    for texto_b, direcao in (("Mais &rápido", +1), ("Mais le&nto", -1)):
+        b = wx.Button(dlg, wx.ID_ANY, texto_b)
+        dlg.Bind(wx.EVT_BUTTON, lambda e, d=direcao: mudar_velocidade(d), b)
+        barra.Add(b, 0, wx.RIGHT, 8)
     dlg.GetSizer().Insert(2, barra, 0, wx.EXPAND | wx.ALL, 8)
     dlg.Layout()
+
+    def passo_atual():
+        return vel.passo_valido(cfg.get("audio_passo_velocidade")) \
+            if cfg is not None else vel.PASSO_PADRAO
+
+    def mudar_velocidade(direcao):
+        atual = getattr(mo, "velocidade", 1.0)
+        novo = vel.proxima(atual, passo_atual(), direcao)
+        mo.velocidade = novo
+        if cfg is not None:
+            cfg.set("audio_velocidade", novo)
+        atualizar_rotulo()
+        fala.falar("Velocidade %s" % vel.rotulo(novo), interromper=True)
+
+    if cfg is not None and not video:
+        mo.velocidade = vel.ajustar(cfg.get("audio_velocidade"),
+                                    passo_atual())
 
     def dizer():
         fala.falar("%s de %s" % (formatar_tempo(mo.posicao),
@@ -300,8 +340,11 @@ def _reproducao(pai, msg, caminho, texto, fala, motor, video):
 
     def atualizar_rotulo():
         botao.SetLabel("&Pausar" if mo.tocando else "&Tocar")
-        posicao.SetLabel("%s de %s" % (formatar_tempo(mo.posicao),
-                                       formatar_tempo(mo.duracao)))
+        extra = ""
+        if getattr(mo, "velocidade", 1.0) != 1.0:
+            extra = ", " + vel.rotulo(mo.velocidade)
+        posicao.SetLabel("%s de %s%s" % (formatar_tempo(mo.posicao),
+                                         formatar_tempo(mo.duracao), extra))
 
     pausou = [False]
     tentativas = [0]
@@ -327,6 +370,10 @@ def _reproducao(pai, msg, caminho, texto, fala, motor, video):
         elif k == wx.WXK_HOME:
             mo.ir_para(0)
             dizer()
+        elif k in (ord("+"), ord("="), wx.WXK_ADD, wx.WXK_NUMPAD_ADD):
+            mudar_velocidade(+1)
+        elif k in (ord("-"), wx.WXK_SUBTRACT, wx.WXK_NUMPAD_SUBTRACT):
+            mudar_velocidade(-1)
         else:
             evt.Skip()
     dlg.Bind(wx.EVT_CHAR_HOOK, tecla)
