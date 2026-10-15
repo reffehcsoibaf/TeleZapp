@@ -167,6 +167,13 @@ class ClienteFalso:
         return N.NewsletterMetadata(ThreadMeta=N.NewsletterThreadMetadata(
             Name=N.NewsletterText(Text="Canal de Notícias")))
 
+    grupos = ()      # GroupInfo de get_joined_groups
+
+    def get_joined_groups(self):
+        if self.grupos is None:
+            raise RuntimeError("sem rede")
+        return list(self.grupos)
+
     def get_group_info(self, j):
         return N.GroupInfo(GroupName=N.GroupName(Name="Família"))
 
@@ -319,6 +326,73 @@ def test_grupo_busca_o_nome_e_lid_vira_numero(amb):
     amb.f["Message"](amb.c, e)
     assert esperar(amb.fila, ev.MensagemNova).mensagem.conversa_id == \
         "5551977776666@s.whatsapp.net"
+
+
+def test_grupo_renomeado_atualiza_a_conversa(amb):
+    amb.f["Message"](amb.c, evento(
+        "G9", E.Message(conversation="oi"), chat="12345", grupo=True,
+        remetente="5551988887777"))
+    esperar(amb.fila, ev.MensagemNova)
+    assert esperar(amb.fila, ev.ConversasAtualizadas).conversas[0].nome == \
+        "Família"
+    cid = "12345@g.us"
+
+    amb.f["GroupInfoEvent"](amb.c, N.GroupInfoEvent(
+        JID=jid("12345", "g.us"), Name=N.GroupName(Name="Família da Ana")))
+    lista = esperar(amb.fila, ev.ConversasAtualizadas).conversas
+    assert [c.nome for c in lista if c.id == cid] == ["Família da Ana"]
+    assert [c.nome for c in amb.banco.conversas("w1") if c.id == cid] == \
+        ["Família da Ana"]
+
+    # o mesmo nome de novo, ou uma mudanca que nao e de nome: nada
+    amb.f["GroupInfoEvent"](amb.c, N.GroupInfoEvent(
+        JID=jid("12345", "g.us"), Name=N.GroupName(Name="Família da Ana")))
+    amb.f["GroupInfoEvent"](amb.c, N.GroupInfoEvent(
+        JID=jid("12345", "g.us"), Topic=N.GroupTopic(Topic="novo assunto")))
+    assert amb.fila.empty()
+
+    # ao entrar de novo no grupo o WhatsApp manda o nome atual
+    amb.f["JoinedGroup"](amb.c, N.JoinedGroup(GroupInfo=N.GroupInfo(
+        JID=jid("12345", "g.us"), GroupName=N.GroupName(Name="Os Silva"))))
+    lista = esperar(amb.fila, ev.ConversasAtualizadas).conversas
+    assert [c.nome for c in lista if c.id == cid] == ["Os Silva"]
+    # grupo que ainda nao tem conversa: ignora
+    amb.f["GroupInfoEvent"](amb.c, N.GroupInfoEvent(
+        JID=jid("777", "g.us"), Name=N.GroupName(Name="Outro")))
+    assert amb.fila.empty()
+
+
+def test_nomes_de_grupos_sao_conferidos_depois_de_ficar_fora(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento(
+        "G8", E.Message(conversation="oi"), chat="12345", grupo=True,
+        remetente="5551988887777"))
+    esperar(amb.fila, ev.MensagemNova)
+    assert esperar(amb.fila, ev.ConversasAtualizadas).conversas[0].nome == \
+        "Família"
+    # o grupo foi renomeado com o app fechado; outro grupo nao mudou e um
+    # terceiro nao tem conversa: so o primeiro muda
+    amb.c.grupos = [
+        N.GroupInfo(JID=jid("12345", "g.us"),
+                    GroupName=N.GroupName(Name="Família Silva")),
+        N.GroupInfo(JID=jid("777", "g.us"),
+                    GroupName=N.GroupName(Name="Sem conversa"))]
+    amb.f["OfflineSyncCompleted"](amb.c, N.OfflineSyncCompleted(Count=0))
+    lista = esperar(amb.fila, ev.ConversasAtualizadas).conversas
+    assert [c.nome for c in lista if c.id == "12345@g.us"] == ["Família Silva"]
+    assert [c.nome for c in amb.banco.conversas("w1")
+            if c.id == "12345@g.us"] == ["Família Silva"]
+
+    # de novo (ex.: F5), sem mudanca: nada novo; e sem rede: nao quebra
+    amb.p.atualizar_conversas()
+    esperar(amb.fila, ev.ConversasAtualizadas)
+    amb.c.grupos = None
+    amb.p.atualizar_conversas()
+    esperar(amb.fila, ev.ConversasAtualizadas)
+    amb.p.enviar_texto("5551@s.whatsapp.net", "garante que a fila andou")
+    esperar(amb.fila, ev.MensagemNova)
+    assert amb.fila.empty()
 
 
 def test_falha_de_envio_e_lida_em_outro_aparelho(amb):

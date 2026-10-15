@@ -263,7 +263,7 @@ def test_sessao_salva_conecta_e_lista_conversas(ambiente):
         assert [(c.nome, c.tipo, c.nao_lidas) for c in convs] == [
             ("Ana", "privada", 2), ("Família", "grupo", 0)]
         assert len(ambiente.banco.conversas("t1")) == 2
-        assert len(cliente.handlers) == 2
+        assert len(cliente.handlers) == 3
 
         p.carregar_mensagens("10")
         msgs = esperar(ambiente.fila, ev.MensagensCarregadas).mensagens
@@ -340,7 +340,7 @@ def test_mensagem_recebida_e_leitura(ambiente):
     p.iniciar()
     try:
         esperar(ambiente.fila, ev.ConversasAtualizadas)
-        receber, ler = cliente.handlers
+        receber, ler, _ = cliente.handlers
 
         async def chegar():
             async def get_chat():
@@ -536,5 +536,26 @@ def test_enviar_nota_de_voz_e_documento(ambiente, tmp_path, monkeypatch):
         falha = esperar(ambiente.fila, ev.EnvioFalhou)
         assert falha.tipo == m.DOCUMENTO and not falha.devolver_texto
         assert "permissão" in falha.motivo
+    finally:
+        p.parar()
+
+
+def test_grupo_renomeado_no_telegram_atualiza_a_conversa(ambiente):
+    import asyncio
+    cliente = ClienteFalso()
+    p = ambiente.criar(cliente)
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ConversasAtualizadas)
+        acao = cliente.handlers[2]
+        asyncio.run(acao(types.SimpleNamespace(new_title="Família 2",
+                                               chat_id=10)))
+        convs = esperar(ambiente.fila, ev.ConversasAtualizadas).conversas
+        assert "Família 2" in [c.nome for c in convs]
+        assert "Família 2" in [c.nome for c in ambiente.banco.conversas("t1")]
+        # sem mudanca de nome, ou de uma conversa desconhecida: nada
+        asyncio.run(acao(types.SimpleNamespace(new_title=None, chat_id=10)))
+        asyncio.run(acao(types.SimpleNamespace(new_title="X", chat_id=999)))
+        assert ambiente.fila.empty()
     finally:
         p.parar()

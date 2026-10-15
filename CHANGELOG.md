@@ -3,6 +3,30 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.15.4
+
+- Grupo renomeado com o TeleZapp fechado (ou sem receber o aviso) continuava
+  com o nome antigo: o aviso da 2026.10.15.3 só vale ao vivo. Agora o WhatsApp
+  é consultado (`get_joined_groups`) no fim da sincronia ao conectar e a cada
+  atualização manual das conversas (`_atualizar_nomes_de_grupos`), e os grupos
+  com nome diferente são corrigidos. Grupos sem conversa local são ignorados.
+  O Telegram já refazia os nomes ao conectar.
+- Não verificado com um WhatsApp real: depende de `get_joined_groups` trazer
+  o nome atual de todos os grupos.
+
+## 2026.10.15.3
+
+- Grupo renomeado não aparecia no TeleZapp: o nome só era buscado enquanto
+  estava como "Grupo". WhatsApp: passa a ouvir `GroupInfoEv` (campo `Name`)
+  e `JoinedGroupEv` (`GroupInfo.GroupName`, reenviado ao entrar/reconectar) e
+  troca o nome da conversa já conhecida (`_renomear_grupo`). Telegram: passa a
+  ouvir `events.ChatAction` e usa `new_title`. A janela atualiza o rótulo
+  "Mensagens de ..." e o título quando a conversa aberta muda de nome.
+- Só vale para mudanças que acontecerem com o TeleZapp aberto (ou que o
+  WhatsApp reenviar ao reconectar). Não verificado com um WhatsApp real: os
+  campos foram conferidos nas definições do neonize, e a entrega do evento
+  `GroupInfoEv` depende do servidor.
+
 ## 2026.10.15.2
 
 Janela de configurações (etapa 4).

@@ -141,6 +141,17 @@ def test_lista_de_conversas(j):
                                   "Bruno, Telegram"]
 
 
+def test_conversa_aberta_renomeada_atualiza_titulo_e_lista(j):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert j.rot_msgs.GetLabel() == "Mensagens de Ana"
+    j.b.publicar(ev.ConversasAtualizadas("t1", [
+        conv("10", "Ana Maria", data=AGORA), conv("11", "Família")]))
+    assert j.rot_msgs.GetLabel() == "Mensagens de Ana Maria"
+    assert j.GetTitle() == "TeleZapp: Ana Maria"
+    assert j.lista_conv.itens[0].startswith("Ana Maria")
+
+
 def test_abrir_conversa_com_nao_lidas_foca_o_marcador(j):
     ditas = []
     j.fala.falar = lambda t, interromper=False: ditas.append(t)
