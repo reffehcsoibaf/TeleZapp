@@ -409,6 +409,32 @@ def escolher_arquivo(pai, pasta=""):
         dlg.Destroy()
 
 
+def mostrar_mensagem(pai, titulo, texto, copiar):
+    """O texto de uma mensagem, somente leitura, com os botoes Copiar texto
+    e Fechar (Esc tambem fecha). `copiar(texto)` copia e avisa a pessoa."""
+    dlg = wx.Dialog(pai, title=titulo, size=(640, 440),
+                    style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+    rot = wx.StaticText(dlg, label="Texto da mensagem")
+    caixa = wx.TextCtrl(dlg, value=texto, name="Texto da mensagem",
+                        style=wx.TE_MULTILINE | wx.TE_READONLY)
+    b_copiar = wx.Button(dlg, wx.ID_ANY, "&Copiar texto")
+    b_fechar = wx.Button(dlg, wx.ID_OK, "&Fechar")
+    b_fechar.SetDefault()
+    b_copiar.Bind(wx.EVT_BUTTON, lambda e: copiar(texto))
+    linha = wx.BoxSizer(wx.HORIZONTAL)
+    for b in (b_copiar, b_fechar):
+        linha.Add(b, 0, wx.RIGHT, 8)
+    lay = wx.BoxSizer(wx.VERTICAL)
+    lay.Add(rot, 0, wx.ALL, 8)
+    lay.Add(caixa, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
+    lay.Add(linha, 0, wx.ALL | wx.ALIGN_RIGHT, 8)
+    dlg.SetSizer(lay)
+    dlg.SetEscapeId(wx.ID_OK)
+    caixa.SetFocus()
+    dlg.ShowModal()
+    dlg.Destroy()
+
+
 def mostrar_depuracao(pai, titulo, texto, copiar, salvar):
     """Texto de depuracao somente leitura, com os botoes Copiar tudo e
     Salvar em arquivo. `copiar(texto)` e `salvar(texto)` fazem o trabalho e

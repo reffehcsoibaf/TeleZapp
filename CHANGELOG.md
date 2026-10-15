@@ -3,6 +3,28 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.15.0
+
+Links e botões de endereço pelo Tab.
+
+- `modelos.itens_de_link(msg)`: links do texto ou da legenda (e os escondidos
+  em `extras.links`) mais os botões de endereço do Telegram (`extras.botoes`),
+  só http/https, sem repetir endereço. Rótulos "Link: ..." e "Botão: ...".
+- Janela: até 12 `wx.Button` (`botoes_link`) criados logo depois dos botões
+  de resposta, na ordem de Tab; aparecem para a mensagem selecionada, em
+  qualquer tipo (texto, foto, vídeo, áudio, documento). Enter no botão abre
+  no navegador (`dialogos.abrir_link`) e fala "Abrindo no navegador.".
+  `_atualizar_botoes` agora considera ações e links na mesma chave.
+- `formatar`: "com N links (Tab)" para qualquer tipo (antes só mídia, "com
+  link (Enter)"). A lista de links dos detalhes segue existindo, inclusive
+  para além dos 12 botões.
+- Enter na lista de mensagens: mídia (inclusive com link na legenda) abre a
+  mídia; mensagem só de texto abre `dialogos.mostrar_mensagem` (texto somente
+  leitura, Copiar texto e Fechar; Esc fecha). Os detalhes ficam só em Alt
+  Enter (e no menu Mensagem). `_copiar_texto` é comum a Control Shift C e à
+  caixa. Mensagem local ainda "enviando" continua abrindo os detalhes.
+- Não verificado com o NVDA.
+
 ## 2026.10.14.16
 
 Etapa 3b: enviar arquivos e gravar nota de voz.
