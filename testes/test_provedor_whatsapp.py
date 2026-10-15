@@ -176,9 +176,15 @@ class ClienteFalso:
             raise RuntimeError("ainda conectando")
         return "ABCD-EFGH"
 
-    def send_message(self, para, mensagem):
+    def send_message(self, para, mensagem, **kw):
         if mensagem.conversation == "falhar":
             raise RuntimeError("erro")
+        if getattr(self, "recusar_479", 0) > 0 and (
+                mensagem.HasField("buttonsResponseMessage") or
+                mensagem.HasField("documentWithCaptionMessage") or
+                mensagem.HasField("templateButtonReplyMessage")):
+            self.recusar_479 -= 1
+            raise RuntimeError("server returned error 479")
         self.enviadas.append((wa.jid_texto(para), mensagem))
         return N.SendResponse(ID="EU1", Timestamp=TS + 60)
 
@@ -966,7 +972,10 @@ def test_escolher_opcao_de_lista_e_botoes_simples(amb):
     amb.p.responder_acao(recebida, {"tipo": "botoes", "rotulo": "Sim",
                                     "id": "1"})
     esperar(amb.fila, ev.MensagemNova)
-    b = amb.c.enviadas[-1][1].buttonsResponseMessage
+    # 1a variante, experimental: a resposta vai dentro de um documento com
+    # legenda (assim a biblioteca nao poe o no <biz><buttons_response/>)
+    b = amb.c.enviadas[-1][1].documentWithCaptionMessage.message \
+        .buttonsResponseMessage
     assert (b.selectedButtonID, b.selectedDisplayText) == ("1", "Sim")
 
 
@@ -976,3 +985,98 @@ def test_falha_ao_tocar_botao_nao_devolve_texto_para_a_caixa(amb):
                                     "id": "1"})
     falha = esperar(amb.fila, ev.EnvioFalhou)
     assert falha.motivo == "sem conexão" and not falha.devolver_texto
+
+
+def test_modo_de_depuracao_guarda_a_estrutura_original(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento("D0", E.Message(conversation="antes")))
+    esperar(amb.fila, ev.MensagemNova)
+    cid = "5551988887777@s.whatsapp.net"
+    assert amb.banco.depuracao_de("w1", cid, "D0") == ""     # modo desligado
+    amb.banco.depuracao = True
+    amb.f["Message"](amb.c, evento("D1", _modelo_com_botoes()))
+    esperar(amb.fila, ev.MensagemNova)
+    bruto = amb.banco.depuracao_de("w1", cid, "D1")
+    assert "Você confirma a consulta?" in bruto and "quickReplyButton" in bruto
+    assert "info" in bruto and "mensagem" in bruto
+
+
+def test_depurar_conversa_explica_como_o_nome_foi_achado(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    dados = amb.p.depurar_conversa("5551988887777@s.whatsapp.net")
+    assert dados["numero"] == "5551988887777@s.whatsapp.net"
+    assert "nome_escolhido" in dados
+    assert amb.p.depurar_conversa("sem-arroba") == {
+        "conversa_id": "sem-arroba"}
+
+
+def _buttons_message():
+    return E.Message(buttonsMessage=E.ButtonsMessage(
+        contentText="Você precisa de assistência?", buttons=[
+            E.ButtonsMessage.Button(
+                buttonID="1", buttonText=E.ButtonsMessage.Button.ButtonText(
+                    displayText="Automóvel"), type=1),
+            E.ButtonsMessage.Button(
+                buttonID="2", buttonText=E.ButtonsMessage.Button.ButtonText(
+                    displayText="Residência"), type=1)]))
+
+
+def test_mensagem_com_botoes_guarda_o_original_para_citar_inteira():
+    msg, _ = wa.converter(evento("O1", _buttons_message()), "w1", "c")
+    extras = m.extras_de(msg)
+    assert "Residência" in extras["original"]
+    assert [a["id"] for a in extras["acoes"]] == ["1", "2"]
+    msg, _ = wa.converter(evento("O2", E.Message(conversation="oi")),
+                          "w1", "c")
+    assert m.extras_de(msg)["original"] == ""
+
+
+def test_resposta_de_botao_tenta_variantes_quando_o_servidor_recusa(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    ev_ = evento("O3", _buttons_message())
+    amb.f["Message"](amb.c, ev_)
+    recebida = esperar(amb.fila, ev.MensagemNova).mensagem
+    recebida.remetente = "94476496285751@lid"
+    acao = m.extras_de(recebida)["acoes"][1]
+    amb.c.recusar_479 = 2                    # a experimental e a do celular
+    amb.p.responder_acao(recebida, acao)
+    esperar(amb.fila, ev.MensagemNova)
+    destino, proto = amb.c.enviadas[-1]
+    r = proto.buttonsResponseMessage
+    assert destino == "5551988887777@s.whatsapp.net"      # 3a variante
+    assert (r.selectedButtonID, r.selectedDisplayText) == ("2", "Residência")
+    assert r.contextInfo.quotedMessage.HasField("buttonsMessage")
+    assert r.contextInfo.participant == "94476496285751@lid"
+
+
+def test_resposta_de_botao_so_falha_se_todas_as_variantes_forem_recusadas(
+        amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento("O4", _buttons_message()))
+    recebida = esperar(amb.fila, ev.MensagemNova).mensagem
+    recebida.remetente = "94476496285751@lid"
+    amb.c.recusar_479 = 99
+    amb.p.responder_acao(recebida, m.extras_de(recebida)["acoes"][0])
+    falha = esperar(amb.fila, ev.EnvioFalhou)
+    assert "erro do WhatsApp" in falha.motivo and not falha.devolver_texto
+    assert amb.c.recusar_479 == 99 - 4       # tentou as 4 variantes
+
+
+def test_resposta_de_botao_tenta_primeiro_a_variante_experimental(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento("O5", _buttons_message()))
+    recebida = esperar(amb.fila, ev.MensagemNova).mensagem
+    recebida.remetente = "94476496285751@lid"
+    amb.p.responder_acao(recebida, m.extras_de(recebida)["acoes"][1])
+    esperar(amb.fila, ev.MensagemNova)
+    destino, proto = amb.c.enviadas[-1]
+    assert destino == "94476496285751@lid"
+    assert not proto.HasField("buttonsResponseMessage")
+    r = proto.documentWithCaptionMessage.message.buttonsResponseMessage
+    assert (r.selectedButtonID, r.selectedDisplayText) == ("2", "Residência")
+    assert r.contextInfo.stanzaID == "O5"

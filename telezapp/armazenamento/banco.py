@@ -16,7 +16,7 @@ from telezapp.nucleo.modelos import ORDEM_ESTADOS, Conversa, Mensagem
 
 log = logging.getLogger("telezapp.banco")
 
-VERSAO_ESQUEMA = 6
+VERSAO_ESQUEMA = 7
 
 ESQUEMA = """
 CREATE TABLE IF NOT EXISTS conversas (
@@ -101,7 +101,17 @@ CREATE TABLE IF NOT EXISTS midias (
     data REAL NOT NULL DEFAULT 0,
     PRIMARY KEY (conta_id, conversa_id, mensagem_id)
 );
+-- Estrutura original das mensagens, so com o modo de depuracao ligado.
+CREATE TABLE IF NOT EXISTS depuracao (
+    conta_id TEXT NOT NULL,
+    conversa_id TEXT NOT NULL,
+    mensagem_id TEXT NOT NULL,
+    dados TEXT NOT NULL,
+    PRIMARY KEY (conta_id, conversa_id, mensagem_id)
+);
 """
+
+MAX_DEPURACAO = 500
 
 _CAMPOS_CONV = [f.name for f in fields(Conversa)]
 _CAMPOS_MSG = [f.name for f in fields(Mensagem)]
@@ -111,6 +121,7 @@ class Banco:
     def __init__(self, caminho):
         self.caminho = caminho
         self._trava = threading.Lock()
+        self.depuracao = False        # modo de depuracao (ver guardar_depuracao)
         self._con = sqlite3.connect(caminho, check_same_thread=False)
         self._con.execute("PRAGMA journal_mode=WAL")
         self._con.execute("PRAGMA synchronous=NORMAL")
@@ -131,6 +142,32 @@ class Banco:
             self._con.execute("ALTER TABLE mensagens ADD COLUMN extras "
                               "TEXT NOT NULL DEFAULT ''")
             log.info("banco atualizado para a versão %d", VERSAO_ESQUEMA)
+
+    # ------------------------------------------------------------ depuracao
+    def guardar_depuracao(self, conta_id, conversa_id, mensagem_id, dados):
+        """Guarda a estrutura original de uma mensagem (so com o modo de
+        depuracao ligado), mantendo as MAX_DEPURACAO mais recentes."""
+        if not self.depuracao:
+            return
+        with self._trava, self._con:
+            self._con.execute(
+                "INSERT OR REPLACE INTO depuracao VALUES (?,?,?,?)",
+                (conta_id, conversa_id, mensagem_id, dados))
+            self._con.execute(
+                "DELETE FROM depuracao WHERE rowid <= "
+                "(SELECT MAX(rowid) FROM depuracao) - ?", (MAX_DEPURACAO,))
+
+    def depuracao_de(self, conta_id, conversa_id, mensagem_id):
+        with self._trava:
+            linha = self._con.execute(
+                "SELECT dados FROM depuracao WHERE conta_id=? AND "
+                "conversa_id=? AND mensagem_id=?",
+                (conta_id, conversa_id, mensagem_id)).fetchone()
+        return linha[0] if linha else ""
+
+    def limpar_depuracao(self):
+        with self._trava, self._con:
+            self._con.execute("DELETE FROM depuracao")
 
     def fechar(self):
         with self._trava:

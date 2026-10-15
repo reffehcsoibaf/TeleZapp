@@ -25,7 +25,7 @@ WXK_ESCAPE, WXK_RETURN, WXK_NUMPAD_ENTER = 27, 13, 370
 WXK_UP, WXK_DOWN, WXK_HOME, WXK_END, WXK_PAGEUP, WXK_PAGEDOWN = range(
     315, 321)
 EVT_CLOSE = EVT_CHAR_HOOK = EVT_MENU = EVT_LISTBOX_DCLICK = object()
-EVT_CONTEXT_MENU = EVT_KEY_DOWN = EVT_BUTTON = object()
+EVT_CONTEXT_MENU = EVT_KEY_DOWN = EVT_BUTTON = EVT_LISTBOX = object()
 DefaultPosition = (-1, -1)
 mensagens = []          # o que passou por MessageBox
 resposta_messagebox = [NO]
@@ -63,6 +63,9 @@ class Janela:
 
     def SetFocus(self):
         _foco[0] = self
+
+    def HasFocus(self):
+        return _foco[0] is self
 
     def __bool__(self):
         return getattr(self, "vivo", True)
@@ -284,6 +287,17 @@ class TextCtrl(Janela):
 
 
 class Button(Janela):
+    def __init__(self, pai=None, *a, label="", **k):
+        super().__init__()
+        self.label = label or (a[1] if len(a) > 1 else "")
+        self.visivel = True
+
+    def SetLabel(self, t):
+        self.label = t
+
+    def GetLabel(self):
+        return self.label
+
     def Enable(self, v=True):
         self.ativo = v
 
@@ -297,6 +311,10 @@ class BoxSizer:
 
     def Add(self, *a, **k):
         pass
+
+
+class WrapSizer(BoxSizer):
+    pass
 
 
 class MenuItem:

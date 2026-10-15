@@ -99,10 +99,12 @@ def extras_de(msg):
     return {"links": list(dados.get("links") or []),
             "botoes": list(dados.get("botoes") or []),
             "mencoes": list(dados.get("mencoes") or []),
-            "acoes": list(dados.get("acoes") or [])}
+            "acoes": list(dados.get("acoes") or []),
+            "original": dados.get("original") or ""}
 
 
-def guardar_extras(msg, links=(), botoes=(), mencoes=(), acoes=()):
+def guardar_extras(msg, links=(), botoes=(), mencoes=(), acoes=(),
+                   original=""):
     """Poe links, botoes, mencoes e acoes (botoes de resposta e opcoes de
     lista que podem ser tocados) na mensagem (nada, se tudo vazio)."""
     dados = {}
@@ -114,6 +116,8 @@ def guardar_extras(msg, links=(), botoes=(), mencoes=(), acoes=()):
         dados["mencoes"] = [dict(x) for x in mencoes]
     if acoes:
         dados["acoes"] = [dict(x) for x in acoes]
+    if original:
+        dados["original"] = original    # JSON da mensagem com botoes
     msg.extras = json.dumps(dados, ensure_ascii=False) if dados else ""
     return msg
 
@@ -212,6 +216,12 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None):
     cont = conteudo(m).replace("\r", " ").replace("\n", " ")
     if m.tipo not in (TEXTO, VOZ, FIGURINHA) and tem_links(m):
         cont = _juntar(cont, "com link (Enter)")
+    acoes = extras_de(m)["acoes"]
+    if acoes:
+        so_opcoes = all(a.get("tipo") == "lista" for a in acoes)
+        cont = _juntar(cont, "com %d %s (Tab)" % (
+            len(acoes), ("opção" if len(acoes) == 1 else "opções")
+            if so_opcoes else ("botão" if len(acoes) == 1 else "botões")))
     if m.resposta_a:
         if isinstance(respondida, Mensagem):
             quem = "você" if respondida.minha else (

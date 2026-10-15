@@ -3,6 +3,68 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.14.15
+
+- Botões de resposta viram controles de verdade (`wx.Button`, até 12, criados
+  logo depois da lista de mensagens para ficarem na ordem de Tab). Aparecem só
+  quando a mensagem selecionada tem botões/opções (`_atualizar_botoes`, chamado
+  ao mudar a seleção e ao refazer a lista); o foco só é movido se o botão
+  focado deixar de existir. A linha da mensagem ganha "com N botões (Tab)".
+- Sem janela de confirmação, também no caminho pelos Detalhes. O resultado é
+  falado quando chega: "Enviado: X" (a resposta aparece na conversa) ou o aviso
+  de falha de sempre (`_acoes_enviadas` casa conta, conversa e rótulo).
+- Variante EXPERIMENTAL tentada antes das outras para `buttonsMessage`: a
+  resposta vai dentro de `documentWithCaptionMessage`. Motivo: o pacote do
+  celular, como o servidor o repassou (log DEBUG de 20:29), traz `<biz>` vazio,
+  sem o filho `<buttons_response/>` que o whatsmeow acrescenta ao nosso, e o
+  servidor preserva filhos do `<biz>` em outras mensagens (`<buttons/>`,
+  `<interactive>`). O whatsmeow só olha dentro de ViewOnce/ViewOnceV2/Ephemeral.
+  NÃO verificado: se o servidor aceita, se o tipo/mediatype calculado muda e se
+  a empresa entende a resposta embrulhada. O log nomeia a variante aceita.
+
+## 2026.10.14.14
+
+- Teste real: modelo (`templateButtonReplyMessage`) foi aceito e entendido;
+  `buttonsResponseMessage` foi recusado com 479 nas três variantes, mesmo
+  citando a mensagem inteira. Como o conteúdo vai criptografado, a recusa é do
+  pacote (stanza), possivelmente do nó `<biz><buttons_response/>` que o
+  whatsmeow acrescenta. Para ver os pacotes: opção "Registro técnico detalhado
+  do WhatsApp" (menu Depurar, vale na próxima abertura), que põe o lado em Go
+  em nível DEBUG (`_ligar_log_detalhado`).
+
+## 2026.10.14.13
+
+- Resposta de botão: o servidor devolveu 479 (formato recusado) ao enviar um
+  `buttonsResponseMessage` citando só o texto. O celular cita a mensagem
+  inteira (`quotedMessage.buttonsMessage` com os botões), responde na conversa
+  LID e inclui `messageSecret`. Agora a mensagem com botões guarda
+  `extras.original` (JSON sem miniaturas) e a resposta tenta, nesta ordem,
+  "como o celular (conversa LID)", "citando a mensagem inteira" e "citação
+  simples", passando à seguinte só se o erro for 479. O log diz qual variante
+  foi aceita ou recusada. Só vale para mensagens que chegarem depois desta
+  versão (as antigas só têm a citação simples).
+
+## 2026.10.14.12
+
+- Log de envio falhado agora traz o tipo, a mensagem e o traceback do erro e,
+  nas respostas de botão, o tipo/id/índice do botão ("resposta de botão: ...").
+
+## 2026.10.14.11
+
+PR #12: menu Depurar.
+
+- `nucleo/depuracao.py`: `texto_mensagem` e `texto_conversa`.
+- Tabela `depuracao` (esquema 7) e `Banco.depuracao` (modo, `config.depuracao`,
+  padrão desligado): `guardar_depuracao` mantém as 500 mais recentes;
+  desligar apaga (`limpar_depuracao`).
+- WhatsApp: `estrutura_bruta` (sem miniaturas nem chaves de mídia) guardada
+  no caminho ao vivo e no histórico; `depurar_conversa` mostra como o nome foi
+  achado. Telegram ainda sem estrutura original.
+- Janela: menu Depurar (mensagem Ctrl+Shift+D, conversa, modo);
+  `dialogos.mostrar_depuracao` com Copiar tudo e Salvar em arquivo
+  (`config.pasta_depuracao`: C:\logs no Windows).
+- `estrutura_interativa` passou a usar `_limpar`, compartilhado.
+
 ## 2026.10.14.10
 
 PR #11: tocar nos botões de resposta e nas listas do WhatsApp.

@@ -1073,15 +1073,80 @@ def test_detalhes_pedem_ao_provedor_o_nome_de_quem_recebeu(j, monkeypatch):
     assert "Entregue a Ana Silva em" in chamadas[0][2]
 
 
-def test_enter_em_botao_de_resposta_confirma_e_envia(j, monkeypatch):
+def _conversa_com_botoes(j):
     j.lista_conv.SetSelection(0)
     j._char_hook(Tecla(wx_falso.WXK_RETURN))
     x = msg("8", "Você confirma?", conversa="10")
-    m.guardar_extras(x, acoes=[{"tipo": "modelo", "rotulo": "Sim",
+    m.guardar_extras(x, acoes=[{"tipo": "modelo", "rotulo": "Sim & não",
                                 "id": "s", "indice": 0},
                                {"tipo": "lista", "rotulo": "Particular",
                                 "id": "p", "indice": 0}])
-    j.b.publicar(ev.MensagensCarregadas("t1", "10", [x]))
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [x, msg("9", "oi")]))
+    return x
+
+
+def test_botoes_da_mensagem_viram_controles_na_ordem_de_tab(j):
+    _conversa_com_botoes(j)
+    assert "com 2 opções (Tab)" not in j.lista_msgs.itens[0]   # botão + opção
+    assert "com 2 botões (Tab)" in "".join(j.lista_msgs.itens)
+    selecionar(j, "9")
+    j._atualizar_botoes()
+    assert not any(b.visivel for b in j.botoes_acao)
+    selecionar(j, "8")
+    j._atualizar_botoes()
+    assert [b.label for b in j.botoes_acao if b.visivel] == \
+        ["Sim && não", "Particular"]
+    assert wx_falso._foco[0] is j.lista_msgs        # nada tirou o foco da lista
+    selecionar(j, "9")
+    j._atualizar_botoes()
+    assert not any(b.visivel for b in j.botoes_acao)
+
+
+def test_botao_focado_que_some_devolve_o_foco_para_a_lista(j):
+    _conversa_com_botoes(j)
+    selecionar(j, "8")
+    j._atualizar_botoes()
+    j.botoes_acao[1].SetFocus()
+    selecionar(j, "9")
+    j._atualizar_botoes()
+    assert wx_falso._foco[0] is j.lista_msgs
+
+
+def test_tocar_botao_envia_direto_sem_confirmar_e_fala_o_resultado(j):
+    _conversa_com_botoes(j)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    selecionar(j, "8")
+    j._atualizar_botoes()
+    antes = len(wx_falso.mensagens)
+    j._tocar_botao(0)
+    assert ("acao", "8", "Sim & não") in j.contas.p.pedidos
+    assert len(wx_falso.mensagens) == antes          # nenhuma janela
+    assert ditas == []                               # fala so o resultado
+    resposta = m.Mensagem("t1", "10", "R1", minha=True, data=AGORA + 50,
+                          texto="Sim & não", estado=m.ENVIADA)
+    j.b.publicar(ev.MensagemNova(resposta, j.indice[("t1", "10")],
+                                 enviada_daqui=True))
+    assert ditas == ["Enviado: Sim & não"]
+    assert j._acoes_enviadas == []
+
+
+def test_falha_ao_tocar_botao_fala_o_aviso_e_limpa_a_espera(j):
+    _conversa_com_botoes(j)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    selecionar(j, "8")
+    j._atualizar_botoes()
+    j._tocar_botao(1)
+    assert j._acoes_enviadas == [("t1", "10", "Particular")]
+    j.b.publicar(ev.EnvioFalhou("t1", "10", "Particular", "erro do WhatsApp",
+                                devolver_texto=False))
+    assert ditas == ["Não foi possível enviar: erro do WhatsApp."]
+    assert j._acoes_enviadas == [] and j.caixa.GetValue() == ""
+
+
+def test_detalhes_tambem_envia_o_botao_direto(j, monkeypatch):
+    _conversa_com_botoes(j)
     monkeypatch.setattr(jm.wx, "CallAfter", lambda f, *a: f(*a),
                         raising=False)
     chamadas = []
@@ -1089,11 +1154,42 @@ def test_enter_em_botao_de_resposta_confirma_e_envia(j, monkeypatch):
         jm.dialogos, "mostrar_texto",
         lambda *a, **k: chamadas.append(k) or {"_acao": 0})
     selecionar(j, "8")
-    wx_falso.resposta_messagebox[0] = wx_falso.NO
     j._detalhes()
-    assert chamadas[0]["acoes"] == [("Sim", False), ("Particular", True)]
-    assert ("acao", "8", "Sim") not in j.contas.p.pedidos     # disse não
-    wx_falso.resposta_messagebox[0] = wx_falso.YES
-    j._detalhes()
-    assert ("acao", "8", "Sim") in j.contas.p.pedidos
-    assert "Enviar o botão \"Sim\"" in wx_falso.mensagens[-1]
+    assert chamadas[0]["acoes"] == [("Sim & não", False), ("Particular", True)]
+    assert ("acao", "8", "Sim & não") in j.contas.p.pedidos
+
+
+def test_depurar_mensagem_abre_a_janela_com_o_texto(j, monkeypatch):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    x = msg("9", "oi", conversa="10")
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [x]))
+    chamadas = []
+    monkeypatch.setattr(jm.dialogos, "mostrar_depuracao",
+                        lambda *a: chamadas.append(a))
+    selecionar(j, "9")
+    j._depurar_mensagem()
+    assert "DEPURAÇÃO DE MENSAGEM" in chamadas[0][2]
+    assert "Ligue o Modo de depuração" in chamadas[0][2]
+
+
+def test_modo_de_depuracao_liga_desliga_e_salva_em_arquivo(j, tmp_path,
+                                                           monkeypatch):
+    monkeypatch.setenv("TELEZAPP_PASTA_DEPURACAO", str(tmp_path))
+    j._modo_depuracao(True)
+    assert j.banco.depuracao is True and j.cfg.get("depuracao") is True
+    j.banco.guardar_depuracao("t1", "10", "9", "{}")
+    j._salvar_depuracao("conteudo de teste")
+    arquivos = list(tmp_path.glob("telezapp_depuracao_*.txt"))
+    assert len(arquivos) == 1 and \
+        arquivos[0].read_text(encoding="utf-8") == "conteudo de teste"
+    j._modo_depuracao(False)
+    assert j.banco.depuracao is False
+    assert j.banco.depuracao_de("t1", "10", "9") == ""
+
+
+def test_registro_detalhado_do_whatsapp_so_grava_a_opcao(j):
+    j._log_detalhado(True)
+    assert j.cfg.get("log_detalhado_whatsapp") is True
+    j._log_detalhado(False)
+    assert j.cfg.get("log_detalhado_whatsapp") is False

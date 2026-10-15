@@ -23,6 +23,7 @@
 <li><a href="#mensagens">Ler e enviar mensagens</a></li>
 <li><a href="#midias">Fotos, vídeos, áudios e documentos</a></li>
 <li><a href="#detalhes">Dados de uma mensagem</a></li>
+<li><a href="#depurar">Depurar: ver o que o WhatsApp mandou</a></li>
 <li><a href="#dados">Onde ficam os seus dados</a></li>
 </ul>
 </nav>
@@ -31,7 +32,7 @@
 <p>O TeleZapp reúne o WhatsApp e o Telegram numa só janela do Windows, pensada para quem usa leitor de tela, como o NVDA. Todos os controles são os do próprio Windows, sem telas desenhadas à mão.</p>
 
 <h2 id="menu">O menu</h2>
-<p>Aperte Alt para abrir o Menu. Ele tem um submenu para cada assunto: Contas, Conversa, Mensagem, Exibição e Ajuda, e no fim o item Sair. Use a seta para baixo para percorrer, a seta para a direita para entrar num submenu, a seta para a esquerda para voltar e Esc para fechar.</p>
+<p>Aperte Alt para abrir o Menu. Ele tem um submenu para cada assunto: Contas, Conversa, Mensagem, Mídias, Exibição, Depurar e Ajuda, e no fim o item Sair. Use a seta para baixo para percorrer, a seta para a direita para entrar num submenu, a seta para a esquerda para voltar e Esc para fechar.</p>
 
 <h2 id="contas">Adicionar e remover contas</h2>
 <p>No Menu, em Contas, escolha adicionar uma conta do Telegram ou do WhatsApp.</p>
@@ -74,7 +75,7 @@
 <p>Por padrão, quando um áudio ou mensagem de voz termina, o próximo áudio da conversa toca em seguida (baixando antes, se precisar), e o leitor de tela fala "Próximo áudio" com o nome de quem enviou. Esc para tudo. Você desliga isso em Menu, Mídias, Áudios em sequência. A sequência só vale para o modo sem janela.</p>
 <p>Uma resposta mostra, depois do texto dela, um trecho da mensagem original: a resposta, em resposta a Ana: "o texto da mensagem". Se a mensagem original é muito antiga e não está guardada, a linha diz que é uma resposta a uma mensagem mais antiga.</p>
 <p>Enter numa mensagem de texto abre a janela de detalhes. Se a mensagem tem links, eles aparecem numa lista logo depois do texto: Tab chega até ela, as setas passam de um link a outro, e Enter ou Espaço abre o link no navegador padrão do Windows. Só endereços http e https são abertos. A lista mostra o texto visível e o endereço real, para você saber para onde o link leva, inclusive quando o endereço está escondido atrás de um texto, como em canais do Telegram.</p>
-<p>Na mesma janela aparecem, quando existirem, a lista Botões de link (botões do Telegram que abrem um endereço) e a lista Pessoas mencionadas. Cada pessoa aparece com o nome primeiro, depois o @usuario e, por último, o telefone. No WhatsApp o nome vem da sua agenda; sem ele, do perfil da pessoa; sem ele, do nome verificado da empresa. Mensagens de empresas do WhatsApp com botões de resposta (como "Sim" e "Não") ou listas de opções mostram também a lista Botões de resposta e opções. Enter num item pergunta "Enviar o botão ... para ...?"; se você confirmar com Sim, o TeleZapp envia a resposta, igual a tocar no botão no celular. A resposta da empresa chega como uma mensagem nova, com os próximos botões. Botões de link seguem na lista Botões de link; botões de pagamento ainda não podem ser tocados. Enter numa pessoa fecha a janela e abre a conversa com ela, no mesmo serviço e na mesma conta da mensagem. Se não existia conversa, ela abre vazia e só passa a existir quando você enviar a primeira mensagem.</p>
+<p>Na mesma janela aparecem, quando existirem, a lista Botões de link (botões do Telegram que abrem um endereço) e a lista Pessoas mencionadas. Cada pessoa aparece com o nome primeiro, depois o @usuario e, por último, o telefone. No WhatsApp o nome vem da sua agenda; sem ele, do perfil da pessoa; sem ele, do nome verificado da empresa. Mensagens de empresas do WhatsApp com botões de resposta (como "Sim" e "Não") ou listas de opções avisam na linha da mensagem, por exemplo "com 2 botões (Tab)". Com a mensagem selecionada, Tab vai ao primeiro botão, Tab de novo ao próximo, e Espaço ou Enter toca, sem pedir confirmação; o TeleZapp fala "Enviado" ou "Não foi possível enviar". Shift Tab volta para a lista. Se houver mais de 12 opções, as demais ficam em Enter na mensagem, na lista Botões de resposta e opções dos detalhes. A resposta da empresa chega como uma mensagem nova, com os próximos botões. Botões de link seguem na lista Botões de link; botões de pagamento ainda não podem ser tocados. Enter numa pessoa fecha a janela e abre a conversa com ela, no mesmo serviço e na mesma conta da mensagem. Se não existia conversa, ela abre vazia e só passa a existir quando você enviar a primeira mensagem.</p>
 <p>No menu de contexto de uma resposta (tecla Aplicações ou Shift F10), e em Menu, Mensagem, o item Ir para a mensagem respondida leva a seleção até a mensagem original, e Esc volta para a resposta de onde você saiu. Um novo Esc fecha a conversa.</p>
 <p>Fotos e figurinhas aparecem numa janela com a descrição. Áudios, mensagens de voz e vídeos tocam numa janela com estes comandos: Espaço toca e pausa, seta para a direita avança 5 segundos, seta para a esquerda volta 5 (com Shift, 30), Home volta ao início e Esc fecha. Textos pequenos são mostrados na própria janela. Outros documentos têm o botão Abrir com o programa do Windows, que é a única forma de sair do TeleZapp; o arquivo continua na pasta do programa.</p>
 <p>Em Mensagem, Salvar cópia da mídia grava uma cópia onde você escolher.</p>
@@ -83,6 +84,11 @@
 
 <h2 id="detalhes">Dados de uma mensagem</h2>
 <p>Alt Enter mostra, num texto que você lê com as setas, a conversa, o autor, a data, o tipo e o texto completo. Nas mensagens que você enviou pelo WhatsApp, aparece também quando cada pessoa recebeu e leu. No Telegram, em grupos, só se sabe até que mensagem alguém leu, sem a hora.</p>
+
+<h2 id="depurar">Depurar: ver o que o WhatsApp mandou</h2>
+<p>O menu Depurar serve para entender uma mensagem ou conversa que apareceu errada, sem precisar de arquivos de log. Depurar esta mensagem (Control Shift D) abre um texto com tudo que o TeleZapp guardou sobre a mensagem selecionada e, se o Modo de depuração estava ligado quando ela chegou, a estrutura original enviada pelo WhatsApp. Depurar esta conversa mostra como o nome foi escolhido (agenda, perfil, empresa ou telefone) e um resumo das mensagens.</p>
+<p>A janela tem os botões Copiar tudo, para colar numa conversa de suporte, e Salvar em arquivo, que grava em C:\logs. O texto contém mensagens e telefones, mas nunca senhas ou chaves de acesso.</p>
+<p>O Modo de depuração fica desligado. Ligado, guarda no seu computador a estrutura das últimas 500 mensagens do WhatsApp que chegarem; ao desligar, tudo é apagado.</p>
 
 <h2 id="dados">Onde ficam os seus dados</h2>
 <p>Tudo fica na pasta TeleZapp dentro de AppData\Roaming do seu usuário: configurações, sessões, conversas guardadas e registros de funcionamento (logs), sem o texto das suas mensagens. As mídias baixadas ficam na subpasta midias, e são apagadas junto com a conta quando você a remove. Arquivos temporários ficam numa subpasta do próprio programa e são apagados ao abrir e ao fechar.</p>

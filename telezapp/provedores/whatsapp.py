@@ -327,6 +327,55 @@ CAMPOS_INTERATIVOS = ("buttonsMessage", "templateMessage", "interactiveMessage",
                       "interactiveResponseMessage")
 
 
+_CAMPOS_PESADOS = ("JPEGThumbnail", "jpegThumbnail", "contextInfo",
+                   "mediaKey", "thumbnail", "fileEncSHA256", "fileSHA256",
+                   "mediaKeyTimestamp", "directPath", "fileEncSha256",
+                   "fileSha256", "streamingSidecar")
+
+
+def _limpar(x, truncar=0, manter=()):
+    """Tira miniaturas e chaves de midia de uma estrutura (dict/list) e, se
+    `truncar`, corta textos maiores que isso."""
+    if isinstance(x, dict):
+        return {k: _limpar(v, truncar, manter) for k, v in x.items()
+                if k not in _CAMPOS_PESADOS or k in manter}
+    if isinstance(x, list):
+        return [_limpar(v, truncar, manter) for v in x]
+    if truncar and isinstance(x, str) and len(x) > truncar:
+        return x[:truncar] + "…"
+    return x
+
+
+def original_com_acoes(interna, acoes):
+    """JSON (sem miniaturas) da mensagem que tem botoes/opcoes, guardado
+    para citar a mensagem inteira ao responder, como faz o celular. Vazio
+    se nao ha acoes."""
+    if not acoes:
+        return ""
+    from google.protobuf.json_format import MessageToDict
+    try:
+        return json.dumps(_limpar(MessageToDict(interna)), ensure_ascii=False,
+                          separators=(",", ":"))
+    except Exception:
+        return ""
+
+
+def estrutura_bruta(mensagem, info=None):
+    """Estrutura original (JSON, sem miniaturas nem chaves) de uma mensagem
+    do WhatsApp, para o menu Depurar. `mensagem` e o protobuf Message ou
+    WebMessageInfo; `info` (opcional) e o Info do evento ao vivo."""
+    from google.protobuf.json_format import MessageToDict
+    saida = {}
+    try:
+        if info is not None:
+            saida["info"] = _limpar(MessageToDict(info))
+        saida["mensagem"] = _limpar(MessageToDict(mensagem), manter=(
+            "contextInfo",))
+    except Exception as e:
+        saida["erro"] = "não consegui ler a estrutura: %s" % type(e).__name__
+    return json.dumps(saida, ensure_ascii=False, indent=2, default=str)
+
+
 def estrutura_interativa(interna):
     """Formato (sem textos longos nem imagens) de uma mensagem de empresa
     com botoes ou lista, para o registro: serve para implementarmos o toque
@@ -340,17 +389,7 @@ def estrutura_interativa(interna):
         except Exception:
             continue
 
-        def limpar(x):
-            if isinstance(x, dict):
-                return {k: limpar(v) for k, v in x.items()
-                        if k not in ("JPEGThumbnail", "jpegThumbnail",
-                                     "contextInfo", "mediaKey", "thumbnail")}
-            if isinstance(x, list):
-                return [limpar(v) for v in x]
-            if isinstance(x, str) and len(x) > 80:
-                return x[:80] + "…"
-            return x
-        return {nome: limpar(dados)}
+        return {nome: _limpar(dados, 80)}
     return None
 
 
@@ -442,9 +481,10 @@ def converter(evento, conta_id, conversa_id, autor=""):
                     else ""),
         remetente="" if minha else jid_texto(origem.Sender))
     interna_ = desembrulhar(evento.Message)
+    acoes_ = acoes_do_whatsapp(interna_)
     m.guardar_extras(msg, botoes=botoes_do_whatsapp(interna_),
-                     mencoes=mencoes_do_contexto(ctx),
-                     acoes=acoes_do_whatsapp(interna_))
+                     mencoes=mencoes_do_contexto(ctx), acoes=acoes_,
+                     original=original_com_acoes(interna_, acoes_))
     return msg, msg.remetente
 
 
@@ -521,9 +561,10 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
                     else ""),
         remetente="" if minha else _sem_aparelho(remetente))
     interna_ = desembrulhar(wmi.message)
+    acoes_ = acoes_do_whatsapp(interna_)
     m.guardar_extras(msg, botoes=botoes_do_whatsapp(interna_),
-                     mencoes=mencoes_do_contexto(ctx),
-                     acoes=acoes_do_whatsapp(interna_))
+                     mencoes=mencoes_do_contexto(ctx), acoes=acoes_,
+                     original=original_com_acoes(interna_, acoes_))
     return msg, remetente
 
 
@@ -600,8 +641,27 @@ class ProvedorWhatsApp(Provedor):
     # ----------------------------------------------------------- execucao
     def _criar_cliente(self):
         from neonize.client import NewClient
+        self._ligar_log_detalhado()
         caminho = caminho_sessao(self.pasta_sessoes, self.conta.id)
         return NewClient(caminho, props=props_do_aparelho(self.historico))
+
+    @staticmethod
+    def _ligar_log_detalhado():
+        """Com a opcao ligada, o lado em Go grava cada pacote trocado com o
+        WhatsApp no log (o nivel e lido quando o cliente conecta)."""
+        try:
+            from telezapp import config
+            if not config.Config().get("log_detalhado_whatsapp"):
+                return
+            from neonize.utils import log as log_neonize
+            log_neonize.setLevel(logging.DEBUG)
+            # os registros do lado em Go chegam com nomes whatsmeow.*, que
+            # herdam o nivel destes
+            for nome in ("whatsmeow", "Whatsmeow"):
+                logging.getLogger(nome).setLevel(logging.DEBUG)
+            log.info("registro técnico detalhado do WhatsApp ligado")
+        except Exception:
+            log.exception("não consegui ligar o registro detalhado")
 
     def iniciar(self):
         if self._threads:
@@ -897,6 +957,35 @@ class ProvedorWhatsApp(Provedor):
             return "+" + alvo.User
         return SEM_NOME
 
+    def depurar_conversa(self, conversa_id):
+        """Como o nome da conversa foi achado (menu Depurar)."""
+        dados = {"conversa_id": conversa_id}
+        if self.cliente is None or "@" not in (conversa_id or ""):
+            return dados
+        try:
+            usuario, servidor = jid_de_texto(conversa_id)
+            jid = _jid_obj(usuario, servidor)
+            alvo = self._numero_do_jid(jid)
+            dados["servidor"] = servidor
+            dados["numero"] = "%s@%s" % (alvo.User, alvo.Server)
+            dados["apelido_visto_nas_mensagens"] = self._apelidos.get(
+                conversa_id, "")
+            for tentativa in (alvo, jid) if alvo is not jid else (jid,):
+                try:
+                    info = self.cliente.contact.get_contact(tentativa)
+                except Exception as e:
+                    dados["contato_%s" % tentativa.Server] = \
+                        "erro: %s" % type(e).__name__
+                    continue
+                dados["contato_%s" % tentativa.Server] = {
+                    "nome_na_agenda": info.FullName or info.FirstName,
+                    "nome_no_perfil": info.PushName,
+                    "nome_verificado_da_empresa": info.BusinessName}
+            dados["nome_escolhido"] = self._nome_contato(jid)
+        except Exception as e:
+            dados["erro"] = type(e).__name__
+        return dados
+
     def nome_de_participante(self, participante_id):
         """Nome de quem entregou/leu uma mensagem, para os detalhes."""
         if self.cliente is None or "@" not in (participante_id or ""):
@@ -949,7 +1038,8 @@ class ProvedorWhatsApp(Provedor):
                            lambda _: "@" + nome, texto)
         msg.texto = texto
         m.guardar_extras(msg, extras["links"], extras["botoes"],
-                         extras["mencoes"], extras["acoes"])
+                         extras["mencoes"], extras["acoes"],
+                         extras["original"])
 
     def _conversa(self, conversa_id, chat, pushname, grupo, data):
         canal = chat.Server == "newsletter"
@@ -1102,6 +1192,10 @@ class ProvedorWhatsApp(Provedor):
             if msg is None:
                 return
             self._enriquecer_mencoes(msg)
+            if self.banco.depuracao:
+                self.banco.guardar_depuracao(
+                    self.conta.id, cid, msg.id,
+                    estrutura_bruta(evento.Message, info))
             if cid in IGNORAR_CONVERSAS:
                 self._guardar_status(msg, origem, info.Pushname)
                 return
@@ -1226,11 +1320,58 @@ class ProvedorWhatsApp(Provedor):
     def responder_acao(self, msg, acao):
         """Toca um botao de resposta (ou escolhe uma opcao de lista) de uma
         mensagem de empresa: manda a resposta citando a mensagem."""
+        descricao = "tipo=%s id=%r indice=%s" % (
+            acao.get("tipo"), acao.get("id"), acao.get("indice"))
+        log.info("resposta de botão: %s", descricao)
         self._fila.put(lambda: self._enviar(
             msg.conversa_id, acao.get("rotulo", ""), msg.id,
-            lambda: self._mensagem_de_acao(msg, acao)))
+            lambda: self._variantes_da_acao(msg, acao), descricao))
 
-    def _mensagem_de_acao(self, msg, acao):
+    def _variantes_da_acao(self, msg, acao):
+        """[(nome, destino, Message, add_msg_secret)]: do mais parecido com o
+        que o celular envia ao mais simples. O servidor recusa (479) o que
+        considera invalido; as variantes seguintes so sao tentadas nesse
+        caso, e nada foi entregue quando ele recusa."""
+        from google.protobuf.json_format import ParseDict
+        from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import Message
+        original = None
+        bruto = m.extras_de(msg)["original"]
+        if bruto:
+            try:
+                original = ParseDict(json.loads(bruto), Message(),
+                                     ignore_unknown_fields=True)
+            except Exception:
+                original = None
+        simples = Message(conversation=msg.texto or m.conteudo(msg))
+        lid = msg.remetente if msg.remetente.endswith("@lid") else ""
+        candidatas = []
+        if original is not None:
+            if lid:
+                candidatas.append(("como o celular (conversa LID)", lid,
+                                   original, True))
+            candidatas.append(("citando a mensagem inteira",
+                               msg.conversa_id, original, False))
+        candidatas.append(("citação simples", msg.conversa_id, simples,
+                           False))
+        variantes = [(nome, dest, self._mensagem_de_acao(msg, acao, citada),
+                      segredo)
+                     for nome, dest, citada, segredo in candidatas]
+        if acao.get("tipo") == "botoes" and variantes:
+            # EXPERIMENTAL: o servidor recusa (479) a resposta de botão com
+            # o no <biz><buttons_response/> que a biblioteca poe sozinha; o
+            # celular nao manda esse no. A biblioteca so o poe quando
+            # reconhece a mensagem, e nao olha dentro do envelope de
+            # "documento com legenda".
+            from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (
+                FutureProofMessage)
+            nome, dest, interna, segredo = variantes[0]
+            variantes.insert(0, (
+                "experimental: dentro de documento com legenda", dest,
+                Message(documentWithCaptionMessage=FutureProofMessage(
+                    message=interna)), segredo))
+        return variantes
+
+    def _mensagem_de_acao(self, msg, acao, citada=None):
         from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (
             ButtonsResponseMessage, ContextInfo, InteractiveResponseMessage,
             ListResponseMessage, Message, TemplateButtonReplyMessage)
@@ -1238,8 +1379,9 @@ class ProvedorWhatsApp(Provedor):
         tipo = acao.get("tipo", "")
         remetente = msg.remetente or (
             "" if msg.conversa_id.endswith("@g.us") else msg.conversa_id)
-        ctx = ContextInfo(stanzaID=msg.id, quotedMessage=Message(
-            conversation=msg.texto or m.conteudo(msg)))
+        if citada is None:
+            citada = Message(conversation=msg.texto or m.conteudo(msg))
+        ctx = ContextInfo(stanzaID=msg.id, quotedMessage=citada)
         if remetente:
             ctx.participant = remetente
         if tipo == "modelo":
@@ -1268,17 +1410,40 @@ class ProvedorWhatsApp(Provedor):
             return Message(interactiveResponseMessage=resp)
         raise ValueError("ação desconhecida: %s" % tipo)
 
-    def _enviar(self, conversa_id, texto, resposta_a, construir=None):
+    def _enviar_variantes(self, variantes):
+        """Tenta cada variante enquanto o servidor responder 479 (recusou o
+        formato); qualquer outro erro, ou a ultima recusa, sobe."""
+        for i, (nome, destino, mensagem, segredo) in enumerate(variantes):
+            try:
+                resp = self.cliente.send_message(
+                    self._jid(destino), mensagem, add_msg_secret=segredo)
+            except Exception as e:
+                if i + 1 < len(variantes) and "479" in str(e):
+                    log.info("resposta de botão recusada (479) na variante "
+                             "'%s'; tentando a próxima", nome)
+                    continue
+                log.info("resposta de botão recusada na variante '%s'", nome)
+                raise
+            log.info("resposta de botão aceita na variante '%s'", nome)
+            return resp
+
+    def _enviar(self, conversa_id, texto, resposta_a, construir=None,
+                descricao_acao=""):
         inicio = time.perf_counter()
         try:
             if not self._conectada:
                 raise ConnectionError("sem conexão")
-            resp = self.cliente.send_message(
-                self._jid(conversa_id),
-                construir() if construir is not None else
-                self._mensagem_de_texto(conversa_id, texto, resposta_a))
+            if construir is None:
+                resp = self.cliente.send_message(
+                    self._jid(conversa_id),
+                    self._mensagem_de_texto(conversa_id, texto, resposta_a))
+            else:
+                resp = self._enviar_variantes(construir())
         except Exception as e:
-            log.warning("envio falhou: %s", type(e).__name__)
+            log.warning("envio falhou: %s: %s%s", type(e).__name__,
+                        str(e)[:300],
+                        (" (resposta de botão %s)" % descricao_acao)
+                        if descricao_acao else "", exc_info=True)
             motivo = "sem conexão" if isinstance(e, ConnectionError) else \
                 "erro do WhatsApp (%s)" % type(e).__name__
             self.barramento.publicar(ev.EnvioFalhou(
@@ -1426,6 +1591,9 @@ class ProvedorWhatsApp(Provedor):
                 if x is None or (limite and x.data < limite):
                     continue
                 self._enriquecer_mencoes(x)
+                if self.banco.depuracao:
+                    self.banco.guardar_depuracao(
+                        self.conta.id, cid, x.id, estrutura_bruta(h.message))
                 novas.append(x)
                 if x.tipo in armazem.BAIXAVEIS and \
                         h.message.HasField("message"):
