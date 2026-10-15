@@ -1483,9 +1483,26 @@ class ProvedorWhatsApp(Provedor):
                 devolver_texto=construir is None))
             return
         log.info("texto enviado em %.2fs", time.perf_counter() - inicio)
+        self._registrar_enviada(resp, conversa_id, texto,
+                                resposta_a=resposta_a)
+
+    def _registrar_enviada(self, resp, conversa_id, texto, resposta_a="",
+                           arquivo=None, **campos):
+        """Guarda e publica a mensagem que o servidor confirmou. `arquivo`
+        (origem, mover): copia a midia enviada para o armazem do app."""
         msg = m.Mensagem(self.conta.id, conversa_id, resp.ID, minha=True,
                          data=segundos(resp.Timestamp) or time.time(),
-                         texto=texto, estado=m.ENVIADA, resposta_a=resposta_a)
+                         texto=texto, estado=m.ENVIADA, resposta_a=resposta_a,
+                         **campos)
+        if arquivo is not None:
+            try:
+                destino = armazem.guardar_enviada(msg, *arquivo)
+                self.banco.registrar_midia(
+                    msg.conta_id, msg.conversa_id, msg.id, msg.tipo,
+                    destino, os.path.getsize(destino), time.time())
+            except OSError:
+                log.warning("não consegui guardar a cópia da mídia enviada",
+                            exc_info=True)
         with self._trava:
             self._vistas.add(resp.ID)
             self._remetentes[resp.ID] = ("", texto)
@@ -1501,6 +1518,69 @@ class ProvedorWhatsApp(Provedor):
         self.banco.salvar_mensagens([msg])
         self.barramento.publicar(ev.MensagemNova(msg, conv,
                                                  enviada_daqui=True))
+        return msg
+
+    # ------------------------------------------------------ arquivos
+    def enviar_arquivo(self, conversa_id, anexo, legenda=""):
+        # thread propria: um upload grande nao pode travar a fila de texto
+        threading.Thread(
+            target=self._enviar_arquivo, args=(conversa_id, anexo, legenda),
+            daemon=True, name="whatsapp-envio").start()
+
+    def _mensagem_de_midia(self, anexo, legenda):
+        """Mensagem de video ou audio montada a mao: o neonize so sabe
+        montar foto e documento sem FFmpeg."""
+        from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (
+            AudioMessage, Message, VideoMessage)
+        with open(anexo.caminho, "rb") as f:
+            dados = f.read()
+        up = self.cliente.upload(dados)
+        comum = dict(URL=up.url, directPath=up.DirectPath,
+                     fileEncSHA256=up.FileEncSHA256, fileLength=up.FileLength,
+                     fileSHA256=up.FileSHA256, mediaKey=up.MediaKey)
+        if anexo.tipo == m.VIDEO:
+            return Message(videoMessage=VideoMessage(
+                caption=legenda, seconds=anexo.segundos,
+                width=anexo.largura, height=anexo.altura,
+                mimetype="video/mp4", **comum))
+        voz = anexo.tipo == m.VOZ
+        return Message(audioMessage=AudioMessage(
+            seconds=anexo.segundos, PTT=voz,
+            mimetype="audio/ogg; codecs=opus" if voz else
+            (anexo.mime or "audio/mpeg"), **comum))
+
+    def _enviar_arquivo(self, conversa_id, anexo, legenda):
+        inicio = time.perf_counter()
+        try:
+            if not self._conectada or self.cliente is None:
+                raise ConnectionError("sem conexão")
+            jid = self._jid(conversa_id)
+            if anexo.tipo == m.FOTO:
+                resp = self.cliente.send_image(jid, anexo.caminho,
+                                               caption=legenda or None)
+            elif anexo.tipo in (m.VIDEO, m.VOZ, m.AUDIO):
+                resp = self.cliente.send_message(
+                    jid, self._mensagem_de_midia(anexo, legenda))
+            else:
+                resp = self.cliente.send_document(
+                    jid, anexo.caminho, caption=legenda or None,
+                    filename=anexo.nome, mimetype=anexo.mime)
+        except Exception as e:
+            log.warning("envio de %s falhou: %s: %s", anexo.tipo,
+                        type(e).__name__, str(e)[:300], exc_info=True)
+            motivo = "sem conexão" if isinstance(e, ConnectionError) else \
+                "erro do WhatsApp (%s)" % type(e).__name__
+            self.barramento.publicar(ev.EnvioFalhou(
+                self.conta.id, conversa_id, legenda, motivo,
+                devolver_texto=False, tipo=anexo.tipo))
+            return
+        log.info("%s enviado em %.2fs (%d bytes)", anexo.tipo,
+                 time.perf_counter() - inicio, anexo.tamanho)
+        self._registrar_enviada(
+            resp, conversa_id, legenda, tipo=anexo.tipo,
+            segundos=anexo.segundos, nome_arquivo=anexo.nome,
+            tamanho=anexo.tamanho,
+            arquivo=(anexo.caminho, anexo.temporario))
 
     def marcar_como_lida(self, conversa_id):
         with self._trava:

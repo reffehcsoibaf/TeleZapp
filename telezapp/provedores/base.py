@@ -58,6 +58,12 @@ class Provedor(ABC):
     def marcar_como_lida(self, conversa_id):
         """Avisa o servico que a pessoa leu a conversa."""
 
+    def enviar_arquivo(self, conversa_id, anexo, legenda=""):
+        """Envia foto, video, audio, documento ou nota de voz (`anexo`, ver
+        midia.envio). Volta na hora; o upload roda fora da fila de texto.
+        Publica MensagemNova(enviada_daqui=True) ou EnvioFalhou."""
+        raise NotImplementedError
+
     def responder_acao(self, msg, acao):
         """Toca um botao de resposta ou escolhe uma opcao de lista de uma
         mensagem (ex.: de empresa). Publica MensagemNova ou EnvioFalhou.

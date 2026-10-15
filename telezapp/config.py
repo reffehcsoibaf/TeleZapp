@@ -113,7 +113,7 @@ OPCOES = (
           "Toca um som curto quando chega uma mensagem nova."),
     Opcao("falar_novas", "Falar mensagens novas", "Avisos", True,
           "O leitor de tela fala o autor e o conteúdo de cada mensagem nova."),
-    Opcao("confirmar_envio", "Confirmar envio por voz", "Avisos", True,
+    Opcao("confirmar_envio", "Falar mensagem enviada", "Avisos", True,
           "Fala Enviada depois que uma mensagem sai."),
     Opcao("depuracao", "Modo de depuração", "Avançado", False,
           "Guarda, no seu computador, a estrutura original das últimas 500 "
@@ -130,6 +130,11 @@ OPCOES = (
           "mensagens.",
           ((1, "Autor e hora primeiro"), (2, "Conteúdo primeiro"),
            (3, "Autor só quando muda"))),
+    Opcao("falar_descricoes", "Falar a descrição de cada opção",
+          "Leitura", True,
+          "Na janela de configurações, o TeleZapp fala a explicação de cada "
+          "opção logo depois que você chega nela. Desmarcada, a explicação "
+          "só é falada com F1."),
     Opcao("audio_janela", "Enter em áudio e mensagem de voz", "Mídias", "sem",
           "Só tocar começa a tocar sem abrir janela: Enter de novo pausa e "
           "continua, e Esc para. O player em janela tem avançar, voltar e "
@@ -141,6 +146,20 @@ OPCOES = (
           "próximo áudio da conversa, baixando antes se preciso. Esc para.",
           (("sim", "Tocar os áudios em sequência"),
            ("nao", "Parar quando o áudio terminar"))),
+    Opcao("audio_passo_velocidade", "Passo da velocidade do áudio", "Mídias",
+          0.25,
+          "De quanto em quanto a velocidade de reprodução do áudio muda "
+          "quando você a aumenta ou diminui.",
+          ((0.25, "De 0,25 em 0,25 (de 0,25x até 3x)"),
+           (0.5, "De 0,5 em 0,5 (de 0,5x até 3x)"),
+           (1.0, "De 1 em 1 (1x, 2x e 3x)"))),
+    Opcao("audio_velocidade", "Velocidade do áudio", "Mídias", 1.0,
+          "Velocidade de reprodução de áudios e mensagens de voz, de 0,25x a "
+          "3x, sem mudar o tom da voz. Os valores disponíveis dependem do "
+          "passo escolhido.",
+          tuple((v, ("%g" % v).replace(".", ",") + "x") for v in (
+              0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75,
+              3.0))),
     Opcao("midias_baixar", "Quando baixar as mídias", "Mídias", "demanda",
           "Sob demanda baixa só quando você abre a mídia. Automático baixa "
           "ao receber, até o limite escolhido.",

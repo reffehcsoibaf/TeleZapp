@@ -164,6 +164,22 @@ class ClienteFalso:
         self.enviadas.append((ent, texto, reply_to))
         return mensagem(99, texto, out=True)
 
+    async def send_file(self, ent, caminho, caption=None,
+                        force_document=False, voice_note=False,
+                        attributes=None, **kw):
+        if caption == "falhar":
+            raise errors.ChatWriteForbiddenError(None)
+        self.arquivos = getattr(self, "arquivos", [])
+        self.arquivos.append(dict(ent=ent, caminho=caminho, caption=caption,
+                                  documento=force_document,
+                                  voz=voice_note, atributos=attributes))
+        extra = dict(voice=object()) if voice_note else dict(
+            document=object())
+        return mensagem(100, caption or "", out=True, media=object(),
+                        file=types.SimpleNamespace(
+                            duration=3, name="", size=os.path.getsize(
+                                caminho)), **extra)
+
     async def get_messages(self, ent, ids=None):
         if ids == 404:
             return None
@@ -481,6 +497,47 @@ def test_botao_de_link_no_formato_antigo_do_telethon():
                               reply_markup=types.SimpleNamespace(
                                   rows=[linha])), "t1", 10)
     assert m.extras_de(x)["botoes"] == [["Site", "https://s.com"]]
+
+
+def test_enviar_nota_de_voz_e_documento(ambiente, tmp_path, monkeypatch):
+    from telezapp.midia import envio
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path / "dados"))
+    ogg = tmp_path / "voz-1.ogg"
+    with open(os.path.join(os.path.dirname(__file__), "amostras",
+                           "voz.ogg"), "rb") as f:
+        ogg.write_bytes(f.read())
+    pdf = tmp_path / "r.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    cliente = ClienteFalso()
+    p = ambiente.criar(cliente)
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ConversasAtualizadas)
+        voz = envio.preparar(str(ogg), voz=True, temporario=True)
+        p.enviar_arquivo("10", voz)
+        nova = esperar(ambiente.fila, ev.MensagemNova)
+        assert nova.enviada_daqui and nova.mensagem.tipo == m.VOZ
+        enviado = cliente.arquivos[0]
+        assert enviado["voz"] and not enviado["documento"]
+        assert enviado["atributos"][0].voice
+        # a gravacao temporaria foi movida para o armazem do app
+        assert not ogg.exists()
+        guardada = ambiente.banco.midia("t1", "10", "100")
+        assert guardada and os.path.isfile(guardada[0])
+
+        p.enviar_arquivo("10", envio.preparar(str(pdf)), "o relatório")
+        nova = esperar(ambiente.fila, ev.MensagemNova)
+        assert nova.mensagem.id == "100"
+        enviado = cliente.arquivos[1]
+        assert enviado["documento"] and enviado["caption"] == "o relatório"
+        assert pdf.exists()            # arquivo do usuario so e copiado
+
+        p.enviar_arquivo("10", envio.preparar(str(pdf)), "falhar")
+        falha = esperar(ambiente.fila, ev.EnvioFalhou)
+        assert falha.tipo == m.DOCUMENTO and not falha.devolver_texto
+        assert "permissão" in falha.motivo
+    finally:
+        p.parar()
 
 
 def test_grupo_renomeado_no_telegram_atualiza_a_conversa(ambiente):

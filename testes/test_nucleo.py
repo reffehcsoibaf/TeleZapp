@@ -240,12 +240,26 @@ def test_abrir_link_so_http(monkeypatch):
 def test_midia_com_link_na_legenda_avisa_e_texto_nao_muda():
     foto = msg(texto="veja https://x.com/a", tipo=m.FOTO)
     assert m.tem_links(foto)
-    assert "com link (Enter)" in m.formatar(foto, m.ESTILO_CONTEUDO_PRIMEIRO)
+    assert "com 1 link (Tab)" in m.formatar(foto, m.ESTILO_CONTEUDO_PRIMEIRO)
     sem = msg(texto="oi", tipo=m.FOTO)
     assert not m.tem_links(sem)
     assert "com link" not in m.formatar(sem, m.ESTILO_CONTEUDO_PRIMEIRO)
-    txt = msg(texto="https://x.com/a")
-    assert "com link" not in m.formatar(txt, m.ESTILO_CONTEUDO_PRIMEIRO)
+
+
+def test_texto_com_links_e_botoes_de_endereco_avisam_com_tab():
+    txt = msg(texto="veja https://x.com/a e https://y.com/b")
+    assert [r for r, _ in m.itens_de_link(txt)] == [
+        "Link: https://x.com/a", "Link: https://y.com/b"]
+    assert "com 2 links (Tab)" in m.formatar(txt, m.ESTILO_CONTEUDO_PRIMEIRO)
+    bot = m.guardar_extras(
+        msg(texto="oferta https://x.com/a"),
+        links=[("https://x.com/a", "aqui")],
+        botoes=[("Site", "https://s.com"), ("Repetido", "https://x.com/a"),
+                ("App", "tg://resolve?domain=x")])
+    # o link escondido aparece com o texto visivel; o endereco repetido e o
+    # que nao e http(s) ficam de fora
+    assert m.itens_de_link(bot) == [("Link: aqui", "https://x.com/a"),
+                                    ("Botão: Site", "https://s.com")]
 
 
 def test_detalhes_mostram_nome_ou_telefone_nunca_o_codigo_do_recibo():

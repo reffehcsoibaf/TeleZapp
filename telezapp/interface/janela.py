@@ -19,6 +19,9 @@ from telezapp import NOME, VERSAO, config
 from telezapp.acessibilidade.fala import Fala, bipe
 from telezapp.interface import dialogos, visualizadores
 from telezapp.midia import armazem
+from telezapp.midia import envio
+from telezapp.midia import velocidade as vel
+from telezapp.midia.gravador import MICROFONE, SOM_INTERNO, Gravador
 from telezapp.midia.reprodutor import FormatoNaoSuportado, Reprodutor
 from telezapp.nucleo import depuracao
 from telezapp.nucleo import eventos as ev
@@ -34,6 +37,8 @@ TEXTO_CARREGANDO = "Carregando mensagens..."
 TEXTO_SEM_CONTAS = "Nenhuma conversa ainda. Aperte Alt e use Contas, no " \
                    "menu, para adicionar uma conta do Telegram ou do WhatsApp."
 MAX_BOTOES_ACAO = 12     # botoes de resposta que cabem na ordem de Tab
+MAX_BOTOES_LINK = 12     # links e botoes de endereco, tambem na ordem de Tab
+LIMITE_ROTULO_LINK = 80  # caracteres do rotulo de um botao de link
 LIMITE_CACHE = 100        # mensagens lidas do banco ao abrir a conversa
 LIMITE_MEMORIA = 1200     # mensagens mantidas na memoria por conversa
 
@@ -59,6 +64,14 @@ Control Shift D: depurar a mensagem selecionada (menu Depurar)
 Control O: abrir a mídia da mensagem (baixa antes, se preciso), mesmo
 quando a legenda tem link
 Control B: baixar a mídia sem abrir
+Tab (na mensagem): vai aos botões de resposta e depois aos links e botões
+de endereço da mensagem; Espaço ou Enter abre
+Control Shift A: anexar e enviar um arquivo (foto, vídeo, áudio, documento)
+Control Shift M: gravar uma nota de voz pelo microfone
+Control Shift S: gravar o som do computador e enviar como nota de voz
+Control Shift Seta para cima e para baixo: áudio mais rápido e mais lento
+(0,25x a 3x); Control Shift 0: velocidade normal
+Control vírgula: abrir as configurações (busca, categorias e opções)
 Tecla Aplicativos ou Shift F10: menu da mensagem selecionada
 
 NA LISTA DE CONVERSAS
@@ -68,18 +81,22 @@ das mensagens não lidas", se houver não lidas, ou para a última mensagem.
 
 NA LISTA DE MENSAGENS
 Esc: fecha a conversa e volta para a lista de conversas.
-Enter: mostra os detalhes e o texto completo da mensagem. Numa mensagem com
-foto, vídeo, áudio, voz ou documento, abre a mídia, menos quando a legenda
-tem link: aí o Enter mostra os detalhes, com os links (Control O abre a mídia).
+Enter: numa mensagem com foto, vídeo, áudio, voz ou documento, abre a mídia
+(toca o áudio e o vídeo), mesmo com link na legenda. Numa mensagem só de
+texto, abre o texto numa caixa somente leitura, com os botões Copiar texto e
+Fechar (Esc também fecha). Alt Enter mostra os detalhes de qualquer mensagem.
 Esc cancela um download.
 
 NO LEITOR DE ÁUDIO E VÍDEO
 Espaço: tocar ou pausar. Seta para a direita e para a esquerda: avançar e
-voltar 5 segundos (com Shift, 30). Home: voltar ao início. Esc: fechar.
+voltar 5 segundos (com Shift, 30). Home: voltar ao início. + e -: mais
+rápido e mais lento. Esc: fechar.
 
 NA CAIXA DE DIGITAÇÃO
 Enter: envia e esconde a caixa. Shift Enter: nova linha. Esc: cancela a
 resposta, se houver, esconde a caixa e volta para as mensagens.
+Depois do botão Enviar há três botões: Anexar arquivo, Gravar do microfone
+e Gravar som do computador. O texto da caixa vai como legenda do arquivo.
 
 MENU
 Aperte Alt para abrir o Menu. Ele tem submenus (Contas, Conversa, Mensagem,
@@ -207,8 +224,18 @@ class Janela(wx.Frame):
             self.Bind(wx.EVT_MENU,
                       lambda e, v=valor: self._mudar_baixar(v), it)
         m_mid.AppendSeparator()
+        item(m_mid, "anexar", "&Anexar arquivo...	Ctrl+Shift+A")
+        item(m_mid, "gravar_mic", "Gravar do &microfone...	Ctrl+Shift+M")
+        item(m_mid, "gravar_som",
+             "Gravar o &som do computador...	Ctrl+Shift+S")
+        m_mid.AppendSeparator()
         item(m_mid, "audio_janela", "&Enter em áudio...")
         item(m_mid, "audio_sequencia", "Áudios em &sequência...")
+        item(m_mid, "vel_mais", "Áudio mais &rápido\tCtrl+Shift+Up")
+        item(m_mid, "vel_menos", "Áudio mais le&nto\tCtrl+Shift+Down")
+        item(m_mid, "vel_normal", "&Velocidade normal do áudio\tCtrl+Shift+0")
+        item(m_mid, "vel_escolher", "Velocidade do áu&dio...")
+        item(m_mid, "vel_passo", "&Passo da velocidade do áudio...")
         item(m_mid, "midias_limite", "&Limite do download automático...")
         item(m_mid, "midias_confirmar", "&Confirmar downloads grandes...")
         item(m_mid, "midias_espaco", "&Espaço usado pelas mídias")
@@ -247,6 +274,7 @@ class Janela(wx.Frame):
                                 (m_aj, "A&juda")):
             raiz.AppendSubMenu(submenu, rotulo)
         raiz.AppendSeparator()
+        item(raiz, "configuracoes", "C&onfigurações...	Ctrl+,")
         item(raiz, "sair", "&Sair\tCtrl+Q")
         barra.Append(raiz, "&Menu")
         self.SetMenuBar(barra)
@@ -258,6 +286,7 @@ class Janela(wx.Frame):
             "remover": lambda e: self._remover_conta(),
             "logs": lambda e: self._abrir_logs(),
             "sair": lambda e: self.Close(),
+            "configuracoes": lambda e: self._configuracoes(),
             "ir_conv": lambda e: self._ir_para(self.lista_conv, "conversas"),
             "ir_msgs": lambda e: self._ir_para(self.lista_msgs, "mensagens"),
             "ir_caixa": lambda e: self._mostrar_caixa(),
@@ -273,12 +302,20 @@ class Janela(wx.Frame):
             "dep_conv": lambda e: self._depurar_conversa(),
             "ajuda": lambda e: dialogos.mostrar_texto(
                 self, "Teclas de atalho", AJUDA, "Teclas de atalho"),
+            "anexar": lambda e: self._anexar_arquivo(),
+            "gravar_mic": lambda e: self._gravar(MICROFONE),
+            "gravar_som": lambda e: self._gravar(SOM_INTERNO),
             "abrir_midia": lambda e: self._abrir_midia(),
             "baixar_midia": lambda e: self._abrir_midia(abrir=False),
             "salvar_midia": lambda e: self._salvar_midia(),
             "audio_janela": lambda e: self._escolher_opcao("audio_janela"),
             "audio_sequencia": lambda e: self._escolher_opcao(
                 "audio_sequencia"),
+            "vel_mais": lambda e: self._mudar_velocidade(+1),
+            "vel_menos": lambda e: self._mudar_velocidade(-1),
+            "vel_normal": lambda e: self._aplicar_velocidade(1.0),
+            "vel_escolher": lambda e: self._escolher_velocidade(),
+            "vel_passo": lambda e: self._escolher_passo(),
             "midias_limite": lambda e: self._escolher_opcao(
                 "midias_limite_auto_mb"),
             "midias_confirmar": lambda e: self._escolher_opcao(
@@ -328,10 +365,25 @@ class Janela(wx.Frame):
             b.Show(False)
             b.Bind(wx.EVT_BUTTON, seguro(lambda e, k=i: self._tocar_botao(k)))
             self.botoes_acao.append(b)
+        # links do texto ou da legenda e botoes de endereco: mesma ideia,
+        # logo depois dos botoes de resposta
+        self.botoes_link, self._links_atuais = [], []
+        for i in range(MAX_BOTOES_LINK):
+            b = wx.Button(painel, label="Link")
+            b.Show(False)
+            b.Bind(wx.EVT_BUTTON,
+                   seguro(lambda e, k=i: self._abrir_botao_link(k)))
+            self.botoes_link.append(b)
         self.rot_caixa = wx.StaticText(painel, label="Digite sua mensagem")
         self.caixa = wx.TextCtrl(painel, style=wx.TE_MULTILINE,
                                  name="Digite sua mensagem")
         self.botao_enviar = wx.Button(painel, label="&Enviar")
+        # sem tecla de acesso: Alt abre o Menu e as letras ja estao em uso
+        self.botao_anexar = wx.Button(painel, label="Anexar arquivo")
+        self.botao_mic = wx.Button(painel, label="Gravar do microfone")
+        self.botao_som = wx.Button(painel, label="Gravar som do computador")
+        self.botoes_envio = (self.botao_enviar, self.botao_anexar,
+                             self.botao_mic, self.botao_som)
 
         esq = wx.BoxSizer(wx.VERTICAL)
         esq.Add(rot_conv, 0, wx.BOTTOM, 4)
@@ -343,9 +395,16 @@ class Janela(wx.Frame):
         for b in self.botoes_acao:
             linha_acoes.Add(b, 0, wx.RIGHT, 6)
         dir_.Add(linha_acoes, 0, wx.TOP, 4)
+        linha_links = wx.WrapSizer(wx.HORIZONTAL)
+        for b in self.botoes_link:
+            linha_links.Add(b, 0, wx.RIGHT, 6)
+        dir_.Add(linha_links, 0, wx.TOP, 4)
         dir_.Add(self.rot_caixa, 0, wx.TOP | wx.BOTTOM, 4)
         dir_.Add(self.caixa, 1, wx.EXPAND)
-        dir_.Add(self.botao_enviar, 0, wx.TOP, 6)
+        linha_envio = wx.WrapSizer(wx.HORIZONTAL)
+        for b in self.botoes_envio:
+            linha_envio.Add(b, 0, wx.RIGHT, 6)
+        dir_.Add(linha_envio, 0, wx.TOP, 6)
         raiz = wx.BoxSizer(wx.HORIZONTAL)
         raiz.Add(esq, 1, wx.EXPAND | wx.ALL, 8)
         raiz.Add(dir_, 2, wx.EXPAND | wx.ALL, 8)
@@ -359,6 +418,12 @@ class Janela(wx.Frame):
                              seguro(lambda e: self._atualizar_botoes()))
         self.botao_enviar.Bind(wx.EVT_BUTTON,
                                seguro(lambda e: self._enviar_texto()))
+        self.botao_anexar.Bind(wx.EVT_BUTTON,
+                               seguro(lambda e: self._anexar_arquivo()))
+        self.botao_mic.Bind(wx.EVT_BUTTON,
+                            seguro(lambda e: self._gravar(MICROFONE)))
+        self.botao_som.Bind(wx.EVT_BUTTON,
+                            seguro(lambda e: self._gravar(SOM_INTERNO)))
         self._mostrar_conversa(False, False)
 
     def _mostrar_conversa(self, mensagens, escrever):
@@ -366,11 +431,11 @@ class Janela(wx.Frame):
         conversa aberta aparecem as mensagens e a caixa de digitar."""
         for w in (self.rot_msgs, self.lista_msgs):
             w.Show(mensagens)
-        for w in (self.rot_caixa, self.caixa, self.botao_enviar):
+        for w in (self.rot_caixa, self.caixa) + self.botoes_envio:
             w.Show(escrever)
         if not mensagens:
             self._botoes_chave = None
-            for b in self.botoes_acao:
+            for b in self.botoes_acao + self.botoes_link:
                 b.Show(False)
         self.painel.Layout()
 
@@ -380,12 +445,15 @@ class Janela(wx.Frame):
         nao ser que o botao focado deixe de existir."""
         x = self._mensagem_selecionada() if self.atual else None
         acoes = m.extras_de(x)["acoes"][:MAX_BOTOES_ACAO] if x else []
+        links = m.itens_de_link(x)[:MAX_BOTOES_LINK] if x else []
         chave = (x.id if x else None,
-                 tuple(a.get("rotulo", "") for a in acoes))
+                 tuple(a.get("rotulo", "") for a in acoes),
+                 tuple(links))
         if chave == self._botoes_chave:
             return
         self._botoes_chave = chave
         self._acoes_atuais, self._msg_das_acoes = acoes, x
+        self._links_atuais = links
         perdeu_foco = False
         for i, b in enumerate(self.botoes_acao):
             if i < len(acoes):
@@ -395,9 +463,29 @@ class Janela(wx.Frame):
             else:
                 perdeu_foco = perdeu_foco or b.HasFocus()
                 b.Show(False)
+        for i, b in enumerate(self.botoes_link):
+            if i < len(links):
+                rotulo = links[i][0]
+                if len(rotulo) > LIMITE_ROTULO_LINK:
+                    rotulo = rotulo[:LIMITE_ROTULO_LINK - 1] + "…"
+                b.SetLabel(rotulo.replace("&", "&&"))
+                b.Show(True)
+            else:
+                perdeu_foco = perdeu_foco or b.HasFocus()
+                b.Show(False)
         if perdeu_foco:
             self.lista_msgs.SetFocus()
         self.painel.Layout()
+
+    @seguro
+    def _abrir_botao_link(self, i):
+        if 0 <= i < len(self._links_atuais):
+            url = self._links_atuais[i][1]
+            if dialogos.abrir_link(url):
+                self.fala.falar("Abrindo no navegador.", interromper=True)
+            else:
+                self.fala.falar("Não consegui abrir o link.",
+                                interromper=True)
 
     @seguro
     def _tocar_botao(self, i):
@@ -794,7 +882,7 @@ class Janela(wx.Frame):
             if self._acao_concluida(chave, msg.texto, True):
                 self.fala.falar("Enviado: " + msg.texto, interromper=True)
             else:
-                self._tirar_local(chave, msg.texto)
+                self._tirar_local(chave, msg.texto, msg.tipo)
         self._mesclar(chave, [msg])
         if aberta:
             # nada tira a pessoa de onde ela esta por conta propria
@@ -832,11 +920,10 @@ class Janela(wx.Frame):
     def _ev_falha(self, e):
         chave = (e.conta_id, e.conversa_id)
         self._acao_concluida(chave, e.texto, False)
-        for x in self.cache.get(chave, []):
-            if x.id.startswith("local-") and x.texto == e.texto and \
-                    x.estado == m.ENVIANDO:
-                x.estado = m.FALHOU
-                break
+        achada = self._local_enviando(self.cache.get(chave, []), e.texto,
+                                      getattr(e, "tipo", m.TEXTO))
+        if achada is not None:
+            achada.estado = m.FALHOU
         if chave == self.atual:
             self._preencher_mensagens()
             if e.devolver_texto and not self.caixa.GetValue():
@@ -891,7 +978,7 @@ class Janela(wx.Frame):
             sem_mod = not (evt.AltDown() or evt.ControlDown()
                            or evt.ShiftDown())
             if k == wx.WXK_ESCAPE and sem_mod:
-                if foco in (self.caixa, self.botao_enviar):
+                if foco is self.caixa or foco in self.botoes_envio:
                     self._sair_da_caixa()
                     return
                 if foco is self.lista_msgs:
@@ -1199,11 +1286,31 @@ class Janela(wx.Frame):
                             "próxima.")
             return
         x = self._mensagem_selecionada()
-        if x is not None and x.tipo in armazem.BAIXAVEIS and \
-                not x.id.startswith("local-") and not m.tem_links(x):
-            self._abrir_midia()
+        if x is not None and not x.id.startswith("local-"):
+            if x.tipo in armazem.BAIXAVEIS:
+                # mesmo com link na legenda: os links sao botoes (Tab)
+                self._abrir_midia()
+                return
+            self._mostrar_texto(x)
             return
         self._detalhes()
+
+    def _mostrar_texto(self, x):
+        """Enter numa mensagem so de texto: o texto numa caixa somente
+        leitura, com Copiar texto e Fechar (Esc fecha). Os detalhes seguem em
+        Alt Enter."""
+        autor = "você" if x.minha else (x.autor or "mensagem")
+        dialogos.mostrar_mensagem(
+            self, "Mensagem de %s" % autor, x.texto or m.conteudo(x),
+            self._copiar_texto)
+
+    def _copiar_texto(self, texto):
+        if wx.TheClipboard.Open():
+            try:
+                wx.TheClipboard.SetData(wx.TextDataObject(texto))
+            finally:
+                wx.TheClipboard.Close()
+        self.fala.falar("Texto copiado.")
 
     def _detalhes(self):
         x = self._mensagem_selecionada()
@@ -1318,13 +1425,7 @@ class Janela(wx.Frame):
         x = self._mensagem_selecionada()
         if x is None:
             return
-        texto = x.texto or m.conteudo(x)
-        if wx.TheClipboard.Open():
-            try:
-                wx.TheClipboard.SetData(wx.TextDataObject(texto))
-            finally:
-                wx.TheClipboard.Close()
-        self.fala.falar("Texto copiado.")
+        self._copiar_texto(x.texto or m.conteudo(x))
 
     # ------------------------------------------------------------ depurar
     def _modo_depuracao(self, ligado):
@@ -1498,17 +1599,118 @@ class Janela(wx.Frame):
         p.enviar_texto(conversa_id, texto, resposta)
         log.info("texto enviado para a fila (%d caracteres)", len(texto))
 
-    def _tirar_local(self, chave, texto):
+    def _tirar_local(self, chave, texto, tipo=m.TEXTO):
         """Troca a mensagem 'enviando' pela confirmada pelo servico."""
         lista = self.cache.get(chave, [])
-        for i, x in enumerate(lista):
-            if x.id.startswith("local-") and x.texto == texto and \
-                    x.estado == m.ENVIANDO:
-                del lista[i]
-                break
+        achada = self._local_enviando(lista, texto, tipo)
+        if achada is not None:
+            lista.remove(achada)
         bipe("enviada")
         if self.cfg.get("confirmar_envio"):
             self.fala.falar("Enviada.")
+
+    @staticmethod
+    def _local_enviando(lista, texto, tipo):
+        """A mensagem local 'enviando' que o servico acabou de confirmar (ou
+        que falhou): do mesmo tipo; numa midia, serve outro tipo de midia,
+        porque o servico pode classificar de outro jeito."""
+        locais = [x for x in lista if x.id.startswith("local-") and
+                  x.estado == m.ENVIANDO and x.texto == texto]
+        for x in locais:
+            if x.tipo == tipo:
+                return x
+        if tipo != m.TEXTO:
+            for x in locais:
+                if x.tipo != m.TEXTO:
+                    return x
+        return None
+
+    # ====================================================== anexos e voz
+    def _destino_do_envio(self):
+        """(conta_id, conversa_id, provedor) se da para enviar agora; senao
+        avisa a pessoa e devolve None."""
+        if self.atual is None:
+            bipe("erro")
+            self.fala.falar(TEXTO_SEM_CONVERSA)
+            return None
+        conta_id, conversa_id = self.atual
+        p = self.contas.provedor(conta_id)
+        if p is None or self.estados.get(conta_id) != ev.CONECTADA:
+            bipe("erro")
+            self.fala.falar("A conta não está conectada. Nada foi enviado.",
+                            interromper=True)
+            return None
+        return conta_id, conversa_id, p
+
+    def _anexar_arquivo(self):
+        if self._destino_do_envio() is None:
+            return
+        caminho = dialogos.escolher_arquivo(
+            self, self.cfg.get("pasta_anexos") or "")
+        if not caminho:
+            return
+        self.cfg.set("pasta_anexos", os.path.dirname(caminho))
+        self._enviar_arquivo(caminho)
+
+    def _gravar(self, origem):
+        if self._destino_do_envio() is None:
+            return
+        pasta = config.pasta_temporaria()
+        if origem == MICROFONE:
+            titulo = "Gravar nota de voz do microfone"
+            instrucao = ("Fale perto do microfone. A gravação já começou. "
+                         "Aperte Enter para parar; depois você pode ouvir, "
+                         "gravar de novo ou enviar. Esc descarta.")
+        else:
+            titulo = "Gravar o som do computador"
+            instrucao = ("Vai ser gravado tudo o que o computador tocar, "
+                         "inclusive a voz do leitor de tela, se ele falar. "
+                         "A gravação já começou. Aperte Enter para parar; "
+                         "depois você pode ouvir, gravar de novo ou enviar. "
+                         "Esc descarta.")
+        gravacao = dialogos.gravar_voz(
+            self, lambda: Gravador(pasta, origem, maximo_segundos=3600),
+            titulo, instrucao, self.fala)
+        if gravacao is None:
+            return
+        log.info("gravação (%s) de %.0fs pronta para enviar", origem,
+                 gravacao.segundos)
+        self._enviar_arquivo(gravacao.caminho, voz=True, temporario=True)
+
+    def _enviar_arquivo(self, caminho, voz=False, temporario=False):
+        destino = self._destino_do_envio()
+        if destino is None:
+            return
+        conta_id, conversa_id, p = destino
+        try:
+            anexo = envio.preparar(caminho, voz=voz, temporario=temporario)
+        except envio.ErroEnvio as e:
+            bipe("erro")
+            self.fala.falar(str(e), interromper=True)
+            return
+        legenda = "" if anexo.tipo in (m.VOZ, m.AUDIO) else \
+            self.caixa.GetValue().strip()
+        self.locais += 1
+        ultima = max((x.data for x in self._mensagens_atuais()), default=0)
+        local = m.Mensagem(conta_id, conversa_id, "local-%d" % self.locais,
+                           minha=True, data=max(time.time(), ultima + 0.001),
+                           texto=legenda, tipo=anexo.tipo,
+                           segundos=anexo.segundos, nome_arquivo=anexo.nome,
+                           tamanho=anexo.tamanho, estado=m.ENVIANDO)
+        self._mesclar(self.atual, [local])
+        if legenda:
+            self.caixa.Clear()
+        self._preencher_mensagens()
+        texto = "Enviando %s, %s." % (m.NOMES_TIPOS[anexo.tipo],
+                                      m.tamanho_legivel(anexo.tamanho))
+        if anexo.aviso:
+            texto += " " + anexo.aviso
+        if self.resposta_a is not None:
+            texto += " A mídia vai sem citar a mensagem respondida."
+        self.fala.falar(texto, interromper=True)
+        p.enviar_arquivo(conversa_id, anexo, legenda)
+        log.info("arquivo (%s, %d bytes) enviado para a fila", anexo.tipo,
+                 anexo.tamanho)
 
     # =============================================================== midias
     def _abrir_midia(self, abrir=True, x=None):
@@ -1569,9 +1771,12 @@ class Janela(wx.Frame):
             motor = Reprodutor(caminho)
         except FormatoNaoSuportado:
             return False
+        motor.velocidade = self._velocidade()
         motor.tocar()
         self.audio = (x.chave, motor)
-        self.fala.falar("Tocando", interromper=True)
+        self.fala.falar("Tocando" if motor.velocidade == 1.0 else
+                        "Tocando a %s" % vel.rotulo(motor.velocidade),
+                        interromper=True)
         wx.CallLater(500, self._vigiar_audio, motor)
         return True
 
@@ -1624,7 +1829,7 @@ class Janela(wx.Frame):
             return
         conv = self.indice.get((x.conta_id, x.conversa_id))
         visualizadores.abrir(self, x, caminho, self.fala,
-                             conv.nome if conv else "")
+                             conv.nome if conv else "", cfg=self.cfg)
 
     def _salvar_midia(self):
         x = self._mensagem_selecionada()
@@ -1636,6 +1841,54 @@ class Janela(wx.Frame):
             self.fala.falar("Baixe a mídia antes, com Control B.")
             return
         visualizadores.salvar_copia(self, x, caminho, self.fala)
+
+    # ------------------------------------------------ velocidade do audio
+    def _passo_velocidade(self):
+        return vel.passo_valido(self.cfg.get("audio_passo_velocidade"))
+
+    def _velocidade(self):
+        return vel.ajustar(self.cfg.get("audio_velocidade"),
+                           self._passo_velocidade())
+
+    def _aplicar_velocidade(self, valor):
+        self.cfg.set("audio_velocidade", valor)
+        if self.audio is not None:
+            self.audio[1].velocidade = valor
+        self.fala.falar("Velocidade %s" % vel.rotulo(valor),
+                        interromper=True)
+
+    def _mudar_velocidade(self, direcao):
+        self._aplicar_velocidade(vel.proxima(
+            self._velocidade(), self._passo_velocidade(), direcao))
+
+    def _escolher_velocidade(self):
+        valores = vel.valores(self._passo_velocidade())
+        dlg = wx.SingleChoiceDialog(
+            self, "Velocidade de reprodução dos áudios e mensagens de voz.",
+            "Velocidade do áudio", [vel.rotulo(v) for v in valores])
+        try:
+            dlg.SetSelection(valores.index(self._velocidade()))
+        except ValueError:
+            pass
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            escolhida = valores[dlg.GetSelection()]
+        finally:
+            dlg.Destroy()
+        self._aplicar_velocidade(escolhida)
+
+    def _escolher_passo(self):
+        """Muda o passo e leva a velocidade ao valor mais proximo que ele
+        permite (de 0,25 em 0,25, de 0,5 em 0,5 ou de 1 em 1)."""
+        antes = self._passo_velocidade()
+        self._escolher_opcao("audio_passo_velocidade")
+        depois = self._passo_velocidade()
+        if depois == antes:
+            return
+        atual = self._velocidade()
+        if atual != self.cfg.get("audio_velocidade"):
+            self._aplicar_velocidade(atual)
 
     def _mudar_baixar(self, valor):
         self.cfg.set("midias_baixar", valor)
@@ -1758,6 +2011,44 @@ class Janela(wx.Frame):
     def _opcao(self, chave, valor):
         self.cfg.set(chave, bool(valor))
         log.info("opção %s = %s", chave, valor)
+
+    def _configuracoes(self):
+        from telezapp.interface.configuracoes import DialogoConfiguracoes
+        dlg = DialogoConfiguracoes(self, self.cfg, self._aplicar_opcao,
+                                   fala=self.fala)
+        try:
+            dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+
+    def _aplicar_opcao(self, chave, valor):
+        """Aplica uma opcao vinda da janela de configuracoes, com os mesmos
+        efeitos e avisos dos menus, e mantem os itens de menu em dia."""
+        if chave == "depuracao":
+            self._modo_depuracao(valor)
+            self.itens["depuracao"].Check(bool(valor))
+        elif chave == "log_detalhado_whatsapp":
+            self._log_detalhado(valor)
+            self.itens["log_detalhado"].Check(bool(valor))
+        elif chave == "estilo":
+            self._mudar_estilo(valor)
+            self.itens["estilo%d" % valor].Check(True)
+        elif chave == "midias_baixar":
+            self._mudar_baixar(valor)
+            self.itens["baixar_" + str(valor)].Check(True)
+        elif chave == "audio_velocidade":
+            self._aplicar_velocidade(vel.ajustar(valor,
+                                                 self._passo_velocidade()))
+        elif chave == "audio_passo_velocidade":
+            self.cfg.set(chave, valor)
+            atual = self._velocidade()
+            if atual != self.cfg.get("audio_velocidade"):
+                self._aplicar_velocidade(atual)
+        elif chave in ("som", "falar_novas", "confirmar_envio"):
+            self._opcao(chave, valor)
+            self.itens[chave].Check(bool(valor))
+        else:
+            self.cfg.set(chave, valor)
 
     def _ir_para(self, controle, nome):
         if self.atual is None and controle is self.lista_msgs:

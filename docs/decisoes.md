@@ -97,31 +97,39 @@ partir dos experimentos, ainda a confirmar.
 
 Aprovado pelo responsável. As ideias foram divididas pelo efeito na base.
 
-### Grupo 1: afeta a base, feito antes da etapa 3
+### Grupo 1: afeta a base, feito antes da etapa 3 (CONCLUÍDO)
 
-- **Versão `ano.mês.dia.dígito`** (ex.: 2026.10.9.0; uma segunda versão no
+Todos os itens abaixo estão implementados (conferido no código em
+14/10/2026, versão 2026.10.14.15). Não foram todos verificados no app real.
+
+- [x] **Versão `ano.mês.dia.dígito`** (ex.: 2026.10.9.0; uma segunda versão no
   mesmo dia é 2026.10.9.1). Cabe nos metadados de versão do Windows (quatro
   números até 65535); entra no instalador, no executável portátil e na lista
   de programas instalados quando eles existirem (etapa 4).
-- **Menu vertical**, como no telezapp migration: uma única entrada "Menu" na
+  Feito: `VERSAO` e `versao_valida` em `telezapp/__init__.py`.
+- [x] **Menu vertical**, como no telezapp migration: uma única entrada "Menu" na
   barra, aberta pelo Alt, com as seções como submenus.
-- **Guia de uso em HTML** no estilo do NVDA, sempre com a versão atual e um
-  rodapé com licença, desenvolvedores e site.
-- **Dois registros de mudanças**: `novidades.html` para o usuário (da versão
+- [x] **Guia de uso em HTML** no estilo do NVDA, sempre com a versão atual e um
+  rodapé com licença, desenvolvedores e site (`ajuda/guia.html`).
+- [x] **Dois registros de mudanças**: `novidades.html` para o usuário (da versão
   mais nova para a mais antiga, sem termos técnicos) e `CHANGELOG.md`, o
   registro técnico.
-- **Rotas limpas**: dados só em `%APPDATA%\TeleZapp`; arquivos temporários
-  numa subpasta própria, limpa pelo app; nada solto no `%temp%` do Windows.
-- **Recibos por participante** (data e hora de entrega, leitura e
+- [x] **Rotas limpas**: dados só em `%APPDATA%\TeleZapp`; arquivos temporários
+  numa subpasta própria, limpa pelo app; nada solto no `%temp%` do Windows
+  (`config.pasta_temporaria` e `limpar_temporarios`).
+- [x] **Recibos por participante** (data e hora de entrega, leitura e
   reprodução; nos grupos, por membro), guardados desde já para a janela de
   dados da mensagem. No Telegram, em grupos, só existe "lida até tal
-  mensagem".
-- **Status do WhatsApp guardados** em vez de descartados, para postar,
-  curtir e responder depois.
-- **Registro das opções de configuração** (nome, categoria, descrição), base
-  da janela de configurações com busca.
-- **Mídias baixadas registradas no banco** (caminho, tamanho, data), base da
-  limpeza de conversas: entra com a etapa 3.
+  mensagem". Feito: tabela `recibos`.
+- [x] **Status do WhatsApp guardados** em vez de descartados, para postar,
+  curtir e responder depois. Feito: tabela `status`. Postar, curtir e
+  responder continuam no Grupo 3.
+- [x] **Registro das opções de configuração** (nome, categoria, descrição), base
+  da janela de configurações com busca (`config.OPCOES` e `buscar_opcoes`).
+  A janela de configurações em si é da etapa 4.
+- [x] **Mídias baixadas registradas no banco** (caminho, tamanho, data), base da
+  limpeza de conversas: tabela `midias` e `Banco.registrar_midia`. A limpeza
+  de conversas em si é do Grupo 3.
 
 ### Grupo 2: nas etapas previstas
 
@@ -170,11 +178,44 @@ demanda é configurável.
   (só no Windows). Velocidade de reprodução e envio de arquivos ficam para a
   etapa 3b.
 
+## Etapa 3b: enviar arquivos e gravar voz (14/10/2026)
+
+Pedido do responsável: um botão para gravar do microfone e outro para gravar
+o som interno do computador, se fosse possível.
+
+- **Som interno é possível**: loopback do WASAPI pela biblioteca `soundcard`
+  (BSD-3-Clause). A `sounddevice` do Windows não tem essa captura; a "Mixagem
+  estéreo" de alguns drivers não existe em todos os computadores, então não
+  serve de base. Verificado no computador de desenvolvimento: um tom de 440 Hz
+  tocado nos alto-falantes foi gravado e voltou a 440 Hz. O microfone continua
+  na `sounddevice`, validada no experimento de voz.
+- **O som interno também grava a fala do leitor de tela** (e qualquer outro
+  som). A janela de gravação avisa. Não há como excluir um programa só.
+- **Formato**: Ogg/Opus mono 48 kHz, o mesmo do experimento de voz; a
+  gravação vai para um WAV temporário e é convertida ao parar.
+- **Ambos os botões enviam como mensagem de voz.** Enviar o som interno como
+  "arquivo de áudio" (sem a forma de onda de voz) ficou para depois: o
+  WhatsApp com Ogg/Opus fora do modo voz não foi testado.
+- **Anexar arquivo**: foto (JPG, PNG, WEBP), vídeo (MP4/MOV/M4V/3GP), áudio e
+  documento; tudo o mais vai como documento, sem recodificar. Limite de 2 GB.
+  O texto da caixa vira legenda.
+- **Mídia enviada** é copiada para o armazém da conversa (gravações
+  temporárias são movidas) e registrada em `midias`: abre sem baixar.
+- **Pendências**: citar a mensagem respondida ao enviar mídia; progresso do
+  envio de arquivos grandes (hoje só "enviando"); escolher microfone e saída
+  de som (hoje o padrão do Windows); cancelar um envio em andamento;
+  enviar várias mídias de uma vez; miniatura de vídeo e de foto no
+  WhatsApp. Nada disto foi verificado nos serviços reais, só com clientes
+  simulados.
+
 ## Próximos passos sugeridos
 
-1. Grupo 1 do plano acima.
-2. Etapa 3b: enviar arquivos e gravar nota de voz (a 3a, receber e abrir, está pronta para teste).
-3. Adicionar o aviso de licença nos arquivos e conferir as licenças pendentes.
+1. ~~Grupo 1 do plano acima~~ (concluído).
+2. ~~Etapa 3b: enviar arquivos e gravar nota de voz~~ (implementada na
+   2026.10.14.16; falta testar no WhatsApp e no Telegram reais, e as
+   pendências da seção acima).
+3. ~~Adicionar o aviso de licença nos arquivos~~ (SPDX presente em todos os
+   `.py` do pacote); conferir ainda as licenças de terceiros pendentes.
 4. Etapa 4 (ver o plano): configurações, sons, instalador, atualização e
    assinatura.
 5. Testes de estabilidade e de arquivos maiores.

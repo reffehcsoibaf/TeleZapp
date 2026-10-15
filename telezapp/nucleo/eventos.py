@@ -68,6 +68,7 @@ class EnvioFalhou:
     texto: str
     motivo: str
     devolver_texto: bool = True    # False: resposta de botao, nada a devolver
+    tipo: str = "texto"            # tipo da mensagem local que falhou
 
 
 @dataclass

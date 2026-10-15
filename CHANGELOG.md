@@ -3,7 +3,7 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
-## 2026.10.15.1
+## 2026.10.15.3
 
 - Grupo renomeado não aparecia no TeleZapp: o nome só era buscado enquanto
   estava como "Grupo". WhatsApp: passa a ouvir `GroupInfoEv` (campo `Name`)
@@ -15,6 +15,111 @@ Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
   WhatsApp reenviar ao reconectar). Não verificado com um WhatsApp real: os
   campos foram conferidos nas definições do neonize, e a entrega do evento
   `GroupInfoEv` depende do servidor.
+
+## 2026.10.15.2
+
+Janela de configurações (etapa 4).
+
+- `nucleo/configuracoes.py`: `ModeloConfiguracoes`, sem wx: categorias (com
+  "Avançado" por último), busca por `config.buscar_opcoes`, valores
+  pendentes (voltar ao valor atual desfaz) e `aplicar`, que entrega as
+  mudanças na ordem de `config.OPCOES` (o passo da velocidade antes da
+  velocidade).
+- `interface/configuracoes.py`: `DialogoConfiguracoes`. Busca no alto,
+  categorias numa lista vertical, opções da categoria como CheckBox ou
+  Choice; a descrição é falada pelo programa 0,4 s depois do foco (F1
+  repete; a opção `falar_descricoes`, padrão ligada, desliga a fala
+  automática), e não é um texto da janela: o NVDA lê todos os textos fixos ao
+  abrir a janela. `wx.Accessible` foi tentado e derrubou o processo. OK,
+  Cancelar e Aplicar. Com
+  busca, a categoria "Resultados da busca" aparece primeiro.
+- Janela principal: Menu, Configurações... (Ctrl+,). `_aplicar_opcao` usa os
+  mesmos efeitos e avisos falados dos menus e mantém os itens de menu
+  marcados. Os menus de hoje continuam.
+- Cobre só as opções que já existem em `config.OPCOES`; sons de eventos,
+  backup e ordem das informações entram nas próximas versões.
+- Não verificado com leitor de tela: a ordem de Tab e a leitura dos
+  controles foram conferidas só por teste de fumaça com o wx real.
+
+## 2026.10.15.1
+
+Velocidade do áudio.
+
+- `midia/velocidade.py`: escala de 0,25x a 3x, em passos de 0,25, 0,5 ou 1
+  (`valores`, `ajustar`, `proxima`, `rotulo`) e `Esticador` (WSOLA em numpy:
+  trechos de 32 ms, corte escolhido por correlação normalizada; muda o
+  tempo sem mudar o tom). Custo de ~1% de CPU; medido só com senoides e a
+  amostra de voz, sem ouvido humano.
+- `Reprodutor.velocidade`: 1,0 lê direto do arquivo; outro valor passa pelo
+  esticador, vale na hora (tocando ou não); posição, `ir_para` e fim de
+  arquivo acompanham. No MediaCtrl (vídeo, m4a) usa `SetPlaybackRate`, e o
+  tom pode acompanhar.
+- Opções `audio_passo_velocidade` (0,25 / 0,5 / 1) e `audio_velocidade`
+  (padrão 1x); trocar o passo leva a velocidade ao valor mais próximo
+  permitido.
+- Janela: Menu, Mídias, Áudio mais rápido (Ctrl+Shift+Up), mais lento
+  (Ctrl+Shift+Down), Velocidade normal (Ctrl+Shift+0), Velocidade do áudio...
+  e Passo da velocidade do áudio... Vale também para o áudio que já está
+  tocando. No player: botões Mais rápido e Mais lento e as teclas + e -.
+- A velocidade é única (vale para todos os áudios) e fica entre sessões.
+
+## 2026.10.15.0
+
+Links e botões de endereço pelo Tab.
+
+- `modelos.itens_de_link(msg)`: links do texto ou da legenda (e os escondidos
+  em `extras.links`) mais os botões de endereço do Telegram (`extras.botoes`),
+  só http/https, sem repetir endereço. Rótulos "Link: ..." e "Botão: ...".
+- Janela: até 12 `wx.Button` (`botoes_link`) criados logo depois dos botões
+  de resposta, na ordem de Tab; aparecem para a mensagem selecionada, em
+  qualquer tipo (texto, foto, vídeo, áudio, documento). Enter no botão abre
+  no navegador (`dialogos.abrir_link`) e fala "Abrindo no navegador.".
+  `_atualizar_botoes` agora considera ações e links na mesma chave.
+- `formatar`: "com N links (Tab)" para qualquer tipo (antes só mídia, "com
+  link (Enter)"). A lista de links dos detalhes segue existindo, inclusive
+  para além dos 12 botões.
+- Enter na lista de mensagens: mídia (inclusive com link na legenda) abre a
+  mídia; mensagem só de texto abre `dialogos.mostrar_mensagem` (texto somente
+  leitura, Copiar texto e Fechar; Esc fecha). Os detalhes ficam só em Alt
+  Enter (e no menu Mensagem). `_copiar_texto` é comum a Control Shift C e à
+  caixa. Mensagem local ainda "enviando" continua abrindo os detalhes.
+- Não verificado com o NVDA.
+
+## 2026.10.14.16
+
+Etapa 3b: enviar arquivos e gravar nota de voz.
+
+- `midia/gravador.py`: `Gravador` (iniciar/parar/cancelar) com duas fontes.
+  Microfone: sounddevice, mono, 48 kHz (ou a taxa padrão, reamostrada).
+  Som interno: loopback do WASAPI pela `soundcard` (a sounddevice do Windows
+  não tem loopback), downmix para mono. A fonte abre dentro da thread da
+  gravação (COM e PortAudio numa thread só). Grava em WAV temporário e, ao
+  parar, converte em blocos para Ogg/Opus 48 kHz mono. Sem limite de memória;
+  `maximo_segundos` para sozinho. Medida: saída muda < -50 dBFS é avisada.
+- `midia/envio.py`: `preparar` devolve `Anexo` (tipo, MIME, duração,
+  dimensões, tamanho). MP4/MOV pelo leitor próprio (`mp4.ler`), HEVC avisa,
+  MKV/AVI/BMP/HEIC/GIF vão como documento, limite de 2 GB, voz exige Ogg/Opus.
+- `Provedor.enviar_arquivo(conversa_id, anexo, legenda)`. WhatsApp: foto e
+  documento pelo neonize; vídeo e áudio/voz montados à mão com `upload`
+  (como nos experimentos); roda numa thread própria para o upload não travar
+  a fila de texto. Telegram: `send_file` (voz com `DocumentAttributeAudio`,
+  vídeo com `DocumentAttributeVideo`). O arquivo enviado é copiado para o
+  armazém da conversa (gravações temporárias são movidas) e registrado em
+  `midias`, para abrir sem baixar. `_registrar_enviada` é o trecho comum de
+  `_enviar` no WhatsApp e no Telegram.
+- `EnvioFalhou.tipo`: a janela casa a mensagem local "enviando" pelo texto e
+  pelo tipo (numa mídia, aceita outro tipo de mídia se o serviço classificar
+  diferente).
+- Janela: botões Anexar arquivo, Gravar do microfone e Gravar som do
+  computador depois de Enviar (sem tecla de acesso: Alt abre o Menu); itens
+  em Menu, Mídias (Ctrl+Shift+A, M, S). O texto da caixa vira legenda de
+  foto, vídeo e documento. `dialogos.gravar_voz`: grava ao abrir, Parar,
+  Ouvir, Enviar, Gravar de novo, Descartar (Esc).
+- Mídia enviada não cita a mensagem respondida (a resposta continua
+  pendente para o próximo texto). NÃO verificado no WhatsApp/Telegram reais:
+  só testes com clientes simulados; o loopback foi verificado no computador
+  de desenvolvimento (tom de 440 Hz tocado e recuperado a 440 Hz).
+- Dependências novas: soundcard, numpy (já vinha com o neonize).
 
 ## 2026.10.14.15
 

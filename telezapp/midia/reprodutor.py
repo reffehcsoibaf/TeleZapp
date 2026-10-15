@@ -10,6 +10,8 @@ FormatoNaoSuportado; a janela usa outro motor nesses casos.
 import logging
 import threading
 
+from telezapp.midia.velocidade import Esticador
+
 log = logging.getLogger("telezapp.reprodutor")
 
 
@@ -34,6 +36,8 @@ class Reprodutor:
         self._trava = threading.Lock()
         self._tocando = False
         self.terminou = False
+        self._velocidade = 1.0
+        self._esticador = None
 
     @staticmethod
     def _saida_padrao(taxa, canais, callback):
@@ -49,7 +53,38 @@ class Reprodutor:
     @property
     def posicao(self):
         with self._trava:
-            return self._arq.tell() / float(self.taxa)
+            return self._quadro_atual() / float(self.taxa)
+
+    def _quadro_atual(self):
+        if self._esticador is not None:
+            return int(self._esticador.posicao)
+        return self._arq.tell()
+
+    @property
+    def velocidade(self):
+        return self._velocidade
+
+    @velocidade.setter
+    def velocidade(self, valor):
+        """1,0 toca direto do arquivo; outra velocidade passa pelo esticador
+        (muda o tempo, nao o tom). Vale na hora, tocando ou nao."""
+        valor = float(valor)
+        with self._trava:
+            if valor == self._velocidade:
+                return
+            atual = self._quadro_atual()
+            self._velocidade = valor
+            if valor == 1.0:
+                self._esticador = None
+                self._arq.seek(min(atual, self.total))
+            elif self._esticador is None:
+                self._arq.seek(min(atual, self.total))
+                self._esticador = Esticador(
+                    self.taxa, self.canais, self._ler_arquivo, self.total,
+                    inicio=min(atual, self.total))
+
+    def _ler_arquivo(self, n):
+        return self._arq.read(n, dtype="float32", always_2d=True)
 
     @property
     def tocando(self):
@@ -58,8 +93,10 @@ class Reprodutor:
     # ---------------------------------------------------------- controles
     def tocar(self):
         with self._trava:
-            if self._arq.tell() >= self.total:
+            if self._quadro_atual() >= self.total:
                 self._arq.seek(0)
+                if self._esticador is not None:
+                    self._esticador.reiniciar(0)
             self.terminou = False
             self._tocando = True
         if self._saida is None:
@@ -79,7 +116,10 @@ class Reprodutor:
     def ir_para(self, segundos):
         with self._trava:
             quadro = int(max(0.0, min(segundos, self.duracao)) * self.taxa)
-            self._arq.seek(min(quadro, self.total))
+            quadro = min(quadro, self.total)
+            self._arq.seek(quadro)
+            if self._esticador is not None:
+                self._esticador.reiniciar(quadro)
             self.terminou = False
 
     def avancar(self, delta):
@@ -108,15 +148,23 @@ class Reprodutor:
             return
         with self._trava:
             try:
-                dados = self._arq.read(quadros, dtype="float32",
-                                       always_2d=True)
+                if self._esticador is not None:
+                    dados = self._esticador.produzir(quadros,
+                                                     self._velocidade)
+                    fim = self._esticador.terminou
+                else:
+                    dados = self._arq.read(quadros, dtype="float32",
+                                           always_2d=True)
+                    fim = (len(dados) < quadros or
+                           self._arq.tell() >= self.total)
             except Exception:
+                log.exception("erro no áudio")
                 self._tocando = False
                 return
             n = len(dados)
             if n:
                 saida[:n] = dados
-            if n < quadros or self._arq.tell() >= self.total:
+            if fim:
                 self._tocando = False
                 self.terminou = True
 

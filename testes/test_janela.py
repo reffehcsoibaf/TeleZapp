@@ -32,6 +32,10 @@ class ProvedorFalso:
     def enviar_texto(self, cid, texto, resposta_a=""):
         self.pedidos.append(("enviar", cid, texto, resposta_a))
 
+    def enviar_arquivo(self, cid, anexo, legenda=""):
+        self.pedidos.append(("arquivo", cid, anexo.tipo, anexo.nome,
+                             legenda))
+
     def responder_acao(self, msg, acao):
         self.pedidos.append(("acao", msg.id, acao["rotulo"]))
 
@@ -535,7 +539,7 @@ def jm_midia(j, monkeypatch):
     j.midias = MidiasFalsas()
     abertas = []
     monkeypatch.setattr(jm.visualizadores, "abrir",
-                        lambda pai, x, caminho, fala, nome="": abertas.append(
+                        lambda pai, x, caminho, fala, nome="", cfg=None: abertas.append(
                             (x.id, caminho, nome)))
     j.lista_conv.SetFocus()
     j.lista_conv.SetSelection(0)
@@ -1039,7 +1043,7 @@ def test_foto_com_link_na_legenda_avisa_na_lista_e_detalhes_traz_o_link(
     j.b.publicar(ev.MensagensCarregadas("t1", "10", [x]))
     linhas = [j.lista_msgs.GetString(i)
               for i in range(j.lista_msgs.GetCount())]
-    assert any("com link (Enter)" in l for l in linhas), linhas
+    assert any("com 1 link (Tab)" in l for l in linhas), linhas
     chamadas = []
     monkeypatch.setattr(jm.dialogos, "mostrar_texto",
                         lambda *a, **k: chamadas.append(k) or None)
@@ -1048,7 +1052,7 @@ def test_foto_com_link_na_legenda_avisa_na_lista_e_detalhes_traz_o_link(
     assert chamadas[0]["links"] == [("https://a.com/x", "https://a.com/x")]
 
 
-def test_enter_em_foto_com_link_mostra_detalhes_e_ctrl_o_abre_a_midia(
+def test_enter_abre_a_midia_mesmo_com_link_e_texto_abre_caixa_somente_leitura(
         j, monkeypatch):
     j.lista_conv.SetSelection(0)
     j._char_hook(Tecla(wx_falso.WXK_RETURN))
@@ -1056,16 +1060,46 @@ def test_enter_em_foto_com_link_mostra_detalhes_e_ctrl_o_abre_a_midia(
     x.tipo = m.FOTO
     sem = msg("6", "so a foto", conversa="10")
     sem.tipo = m.FOTO
-    j.b.publicar(ev.MensagensCarregadas("t1", "10", [x, sem]))
-    abertas, detalhes = [], []
+    txt = msg("7", "texto inteiro da mensagem", conversa="10")
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [x, sem, txt]))
+    abertas, detalhes, caixas = [], [], []
     monkeypatch.setattr(j, "_abrir_midia", lambda *a, **k: abertas.append(1))
     monkeypatch.setattr(j, "_detalhes", lambda: detalhes.append(1))
-    selecionar(j, "5")
+    monkeypatch.setattr(
+        jm.dialogos, "mostrar_mensagem",
+        lambda pai, titulo, texto, copiar: caixas.append(
+            (titulo, texto, copiar)))
+    selecionar(j, "5")                    # foto com link: abre a midia
     j._detalhes_ou_marcador()
-    assert detalhes and not abertas
+    assert len(abertas) == 1 and not detalhes and not caixas
     selecionar(j, "6")
     j._detalhes_ou_marcador()
-    assert abertas
+    assert len(abertas) == 2
+    selecionar(j, "7")                    # so texto: caixa somente leitura
+    j._detalhes_ou_marcador()
+    assert len(abertas) == 2 and not detalhes
+    assert caixas == [("Mensagem de Ana", "texto inteiro da mensagem",
+                       j._copiar_texto)]
+
+
+def test_copiar_texto_da_caixa_fala_e_vai_para_a_area_de_transferencia(
+        j, monkeypatch):
+    ditas, copiados = [], []
+
+    class Area:
+        def Open(self):
+            return True
+
+        def SetData(self, d):
+            copiados.append(d)
+
+        def Close(self):
+            pass
+    monkeypatch.setattr(jm.wx, "TheClipboard", Area(), raising=False)
+    monkeypatch.setattr(jm.wx, "TextDataObject", lambda t: t, raising=False)
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._copiar_texto("conteudo")
+    assert copiados == ["conteudo"] and ditas == ["Texto copiado."]
 
 
 def test_detalhes_pedem_ao_provedor_o_nome_de_quem_recebeu(j, monkeypatch):
@@ -1204,3 +1238,224 @@ def test_registro_detalhado_do_whatsapp_so_grava_a_opcao(j):
     assert j.cfg.get("log_detalhado_whatsapp") is True
     j._log_detalhado(False)
     assert j.cfg.get("log_detalhado_whatsapp") is False
+
+
+# ------------------------------------------------------ anexos e gravacao
+def _abrir_com_caixa(j):
+    j._abrir_conversa(j.indice[("t1", "20")])
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", [msg("5", "oi",
+                                                          conversa="20")]))
+
+
+def test_anexar_arquivo_usa_a_caixa_como_legenda(j, tmp_path, monkeypatch):
+    _abrir_com_caixa(j)
+    pdf = tmp_path / "relatorio.pdf"
+    pdf.write_bytes(b"%PDF")
+    monkeypatch.setattr(jm.dialogos, "escolher_arquivo",
+                        lambda pai, pasta="": str(pdf))
+    j.caixa.SetValue("o relatório")
+    j._anexar_arquivo()
+    assert ("arquivo", "20", m.DOCUMENTO, "relatorio.pdf",
+            "o relatório") in j.contas.p.pedidos
+    assert j.caixa.GetValue() == ""
+    assert j.cfg.get("pasta_anexos") == str(tmp_path)
+    assert "enviando" in j.lista_msgs.itens[-1]
+
+    enviada = m.Mensagem("t1", "20", "7", minha=True, data=AGORA + 50,
+                         texto="o relatório", tipo=m.DOCUMENTO,
+                         nome_arquivo="relatorio.pdf", tamanho=4,
+                         estado=m.ENVIADA)
+    j.b.publicar(ev.MensagemNova(enviada, j.indice[("t1", "20")],
+                                 enviada_daqui=True))
+    assert not any("enviando" in x for x in j.lista_msgs.itens)
+    assert not [x for x in j._mensagens_atuais()
+                if x.id.startswith("local-")]
+
+
+def test_anexar_cancelado_nao_envia(j, monkeypatch):
+    _abrir_com_caixa(j)
+    monkeypatch.setattr(jm.dialogos, "escolher_arquivo",
+                        lambda pai, pasta="": None)
+    j._anexar_arquivo()
+    assert not [p for p in j.contas.p.pedidos if p[0] == "arquivo"]
+
+
+def test_arquivo_invalido_e_falado(j, tmp_path):
+    _abrir_com_caixa(j)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._enviar_arquivo(str(tmp_path / "nao-existe.pdf"))
+    assert ditas == ["O arquivo não foi encontrado."]
+    assert not [p for p in j.contas.p.pedidos if p[0] == "arquivo"]
+
+
+def test_gravar_envia_nota_de_voz_sem_legenda(j, tmp_path, monkeypatch):
+    import os
+    from telezapp.midia.gravador import MICROFONE, Gravacao
+    _abrir_com_caixa(j)
+    ogg = tmp_path / "voz-1.ogg"
+    with open(os.path.join(os.path.dirname(__file__), "amostras",
+                           "voz.ogg"), "rb") as f:
+        ogg.write_bytes(f.read())
+    vistos = {}
+
+    def falso(pai, nova, titulo, instrucao, fala):
+        vistos["gravador"] = nova()
+        vistos["titulo"] = titulo
+        return Gravacao(str(ogg), 3.0, -6.0)
+    monkeypatch.setattr(jm.dialogos, "gravar_voz", falso)
+    j.caixa.SetValue("rascunho que fica")
+    j._gravar(MICROFONE)
+    assert vistos["gravador"].origem == MICROFONE
+    assert vistos["gravador"].pasta == config.pasta_temporaria()
+    pedido = [p for p in j.contas.p.pedidos if p[0] == "arquivo"][-1]
+    assert pedido[2] == m.VOZ and pedido[4] == ""
+    assert j.caixa.GetValue() == "rascunho que fica"
+
+
+def test_gravar_descartado_nao_envia(j, monkeypatch):
+    from telezapp.midia.gravador import SOM_INTERNO
+    _abrir_com_caixa(j)
+    origens = []
+    monkeypatch.setattr(
+        jm.dialogos, "gravar_voz",
+        lambda pai, nova, *a: origens.append(nova().origem))
+    j._gravar(SOM_INTERNO)
+    assert origens == [SOM_INTERNO]
+    assert not [p for p in j.contas.p.pedidos if p[0] == "arquivo"]
+
+
+def test_falha_de_midia_marca_so_a_mensagem_local(j, tmp_path):
+    _abrir_com_caixa(j)
+    pdf = tmp_path / "r.pdf"
+    pdf.write_bytes(b"%PDF")
+    j.caixa.SetValue("texto da caixa")
+    j.caixa.Clear()
+    j._enviar_arquivo(str(pdf))
+    j.caixa.SetValue("outro texto")
+    j.b.publicar(ev.EnvioFalhou("t1", "20", "", "sem conexão",
+                                devolver_texto=False, tipo=m.DOCUMENTO))
+    assert j.lista_msgs.itens[-1].endswith("falhou")
+    assert j.caixa.GetValue() == "outro texto"
+
+
+def test_sem_conexao_nao_anexa(j, monkeypatch):
+    _abrir_com_caixa(j)
+    j.b.publicar(ev.EstadoConta("t1", ev.DESCONECTADA))
+    chamado = []
+    monkeypatch.setattr(jm.dialogos, "escolher_arquivo",
+                        lambda *a, **k: chamado.append(1))
+    j._anexar_arquivo()
+    assert not chamado
+
+
+# ------------------------------------------------- links por Tab
+def _com_links(id_, tipo=m.TEXTO, texto="", links=(), botoes=()):
+    x = m.Mensagem("t1", "20", id_, autor="Ana", data=AGORA + int(id_),
+                   tipo=tipo, texto=texto)
+    return m.guardar_extras(x, links=links, botoes=botoes)
+
+
+def test_links_e_botoes_de_endereco_viram_botoes_na_ordem_do_tab(
+        j, monkeypatch):
+    j._abrir_conversa(j.indice[("t1", "20")])
+    foto = _com_links("5", m.FOTO, "veja https://a.com/x",
+                      botoes=[("Site oficial", "https://s.com")])
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", [
+        _com_links("4", texto="sem nada"), foto]))
+    selecionar(j, "5")
+    j._atualizar_botoes()
+    visiveis = [(b.GetLabel(), b.visivel) for b in j.botoes_link
+                if getattr(b, "visivel", False)]
+    assert [r for r, _ in visiveis] == ["Link: https://a.com/x",
+                                        "Botão: Site oficial"]
+    aberto, ditas = [], []
+    monkeypatch.setattr(jm.dialogos, "abrir_link",
+                        lambda url: aberto.append(url) or True)
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._abrir_botao_link(1)
+    assert aberto == ["https://s.com"] and ditas == ["Abrindo no navegador."]
+
+    selecionar(j, "4")                     # mensagem sem links: somem
+    j._atualizar_botoes()
+    assert not any(getattr(b, "visivel", False) for b in j.botoes_link)
+    j._abrir_botao_link(0)                 # indice sem botao: nada
+    assert aberto == ["https://s.com"]
+
+
+def test_link_que_nao_abre_e_avisado(j, monkeypatch):
+    j._abrir_conversa(j.indice[("t1", "20")])
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", [
+        _com_links("5", texto="https://a.com")]))
+    selecionar(j, "5")
+    j._atualizar_botoes()
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    monkeypatch.setattr(jm.dialogos, "abrir_link", lambda url: False)
+    j._abrir_botao_link(0)
+    assert ditas == ["Não consegui abrir o link."]
+
+
+# -------------------------------------------------- velocidade do audio
+class MotorComVelocidade:
+    def __init__(self):
+        self.velocidade = 1.0
+        self.terminou = False
+        self.tocando = True
+
+    def fechar(self):
+        pass
+
+
+def test_mais_rapido_e_mais_lento_respeitam_o_passo(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    assert j._velocidade() == 1.0
+    j._mudar_velocidade(+1)
+    assert j.cfg.get("audio_velocidade") == 1.25
+    assert ditas[-1] == "Velocidade 1,25x"
+    j.cfg.set("audio_passo_velocidade", 0.5)
+    j._mudar_velocidade(+1)
+    assert j.cfg.get("audio_velocidade") == 1.5
+    j.cfg.set("audio_passo_velocidade", 1.0)
+    j._mudar_velocidade(+1)
+    assert j.cfg.get("audio_velocidade") == 2.0
+    j._mudar_velocidade(+1)
+    j._mudar_velocidade(+1)             # 3x e o limite
+    assert j.cfg.get("audio_velocidade") == 3.0
+    j._aplicar_velocidade(1.0)
+    assert j._velocidade() == 1.0 and ditas[-1] == "Velocidade 1x"
+
+
+def test_velocidade_vale_para_o_audio_que_esta_tocando(j):
+    motor = MotorComVelocidade()
+    j.audio = (("t1", "10", "9"), motor)
+    j._mudar_velocidade(+1)
+    assert motor.velocidade == 1.25
+    j._mudar_velocidade(-1)
+    j._mudar_velocidade(-1)
+    assert motor.velocidade == 0.75
+
+
+def test_trocar_o_passo_leva_a_velocidade_ao_valor_permitido(j, monkeypatch):
+    j.cfg.set("audio_velocidade", 1.75)
+
+    def escolher(chave):
+        j.cfg.set(chave, 1.0)
+    monkeypatch.setattr(j, "_escolher_opcao", escolher)
+    j._escolher_passo()
+    assert j.cfg.get("audio_velocidade") == 2.0     # 1,75 -> 2 (o mais proximo)
+
+
+def test_configuracoes_aplicam_com_os_efeitos_dos_menus(j):
+    j._aplicar_opcao("estilo", 2)
+    assert j.estilo == 2 and j.cfg.get("estilo") == 2
+    j._aplicar_opcao("midias_baixar", "automatico")
+    assert j.cfg.get("midias_baixar") == "automatico"
+    j._aplicar_opcao("som", False)
+    assert j.cfg.get("som") is False
+    j._aplicar_opcao("depuracao", True)
+    assert j.banco.depuracao is True
+    j._aplicar_opcao("audio_passo_velocidade", 1.0)
+    j._aplicar_opcao("audio_velocidade", 1.75)       # nao existe de 1 em 1
+    assert j.cfg.get("audio_velocidade") in (1.0, 2.0)
