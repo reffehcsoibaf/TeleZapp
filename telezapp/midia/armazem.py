@@ -65,6 +65,19 @@ def com_extensao(base, ext):
     return base if os.path.splitext(base)[1].lower() == ext else base + ext
 
 
+def guardar_enviada(msg, origem, mover=False):
+    """Deixa uma copia (ou move, se for temporario) do arquivo enviado na
+    pasta da conversa, para a pessoa poder abri-lo depois sem baixar."""
+    destino = com_extensao(caminho_base(msg),
+                           os.path.splitext(origem)[1].lower() or ".bin")
+    if os.path.abspath(origem) != os.path.abspath(destino):
+        if mover:
+            shutil.move(origem, destino)
+        else:
+            shutil.copy2(origem, destino)
+    return destino
+
+
 def tamanho_da_pasta(conta_id=None):
     total = 0
     raiz = pasta_midias() if conta_id is None else os.path.join(

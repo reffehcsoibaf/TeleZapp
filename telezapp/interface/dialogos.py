@@ -10,6 +10,10 @@ import time
 
 import wx
 
+from telezapp.acessibilidade.fala import bipe
+from telezapp.midia.gravador import ErroGravacao
+from telezapp.midia.reprodutor import (FormatoNaoSuportado, Reprodutor,
+                                       formatar_tempo)
 from telezapp.provedores.base import PEDIR_CODIGO, PEDIR_SENHA, PEDIR_TELEFONE
 
 TEXTOS_LOGIN = {
@@ -217,6 +221,192 @@ def mostrar_texto(pai, titulo, texto, rotulo, links=(), botoes=(),
     dlg.ShowModal()
     dlg.Destroy()
     return escolhida[0]
+
+
+def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala):
+    """Grava, deixa ouvir e devolve a Gravacao que a pessoa quer enviar, ou
+    None se ela descartar ou se a captura nao abrir.
+
+    A gravacao comeca assim que a janela abre. O foco fica em "Parar de
+    gravar"; depois de parar, em "Enviar". Esc descarta. `nova_gravacao()`
+    devolve um Gravador novo (usado tambem em "Gravar de novo")."""
+    dlg = wx.Dialog(pai, title=titulo, style=wx.DEFAULT_DIALOG_STYLE)
+    explicacao = wx.StaticText(dlg, label=instrucao)
+    explicacao.Wrap(420)
+    situacao = wx.StaticText(dlg, label="Preparando...", name="Situação")
+    b_parar = wx.Button(dlg, wx.ID_ANY, "&Parar de gravar")
+    b_enviar = wx.Button(dlg, wx.ID_OK, "&Enviar")
+    b_ouvir = wx.Button(dlg, wx.ID_ANY, "&Ouvir")
+    b_refazer = wx.Button(dlg, wx.ID_ANY, "&Gravar de novo")
+    b_descartar = wx.Button(dlg, wx.ID_CANCEL, "&Descartar")
+    lay = wx.BoxSizer(wx.VERTICAL)
+    lay.Add(explicacao, 0, wx.ALL, 10)
+    lay.Add(situacao, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+    linha = wx.BoxSizer(wx.HORIZONTAL)
+    for b in (b_parar, b_enviar, b_ouvir, b_refazer, b_descartar):
+        linha.Add(b, 0, wx.RIGHT, 6)
+    lay.Add(linha, 0, wx.ALL, 10)
+    dlg.SetSizer(lay)
+    dlg.SetEscapeId(b_descartar.GetId())
+    temporizador = wx.Timer(dlg)
+    est = {"gravador": None, "gravacao": None, "player": None,
+           "fase": "gravando"}
+
+    def mostrar(fase):
+        est["fase"] = fase
+        gravando = fase == "gravando"
+        b_parar.Show(gravando)
+        for b in (b_enviar, b_ouvir, b_refazer):
+            b.Show(not gravando)
+        dlg.Layout()
+        dlg.Fit()
+        (b_parar if gravando else b_enviar).SetFocus()
+        if gravando:
+            b_parar.SetDefault()
+        else:
+            b_enviar.SetDefault()
+
+    def fechar_player():
+        p, est["player"] = est["player"], None
+        if p is not None:
+            try:
+                p.fechar()
+            except Exception:
+                pass
+        b_ouvir.SetLabel("&Ouvir")
+
+    def comecar():
+        g = nova_gravacao()
+        bipe("nova")
+        time.sleep(0.3)     # o bipe nao pode entrar na gravacao
+        try:
+            g.iniciar()
+        except ErroGravacao as e:
+            wx.MessageBox(str(e), titulo, wx.OK | wx.ICON_WARNING, pai)
+            return False
+        est["gravador"] = g
+        situacao.SetLabel("Gravando: 0:00")
+        mostrar("gravando")
+        fala.falar("Gravando.", interromper=True)
+        temporizador.Start(500)
+        return True
+
+    def parar(_e=None):
+        g = est["gravador"]
+        if est["fase"] != "gravando" or g is None:
+            return
+        temporizador.Stop()
+        try:
+            est["gravacao"] = g.parar()
+        except ErroGravacao as e:
+            est["gravador"] = None
+            bipe("erro")
+            wx.MessageBox(str(e), titulo, wx.OK | wx.ICON_WARNING, dlg)
+            dlg.EndModal(wx.ID_CANCEL)
+            return
+        bipe("enviada")
+        r = est["gravacao"]
+        texto = "Gravação pronta: %s." % formatar_tempo(r.segundos)
+        if r.silenciosa:
+            texto += (" Atenção: saiu quase em silêncio. Confira se o "
+                      "microfone ou o som estavam ligados.")
+        elif g.estourou_limite:
+            texto += " A gravação chegou ao limite de tempo."
+        situacao.SetLabel(texto)
+        mostrar("pronta")
+        fala.falar(texto, interromper=True)
+
+    def quando_o_tempo_passa(_e=None):
+        g = est["gravador"]
+        if est["fase"] == "gravando" and g is not None:
+            if g.gravando:
+                situacao.SetLabel("Gravando: %s" % formatar_tempo(g.decorrido))
+            else:
+                parar()
+        elif est["player"] is not None and not est["player"].tocando:
+            fechar_player()
+
+    def ouvir(_e=None):
+        if est["player"] is not None:
+            fechar_player()
+            return
+        try:
+            est["player"] = Reprodutor(est["gravacao"].caminho)
+            est["player"].tocar()
+        except (FormatoNaoSuportado, Exception):
+            est["player"] = None
+            fala.falar("Não consegui tocar a gravação.", interromper=True)
+            return
+        b_ouvir.SetLabel("Parar de &ouvir")
+        temporizador.Start(500)
+
+    def refazer(_e=None):
+        fechar_player()
+        if est["gravacao"] is not None:
+            _apagar(est["gravacao"].caminho)
+            est["gravacao"] = None
+        comecar()
+
+    def descartar(_e=None):
+        temporizador.Stop()
+        fechar_player()
+        if est["fase"] == "gravando" and est["gravador"] is not None:
+            est["gravador"].cancelar()
+        elif est["gravacao"] is not None:
+            _apagar(est["gravacao"].caminho)
+            est["gravacao"] = None
+        dlg.EndModal(wx.ID_CANCEL)
+
+    def enviar(_e=None):
+        temporizador.Stop()
+        fechar_player()
+        dlg.EndModal(wx.ID_OK)
+
+    b_parar.Bind(wx.EVT_BUTTON, parar)
+    b_ouvir.Bind(wx.EVT_BUTTON, ouvir)
+    b_refazer.Bind(wx.EVT_BUTTON, refazer)
+    b_descartar.Bind(wx.EVT_BUTTON, descartar)
+    b_enviar.Bind(wx.EVT_BUTTON, enviar)
+    dlg.Bind(wx.EVT_TIMER, quando_o_tempo_passa)
+    dlg.Bind(wx.EVT_CLOSE, descartar)
+    resultado = None
+    try:
+        if comecar():
+            dlg.CentreOnParent()
+            if dlg.ShowModal() == wx.ID_OK:
+                resultado = est["gravacao"]
+    finally:
+        temporizador.Stop()
+        if est["gravador"] is not None and est["fase"] == "gravando":
+            est["gravador"].cancelar()
+        dlg.Destroy()
+    return resultado
+
+
+def _apagar(caminho):
+    import os
+    try:
+        os.remove(caminho)
+    except OSError:
+        pass
+
+
+def escolher_arquivo(pai, pasta=""):
+    """Janela do Windows para escolher o arquivo a enviar; None se cancelar."""
+    filtros = ("Fotos, vídeos, áudios e documentos|*.*|"
+               "Fotos|*.jpg;*.jpeg;*.png;*.webp|"
+               "Vídeos|*.mp4;*.mov;*.m4v;*.3gp|"
+               "Áudios|*.ogg;*.opus;*.mp3;*.m4a;*.wav|"
+               "Todos os arquivos|*.*")
+    dlg = wx.FileDialog(pai, "Escolha o arquivo para enviar",
+                        defaultDir=pasta, wildcard=filtros,
+                        style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST)
+    try:
+        if dlg.ShowModal() != wx.ID_OK:
+            return None
+        return dlg.GetPath()
+    finally:
+        dlg.Destroy()
 
 
 def mostrar_depuracao(pai, titulo, texto, copiar, salvar):

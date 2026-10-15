@@ -32,6 +32,10 @@ class ProvedorFalso:
     def enviar_texto(self, cid, texto, resposta_a=""):
         self.pedidos.append(("enviar", cid, texto, resposta_a))
 
+    def enviar_arquivo(self, cid, anexo, legenda=""):
+        self.pedidos.append(("arquivo", cid, anexo.tipo, anexo.nome,
+                             legenda))
+
     def responder_acao(self, msg, acao):
         self.pedidos.append(("acao", msg.id, acao["rotulo"]))
 
@@ -1193,3 +1197,112 @@ def test_registro_detalhado_do_whatsapp_so_grava_a_opcao(j):
     assert j.cfg.get("log_detalhado_whatsapp") is True
     j._log_detalhado(False)
     assert j.cfg.get("log_detalhado_whatsapp") is False
+
+
+# ------------------------------------------------------ anexos e gravacao
+def _abrir_com_caixa(j):
+    j._abrir_conversa(j.indice[("t1", "20")])
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", [msg("5", "oi",
+                                                          conversa="20")]))
+
+
+def test_anexar_arquivo_usa_a_caixa_como_legenda(j, tmp_path, monkeypatch):
+    _abrir_com_caixa(j)
+    pdf = tmp_path / "relatorio.pdf"
+    pdf.write_bytes(b"%PDF")
+    monkeypatch.setattr(jm.dialogos, "escolher_arquivo",
+                        lambda pai, pasta="": str(pdf))
+    j.caixa.SetValue("o relatório")
+    j._anexar_arquivo()
+    assert ("arquivo", "20", m.DOCUMENTO, "relatorio.pdf",
+            "o relatório") in j.contas.p.pedidos
+    assert j.caixa.GetValue() == ""
+    assert j.cfg.get("pasta_anexos") == str(tmp_path)
+    assert "enviando" in j.lista_msgs.itens[-1]
+
+    enviada = m.Mensagem("t1", "20", "7", minha=True, data=AGORA + 50,
+                         texto="o relatório", tipo=m.DOCUMENTO,
+                         nome_arquivo="relatorio.pdf", tamanho=4,
+                         estado=m.ENVIADA)
+    j.b.publicar(ev.MensagemNova(enviada, j.indice[("t1", "20")],
+                                 enviada_daqui=True))
+    assert not any("enviando" in x for x in j.lista_msgs.itens)
+    assert not [x for x in j._mensagens_atuais()
+                if x.id.startswith("local-")]
+
+
+def test_anexar_cancelado_nao_envia(j, monkeypatch):
+    _abrir_com_caixa(j)
+    monkeypatch.setattr(jm.dialogos, "escolher_arquivo",
+                        lambda pai, pasta="": None)
+    j._anexar_arquivo()
+    assert not [p for p in j.contas.p.pedidos if p[0] == "arquivo"]
+
+
+def test_arquivo_invalido_e_falado(j, tmp_path):
+    _abrir_com_caixa(j)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._enviar_arquivo(str(tmp_path / "nao-existe.pdf"))
+    assert ditas == ["O arquivo não foi encontrado."]
+    assert not [p for p in j.contas.p.pedidos if p[0] == "arquivo"]
+
+
+def test_gravar_envia_nota_de_voz_sem_legenda(j, tmp_path, monkeypatch):
+    import os
+    from telezapp.midia.gravador import MICROFONE, Gravacao
+    _abrir_com_caixa(j)
+    ogg = tmp_path / "voz-1.ogg"
+    with open(os.path.join(os.path.dirname(__file__), "amostras",
+                           "voz.ogg"), "rb") as f:
+        ogg.write_bytes(f.read())
+    vistos = {}
+
+    def falso(pai, nova, titulo, instrucao, fala):
+        vistos["gravador"] = nova()
+        vistos["titulo"] = titulo
+        return Gravacao(str(ogg), 3.0, -6.0)
+    monkeypatch.setattr(jm.dialogos, "gravar_voz", falso)
+    j.caixa.SetValue("rascunho que fica")
+    j._gravar(MICROFONE)
+    assert vistos["gravador"].origem == MICROFONE
+    assert vistos["gravador"].pasta == config.pasta_temporaria()
+    pedido = [p for p in j.contas.p.pedidos if p[0] == "arquivo"][-1]
+    assert pedido[2] == m.VOZ and pedido[4] == ""
+    assert j.caixa.GetValue() == "rascunho que fica"
+
+
+def test_gravar_descartado_nao_envia(j, monkeypatch):
+    from telezapp.midia.gravador import SOM_INTERNO
+    _abrir_com_caixa(j)
+    origens = []
+    monkeypatch.setattr(
+        jm.dialogos, "gravar_voz",
+        lambda pai, nova, *a: origens.append(nova().origem))
+    j._gravar(SOM_INTERNO)
+    assert origens == [SOM_INTERNO]
+    assert not [p for p in j.contas.p.pedidos if p[0] == "arquivo"]
+
+
+def test_falha_de_midia_marca_so_a_mensagem_local(j, tmp_path):
+    _abrir_com_caixa(j)
+    pdf = tmp_path / "r.pdf"
+    pdf.write_bytes(b"%PDF")
+    j.caixa.SetValue("texto da caixa")
+    j.caixa.Clear()
+    j._enviar_arquivo(str(pdf))
+    j.caixa.SetValue("outro texto")
+    j.b.publicar(ev.EnvioFalhou("t1", "20", "", "sem conexão",
+                                devolver_texto=False, tipo=m.DOCUMENTO))
+    assert j.lista_msgs.itens[-1].endswith("falhou")
+    assert j.caixa.GetValue() == "outro texto"
+
+
+def test_sem_conexao_nao_anexa(j, monkeypatch):
+    _abrir_com_caixa(j)
+    j.b.publicar(ev.EstadoConta("t1", ev.DESCONECTADA))
+    chamado = []
+    monkeypatch.setattr(jm.dialogos, "escolher_arquivo",
+                        lambda *a, **k: chamado.append(1))
+    j._anexar_arquivo()
+    assert not chamado

@@ -5,3 +5,5 @@ neonize==0.5.2
 segno>=1.6
 soundfile>=0.13
 sounddevice>=0.5
+soundcard>=0.4.6
+numpy>=2.1
