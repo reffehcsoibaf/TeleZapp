@@ -3,6 +3,17 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.15.4
+
+- Grupo renomeado com o TeleZapp fechado (ou sem receber o aviso) continuava
+  com o nome antigo: o aviso da 2026.10.15.3 só vale ao vivo. Agora o WhatsApp
+  é consultado (`get_joined_groups`) no fim da sincronia ao conectar e a cada
+  atualização manual das conversas (`_atualizar_nomes_de_grupos`), e os grupos
+  com nome diferente são corrigidos. Grupos sem conversa local são ignorados.
+  O Telegram já refazia os nomes ao conectar.
+- Não verificado com um WhatsApp real: depende de `get_joined_groups` trazer
+  o nome atual de todos os grupos.
+
 ## 2026.10.15.3
 
 - Grupo renomeado não aparecia no TeleZapp: o nome só era buscado enquanto

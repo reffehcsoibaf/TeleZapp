@@ -860,6 +860,8 @@ class ProvedorWhatsApp(Provedor):
                  quantas)
         self.barramento.publicar(ev.SincronizacaoConcluida(self.conta.id,
                                                            quantas))
+        # grupos renomeados com o app fechado: o WhatsApp so avisa na hora
+        self._fila.put(self._atualizar_nomes_de_grupos)
 
     def _ao_sair(self, cliente, e):
         self._conectada = False
@@ -902,6 +904,31 @@ class ProvedorWhatsApp(Provedor):
 
     def atualizar_conversas(self):
         self._publicar_conversas()
+        self._fila.put(self._atualizar_nomes_de_grupos)
+
+    def _atualizar_nomes_de_grupos(self):
+        """Pergunta ao WhatsApp o nome atual de todos os grupos e corrige os
+        que mudaram (o aviso de mudanca so chega com o app aberto)."""
+        if not self._conectada or self.cliente is None:
+            return
+        try:
+            grupos = list(self.cliente.get_joined_groups())
+        except Exception:
+            log.info("não consegui a lista de grupos para conferir os nomes")
+            return
+        mudou = []
+        with self._trava:
+            for g in grupos:
+                conv = self._conversas.get(jid_texto(g.JID))
+                nome = g.GroupName.Name
+                if conv is not None and nome and conv.nome != nome:
+                    conv.nome = nome
+                    mudou.append(conv)
+        log.info("conferi o nome de %d grupos: %d mudaram", len(grupos),
+                 len(mudou))
+        if mudou:
+            self.banco.salvar_conversas(mudou)
+            self._publicar_conversas()
 
     def _id_da_conversa(self, chat):
         """JID da conversa -> texto. Conversas individuais com endereco LID
