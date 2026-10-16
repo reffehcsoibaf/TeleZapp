@@ -6,4 +6,5 @@ segno>=1.6
 soundfile>=0.13
 sounddevice>=0.5
 soundcard>=0.4.6
+py-tgcalls>=3.0,<4
 numpy>=2.1

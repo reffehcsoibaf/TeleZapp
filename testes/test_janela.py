@@ -1459,3 +1459,209 @@ def test_configuracoes_aplicam_com_os_efeitos_dos_menus(j):
     j._aplicar_opcao("audio_passo_velocidade", 1.0)
     j._aplicar_opcao("audio_velocidade", 1.75)       # nao existe de 1 em 1
     assert j.cfg.get("audio_velocidade") in (1.0, 2.0)
+
+
+# ------------------------------------------------------ chamadas de voz
+class DialogoFalso:
+    """Lugar do DialogoChamada: guarda o que a janela pediu para mostrar."""
+    abertos = []
+
+    def __init__(self, pai, chamada, acoes, falar, microfones=(),
+                 saidas=(), microfone="", saida="", ao_fechar=None):
+        self.chamada, self.acoes, self.falar = chamada, acoes, falar
+        self.microfones, self.saidas = list(microfones), list(saidas)
+        self.ao_fechar = ao_fechar
+        self.mostradas = 0
+        self.vivo = True
+        DialogoFalso.abertos.append(self)
+
+    def Show(self, v=True):
+        pass
+
+    def mostrar(self):
+        self.mostradas += 1
+
+    def fechar(self):
+        self.vivo = False
+        if self.ao_fechar:
+            self.ao_fechar()
+
+
+@pytest.fixture
+def chamadas(j, monkeypatch):
+    from telezapp.nucleo import chamadas as ch
+    DialogoFalso.abertos = []
+    monkeypatch.setattr(jm, "DialogoChamada", DialogoFalso)
+    falas, sons = [], []
+    monkeypatch.setattr(j.fala, "falar",
+                        lambda t, interromper=False: falas.append(t))
+    monkeypatch.setattr(jm, "bipe", lambda tipo="nova": sons.append(tipo))
+    p = j.contas.p
+    p.suporta_chamadas = True
+    p.comandos = []
+    p.dispositivos_de_audio = lambda: (["Mic A", "Mic B"], ["Saída A"])
+    for nome in ("ligar", "atender_chamada", "silenciar_chamada",
+                 "trocar_dispositivos"):
+        setattr(p, nome, lambda *a, _n=nome: p.comandos.append((_n,) + a))
+    p.encerrar_chamada = lambda cid: p.comandos.append(("encerrar", cid))
+    return types.SimpleNamespace(j=j, ch=ch, falas=falas, sons=sons, p=p)
+
+
+def estado(j, estado, conversa="10", entrante=False, motivo="", erro="",
+           nome="Ana"):
+    j.b.publicar(ev.EstadoChamada("t1", conversa, estado, nome, entrante,
+                                  motivo, erro))
+
+
+def test_ligar_para_a_conversa_aberta(chamadas):
+    j = chamadas.j
+    j.atual = ("t1", "10")
+    j._ligar()
+    assert chamadas.p.comandos == [("ligar", "10", "", "")]
+
+
+def test_ligar_usa_os_dispositivos_escolhidos(chamadas):
+    j = chamadas.j
+    j.cfg.set("chamada_microfone", "Mic B")
+    j.atual = ("t1", "10")
+    j._ligar()
+    assert chamadas.p.comandos == [("ligar", "10", "Mic B", "")]
+
+
+def test_ligar_sem_conversa_avisa(chamadas, monkeypatch):
+    j = chamadas.j
+    j.atual = None
+    monkeypatch.setattr(j, "_conversa_selecionada", lambda: None)
+    j._ligar()
+    assert any("Abra ou selecione" in f for f in chamadas.falas)
+    assert chamadas.p.comandos == []
+
+
+def test_ligar_para_grupo_nao_pode(chamadas):
+    j = chamadas.j
+    j.indice[("t1", "10")].tipo = "grupo"
+    j.atual = ("t1", "10")
+    j._ligar()
+    assert any("grupos" in f for f in chamadas.falas)
+    assert chamadas.p.comandos == []
+
+
+def test_ligar_sem_suporte_do_servico(chamadas):
+    j = chamadas.j
+    chamadas.p.suporta_chamadas = False
+    j.atual = ("t1", "10")
+    j._ligar()
+    assert any("ainda não faz chamadas" in f for f in chamadas.falas)
+
+
+def test_chamada_recebida_abre_a_janela_toca_e_fala(chamadas):
+    j, ch = chamadas.j, chamadas.ch
+    estado(j, ch.TOCANDO, entrante=True)
+    assert len(DialogoFalso.abertos) == 1
+    assert chamadas.falas[-1].startswith("Chamada de Ana")
+    assert "toque" in chamadas.sons
+    assert j.chamada is not None and j.chamada.entrante
+
+
+def test_sem_som_de_chamada_so_fala(chamadas):
+    j, ch = chamadas.j, chamadas.ch
+    j.cfg.set("toque_chamada", False)
+    estado(j, ch.TOCANDO, entrante=True)
+    assert "toque" not in chamadas.sons
+    assert chamadas.falas
+
+
+def test_atender_pede_ao_provedor_com_os_dispositivos(chamadas):
+    j, ch = chamadas.j, chamadas.ch
+    j.cfg.set("chamada_saida", "Saída A")
+    estado(j, ch.TOCANDO, entrante=True)
+    DialogoFalso.abertos[0].acoes["atender"]()
+    assert chamadas.p.comandos == [("atender_chamada", "10", "", "Saída A")]
+
+
+def test_recusar_e_desligar_encerram(chamadas):
+    j, ch = chamadas.j, chamadas.ch
+    estado(j, ch.TOCANDO, entrante=True)
+    DialogoFalso.abertos[0].acoes["recusar"]()
+    assert chamadas.p.comandos == [("encerrar", "10")]
+
+
+def test_em_chamada_silenciar_fala_e_atualiza(chamadas):
+    j, ch = chamadas.j, chamadas.ch
+    estado(j, ch.CHAMANDO)
+    estado(j, ch.EM_CHAMADA)
+    assert "conectado" in chamadas.sons
+    antes = DialogoFalso.abertos[0].mostradas
+    j._alternar_mudo()
+    assert chamadas.p.comandos[-1] == ("silenciar_chamada", "10", True)
+    assert j.chamada.mudo is True
+    assert chamadas.falas[-1] == "Microfone silenciado."
+    assert DialogoFalso.abertos[0].mostradas > antes
+    j._alternar_mudo()
+    assert chamadas.falas[-1] == "Microfone ativado."
+
+
+def test_mudo_antes_de_conectar_nao_faz_nada(chamadas):
+    j, ch = chamadas.j, chamadas.ch
+    estado(j, ch.CHAMANDO)
+    j._alternar_mudo()
+    assert not any(c[0] == "silenciar_chamada" for c in chamadas.p.comandos)
+    assert any("durante" in f for f in chamadas.falas)
+
+
+def test_tempo_da_chamada_e_falado(chamadas):
+    j, ch = chamadas.j, chamadas.ch
+    estado(j, ch.CHAMANDO)
+    estado(j, ch.EM_CHAMADA)
+    j.chamada.inicio_conexao = j.chamada._agora() - 125
+    j._falar_tempo_da_chamada()
+    assert chamadas.falas[-1] == "Em chamada há 2 minutos e 5 segundos."
+
+
+def test_encerrada_mostra_motivo_e_libera_a_janela(chamadas):
+    j, ch = chamadas.j, chamadas.ch
+    estado(j, ch.CHAMANDO)
+    estado(j, ch.ENCERRADA, motivo=ch.SEM_RESPOSTA)
+    assert chamadas.falas[-1] == "Ana não atendeu."
+    assert j.chamada is None
+    assert "desligada" in chamadas.sons
+    j._desligar_chamada()          # nada a desligar: so avisa
+    assert chamadas.falas[-1] == "Nenhuma chamada em andamento."
+
+
+def test_nova_chamada_depois_de_encerrada_abre_outra_janela(chamadas):
+    j, ch = chamadas.j, chamadas.ch
+    estado(j, ch.CHAMANDO)
+    estado(j, ch.ENCERRADA, motivo=ch.CANCELADA)
+    primeiro = DialogoFalso.abertos[0]
+    estado(j, ch.TOCANDO, entrante=True)
+    assert len(DialogoFalso.abertos) == 2
+    assert primeiro.vivo is False
+
+
+def test_fim_de_chamada_desconhecida_e_ignorado(chamadas):
+    j, ch = chamadas.j, chamadas.ch
+    estado(j, ch.ENCERRADA, motivo=ch.DESLIGADA)
+    assert DialogoFalso.abertos == [] and chamadas.falas == []
+
+
+def test_trocar_dispositivo_guarda_e_pede_ao_provedor(chamadas):
+    j, ch = chamadas.j, chamadas.ch
+    estado(j, ch.CHAMANDO)
+    estado(j, ch.EM_CHAMADA)
+    DialogoFalso.abertos[0].acoes["trocar"]("Mic B", "Saída A")
+    assert j.cfg.get("chamada_microfone") == "Mic B"
+    assert j.cfg.get("chamada_saida") == "Saída A"
+    assert chamadas.p.comandos[-1] == (
+        "trocar_dispositivos", "10", "Mic B", "Saída A")
+
+
+def test_fechar_a_janela_com_chamada_pergunta(chamadas, monkeypatch):
+    j, ch = chamadas.j, chamadas.ch
+    estado(j, ch.CHAMANDO)
+    estado(j, ch.EM_CHAMADA)
+    parou = []
+    j.contas.parar_todos = lambda: parou.append(True)
+    wx_falso.resposta_messagebox[0] = wx_falso.NO
+    j._ao_fechar(types.SimpleNamespace(Veto=lambda: parou.append("veto")))
+    assert parou == ["veto"]
