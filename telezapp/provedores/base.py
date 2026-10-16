@@ -27,6 +27,8 @@ class DownloadCancelado(Exception):
 
 class Provedor(ABC):
     servico = ""
+    # True quando o servico e a biblioteca de chamadas estao disponiveis
+    suporta_chamadas = False
 
     def __init__(self, conta, barramento, banco, pedir):
         self.conta = conta
@@ -69,6 +71,34 @@ class Provedor(ABC):
         mensagem (ex.: de empresa). Publica MensagemNova ou EnvioFalhou.
         Por padrao o servico nao tem isso."""
         raise NotImplementedError
+
+    # ------------------------------------------------ chamadas de voz
+    # Voltam na hora; o andamento chega como ev.EstadoChamada.
+    def ligar(self, conversa_id, microfone="", saida=""):
+        """Liga para a pessoa da conversa privada."""
+        raise NotImplementedError
+
+    def atender_chamada(self, conversa_id, microfone="", saida=""):
+        """Atende a chamada que esta tocando."""
+        raise NotImplementedError
+
+    def encerrar_chamada(self, conversa_id):
+        """Recusa (tocando), cancela (chamando) ou desliga (em chamada)."""
+        raise NotImplementedError
+
+    def silenciar_chamada(self, conversa_id, silenciar):
+        """Silencia ou reativa o microfone durante a chamada."""
+        raise NotImplementedError
+
+    def trocar_dispositivos(self, conversa_id, microfone="", saida=""):
+        """Troca o microfone e/ou a saida de som no meio da chamada. Nome
+        vazio mantem o atual."""
+        raise NotImplementedError
+
+    def dispositivos_de_audio(self):
+        """([nomes dos microfones], [nomes das saidas de som]) que o motor
+        de chamadas enxerga; listas vazias se nao houver."""
+        return [], []
 
     def depurar_conversa(self, conversa_id):
         """Dados do servico sobre a conversa, para o menu Depurar (como o

@@ -3,6 +3,46 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.15.5
+
+Chamadas de voz 1 a 1 no Telegram (interface acessível).
+
+- `nucleo/chamadas.py` (sem wx): estados (`CHAMANDO`, `TOCANDO`,
+  `CONECTANDO`, `EM_CHAMADA`, `ENCERRADA`), motivos de encerramento,
+  `Chamada` (com o tempo em chamada), `apresentar` (título, texto, fala,
+  botões visíveis em ordem de Tab, foco e som de cada estado),
+  `motivo_da_excecao` e as durações para mostrar e para falar.
+- `provedores/chamadas_telegram.py`: `ChamadasTelegram`, sobre o py-tgcalls
+  3.x (NTgCalls), na thread e no cliente Telethon do provedor. Liga, atende,
+  recusa, desliga, silencia e troca microfone e saída de som no meio da
+  chamada; recusa sozinha uma segunda chamada recebida. Sem o py-tgcalls as
+  chamadas ficam desligadas e nada mais muda (`suporta_chamadas` falso).
+  Microfone e saída são os do Windows, vistos pela NTgCalls, sem FFmpeg.
+- `Provedor`: `ligar`, `atender_chamada`, `encerrar_chamada`,
+  `silenciar_chamada`, `trocar_dispositivos`, `dispositivos_de_audio` e
+  `suporta_chamadas`. Evento novo `EstadoChamada`.
+- `interface/chamada.py`: `DialogoChamada`, uma janela só que muda de estado.
+  Foco em Atender ao tocar e em Desligar nos outros estados; Esc recusa ou
+  cancela, mas não desliga uma chamada já conectada.
+- Janela principal: menu Chamada (Ligar Ctrl+Shift+L, Janela da chamada
+  Ctrl+Shift+J, Silenciar Ctrl+Shift+K, Tempo, Desligar Ctrl+Shift+H);
+  pergunta antes de fechar o TeleZapp com uma chamada aberta. Opção "Som de
+  chamada" (`toque_chamada`) e dispositivos guardados em `chamada_microfone`
+  e `chamada_saida`. Sons novos: `toque`, `chamando`, `desligada`.
+- **Cuidado com o COM**: listar microfones e saídas pela NTgCalls na thread
+  da interface derruba o processo (o wx inicia o COM no modo dele). Os
+  nomes são listados só na thread do provedor (`atualizar_dispositivos`) e
+  `dispositivos()` devolve o cache. Reproduzido fora do app com um
+  `wx.App` e corrigido com uma thread separada.
+- `__main__`: `faulthandler` grava em `logs\\falha-nativa.log` onde cada
+  thread estava quando uma biblioteca nativa derruba o processo.
+- Só conversas privadas do Telegram. Não há aviso de chamada perdida na
+  conversa, nem vídeo, nem chamada pelo WhatsApp.
+- Testado com um py-tgcalls simulado e com a janela simulada; chamada real
+  de saída de 45 s medida no experimento 9 (docs/decisoes.md). **Não
+  verificado**: chamada recebida, leitura pelo NVDA da janela da chamada,
+  troca de dispositivo no meio da chamada e quedas de rede.
+
 ## 2026.10.15.4
 
 - Grupo renomeado com o TeleZapp fechado (ou sem receber o aviso) continuava

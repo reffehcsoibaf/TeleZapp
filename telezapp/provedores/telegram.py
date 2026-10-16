@@ -216,6 +216,7 @@ class ProvedorTelegram(Provedor):
         self._conversas = {}                    # conversa_id -> Conversa
         self._usuarios = {}                     # @usuario -> dados ou None
         self._pronto = threading.Event()
+        self._chamadas = None                   # ChamadasTelegram, se houver
 
     # ----------------------------------------------------------- execucao
     def iniciar(self):
@@ -325,6 +326,7 @@ class ProvedorTelegram(Provedor):
         self._estado(ev.CONECTADA)
         self._pronto.set()
         await self._atualizar_conversas()
+        await self._iniciar_chamadas()
 
     async def _login(self):
         """Pede telefone, codigo e senha pela interface. False se cancelar."""
@@ -657,6 +659,66 @@ class ProvedorTelegram(Provedor):
         if conv is not None:
             conv.nao_lidas = 0
         self.banco.atualizar_conversa(self.conta.id, conversa_id, nao_lidas=0)
+
+    # ------------------------------------------------- chamadas de voz
+    @property
+    def suporta_chamadas(self):
+        return self._chamadas is not None and self._chamadas.pronta
+
+    async def _iniciar_chamadas(self):
+        from telezapp.provedores.chamadas_telegram import (ChamadasTelegram,
+                                                           disponivel)
+        if not disponivel():
+            log.info("py-tgcalls não instalado: sem chamadas de voz")
+            return
+        chamadas = ChamadasTelegram(self.cliente, self.conta.id,
+                                    self.barramento, self._nome_da_conversa)
+        if await chamadas.iniciar():
+            self._chamadas = chamadas
+
+    async def _nome_da_conversa(self, chat_id):
+        conv = self._conversas.get(str(chat_id))
+        if conv is not None and conv.nome:
+            return conv.nome
+        try:
+            return nome_de(await self.cliente.get_entity(chat_id))
+        except Exception:
+            return ""
+
+    def _chat(self, conversa_id):
+        try:
+            return int(conversa_id)
+        except (TypeError, ValueError):
+            return None
+
+    def _comando_de_chamada(self, nome_metodo, conversa_id, *args):
+        chat = self._chat(conversa_id)
+        if not self.suporta_chamadas or chat is None or chat < 0:
+            self._avisar("Chamadas de voz não estão disponíveis nesta "
+                         "conversa.")
+            return
+        self._agendar(getattr(self._chamadas, nome_metodo)(chat, *args))
+
+    def ligar(self, conversa_id, microfone="", saida=""):
+        self._comando_de_chamada("ligar", conversa_id, microfone, saida)
+
+    def atender_chamada(self, conversa_id, microfone="", saida=""):
+        self._comando_de_chamada("atender", conversa_id, microfone, saida)
+
+    def encerrar_chamada(self, conversa_id):
+        self._comando_de_chamada("encerrar", conversa_id)
+
+    def silenciar_chamada(self, conversa_id, silenciar):
+        self._comando_de_chamada("silenciar", conversa_id, silenciar)
+
+    def trocar_dispositivos(self, conversa_id, microfone="", saida=""):
+        self._comando_de_chamada("trocar_dispositivos", conversa_id,
+                                 microfone, saida)
+
+    def dispositivos_de_audio(self):
+        if self._chamadas is None:
+            return [], []
+        return self._chamadas.dispositivos()
 
     # ----------------------------------------------------- eventos do servico
     async def _ao_receber(self, evento):
