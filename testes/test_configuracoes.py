@@ -76,3 +76,17 @@ def test_falar_descricoes_e_opcao_de_leitura_ligada_por_padrao(mod):
     assert mod.valor("falar_descricoes") is True
     mod.definir("falar_descricoes", False)
     assert mod.valor("falar_descricoes") is False   # vale ja na janela
+
+
+def test_opcao_numerica_e_limitada_ao_intervalo(tmp_path, monkeypatch):
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path))
+    from telezapp import config
+    from telezapp.nucleo.configuracoes import ModeloConfiguracoes
+    mod = ModeloConfiguracoes(config.Config())
+    mod.definir("mensagens_por_conversa", 10)
+    assert mod.valor("mensagens_por_conversa") == 50
+    mod.definir("mensagens_por_conversa", 99999)
+    assert mod.valor("mensagens_por_conversa") == 5000
+    mod.definir("mensagens_por_conversa", "abc")
+    assert mod.valor("mensagens_por_conversa") == 1200   # padrao: nada pendente
+    assert "mensagens_por_conversa" not in mod.pendentes

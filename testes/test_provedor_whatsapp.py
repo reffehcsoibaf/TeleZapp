@@ -1243,3 +1243,191 @@ def test_mensagem_de_grupo_com_chave_e_conteudo_no_mesmo_pacote(amb):
     assert amb.banco.conversas("w1")[0].nao_lidas == 1
     assert len([x for x in amb.banco.mensagens("w1", nova.mensagem.conversa_id,
                                                50) if x.id == "G1"]) == 1
+
+
+# --------------------------------------------- reacoes, edicoes e apagadas
+def _chave(id, de_mim=False, grupo=False):
+    from neonize.proto.waCommon import WACommon_pb2 as C
+    return C.MessageKey(ID=id, fromMe=de_mim)
+
+
+def _chegou(amb, id="M1", texto="Olá"):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento(id, E.Message(conversation=texto)))
+    return esperar(amb.fila, ev.MensagemNova).mensagem
+
+
+def test_reacao_aparece_na_mensagem_e_pode_ser_trocada(amb):
+    original = _chegou(amb)
+    reacao = E.Message(reactionMessage=E.ReactionMessage(
+        key=_chave("M1"), text="👍"))
+    amb.f["Message"](amb.c, evento("R1", reacao, pushname="Bruno"))
+    a = esperar(amb.fila, ev.MensagemAtualizada)
+    assert (a.motivo, a.emoji) == ("reacao", "👍")
+    assert a.quem                       # o nome do contato ou do perfil
+    assert [r["emoji"] for r in m.extras_de(a.mensagem)["reacoes"]] == ["👍"]
+    assert m.resumo_reacoes(a.mensagem) == "👍 de " + a.quem
+
+    # a mesma pessoa troca de emoji: continua uma so reacao
+    reacao2 = E.Message(reactionMessage=E.ReactionMessage(
+        key=_chave("M1"), text="❤"))
+    amb.f["Message"](amb.c, evento("R2", reacao2, pushname="Bruno"))
+    b = esperar(amb.fila, ev.MensagemAtualizada)
+    assert [r["emoji"] for r in m.extras_de(b.mensagem)["reacoes"]] == ["❤"]
+
+    # e depois tira a reacao (texto vazio)
+    tirar = E.Message(reactionMessage=E.ReactionMessage(key=_chave("M1"),
+                                                        text=""))
+    amb.f["Message"](amb.c, evento("R3", tirar, pushname="Bruno"))
+    c = esperar(amb.fila, ev.MensagemAtualizada)
+    assert m.extras_de(c.mensagem)["reacoes"] == []
+    assert original.id == "M1"
+
+
+def test_edicao_troca_o_texto_e_marca_editada(amb):
+    _chegou(amb, texto="Oi")
+    novo = E.Message(conversation="Oi, tudo bem?")
+    edicao = E.Message(protocolMessage=E.ProtocolMessage(
+        key=_chave("M1"), type=E.ProtocolMessage.MESSAGE_EDIT,
+        editedMessage=novo))
+    amb.f["Message"](amb.c, evento("E1", edicao))
+    a = esperar(amb.fila, ev.MensagemAtualizada)
+    assert a.motivo == "editada" and a.mensagem.texto == "Oi, tudo bem?"
+    assert m.extras_de(a.mensagem)["editada"] is True
+    assert "(editada)" in m.formatar(a.mensagem, m.ESTILO_CONTEUDO_PRIMEIRO)
+    assert amb.banco.mensagem("w1", a.conversa_id, "M1").texto == \
+        "Oi, tudo bem?"
+
+
+def test_apagar_para_todos_esconde_o_conteudo(amb):
+    _chegou(amb, texto="segredo")
+    apagar = E.Message(protocolMessage=E.ProtocolMessage(
+        key=_chave("M1"), type=E.ProtocolMessage.REVOKE))
+    amb.f["Message"](amb.c, evento("D1", apagar))
+    a = esperar(amb.fila, ev.MensagemAtualizada)
+    assert a.motivo == "apagada" and a.mensagem.texto == ""
+    assert m.conteudo(a.mensagem) == "mensagem apagada"
+    assert "segredo" not in m.formatar(a.mensagem, m.ESTILO_AUTOR_PRIMEIRO)
+
+
+def test_alteracao_de_mensagem_desconhecida_e_ignorada(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    reacao = E.Message(reactionMessage=E.ReactionMessage(
+        key=_chave("NAOEXISTE"), text="👍"))
+    amb.f["Message"](amb.c, evento("R9", reacao))
+    # nada novo na fila: uma mensagem de verdade chega em seguida
+    amb.f["Message"](amb.c, evento("M2", E.Message(conversation="depois")))
+    assert esperar(amb.fila, ev.MensagemNova).mensagem.id == "M2"
+
+
+def test_reacoes_no_resumo_e_nos_detalhes():
+    x = m.Mensagem("w1", "c", "1", autor="Ana", texto="oi")
+    m.atualizar_extras(x, reacoes=[
+        {"id": "a", "quem": "Bruno", "emoji": "👍"},
+        {"id": "b", "quem": "Carla", "emoji": "❤"}])
+    assert m.resumo_reacoes(x) == "👍 de Bruno, ❤ de Carla"
+    assert "reações: 👍 de Bruno, ❤ de Carla" in m.formatar(
+        x, m.ESTILO_CONTEUDO_PRIMEIRO)
+    m.atualizar_extras(x, reacoes=[{"id": str(i), "quem": "p", "emoji": "👍"}
+                                   for i in range(5)])
+    assert m.resumo_reacoes(x) == "5 reações"
+    # os outros extras continuam
+    m.guardar_extras(x, links=[("https://a.com", "a")])
+    m.atualizar_extras(x, editada=True)
+    assert m.extras_de(x)["links"] == [["https://a.com", "a"]]
+    assert m.extras_de(x)["editada"] is True
+
+
+# ------------------------------------------ audio e voz "ouvida" na lista
+def test_voz_ouvida_aparece_na_linha_mas_nao_na_citacao():
+    x = m.Mensagem("w1", "c", "1", autor="Ana", tipo=m.VOZ, segundos=12)
+    assert m.conteudo(x) == "mensagem de voz, 12 segundos"
+    m.atualizar_extras(x, ouvida=True)
+    assert m.conteudo(x) == "mensagem de voz, 12 segundos, ouvida"
+    assert "ouvida" in m.formatar(x, m.ESTILO_AUTOR_PRIMEIRO)
+    assert "ouvida" not in m.citacao(x)
+    minha = m.Mensagem("w1", "c", "2", minha=True, tipo=m.VOZ, segundos=5)
+    m.atualizar_extras(minha, ouvida=True)
+    assert "ouvida" not in m.conteudo(minha)
+
+
+def test_whatsapp_voz_tocada_no_celular_vira_ouvida(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    voz = E.Message(audioMessage=E.AudioMessage(PTT=True, seconds=7,
+                                                fileLength=900))
+    amb.f["Message"](amb.c, evento("V1", voz))
+    esperar(amb.fila, ev.MensagemNova)
+    amb.f["Receipt"](amb.c, N.Receipt(
+        MessageSource=N.MessageSource(Chat=jid("5551988887777"),
+                                      IsFromMe=True),
+        MessageIDs=["V1"], Type=7))
+    a = esperar(amb.fila, ev.MensagemAtualizada)
+    assert a.motivo == "ouvida" and m.extras_de(a.mensagem)["ouvida"]
+    assert amb.banco.mensagem("w1", a.conversa_id, "V1") is not None
+    assert m.extras_de(amb.banco.mensagem(
+        "w1", a.conversa_id, "V1"))["ouvida"] is True
+
+
+def test_arquivadas_seguem_o_celular(tmp_path):
+    """O armazem local do whatsmeow guarda o que o celular arquivou."""
+    b = ev.Barramento()
+    banco = Banco(str(tmp_path / "s.db"))
+    p = wa.ProvedorWhatsApp(m.Conta("w1", "whatsapp"), b, banco,
+                            pasta_sessoes=str(tmp_path),
+                            fabrica_cliente=ClienteFalso)
+    cel = {"5551@s.whatsapp.net": True, "5552@s.whatsapp.net": False}
+
+    class Armazem:
+        def get_chat_settings(self, alvo):
+            chave = "%s@%s" % (alvo.User, alvo.Server)
+            if chave in cel:
+                return N.LocalChatSettings(Found=True, Archived=cel[chave])
+            return N.LocalChatSettings(Found=False)
+
+    p.cliente = types.SimpleNamespace(
+        chat_settings=Armazem(),
+        get_lid_from_pn=lambda j: (_ for _ in ()).throw(RuntimeError("n")))
+    p._conectada = True
+    a = m.Conversa("w1", "5551@s.whatsapp.net", "A", "whatsapp")
+    c = m.Conversa("w1", "5552@s.whatsapp.net", "C", "whatsapp",
+                   arquivada=True)         # estava marcada aqui, celular nao
+    d = m.Conversa("w1", "5553@s.whatsapp.net", "D", "whatsapp")
+    p._conversas = {x.id: x for x in (a, c, d)}
+    p._conferir_arquivadas()
+    assert (a.arquivada, c.arquivada, d.arquivada) == (True, False, False)
+    # arquiva aqui: enquanto o celular nao mudar, continua arquivada
+    d.arquivada = True
+    c.arquivada = True
+    p._conferir_arquivadas()
+    assert d.arquivada and c.arquivada
+    cel["5551@s.whatsapp.net"] = False       # desarquivou no celular
+    p._conferir_arquivadas()
+    assert a.arquivada is False
+    banco.fechar()
+
+
+def test_avisos_de_arquivar_e_trancar_do_celular(tmp_path):
+    b = ev.Barramento()
+    banco = Banco(str(tmp_path / "s.db"))
+    p = wa.ProvedorWhatsApp(m.Conta("w1", "whatsapp"), b, banco,
+                            pasta_sessoes=str(tmp_path),
+                            fabrica_cliente=ClienteFalso)
+    c = m.Conversa("w1", "5551@s.whatsapp.net", "A", "whatsapp")
+    p._conversas = {c.id: c}
+
+    def aviso(**acao):
+        return types.SimpleNamespace(JID=jid("5551"),
+                                     Action=types.SimpleNamespace(**acao))
+    p._ao_arquivar(None, aviso(archived=True))
+    p._ao_trancar(None, aviso(locked=True))
+    assert c.arquivada and c.trancada
+    assert p._arquivada_vista[c.id] is True        # a conferencia nao desfaz
+    p._ao_trancar(None, aviso(locked=False))
+    assert not c.trancada
+    p._ao_arquivar(None, types.SimpleNamespace(
+        JID=jid("9999"), Action=types.SimpleNamespace(archived=True)))
+    assert [x.arquivada for x in banco.conversas("w1")] == [True]
+    banco.fechar()

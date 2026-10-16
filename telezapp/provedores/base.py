@@ -100,10 +100,26 @@ class Provedor(ABC):
         de chamadas enxerga; listas vazias se nao houver."""
         return [], []
 
+    def arquivar_conversa(self, conversa_id, arquivar):
+        """Arquiva (ou desarquiva) a conversa na conta do servico. Devolve
+        True se o servico foi avisado; False quando so da para guardar no
+        TeleZapp."""
+        return False
+
     def depurar_conversa(self, conversa_id):
         """Dados do servico sobre a conversa, para o menu Depurar (como o
         nome foi achado, identificadores). Dicionario; vazio se nao houver."""
         return {}
+
+    def contatos_da_conta(self):
+        """[(id, nome, telefone)] da agenda que o servico mantem na conta;
+        vazio por padrao. Leitura local e rapida."""
+        return []
+
+    def id_do_telefone(self, telefone):
+        """Id de conversa de quem tem esse telefone ('+5551...'), ou ''
+        quando o servico nao deixa saber sem consultar a rede."""
+        return ""
 
     def nome_de_participante(self, participante_id):
         """Nome para mostrar de quem aparece num recibo (entregue, lida);

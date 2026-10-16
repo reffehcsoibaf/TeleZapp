@@ -135,6 +135,19 @@ class CodigoPareamento:
 
 
 @dataclass
+class MensagemAtualizada:
+    """Uma mensagem ja conhecida mudou: `motivo` e "reacao" (alguem reagiu ou
+    tirou a reacao), "editada" ou "apagada". `mensagem` ja vem atualizada;
+    `quem` e `emoji` so valem para reacao (emoji vazio: tirou)."""
+    conta_id: str
+    conversa_id: str
+    mensagem: object
+    motivo: str
+    quem: str = ""
+    emoji: str = ""
+
+
+@dataclass
 class EstadoChamada:
     """Uma chamada de voz mudou de estado (ver nucleo.chamadas). `entrante`:
     a chamada veio de fora. `motivo` e `erro` so valem quando encerrada."""

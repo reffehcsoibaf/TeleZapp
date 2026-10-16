@@ -3,6 +3,91 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.15.7
+
+Agenda de contatos própria e menções melhores.
+
+- Filtros da lista de conversas: duas caixas acima da lista (`cx_conta`:
+  todas, serviço e, com 2+ contas do serviço, cada conta; `cx_tipo`: todas,
+  não lidas, pessoais, grupos, canais, arquivadas). `modelos.passa_filtro`,
+  `opcoes_de_conta`, `FILTROS_TIPO`; opção `filtro_conversas` (tipo) e
+  `filtro_conta` (só no config). Alt+4/Alt+5. `Janela.conversas` é só o que
+  passa (mais a aberta); sem nenhuma, a lista avisa.
+- `Conversa.trancada` (WhatsApp "Trancar conversa"; coluna nova): vem do
+  `locked` das conversas do pacote de histórico. Fora de todos os tipos, só
+  no tipo `trancadas`; aviso de mensagem nova sem nome nem conteúdo. O
+  neonize 0.5.2 não repassa o `lockChatAction` e o whatsmeow não o guarda
+  (`chat_settings` só tem mudo, fixada e arquivada): sem estado ao vivo.
+- `Conversa.arquivada` (coluna nova no banco). Telegram: duas buscas
+  (`folder=0` e `folder=1`, a principal não traz as arquivadas) e
+  `arquivar_conversa` (`edit_folder`); item de menu Arquivar/desarquivar
+  (`_arquivar_conversa`; WhatsApp: só local). WhatsApp: o neonize não repassa
+  o aviso de arquivar, mas o whatsmeow grava o estado em `chat_settings`;
+  `_conferir_arquivadas` lê `chat_settings.get_chat_settings` a cada 60 s, no
+  F5 e depois de um pacote de histórico (a 1ª leitura de cada conversa vale;
+  depois só uma mudança do celular conta). Antes: WhatsApp: `archived` do histórico (o desarquivar
+  ao vivo ainda não é tratado). Arquivadas só aparecem no tipo Arquivadas.
+- Opção `mensagens_por_conversa` (Leitura, 50 a 5000, padrão 1200): vira o
+  `LIMITE_MEMORIA` da janela (`_limite_memoria`). `Opcao.numero` é novo: opção
+  numérica digitada (wx.SpinCtrl na janela de configurações; o modelo limita
+  ao intervalo).
+- Tabela `contatos` no banco (`salvar_contato`, `remover_contato`,
+  `contatos`, `nome_de_contato` com cache). `interface/contatos.py` tem o
+  gerenciador (Adicionar, Editar, Remover, Trazer do WhatsApp) e o diálogo
+  "Salvar a pessoa desta conversa". O nome vale nas conversas privadas
+  (`_juntar_conversas`) e no `_nome_contato` do WhatsApp; Telegram: só nas
+  conversas. Nada é gravado na conta (local).
+- Provedor: `contatos_da_conta()` (WhatsApp lê `get_all_contacts`) e
+  `id_do_telefone()`.
+- Menções viram botões "Pessoa: nome" na ordem do Tab. Nome da menção:
+  agenda, pushname visto nas mensagens, participantes do grupo
+  (`_aprender_do_grupo`, 1 consulta por grupo a cada 10 min), autor guardado
+  no banco (`nome_do_remetente`) e nome verificado de empresa.
+
+Edições, mensagens apagadas e reações do WhatsApp deixam de ser descartadas.
+
+- Eram `protocolMessage` e `reactionMessage`, tratadas como "só controle".
+  `_tratar_alteracao` (antes de `converter`) aplica a mudança à mensagem já
+  guardada e publica `MensagemAtualizada` (`reacao`, `editada`, `apagada`).
+- Reação: uma por pessoa (trocar de emoji substitui; texto vazio tira).
+  Guardada em `extras.reacoes` com o jid de quem reagiu. A linha da mensagem
+  ganha "reações: 👍 de Ana" (até 3; com mais, a contagem); os detalhes
+  listam todas. Reação a mensagem minha é falada (opção `falar_reacoes`).
+- Edição: troca o texto e marca `extras.editada`; a linha ganha "(editada)".
+- Apagar para todos: limpa o texto e os links, marca `extras.apagada` e a
+  mensagem passa a ser lida como "mensagem apagada". A mídia já baixada
+  continua no armazém.
+- `modelos.atualizar_extras` muda só as chaves dadas, sem perder links nem
+  botões. Mensagem que não está guardada (anterior ao TeleZapp) é ignorada.
+- Áudio e mensagem de voz: ao começar a tocar, o leitor de tela fala o que é
+  e de quem ("Tocando mensagem de voz de Ana, 12 segundos", mais "a 1,5x"
+  fora da velocidade normal), no tocar sem janela e no player em janela
+  (`modelos.anuncio_reproducao`). Na sequência de áudios, "Próximo áudio" e
+  o anúncio saem numa fala só: antes eram duas e a segunda cortava a
+  primeira (cada fala interrompe a anterior), então não se ouvia de quem era.
+- O anúncio de quem é o áudio que toca é opcional: opção
+  `falar_quem_toca` (padrão ligada), no menu Exibição e em Configurações,
+  Avisos. Desligada, fala só "Tocando" (e a velocidade, se não for a normal).
+  `falar_reacoes` também entrou no menu Exibição, junto das outras.
+- Voz e áudio recebidos já tocados: a linha da mensagem diz "ouvida" ao
+  andar pela lista ("mensagem de voz, 12 segundos, ouvida"). Marcado
+  (`extras.ouvida`, `Janela._marcar_ouvida`) quando começa a tocar no
+  TeleZapp, com ou sem janela, e guardado no banco. Também chega de fora: no
+  WhatsApp, o recibo `PLAYED_SELF` (toquei no celular) vira
+  `MensagemAtualizada(motivo="ouvida")`; no Telegram, `media_unread` falso ao
+  receber. Não entra em citações nem em mensagens minhas; mensagens antigas
+  sem informação não dizem "não ouvida".
+- Áudios em sequência ganhou um terceiro modo, `bloco`: toca os áudios
+  seguidos e para na primeira mensagem que não for áudio (3 áudios, um
+  texto, 2 áudios: toca os 3 e para). `sim` continua tocando todos da
+  conversa, pulando o que não é áudio, e é o padrão; `nao` toca um só.
+- Ainda de fora: votos de enquete (cifrados com a chave da enquete) e o
+  histórico de edições (só o texto mais novo fica).
+- Telegram não foi mexido: o Telethon entrega reações e edições por outros
+  eventos, que ainda não são tratados.
+- Não verificado com um WhatsApp real: os eventos foram montados a partir
+  das definições do neonize.
+
 ## 2026.10.15.6
 
 Mensagens de grupo que o TeleZapp não mostrava.

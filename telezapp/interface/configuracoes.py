@@ -132,7 +132,17 @@ class DialogoConfiguracoes(wx.Dialog):
 
     def _criar_opcao(self, o):
         p = self.painel
-        if o.escolhas:
+        if o.numero:
+            self.lay_painel.Add(wx.StaticText(p, label=o.rotulo + ":"), 0,
+                                wx.LEFT | wx.RIGHT | wx.TOP, 8)
+            c = wx.SpinCtrl(p, min=o.numero[0], max=o.numero[1],
+                            initial=int(self.modelo.valor(o.chave)),
+                            name=o.rotulo)
+            c.Bind(wx.EVT_SPINCTRL, lambda e, o=o, c=c:
+                   self.modelo.definir(o.chave, c.GetValue()))
+            c.Bind(wx.EVT_TEXT, lambda e, o=o, c=c:
+                   self.modelo.definir(o.chave, c.GetValue()))
+        elif o.escolhas:
             escolhas = self.modelo.escolhas(o)
             self.lay_painel.Add(wx.StaticText(p, label=o.rotulo + ":"), 0,
                                 wx.LEFT | wx.RIGHT | wx.TOP, 8)

@@ -13,6 +13,21 @@
 </header>
 <main>
 <section>
+<h2>Versão 2026.10.15.7</h2>
+<ul>
+<li>Filtros na lista de conversas: acima da lista há duas caixas. Uma escolhe o serviço ou a conta (todas as contas, Telegram, WhatsApp e, quando há mais de uma conta do mesmo serviço, cada conta). A outra escolhe o tipo (todas as conversas, não lidas, pessoais, grupos, canais e arquivadas). Alt 4 e Alt 5 levam a elas, e o TeleZapp fala o filtro e quantas conversas sobraram. As conversas arquivadas só aparecem no tipo Arquivadas, e as que você trancou no celular (Trancar conversa do WhatsApp) só no tipo Trancadas no celular; mensagens novas delas são avisadas sem nome nem conteúdo. O estado de trancada chega na sincronização do histórico do WhatsApp, ao parear: trancar ou destrancar no celular depois não é percebido até uma nova sincronização. Menu, Conversa, "Arquivar ou desarquivar a conversa" muda a conversa de lugar: no Telegram vale também na sua conta; no WhatsApp vale só no TeleZapp. O que você arquiva ou desarquiva no celular o TeleZapp acompanha sozinho, conferindo a cada minuto (e com F5). A conversa aberta fica sempre na lista, e o filtro escolhido é lembrado. O tipo também está em Configurações, Leitura.</li>
+<li>Nova configuração, em Leitura: "Mensagens carregadas por conversa" (de 50 a 5000, padrão 1200). Em grupos movimentados, diminuir esse número deixa a abertura da conversa mais rápida; as mensagens antigas continuam guardadas, só não aparecem na lista.</li>
+<li>Contatos: novo submenu Contatos no Menu. "Gerenciar contatos" abre uma lista com Adicionar, Editar, Remover e "Trazer do WhatsApp" (copia os contatos que a sua conta do WhatsApp já tem). O nome que você dá vale nas conversas, nos autores das mensagens do WhatsApp e nas menções. "Salvar a pessoa desta conversa como contato" serve para o Telegram também. Os contatos ficam só no TeleZapp: não aparecem no celular nem na conta.</li>
+<li>Mensagens com pessoas mencionadas: cada pessoa vira um botão "Pessoa: nome" na ordem do Tab, depois dos links. Enter abre a conversa com ela. Nas menções do WhatsApp o TeleZapp procura o nome na sua agenda, nos nomes de perfil vistos nas mensagens, na lista de participantes do grupo e nas mensagens já guardadas.</li>
+<li>Reações do WhatsApp: quando alguém reage a uma mensagem sua, o TeleZapp fala quem reagiu, com qual emoji e a qual mensagem. A reação aparece também na linha da mensagem ("reações: 👍 de Ana") e nos detalhes. Em Configurações, categoria Avisos, dá para desligar a fala.</li>
+<li>Áudios em sequência (Menu, Mídias): novo modo "Tocar só os áudios seguidos, até uma mensagem que não seja áudio". Com três áudios, um texto e mais dois áudios, ele toca os três primeiros e para antes do texto. Os outros dois modos continuam: tocar todos da conversa, ou um só.</li>
+<li>Ao passar pelas mensagens com as setas, uma mensagem de voz ou áudio que você já ouviu é lida com "ouvida" no fim, por exemplo "mensagem de voz, 12 segundos, ouvida". Vale para o que você tocou no TeleZapp e para o que você tocou no celular (WhatsApp) ou em outro aparelho (Telegram).</li>
+<li>Quando um áudio ou uma mensagem de voz começa a tocar, o leitor de tela agora diz o que é e de quem, por exemplo "Tocando mensagem de voz de Ana, 12 segundos". Na sequência de áudios, o "Próximo áudio" e o nome de quem enviou saem juntos, sem um cortar o outro. Esse anúncio pode ser desligado em Menu, Exibição, "Falar de quem é o áudio que toca" (ou em Configurações, Avisos); desligado, o TeleZapp fala só "Tocando".</li>
+<li>Mensagens editadas mostram o texto novo, com "(editada)" no fim. Mensagens que o autor apagou para todos passam a ser lidas como "mensagem apagada".</li>
+<li>Ainda não aparecem os votos de enquete. No Telegram, reações e edições ainda não foram incluídas.</li>
+</ul>
+</section>
+<section>
 <h2>Versão 2026.10.15.6</h2>
 <ul>
 <li>Corrigido: algumas mensagens de grupos do WhatsApp não apareciam no TeleZapp. Acontecia quando quem escrevia tinha acabado de trocar a chave de segurança do grupo, e era justamente a mensagem de quem voltava a falar depois de um tempo. Daqui para a frente elas aparecem. As que já tinham se perdido não voltam.</li>

@@ -19,6 +19,7 @@ import unicodedata
 from dataclasses import dataclass
 
 from telezapp import NOME, VERSAO
+from telezapp.nucleo.modelos import FILTROS_TIPO
 
 log = logging.getLogger("telezapp")
 
@@ -106,6 +107,7 @@ class Opcao:
     padrao: object
     descricao: str
     escolhas: tuple = ()     # vazio: sim ou nao; senao (valor, rotulo)
+    numero: tuple = ()       # (minimo, maximo): numero digitado, sem lista
 
 
 OPCOES = (
@@ -115,6 +117,14 @@ OPCOES = (
           "O leitor de tela fala o autor e o conteúdo de cada mensagem nova."),
     Opcao("confirmar_envio", "Falar mensagem enviada", "Avisos", True,
           "Fala Enviada depois que uma mensagem sai."),
+    Opcao("falar_quem_toca", "Falar de quem é o áudio que toca", "Avisos",
+          True,
+          "Quando um áudio ou mensagem de voz começa a tocar, fala o que é, "
+          "de quem e quanto dura. Desmarcada, só diz Tocando."),
+    Opcao("falar_reacoes", "Falar reações às minhas mensagens", "Avisos",
+          True,
+          "Fala quem reagiu e com qual emoji quando alguém reage a uma "
+          "mensagem sua. Desmarcada, a reação só aparece na mensagem."),
     Opcao("toque_chamada", "Som de chamada", "Avisos", True,
           "Toca um som enquanto uma chamada de voz está tocando para você "
           "ou esperando a outra pessoa atender. Desmarcada, só a fala "
@@ -134,6 +144,21 @@ OPCOES = (
           "mensagens.",
           ((1, "Autor e hora primeiro"), (2, "Conteúdo primeiro"),
            (3, "Autor só quando muda"))),
+    Opcao("filtro_conversas", "Tipo de conversa na lista", "Leitura",
+          "todas",
+          "Mostra na lista principal só as conversas do tipo escolhido. A "
+          "conversa aberta fica sempre na lista. A janela principal tem "
+          "também uma caixa para escolher a conta ou o serviço (Alt 4 vai "
+          "para ela, Alt 5 para esta).",
+          FILTROS_TIPO),
+    Opcao("mensagens_por_conversa", "Mensagens carregadas por conversa",
+          "Leitura", 1200,
+          "Quantas mensagens, no máximo, o TeleZapp mantém na lista ao abrir "
+          "uma conversa. Valores menores abrem a conversa mais depressa; as "
+          "mensagens mais antigas continuam guardadas, mas não aparecem na "
+          "lista. Se houver mais mensagens não lidas que este número, o "
+          "marcador de não lidas pode ficar de fora. De 50 a 5000.",
+          numero=(50, 5000)),
     Opcao("falar_descricoes", "Falar a descrição de cada opção",
           "Leitura", True,
           "Na janela de configurações, o TeleZapp fala a explicação de cada "
@@ -146,9 +171,14 @@ OPCOES = (
           (("sem", "Só tocar, sem janela"),
            ("janela", "Abrir a janela do player"))),
     Opcao("audio_sequencia", "Áudios em sequência", "Mídias", "sim",
-          "Quando um áudio ou mensagem de voz termina (sem janela), toca o "
-          "próximo áudio da conversa, baixando antes se preciso. Esc para.",
-          (("sim", "Tocar os áudios em sequência"),
+          "O que acontece quando um áudio ou mensagem de voz termina (sem "
+          "janela). Todos da conversa: toca o próximo áudio, pulando as "
+          "mensagens que não são áudio. Só os seguidos: toca os áudios um "
+          "depois do outro e para na primeira mensagem que não for áudio, "
+          "como um texto ou uma foto. Baixa antes, se preciso. Esc para.",
+          (("sim", "Tocar todos os áudios da conversa em sequência"),
+           ("bloco", "Tocar só os áudios seguidos, até uma mensagem que "
+                     "não seja áudio"),
            ("nao", "Parar quando o áudio terminar"))),
     Opcao("audio_passo_velocidade", "Passo da velocidade do áudio", "Mídias",
           0.25,

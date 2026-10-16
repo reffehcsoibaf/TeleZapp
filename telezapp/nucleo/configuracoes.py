@@ -48,6 +48,9 @@ class ModeloConfiguracoes:
     def definir(self, chave, valor):
         """Marca o valor como pendente; voltar ao atual desfaz a mudanca.
         Trocar o passo leva a velocidade ao valor mais proximo permitido."""
+        opcao = next((o for o in config.OPCOES if o.chave == chave), None)
+        if opcao is not None and opcao.numero:
+            valor = self.limitar(opcao, valor)
         if valor == self.cfg.get(chave):
             self.pendentes.pop(chave, None)
         else:
@@ -56,6 +59,15 @@ class ModeloConfiguracoes:
             atual = self.valor("audio_velocidade")
             self.definir("audio_velocidade",
                          vel.ajustar(atual, vel.passo_valido(valor)))
+
+    @staticmethod
+    def limitar(opcao, valor):
+        """Numero dentro de (minimo, maximo); lixo vira o padrao."""
+        try:
+            valor = int(valor)
+        except (TypeError, ValueError):
+            return opcao.padrao
+        return max(opcao.numero[0], min(opcao.numero[1], valor))
 
     def escolhas(self, opcao):
         """Escolhas da opcao; as velocidades dependem do passo pendente."""

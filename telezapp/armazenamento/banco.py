@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS conversas (
     nao_lidas INTEGER NOT NULL DEFAULT 0,
     data REAL NOT NULL DEFAULT 0,
     lidas_ate INTEGER NOT NULL DEFAULT 0,
+    arquivada INTEGER NOT NULL DEFAULT 0,
+    trancada INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (conta_id, id)
 );
 CREATE TABLE IF NOT EXISTS mensagens (
@@ -101,6 +103,14 @@ CREATE TABLE IF NOT EXISTS midias (
     data REAL NOT NULL DEFAULT 0,
     PRIMARY KEY (conta_id, conversa_id, mensagem_id)
 );
+-- Agenda propria do TeleZapp: o nome que a pessoa deu a cada contato.
+CREATE TABLE IF NOT EXISTS contatos (
+    conta_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    nome TEXT NOT NULL,
+    telefone TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (conta_id, id)
+);
 -- Estrutura original das mensagens, so com o modo de depuracao ligado.
 CREATE TABLE IF NOT EXISTS depuracao (
     conta_id TEXT NOT NULL,
@@ -122,6 +132,7 @@ class Banco:
         self.caminho = caminho
         self._trava = threading.Lock()
         self.depuracao = False        # modo de depuracao (ver guardar_depuracao)
+        self._agenda = None           # cache de contatos: (conta, id) -> nome
         self._con = sqlite3.connect(caminho, check_same_thread=False)
         self._con.execute("PRAGMA journal_mode=WAL")
         self._con.execute("PRAGMA synchronous=NORMAL")
@@ -132,6 +143,14 @@ class Banco:
 
     def _atualizar_esquema(self):
         """Bancos de versoes anteriores ganham as colunas novas."""
+        conv = {linha[1] for linha in self._con.execute(
+            "PRAGMA table_info(conversas)")}
+        if "arquivada" not in conv:
+            self._con.execute("ALTER TABLE conversas ADD COLUMN arquivada "
+                              "INTEGER NOT NULL DEFAULT 0")
+        if "trancada" not in conv:
+            self._con.execute("ALTER TABLE conversas ADD COLUMN trancada "
+                              "INTEGER NOT NULL DEFAULT 0")
         colunas = {linha[1] for linha in self._con.execute(
             "PRAGMA table_info(mensagens)")}
         if "remetente" not in colunas:
@@ -202,9 +221,50 @@ class Banco:
             self._con.execute("DELETE FROM conversas WHERE conta_id=?",
                               (conta_id,))
             for tabela in ("mensagens", "recibos", "status", "midias",
-                           "fichas", "posicoes"):
+                           "fichas", "posicoes", "contatos"):
                 self._con.execute(
                     "DELETE FROM %s WHERE conta_id=?" % tabela, (conta_id,))
+            self._agenda = None
+
+    # ------------------------------------------------------------- contatos
+    def contatos(self, conta_id=None):
+        """[(conta_id, id, nome, telefone)] da agenda, por nome."""
+        sql = "SELECT conta_id, id, nome, telefone FROM contatos"
+        args = ()
+        if conta_id is not None:
+            sql, args = sql + " WHERE conta_id=?", (conta_id,)
+        with self._trava:
+            linhas = self._con.execute(
+                sql + " ORDER BY nome COLLATE NOCASE", args).fetchall()
+        return [tuple(l) for l in linhas]
+
+    def salvar_contato(self, conta_id, id_, nome, telefone=""):
+        with self._trava, self._con:
+            self._con.execute(
+                "INSERT OR REPLACE INTO contatos VALUES (?,?,?,?)",
+                (conta_id, id_, nome, telefone))
+            self._agenda = None
+
+    def remover_contato(self, conta_id, id_):
+        with self._trava, self._con:
+            self._con.execute(
+                "DELETE FROM contatos WHERE conta_id=? AND id=?",
+                (conta_id, id_))
+            self._agenda = None
+
+    def nome_de_contato(self, conta_id, *ids):
+        """Nome que a pessoa deu ao contato, pelo primeiro id conhecido;
+        vazio se nao houver. Usa um cache (chamado a cada nome mostrado)."""
+        with self._trava:
+            if self._agenda is None:
+                self._agenda = {
+                    (c, i): n for c, i, n in self._con.execute(
+                        "SELECT conta_id, id, nome FROM contatos")}
+            for i in ids:
+                nome = self._agenda.get((conta_id, i))
+                if nome:
+                    return nome
+        return ""
 
     # ------------------------------------------------------------ mensagens
     def salvar_mensagens(self, mensagens):
@@ -223,6 +283,21 @@ class Banco:
                 % ", ".join(_CAMPOS_MSG),
                 (conta_id, conversa_id, limite)).fetchall()
         return [_msg(l) for l in reversed(linhas)]
+
+    def nome_do_remetente(self, conta_id, remetentes):
+        """Nome (autor) mais recente com que alguem dessa lista de enderecos
+        aparece nas mensagens guardadas, sem contar telefones soltos."""
+        remetentes = [r for r in remetentes if r]
+        if not remetentes:
+            return ""
+        with self._trava:
+            linha = self._con.execute(
+                "SELECT autor FROM mensagens WHERE conta_id=? AND minha=0 "
+                "AND autor<>'' AND autor NOT LIKE '+%%' AND autor NOT LIKE "
+                "'%%@%%' AND remetente IN (%s) ORDER BY data DESC LIMIT 1"
+                % ", ".join("?" * len(remetentes)),
+                (conta_id, *remetentes)).fetchone()
+        return linha[0] if linha else ""
 
     def mensagem(self, conta_id, conversa_id, mensagem_id):
         with self._trava:

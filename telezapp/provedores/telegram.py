@@ -186,7 +186,12 @@ def converter(msg, conta_id, conversa_id, lidas_ate=0, nome_padrao=""):
         nome_arquivo=nome_arquivo, tamanho=tamanho, estado=estado,
         resposta_a=str(resposta_a) if resposta_a else "")
     links, botoes, mencoes = extras_do_telegram(msg)
-    return m.guardar_extras(nova, links, botoes, mencoes)
+    m.guardar_extras(nova, links, botoes, mencoes)
+    # voz ou audio que o Telegram diz ja ter sido tocado (em outro aparelho)
+    if not minha and tipo in (m.VOZ, m.AUDIO) and \
+            getattr(msg, "media_unread", None) is False:
+        m.atualizar_extras(nova, ouvida=True)
+    return nova
 
 
 def tipo_da_conversa(dialogo):
@@ -395,22 +400,35 @@ class ProvedorTelegram(Provedor):
     async def _atualizar_conversas(self):
         inicio = time.perf_counter()
         lista = []
-        async for d in self.cliente.iter_dialogs(limit=LIMITE_CONVERSAS,
-                                                 archived=False):
-            cid = str(d.id)
-            self._entidades[cid] = d.input_entity
-            c = m.Conversa(
-                conta_id=self.conta.id, id=cid, nome=d.name or "Sem nome",
-                servico=self.servico, tipo=tipo_da_conversa(d),
-                nao_lidas=d.unread_count or 0,
-                data=d.date.timestamp() if d.date else 0.0,
-                lidas_ate=getattr(d.dialog, "read_outbox_max_id", 0) or 0)
-            self._conversas[cid] = c
-            lista.append(c)
+        # O Telegram so devolve a pasta principal (0) se nao se pede a
+        # pasta de arquivadas (1): sao duas buscas.
+        for pasta in (0, 1):
+            async for d in self.cliente.iter_dialogs(
+                    limit=LIMITE_CONVERSAS, folder=pasta):
+                cid = str(d.id)
+                self._entidades[cid] = d.input_entity
+                c = m.Conversa(
+                    conta_id=self.conta.id, id=cid,
+                    nome=d.name or "Sem nome",
+                    servico=self.servico, tipo=tipo_da_conversa(d),
+                    nao_lidas=d.unread_count or 0,
+                    data=d.date.timestamp() if d.date else 0.0,
+                    lidas_ate=getattr(d.dialog, "read_outbox_max_id", 0) or 0,
+                    arquivada=pasta == 1)
+                self._conversas[cid] = c
+                lista.append(c)
         self.banco.salvar_conversas(lista)
         log.info("conversas: %d em %.2fs", len(lista),
                  time.perf_counter() - inicio)
         self.barramento.publicar(ev.ConversasAtualizadas(self.conta.id, lista))
+
+    def arquivar_conversa(self, conversa_id, arquivar):
+        """Move a conversa para a pasta Arquivadas (ou de volta) na conta."""
+        entidade = self._entidades.get(conversa_id)
+        if entidade is None:
+            return False
+        self._agendar(self.cliente.edit_folder(entidade, 1 if arquivar else 0))
+        return True
 
     async def _resolver_mencoes(self, mensagens):
         """Acha o id e o nome de quem foi mencionado por @usuario (com cache;
