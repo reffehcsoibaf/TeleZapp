@@ -1237,9 +1237,6 @@ class ProvedorWhatsApp(Provedor):
             with self._trava:
                 if info.ID in self._vistas:
                     return
-                self._vistas.add(info.ID)
-                if len(self._vistas) > MAX_GUARDADAS:
-                    self._vistas = set(list(self._vistas)[-MAX_GUARDADAS // 2:])
             origem = info.MessageSource
             grupo = bool(origem.IsGroup)
             cid = self._id_da_conversa(origem.Chat)
@@ -1249,7 +1246,17 @@ class ProvedorWhatsApp(Provedor):
                     origem.Sender, info.Pushname or nome_verificado(info))
             msg, remetente = converter(evento, self.conta.id, cid, autor)
             if msg is None:
+                # So controle (chave de grupo, reacao...). O ID NAO entra em
+                # _vistas: num grupo, quem troca a chave de envio manda a
+                # chave e o texto no mesmo pacote, e o whatsmeow entrega dois
+                # eventos com o mesmo ID; o do texto vem depois.
                 return
+            with self._trava:
+                if info.ID in self._vistas:      # outro evento ja tratou
+                    return
+                self._vistas.add(info.ID)
+                if len(self._vistas) > MAX_GUARDADAS:
+                    self._vistas = set(list(self._vistas)[-MAX_GUARDADAS // 2:])
             self._enriquecer_mencoes(msg)
             if self.banco.depuracao:
                 self.banco.guardar_depuracao(

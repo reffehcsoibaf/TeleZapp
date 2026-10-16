@@ -1218,3 +1218,28 @@ def test_enviar_arquivo_sem_conexao(amb, tmp_path):
     pdf.write_bytes(b"%PDF")
     amb.p.enviar_arquivo("5551@s.whatsapp.net", envio.preparar(str(pdf)))
     assert esperar(amb.fila, ev.EnvioFalhou).motivo == "sem conexão"
+
+
+def test_mensagem_de_grupo_com_chave_e_conteudo_no_mesmo_pacote(amb):
+    """Quando alguem fala no grupo depois de trocar a chave de envio, o
+    pacote traz duas partes cifradas (a chave e o conteudo) e o whatsmeow
+    entrega DOIS eventos com o mesmo ID: primeiro so a chave, depois o texto.
+    Marcar o ID como visto antes de ver se ha conteudo descartava o texto."""
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    chave = E.Message(senderKeyDistributionMessage=(
+        E.SenderKeyDistributionMessage(groupID="g")))
+    kw = dict(chat="120363000000000001", grupo=True, remetente="5551977776666")
+
+    amb.f["Message"](amb.c, evento("G1", chave, **kw))
+    amb.f["Message"](amb.c, evento("G1", E.Message(conversation="Oi grupo"),
+                                   **kw))
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.mensagem.id == "G1" and nova.mensagem.texto == "Oi grupo"
+
+    # o conteudo repetido continua sendo ignorado (nao duplica)
+    amb.f["Message"](amb.c, evento("G1", E.Message(conversation="Oi grupo"),
+                                   **kw))
+    assert amb.banco.conversas("w1")[0].nao_lidas == 1
+    assert len([x for x in amb.banco.mensagens("w1", nova.mensagem.conversa_id,
+                                               50) if x.id == "G1"]) == 1
