@@ -3,9 +3,10 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
-## 2026.10.15.7
+## 2026.10.16.0
 
-Agenda de contatos própria e menções melhores.
+Agenda de contatos, filtros, arquivadas e trancadas, privacidade e nova
+mensagem.
 
 - Filtros da lista de conversas: duas caixas acima da lista (`cx_conta`:
   todas, serviço e, com 2+ contas do serviço, cada conta; `cx_tipo`: todas,
@@ -79,6 +80,8 @@ Agenda de contatos própria e menções melhores.
   agenda, pushname visto nas mensagens, participantes do grupo
   (`_aprender_do_grupo`, 1 consulta por grupo a cada 10 min), autor guardado
   no banco (`nome_do_remetente`) e nome verificado de empresa.
+
+## 2026.10.15.7
 
 Edições, mensagens apagadas e reações do WhatsApp deixam de ser descartadas.
 
