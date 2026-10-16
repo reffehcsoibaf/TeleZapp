@@ -16,13 +16,15 @@ from telezapp.nucleo.configuracoes import (CATEGORIA_BUSCA,
 
 class DialogoConfiguracoes(wx.Dialog):
     def __init__(self, pai, cfg, aplicador, categoria_inicial=None,
-                 fala=None):
+                 fala=None, privacidade=None):
         """aplicador(chave, valor) executa uma mudanca (efeitos incluidos)."""
         super().__init__(pai, title="Configurações do TeleZapp",
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.modelo = ModeloConfiguracoes(cfg)
         self.aplicador = aplicador
         self.fala = fala
+        # contas do WhatsApp e leitura da privacidade delas (ver janela)
+        self.privacidade = privacidade
         self._espera = None          # fala da descricao agendada
         self._opcao_em_foco = None
         self.Bind(wx.EVT_CHAR_HOOK, self._ao_tecla)
@@ -127,6 +129,9 @@ class DialogoConfiguracoes(wx.Dialog):
                 0, wx.ALL, 8)
         for o in opcoes:
             self._criar_opcao(o)
+        if categoria == "Privacidade" and self.privacidade is not None \
+                and not self.modelo.busca.strip():
+            self._criar_privacidade_conta()
         self.painel.Layout()
         self.painel.FitInside()
 
@@ -155,12 +160,140 @@ class DialogoConfiguracoes(wx.Dialog):
             c = wx.CheckBox(p, label=o.rotulo, name=o.rotulo)
             c.SetValue(bool(self.modelo.valor(o.chave)))
             c.Bind(wx.EVT_CHECKBOX, lambda e, o=o, c=c:
-                   self.modelo.definir(o.chave, c.GetValue()))
+                   self._ao_marcar(o, c.GetValue()))
         # A descricao nao e um texto da janela (o NVDA leria todos ao abrir):
         # e falada pelo programa pouco depois do foco, e F1 repete.
         c.Bind(wx.EVT_SET_FOCUS, lambda e, o=o: self._ao_focar(e, o))
         self.lay_painel.Add(c, 0, wx.ALL, 8)
         self.controles[o.chave] = c
+        if o.chave == "trancadas_exigir_codigo":
+            self._criar_campos_codigo()
+
+    # ------------------------------------ privacidade das contas
+    def _criar_privacidade_conta(self):
+        """Escolhas de privacidade da conta (ficam no servico, nao no
+        TeleZapp), lidas ao abrir a categoria. Com mais de uma conta, uma
+        caixa escolhe qual; cada servico mostra os campos que tem."""
+        from telezapp.nucleo import privacidade_conta as pw
+        p = self.painel
+        contas = self.privacidade.contas()
+        self.lay_painel.Add(wx.StaticText(
+            p, label="Privacidade das contas (WhatsApp e Telegram)"), 0,
+            wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        if not contas:
+            self.lay_painel.Add(wx.StaticText(
+                p, label="Conecte uma conta do WhatsApp ou do Telegram para "
+                         "ver e mudar estas opções."), 0, wx.ALL, 8)
+            return
+        self._priv_contas = contas
+        self._priv_conta = contas[0][0]
+        if len(contas) > 1:
+            self.lay_painel.Add(wx.StaticText(p, label="Conta:"), 0,
+                                wx.LEFT | wx.RIGHT | wx.TOP, 8)
+            sel = wx.Choice(p, choices=[r for _, r, _ in contas],
+                            name="Conta")
+            sel.SetSelection(0)
+            sel.Bind(wx.EVT_CHOICE, lambda e, s=sel: self._trocar_conta_priv(
+                self._priv_contas[s.GetSelection()][0]))
+            self.lay_painel.Add(sel, 0, wx.ALL, 8)
+        self._priv_caixas = {}
+        for campo in pw.CAMPOS:
+            rot = wx.StaticText(p, label=campo.rotulo + ":")
+            c = wx.Choice(p, choices=[r for _, r in campo.opcoes],
+                          name=campo.rotulo)
+            c.Bind(wx.EVT_CHOICE, lambda e, k=campo.nome, c=c:
+                   self.modelo.priv_definir(self._priv_conta, k,
+                                            c.GetSelection()))
+            self.lay_painel.Add(rot, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
+            self.lay_painel.Add(c, 0, wx.ALL, 8)
+            self._priv_caixas[campo.nome] = (rot, c)
+        self._priv_rot_status = wx.StaticText(
+            p, label="Quem pode ver meu status (só leitura; para mudar, "
+                     "use o celular):")
+        self._priv_status = wx.TextCtrl(
+            p, name="Quem pode ver meu status", style=wx.TE_READONLY,
+            size=(300, -1))
+        self.lay_painel.Add(self._priv_rot_status, 0,
+                            wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        self.lay_painel.Add(self._priv_status, 0, wx.ALL, 8)
+        self._trocar_conta_priv(self._priv_conta)
+
+    def _trocar_conta_priv(self, conta_id):
+        """Mostra nas caixas o que a conta tem (lido agora do servico) e
+        so os campos que o servico dela oferece."""
+        from telezapp.nucleo import privacidade_conta as pw
+        self._priv_conta = conta_id
+        lido = self.privacidade.ler(conta_id) or {}
+        valores = lido.get("valores")
+        campos = {c.nome: c for c in pw.campos_do(lido.get("servico"))}
+        for nome, (rot, caixa) in self._priv_caixas.items():
+            visivel = nome in campos
+            rot.Show(visivel)
+            caixa.Show(visivel)
+            if visivel:
+                rot.SetLabel(campos[nome].rotulo + ":")
+        tem_status = bool(lido.get("status"))
+        self._priv_rot_status.Show(tem_status)
+        self._priv_status.Show(tem_status)
+        if pw.ilegivel(valores):
+            for rot, c in self._priv_caixas.values():
+                c.Enable(False)
+            self._priv_rot_status.Show(True)
+            self._priv_status.Show(True)
+            self._priv_status.SetValue("Não consegui ler a privacidade desta "
+                                       "conta agora.")
+            self.painel.Layout()
+            return
+        self.modelo.priv_carregado[conta_id] = valores
+        escolhido = self.modelo.priv_escolhido.get(conta_id, {})
+        for nome, campo in campos.items():
+            caixa = self._priv_caixas[nome][1]
+            caixa.Enable(True)
+            i = escolhido.get(nome, pw.indice(campo, valores.get(nome)))
+            if i >= 0:
+                caixa.SetSelection(i)
+        self._priv_status.SetValue(lido.get("status") or "")
+        self.painel.Layout()
+        self.painel.FitInside()
+
+    # ------------------------------------------- codigo das trancadas
+    def _criar_campos_codigo(self):
+        """Campos do codigo secreto, logo depois da caixa: o codigo atual
+        (se ja existe) e o novo, duas vezes. Os novos so aparecem com a
+        caixa marcada."""
+        p = self.painel
+        guardado = bool(self.modelo.cfg.get("codigo_trancadas"))
+        self.campos_codigo = {}
+        for campo, rotulo, existe in (
+                ("atual", "Código atual", guardado),
+                ("novo", "Novo código (4 a 12 números)", True),
+                ("repita", "Repita o novo código", True)):
+            rot = wx.StaticText(p, label=rotulo + ":")
+            ctrl = wx.TextCtrl(p, name=rotulo, style=wx.TE_PASSWORD,
+                               size=(240, -1))
+            ctrl.SetValue(self.modelo.codigo[campo])
+            ctrl.Bind(wx.EVT_TEXT, lambda e, k=campo, c=ctrl:
+                      self.modelo.definir_codigo(k, c.GetValue()))
+            self.lay_painel.Add(rot, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
+            self.lay_painel.Add(ctrl, 0, wx.ALL, 8)
+            self.campos_codigo[campo] = (rot, ctrl, existe)
+        self._mostrar_campos_codigo()
+
+    def _mostrar_campos_codigo(self):
+        marcada = bool(self.modelo.valor("trancadas_exigir_codigo"))
+        for campo, (rot, ctrl, existe) in self.campos_codigo.items():
+            # o atual aparece sempre que ha codigo (ele e pedido tambem para
+            # desligar); os novos, so com a exigencia marcada
+            visivel = existe if campo == "atual" else marcada
+            rot.Show(visivel)
+            ctrl.Show(visivel)
+        self.painel.Layout()
+        self.painel.FitInside()
+
+    def _ao_marcar(self, opcao, valor):
+        self.modelo.definir(opcao.chave, valor)
+        if opcao.chave == "trancadas_exigir_codigo":
+            self._mostrar_campos_codigo()
 
     def _ao_focar(self, evento, opcao):
         evento.Skip()
@@ -192,8 +325,22 @@ class DialogoConfiguracoes(wx.Dialog):
 
     # ------------------------------------------------------------ botoes
     def _aplicar(self):
+        """False (e nada aplicado) se o codigo secreto esta errado."""
+        erro = self.modelo.erro_codigo()
+        if erro:
+            if self.fala is not None:
+                self.fala.falar(erro, interromper=True)
+            else:
+                wx.MessageBox(erro, "Configurações", wx.OK | wx.ICON_WARNING,
+                              self)
+            campos = getattr(self, "campos_codigo", {})
+            alvo = campos.get("atual" if "atual" in erro else "novo")
+            if alvo is not None:
+                alvo[1].SetFocus()
+            return False
         self.modelo.aplicar(self.aplicador)
+        return True
 
     def _ao_ok(self, evento):
-        self._aplicar()
-        self.EndModal(wx.ID_OK)
+        if self._aplicar():
+            self.EndModal(wx.ID_OK)

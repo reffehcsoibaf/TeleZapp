@@ -19,7 +19,6 @@ import unicodedata
 from dataclasses import dataclass
 
 from telezapp import NOME, VERSAO
-from telezapp.nucleo.modelos import FILTROS_TIPO
 
 log = logging.getLogger("telezapp")
 
@@ -113,22 +112,32 @@ class Opcao:
 OPCOES = (
     Opcao("som", "Som ao receber mensagem", "Avisos", True,
           "Toca um som curto quando chega uma mensagem nova."),
-    Opcao("falar_novas", "Falar mensagens novas", "Avisos", True,
+    Opcao("falar_novas", "Falar mensagens novas", "Avisos", False,
           "O leitor de tela fala o autor e o conteúdo de cada mensagem nova."),
-    Opcao("confirmar_envio", "Falar mensagem enviada", "Avisos", True,
+    Opcao("confirmar_envio", "Falar mensagem enviada", "Avisos", False,
           "Fala Enviada depois que uma mensagem sai."),
     Opcao("falar_quem_toca", "Falar de quem é o áudio que toca", "Avisos",
-          True,
+          False,
           "Quando um áudio ou mensagem de voz começa a tocar, fala o que é, "
-          "de quem e quanto dura. Desmarcada, só diz Tocando."),
+          "de quem e quanto dura. Desmarcada, só diz Tocando. Vale para o "
+          "primeiro áudio; dentro da sequência valem as opções da categoria "
+          "Mídias."),
     Opcao("falar_reacoes", "Falar reações às minhas mensagens", "Avisos",
-          True,
+          False,
           "Fala quem reagiu e com qual emoji quando alguém reage a uma "
           "mensagem sua. Desmarcada, a reação só aparece na mensagem."),
     Opcao("toque_chamada", "Som de chamada", "Avisos", True,
           "Toca um som enquanto uma chamada de voz está tocando para você "
           "ou esperando a outra pessoa atender. Desmarcada, só a fala "
           "avisa."),
+    Opcao("trancadas_exigir_codigo",
+          "Esconder as conversas trancadas atrás de um código secreto",
+          "Privacidade", True,
+          "As conversas que você trancou no celular só aparecem depois que "
+          "você digita, no campo de busca de conversas, o código secreto "
+          "que definiu em Menu, Conversa, Código secreto das conversas "
+          "trancadas. Sem código definido elas ficam escondidas. Desmarcada, "
+          "o tipo Trancadas no celular aparece sempre."),
     Opcao("depuracao", "Modo de depuração", "Avançado", False,
           "Guarda, no seu computador, a estrutura original das últimas 500 "
           "mensagens do WhatsApp para o menu Depurar mostrar. Contém o texto "
@@ -144,13 +153,6 @@ OPCOES = (
           "mensagens.",
           ((1, "Autor e hora primeiro"), (2, "Conteúdo primeiro"),
            (3, "Autor só quando muda"))),
-    Opcao("filtro_conversas", "Tipo de conversa na lista", "Leitura",
-          "todas",
-          "Mostra na lista principal só as conversas do tipo escolhido. A "
-          "conversa aberta fica sempre na lista. A janela principal tem "
-          "também uma caixa para escolher a conta ou o serviço (Alt 4 vai "
-          "para ela, Alt 5 para esta).",
-          FILTROS_TIPO),
     Opcao("mensagens_por_conversa", "Mensagens carregadas por conversa",
           "Leitura", 1200,
           "Quantas mensagens, no máximo, o TeleZapp mantém na lista ao abrir "
@@ -194,6 +196,36 @@ OPCOES = (
           tuple((v, ("%g" % v).replace(".", ",") + "x") for v in (
               0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75,
               3.0))),
+    Opcao("seq_falar_proximo", "Na sequência de áudios, falar Próximo áudio",
+          "Mídias", False,
+          "A cada áudio que começa na sequência, fala Próximo áudio antes "
+          "do resto. Só vale quando um áudio toca depois do outro; o "
+          "primeiro segue a opção Falar de quem é o áudio que toca."),
+    Opcao("seq_falar_tipo",
+          "Na sequência de áudios, falar se é mensagem de voz ou áudio",
+          "Mídias", False,
+          "Fala Tocando mensagem de voz, ou Tocando áudio, a cada áudio da "
+          "sequência."),
+    Opcao("seq_falar_quem", "Na sequência de áudios, falar de quem é",
+          "Mídias", False,
+          "Fala o nome de quem enviou cada áudio da sequência. Em áudio "
+          "seu, fala seu ou sua."),
+    Opcao("seq_falar_duracao", "Na sequência de áudios, falar a duração",
+          "Mídias", False,
+          "Fala quanto dura cada áudio da sequência, por exemplo 12 "
+          "segundos."),
+    Opcao("seq_falar_velocidade",
+          "Na sequência de áudios, falar a velocidade",
+          "Mídias", False,
+          "Fala a velocidade, por exemplo a 1,5x, quando ela não é a "
+          "normal. Desmarcando todas as opções da sequência, nada é falado "
+          "entre um áudio e outro."),
+    Opcao("seq_falar_fim", "Na sequência de áudios, falar Fim da sequência",
+          "Mídias", False,
+          "Quando o último áudio da sequência termina e não há outro para "
+          "tocar, fala Fim da sequência. Só vale se pelo menos dois áudios "
+          "tocaram em sequência; um áudio sozinho não anuncia nada. "
+          "Interromper o áudio com Esc também não anuncia."),
     Opcao("midias_baixar", "Quando baixar as mídias", "Mídias", "demanda",
           "Sob demanda baixa só quando você abre a mídia. Automático baixa "
           "ao receber, até o limite escolhido.",
@@ -235,6 +267,8 @@ PADROES.update({
     "chamada_saida": "",         # nome da saida de som das chamadas
     "telegram_api_id": 0,
     "telegram_api_hash": "",
+    "filtro_conversas": "todas",   # tipo escolhido na janela principal
+    "filtro_conta": "todas",       # servico ou conta escolhido nela
 })
 
 

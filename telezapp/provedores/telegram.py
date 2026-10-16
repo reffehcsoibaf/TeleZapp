@@ -17,7 +17,7 @@ from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import modelos as m
 from telezapp.provedores.base import (PEDIR_CODIGO, PEDIR_SENHA,
                                       PEDIR_TELEFONE, DownloadCancelado,
-                                      ErroMidia, Provedor)
+                                      ErroMidia, ErroPrivacidade, Provedor)
 
 log = logging.getLogger("telezapp.telegram")
 
@@ -194,6 +194,39 @@ def converter(msg, conta_id, conversa_id, lidas_ate=0, nome_padrao=""):
     return nova
 
 
+# --------------------------------------------------------- privacidade
+_COM_EXCECOES = ("PrivacyValueAllowUsers", "PrivacyValueDisallowUsers",
+                 "PrivacyValueAllowChatParticipants",
+                 "PrivacyValueDisallowChatParticipants",
+                 "PrivacyValueAllowPremium", "PrivacyValueAllowBots",
+                 "PrivacyValueDisallowBots")
+
+
+def valor_das_regras(regras):
+    """all, contacts ou none, conforme as regras de privacidade do Telegram;
+    None quando ha excecoes por pessoa ou grupo (so o aplicativo as edita)
+    ou o valor e desconhecido."""
+    nomes = [type(r).__name__ for r in regras or ()]
+    if any(n in _COM_EXCECOES for n in nomes):
+        return None
+    if "PrivacyValueAllowAll" in nomes:
+        return "all"
+    if "PrivacyValueAllowContacts" in nomes:
+        return "contacts"
+    if "PrivacyValueDisallowAll" in nomes:
+        return "none"
+    return None
+
+
+# campo -> tipo da chave de privacidade do Telegram
+CHAVES_PRIVACIDADE = {"last": "InputPrivacyKeyStatusTimestamp",
+                      "status": "InputPrivacyKeyAbout",
+                      "groupadd": "InputPrivacyKeyChatInvite"}
+_REGRA_DO_VALOR = {"all": "InputPrivacyValueAllowAll",
+                   "contacts": "InputPrivacyValueAllowContacts",
+                   "none": "InputPrivacyValueDisallowAll"}
+
+
 def tipo_da_conversa(dialogo):
     if getattr(dialogo, "is_channel", False) and not \
             getattr(dialogo, "is_group", False):
@@ -262,6 +295,104 @@ class ProvedorTelegram(Provedor):
         except Exception:
             log.exception("erro no provedor do Telegram")
             self._avisar("Erro no Telegram. Os detalhes estão no log.")
+
+    def contatos_da_conta(self):
+        """[(id, nome, telefone)] dos contatos salvos na conta do Telegram
+        (os mesmos que o aplicativo mostra em Contatos)."""
+        try:
+            return self._executar(self._ler_contatos())
+        except Exception:
+            log.info("não consegui ler os contatos do Telegram")
+            return []
+
+    async def _ler_contatos(self):
+        from telethon.tl import functions
+        r = await self.cliente(functions.contacts.GetContactsRequest(hash=0))
+        achados = []
+        for u in getattr(r, "users", None) or []:
+            if getattr(u, "bot", False) or getattr(u, "deleted", False):
+                continue
+            nome = nome_de(u)
+            if not nome:
+                continue
+            fone = getattr(u, "phone", "") or ""
+            achados.append((str(u.id), nome, "+" + fone if fone else ""))
+        return achados
+
+    def resolver_destinatario(self, texto):
+        """@usuario, telefone de contato ou id: acha a pessoa no Telegram."""
+        try:
+            return self._executar(self._resolver_destinatario(texto))
+        except Exception:
+            log.info("não achei o destinatário no Telegram")
+            return None
+
+    async def _resolver_destinatario(self, texto):
+        from telethon import utils
+        entidade = await self.cliente.get_entity(texto)
+        cid = str(utils.get_peer_id(entidade))
+        self._entidades[cid] = await self.cliente.get_input_entity(entidade)
+        return cid, nome_de(entidade)
+
+    # ------------------------------------------------------ privacidade
+    def _executar(self, corotina, espera=20):
+        """Roda no loop do Telegram e devolve o resultado (ou levanta o
+        erro), sem o aviso generico de _protegido."""
+        if self._loop is None or self._loop.is_closed():
+            corotina.close()
+            raise ErroPrivacidade("A conta do Telegram não está conectada.")
+        return asyncio.run_coroutine_threadsafe(
+            corotina, self._loop).result(timeout=espera)
+
+    def privacidade(self):
+        try:
+            return self._executar(self._ler_privacidade())
+        except Exception:
+            log.exception("não consegui ler a privacidade do Telegram")
+            return None
+
+    async def _ler_privacidade(self):
+        from telethon.tl import functions, types
+        valores = {}
+        for campo, nome in CHAVES_PRIVACIDADE.items():
+            tipo = getattr(types, nome, None)
+            if tipo is None:
+                continue
+            r = await self.cliente(functions.account.GetPrivacyRequest(
+                tipo()))
+            valores[campo] = valor_das_regras(r.rules)
+        g = await self.cliente(
+            functions.account.GetGlobalPrivacySettingsRequest())
+        valores["readreceipts"] = "none" if getattr(
+            g, "hide_read_marks", False) else "all"
+        return valores
+
+    def definir_privacidade(self, campo, valor):
+        try:
+            self._executar(self._gravar_privacidade(campo, valor))
+        except ErroPrivacidade:
+            raise
+        except Exception as e:
+            if "PREMIUM" in str(e).upper():
+                raise ErroPrivacidade(
+                    "Esta opção exige Telegram Premium.") from e
+            raise
+
+    async def _gravar_privacidade(self, campo, valor):
+        from telethon.tl import functions, types
+        if campo == "readreceipts":
+            atual = await self.cliente(
+                functions.account.GetGlobalPrivacySettingsRequest())
+            atual.hide_read_marks = valor == "none"
+            await self.cliente(functions.account.SetGlobalPrivacySettingsRequest(
+                settings=atual))
+            return
+        tipo = getattr(types, CHAVES_PRIVACIDADE.get(campo, ""), None)
+        regra = getattr(types, _REGRA_DO_VALOR.get(valor, ""), None)
+        if tipo is None or regra is None:
+            raise ErroPrivacidade("Esta opção não existe no Telegram.")
+        await self.cliente(functions.account.SetPrivacyRequest(
+            key=tipo(), rules=[regra()]))
 
     def _avisar(self, texto, grave=False):
         self.barramento.publicar(ev.Aviso(self.conta.id, texto, grave))

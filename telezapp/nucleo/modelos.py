@@ -6,6 +6,7 @@ import json
 import os
 import re
 import time
+import unicodedata
 from dataclasses import dataclass
 
 SERVICOS = {"telegram": "Telegram", "whatsapp": "WhatsApp"}
@@ -266,6 +267,37 @@ def anuncio_reproducao(msg, velocidade="", proximo=False,
     return ("Próximo áudio. " + texto) if proximo else texto
 
 
+def anuncio_sequencia(msg, velocidade="", proximo=True, tipo=True,
+                      quem=True, duracao=True, mostrar_velocidade=True):
+    """O que se fala quando um audio da sequencia comeca, conforme as
+    opcoes da pessoa. Tudo ligado = 'Próximo áudio. Tocando mensagem de voz
+    de Ana, 12 segundos, a 1,5x.'; tudo desligado = nada (texto vazio).
+    `velocidade`: rotulo ('1,5x'), vazio na velocidade normal."""
+    coisa = {VOZ: "mensagem de voz", AUDIO: "áudio",
+             VIDEO: "vídeo"}.get(msg.tipo, "áudio")
+    partes = []
+    if tipo and quem and msg.minha:
+        partes.append("Tocando " + ("sua " if msg.tipo == VOZ else "seu ")
+                      + coisa)
+    elif tipo and quem:
+        partes.append("Tocando " + coisa
+                      + (" de " + msg.autor if msg.autor else ""))
+    elif tipo:
+        partes.append("Tocando " + coisa)
+    elif quem:
+        partes.append("Enviado por você" if msg.minha else
+                      ("De " + msg.autor if msg.autor else ""))
+    if duracao and msg.segundos:
+        partes.append(duracao_legivel(msg.segundos))
+    if mostrar_velocidade and velocidade:
+        partes.append("a " + velocidade)
+    partes = [p for p in partes if p]
+    corpo = ", ".join(partes) + "." if partes else ""
+    if proximo:
+        return "Próximo áudio. " + corpo if corpo else "Próximo áudio."
+    return corpo
+
+
 def citacao(original, max_caracteres=LIMITE_CITACAO):
     """Trecho curto de uma mensagem para mostrar numa resposta."""
     texto = " ".join(conteudo(original, com_estado=False).split())
@@ -328,14 +360,33 @@ FILTROS_TIPO = (("todas", "Todas as conversas"),
                 ("arquivadas", "Arquivadas"),
                 ("trancadas", "Trancadas no celular"))
 CONTA_TODAS = "todas"
+
+
+def tipos_visiveis(trancadas):
+    """FILTROS_TIPO; o tipo Trancadas so entra quando liberado."""
+    return tuple(t for t in FILTROS_TIPO if trancadas or t[0] != "trancadas")
+
+
+def _sem_acento(texto):
+    return "".join(c for c in unicodedata.normalize("NFD", texto.lower())
+                   if unicodedata.category(c) != "Mn")
+
+
+def casa_busca(nome, busca):
+    """Todas as palavras da busca aparecem no nome (sem maiusculas nem
+    acentos)? Busca vazia casa com tudo."""
+    alvo = _sem_acento(nome or "")
+    return all(p in alvo for p in _sem_acento(busca or "").split())
 ROTULO_TODAS_AS_CONTAS = "Todas as contas"
 
 
-def passa_filtro(c, tipo="todas", conta=CONTA_TODAS):
+def passa_filtro(c, tipo="todas", conta=CONTA_TODAS, busca=""):
     """A conversa aparece na lista? `conta`: "todas", um servico
     ("telegram", "whatsapp") ou "conta:<id>". `tipo`: ver FILTROS_TIPO. As
     arquivadas so aparecem no tipo Arquivadas. Valor desconhecido nao
     filtra."""
+    if busca and not casa_busca(c.nome, busca):
+        return False
     if conta in SERVICOS and c.servico != conta:
         return False
     if conta.startswith("conta:") and c.conta_id != conta[6:]:

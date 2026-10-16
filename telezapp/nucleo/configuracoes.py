@@ -4,6 +4,8 @@
 sistema): categorias, busca e valores ainda nao aplicados."""
 from telezapp import config
 from telezapp.midia import velocidade as vel
+from telezapp.nucleo import codigo_secreto as cs
+from telezapp.nucleo import privacidade_conta as pw
 
 CATEGORIA_BUSCA = "Resultados da busca"
 
@@ -25,6 +27,12 @@ class ModeloConfiguracoes:
         self.cfg = cfg
         self.pendentes = {}
         self.busca = ""
+        # campos do codigo secreto das trancadas (nao sao uma opcao comum)
+        self.codigo = {"atual": "", "novo": "", "repita": ""}
+        # privacidade da conta do WhatsApp: conta -> valores lidos; conta ->
+        # (campo -> posicao escolhida na caixa)
+        self.priv_carregado = {}
+        self.priv_escolhido = {}
 
     # ------------------------------------------------------------ consulta
     def lista_de_categorias(self):
@@ -84,6 +92,63 @@ class ModeloConfiguracoes:
         except ValueError:
             return 0
 
+    # ------------------------------------------ privacidade do WhatsApp
+    def priv_definir(self, conta_id, campo, posicao):
+        self.priv_escolhido.setdefault(conta_id, {})[campo] = posicao
+
+    def priv_mudancas(self):
+        """[(conta_id, campo, valor)] do que a pessoa mudou."""
+        feitas = []
+        for conta_id, escolhido in self.priv_escolhido.items():
+            carregado = self.priv_carregado.get(conta_id)
+            if carregado is None:
+                continue
+            feitas += [(conta_id, c, v)
+                       for c, v in pw.mudancas(carregado, escolhido)]
+        return feitas
+
+    # ------------------------------------------------- codigo secreto
+    def definir_codigo(self, campo, valor):
+        self.codigo[campo] = valor
+
+    def erro_codigo(self):
+        """Por que o codigo secreto (e a exigencia dele) nao pode ser
+        aplicado agora; vazio se esta tudo certo. Mudar o codigo ou desligar
+        a exigencia pede o codigo atual; nao ha como redefinir sem ele."""
+        guardado = self.cfg.get("codigo_trancadas")
+        exigir = bool(self.valor("trancadas_exigir_codigo"))
+        c = self.codigo
+        mexeu = bool(c["novo"] or c["repita"])
+        if guardado:
+            if not (mexeu or not exigir):
+                return ""
+            if not cs.confere(c["atual"], guardado):
+                return ("Digite o código atual para mudar o código ou "
+                        "desligar a exigência.")
+            if not exigir:
+                return ""
+        else:
+            if not exigir:
+                return ""
+            if not (mexeu or "trancadas_exigir_codigo" in self.pendentes):
+                return ""
+        if c["novo"] != c["repita"]:
+            return "Os dois códigos novos não são iguais."
+        if not cs.valido(c["novo"]):
+            return "O código novo deve ter de 4 a 12 números."
+        return ""
+
+    def acao_codigo(self):
+        """None, ("definir", novo) ou ("remover", None), conforme o que a
+        pessoa preencheu. So vale se erro_codigo() for vazio."""
+        guardado = self.cfg.get("codigo_trancadas")
+        exigir = bool(self.valor("trancadas_exigir_codigo"))
+        if not exigir:
+            return ("remover", None) if guardado else None
+        if self.codigo["novo"]:
+            return ("definir", self.codigo["novo"])
+        return None
+
     def mudancas(self):
         """Pendentes na ordem de config.OPCOES; o passo da velocidade vem
         antes da velocidade, que depende dele."""
@@ -93,7 +158,17 @@ class ModeloConfiguracoes:
     def aplicar(self, aplicador):
         """Entrega cada mudanca ao aplicador(chave, valor) e zera."""
         feitas = self.mudancas()
+        acao = self.acao_codigo() if not self.erro_codigo() else None
+        priv = self.priv_mudancas()
+        self.priv_escolhido = {}
         self.pendentes = {}
+        self.codigo = {"atual": "", "novo": "", "repita": ""}
         for chave, valor in feitas:
             aplicador(chave, valor)
+        if acao is not None:
+            aplicador("codigo_trancadas", acao[1])
+            feitas.append(("codigo_trancadas", acao[1]))
+        if priv:
+            aplicador("privacidade_conta", priv)
+            feitas.append(("privacidade_conta", priv))
         return [c for c, _ in feitas]

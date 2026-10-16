@@ -125,6 +125,9 @@ def j(tmp_path, monkeypatch):
     monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path))
     cfg = config.Config()
     cfg.salvar_conta({"id": "t1", "servico": "telegram", "nome": "Fábio"})
+    # o padrao e falar pouco; os testes olham o que se fala, entao ligam
+    for chave in ("falar_novas", "confirmar_envio", "falar_reacoes"):
+        cfg.set(chave, True)
     banco = Banco(str(tmp_path / "t.db"))
     b = ev.Barramento()
     janela = jm.Janela(cfg, banco, b)
@@ -541,6 +544,11 @@ def foto(id, tamanho=1000):
 @pytest.fixture
 def jm_midia(j, monkeypatch):
     j.midias = MidiasFalsas()
+    # estes testes olham o que se fala; o padrao e falar pouco, entao liga tudo
+    for chave in ("falar_quem_toca", "seq_falar_proximo", "seq_falar_tipo",
+                  "seq_falar_quem", "seq_falar_duracao",
+                  "seq_falar_velocidade"):
+        j.cfg.set(chave, True)
     abertas = []
     monkeypatch.setattr(jm.visualizadores, "abrir",
                         lambda pai, x, caminho, fala, nome="", cfg=None: abertas.append(
@@ -1859,11 +1867,25 @@ def test_anuncio_de_quem_toca_e_opcional(jm_midia, monkeypatch):
     j.cfg.set("falar_quem_toca", False)
     _preparar_sequencia(j, monkeypatch)
     assert falas[-1] == "Tocando."
-    # a sequencia tambem fica curta, mas continua dizendo que e o proximo
+    # na sequencia valem as opcoes proprias dela, nao esta
     primeiro = MotorFalso.criados[0]
     primeiro.terminou = True
     j._vigiar_audio(primeiro)
-    assert falas[-1] == "Próximo áudio. Tocando."
+    assert falas[-1] == "Próximo áudio. Tocando mensagem de voz de Ana."
+
+
+def test_o_que_falar_na_sequencia_e_configuravel(jm_midia, monkeypatch):
+    j = jm_midia
+    falas = []
+    monkeypatch.setattr(j.fala, "falar",
+                        lambda t, interromper=False: falas.append(t))
+    for chave in ("seq_falar_tipo", "seq_falar_duracao"):
+        j.cfg.set(chave, False)
+    _preparar_sequencia(j, monkeypatch)
+    primeiro = MotorFalso.criados[0]
+    primeiro.terminou = True
+    j._vigiar_audio(primeiro)
+    assert falas[-1] == "Próximo áudio. De Ana."
 
 
 def test_opcoes_de_fala_estao_no_menu_exibicao(j):
@@ -2000,19 +2022,262 @@ def test_arquivar_e_desarquivar_conversa(j):
     assert ditas[-1] == "Nenhuma conversa selecionada."
 
 
-def test_trancada_so_aparece_no_tipo_trancadas_e_nao_fala_o_conteudo(j):
+# ------------------------------------------- busca e trancadas com codigo
+def _com_trancada(j, codigo="2468"):
+    from telezapp.nucleo import codigo_secreto
+    if codigo:
+        j.cfg.set("codigo_trancadas", codigo_secreto.criar(codigo))
     j.b.publicar(ev.ConversasAtualizadas("t1", [
         conv("10", "Ana", data=AGORA - 10),
+        conv("20", "Bruno", data=AGORA - 100),
         m.Conversa("t1", "50", "Segredo", "telegram", "privada",
                    data=AGORA - 20, trancada=True)]))
-    assert _nomes(j) == ["Ana"]
-    _tipo(j, "trancadas")
-    assert _nomes(j) == ["Segredo"]
-    _tipo(j, "todas")
+
+
+def _digitar(j, texto):
+    j.campo_busca.SetValue(texto)
+    j._ao_busca()
+
+
+def test_busca_de_conversas_por_nome_sem_acento(j):
+    _com_trancada(j)
+    _digitar(j, "BRUN")
+    assert _nomes(j) == ["Bruno"]
+    _digitar(j, "")
+    assert _nomes(j) == ["Ana", "Bruno"]
+
+
+def test_trancadas_so_com_o_codigo_secreto(j):
+    _com_trancada(j)
+    assert _nomes(j) == ["Ana", "Bruno"]            # escondida
+    assert [v for v, _ in j._tipos_atuais][-1] == "arquivadas"
+    _digitar(j, "1111")                              # codigo errado: busca
+    assert not j.trancadas_liberadas
+    assert j.lista_conv.itens == ["Nenhuma conversa neste filtro."]
     ditas = []
     j.fala.falar = lambda t, interromper=False: ditas.append(t)
-    msg = m.Mensagem("t1", "50", "9", autor="Eu sei", data=AGORA,
-                     texto="conteudo reservado")
-    j.b.publicar(ev.MensagemNova(msg, j.indice[("t1", "50")]))
-    assert ditas and ditas[-1] == "Nova mensagem em conversa trancada."
-    assert "Segredo" not in ditas[-1] and "reservado" not in ditas[-1]
+    _digitar(j, "2468")
+    assert j.trancadas_liberadas
+    assert j.campo_busca.GetValue() == ""            # o codigo some da tela
+    assert [v for v, _ in j._tipos_atuais][-1] == "trancadas"
+    assert j.filtro_tipo == "trancadas" and _nomes(j) == ["Segredo"]
+    assert ditas[-1].startswith("Conversas trancadas liberadas.")
+    _tipo(j, "todas")                     # trocar de filtro esconde de novo
+    assert not j.trancadas_liberadas
+    assert "trancadas" not in dict(j._tipos_atuais)
+    assert _nomes(j) == ["Ana", "Bruno"]
+    _digitar(j, "2468")                   # so voltam com o codigo
+    assert j.trancadas_liberadas and j.filtro_tipo == "trancadas"
+    j._esconder_trancadas()
+    assert not j.trancadas_liberadas and j.filtro_tipo == "todas"
+    assert _nomes(j) == ["Ana", "Bruno"]
+    assert "trancadas" not in dict(j._tipos_atuais)
+    assert j.cfg.get("filtro_conversas") != "trancadas"
+
+
+def test_trancadas_sem_codigo_definido_ficam_escondidas(j):
+    _com_trancada(j, codigo=None)
+    _digitar(j, "2468")
+    assert not j.trancadas_liberadas
+    assert "trancadas" not in dict(j._tipos_atuais)
+
+
+def test_opcao_desligada_mostra_trancadas_sempre(j):
+    _com_trancada(j, codigo=None)
+    j._aplicar_opcao("trancadas_exigir_codigo", False)
+    assert "trancadas" in dict(j._tipos_atuais)
+    _tipo(j, "trancadas")
+    assert _nomes(j) == ["Segredo"]
+    assert j.cfg.get("filtro_conversas") == "trancadas"
+    j._aplicar_opcao("trancadas_exigir_codigo", True)   # volta a esconder
+    assert j.filtro_tipo == "todas" and "trancadas" not in dict(j._tipos_atuais)
+
+
+def test_arquivada_e_trancada_nao_avisam_mensagem_nova(j):
+    _com_trancada(j)
+    j.indice[("t1", "20")].arquivada = True
+    ditas, bipes = [], []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    monkey = __import__("telezapp.interface.janela", fromlist=["bipe"])
+    antigo = monkey.bipe
+    monkey.bipe = lambda *a, **k: bipes.append(a)
+    try:
+        for cid in ("50", "20"):                 # trancada e arquivada
+            msg = m.Mensagem("t1", cid, "9", autor="Eu sei", data=AGORA,
+                             texto="conteudo reservado")
+            j.b.publicar(ev.MensagemNova(msg, j.indice[("t1", cid)]))
+        assert ditas == [] and bipes == []
+        msg = m.Mensagem("t1", "10", "9", autor="Ana", data=AGORA, texto="oi")
+        j.b.publicar(ev.MensagemNova(msg, j.indice[("t1", "10")]))
+        assert ditas and bipes                   # conversa comum avisa
+    finally:
+        monkey.bipe = antigo
+
+
+
+def test_aplicar_codigo_vindo_das_configuracoes_e_novo_pareamento_apaga(j):
+    from telezapp.nucleo import codigo_secreto
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._aplicar_opcao("codigo_trancadas", "2468")
+    assert codigo_secreto.confere("2468", j.cfg.get("codigo_trancadas"))
+    assert ditas[-1] == "Código secreto salvo."
+    j._limpar_codigo_trancadas()                  # novo pareamento
+    assert j.cfg.get("codigo_trancadas") is None
+    assert "Defina um novo" in ditas[-1]
+    j._aplicar_opcao("codigo_trancadas", None)    # desligar: ja sem codigo
+    assert j.cfg.get("codigo_trancadas") is None
+
+
+def test_ativar_ou_desativar_contas_pelo_menu(j, monkeypatch):
+    chamadas = []
+    j.contas.ativar = lambda cid: chamadas.append(("ativar", cid)) or True
+    j.contas.desativar = lambda cid: chamadas.append(("desativar", cid)) or True
+    j.cfg.salvar_conta({"id": "t1", "servico": "telegram", "nome": "Fábio"})
+
+    class Dlg(wx_falso.MultiChoiceDialog):
+        def ShowModal(self):
+            self.novas = []                    # desmarca tudo
+            return wx_falso.ID_OK
+    monkeypatch.setattr(jm.wx, "MultiChoiceDialog", Dlg, raising=False)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._ativar_contas()
+    assert chamadas == [("desativar", "t1")]
+    assert ditas[-1] == "Contas: 1 desativada."
+
+
+def test_fim_da_sequencia_so_se_pedido_e_com_mais_de_um_audio(jm_midia,
+                                                              monkeypatch):
+    j = jm_midia
+    falas = []
+    monkeypatch.setattr(j.fala, "falar",
+                        lambda t, interromper=False: falas.append(t))
+    j.cfg.set("seq_falar_fim", True)
+    primeiro = _preparar_sequencia(j, monkeypatch)
+    primeiro.terminou = True
+    j._vigiar_audio(primeiro)                    # toca o segundo audio
+    segundo = MotorFalso.criados[1]
+    segundo.terminou = True
+    j._vigiar_audio(segundo)                     # nao ha mais: fim
+    assert falas[-1] == "Fim da sequência."
+    j._fim_da_sequencia()                        # ja avisou: nao repete
+    assert falas.count("Fim da sequência.") == 1
+
+
+def test_fim_da_sequencia_desligado_ou_audio_sozinho_nao_fala(jm_midia,
+                                                              monkeypatch):
+    j = jm_midia
+    falas = []
+    monkeypatch.setattr(j.fala, "falar",
+                        lambda t, interromper=False: falas.append(t))
+    primeiro = _preparar_sequencia(j, monkeypatch)
+    primeiro.terminou = True
+    j._vigiar_audio(primeiro)
+    MotorFalso.criados[1].terminou = True
+    j._vigiar_audio(MotorFalso.criados[1])       # opcao desligada (padrao)
+    assert "Fim da sequência." not in falas
+    j.cfg.set("seq_falar_fim", True)
+    j._seq_tocados = 0                           # so um audio tocou
+    j._fim_da_sequencia()
+    assert "Fim da sequência." not in falas
+
+
+def test_aplicar_privacidade_do_whatsapp_confere_pela_releitura(j):
+    class Prov:
+        def __init__(self, aceita):
+            self.aceita, self.valores = aceita, {
+                "last": "all", "online": "all", "status": "all",
+                "readreceipts": "all", "groupadd": "all"}
+            self.feitas = []
+
+        def definir_privacidade(self, campo, valor):
+            self.feitas.append((campo, valor))
+            if self.aceita:
+                self.valores[campo] = valor
+
+        def privacidade(self):
+            return dict(self.valores)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.contas.provedores["w9"] = Prov(True)
+    j._aplicar_opcao("privacidade_conta",
+                     [("w9", "last", "none"), ("w9", "online", "all")])
+    assert j.contas.provedores["w9"].feitas == [("last", "none"),
+                                                ("online", "all")]
+    assert ditas[-1] == "Privacidade: 2 mudanças salvas."
+    j.contas.provedores["w8"] = Prov(False)      # aceita mas nao grava
+    j._aplicar_opcao("privacidade_conta", [("w8", "readreceipts", "none")])
+    assert ditas[-1].startswith("O serviço não confirmou: confirmação de leitura")
+
+
+# ------------------------------------------------------- nova mensagem
+def test_nova_mensagem_escolhe_conta_e_envia(j, monkeypatch):
+    from telezapp.interface import contatos
+    vistas = []
+    monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
+                        lambda pai, contas, buscar: vistas.append(contas) or
+                        ("t1", "bruno", "oi, tudo bem?", None))
+    enviados = []
+    j._enviar_texto = lambda: enviados.append((j.atual, j.caixa.GetValue()))
+    j._nova_mensagem()
+    assert [c for c, _ in vistas[0]] == ["t1"]           # so a conectada
+    assert enviados == [(("t1", "20"), "oi, tudo bem?")]  # Bruno ja existia
+    assert j.atual == ("t1", "20")
+
+
+def test_nova_mensagem_para_telefone_cria_conversa_no_whatsapp(j, monkeypatch):
+    from telezapp.interface import contatos
+    j.cfg.salvar_conta({"id": "w1", "servico": "whatsapp", "nome": "Zap"})
+
+    class Zap:
+        def id_do_telefone(self, tel):
+            return tel.lstrip("+") + "@s.whatsapp.net"
+        pedidos = []
+
+        def carregar_mensagens(self, *a, **k):
+            pass
+
+        def marcar_como_lida(self, *a):
+            pass
+    j.contas.provedores["w1"] = Zap()
+    j.contas.provedor = lambda cid: j.contas.provedores.get(cid)
+    j.b.publicar(ev.EstadoConta("w1", ev.CONECTADA))
+    vistas = []
+    monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
+                        lambda pai, contas, buscar: vistas.append(contas) or
+                        ("w1", "(51) 99999-8888", "oi", None))
+    enviados = []
+    j._enviar_texto = lambda: enviados.append(j.atual)
+    j._nova_mensagem()
+    assert len(vistas[0]) == 2                  # duas contas: aparece a escolha
+    assert enviados == [("w1", "5551999998888@s.whatsapp.net")]
+    assert ("w1", "5551999998888@s.whatsapp.net") in j.indice
+
+
+def test_nova_mensagem_sem_conta_conectada_ou_destino_desconhecido(j,
+                                                                     monkeypatch):
+    from telezapp.interface import contatos
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.estados["t1"] = ev.DESCONECTADA
+    j._nova_mensagem()
+    assert ditas[-1] == "Nenhuma conta conectada para enviar."
+    j.estados["t1"] = ev.CONECTADA
+    monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
+                        lambda pai, contas, buscar: ("t1", "ninguem assim", "oi", None))
+    j._nova_mensagem()
+    assert ditas[-1].startswith("Não encontrei ninguem assim.")
+
+
+def test_nova_mensagem_com_pessoa_escolhida_na_lista_nao_resolve_o_texto(
+        j, monkeypatch):
+    from telezapp.interface import contatos
+    monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
+                        lambda pai, contas, buscar: (
+                            "t1", "br", "oi", ("20", "Bruno")))
+    enviados = []
+    j._enviar_texto = lambda: enviados.append(j.atual)
+    j._resolver_destino = lambda *a: (_ for _ in ()).throw(AssertionError)
+    j._nova_mensagem()
+    assert enviados == [("t1", "20")]

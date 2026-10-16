@@ -10,14 +10,50 @@ Agenda de contatos própria e menções melhores.
 - Filtros da lista de conversas: duas caixas acima da lista (`cx_conta`:
   todas, serviço e, com 2+ contas do serviço, cada conta; `cx_tipo`: todas,
   não lidas, pessoais, grupos, canais, arquivadas). `modelos.passa_filtro`,
-  `opcoes_de_conta`, `FILTROS_TIPO`; opção `filtro_conversas` (tipo) e
+  `opcoes_de_conta`, `FILTROS_TIPO`; valores `filtro_conversas` (tipo) e
   `filtro_conta` (só no config). Alt+4/Alt+5. `Janela.conversas` é só o que
   passa (mais a aberta); sem nenhuma, a lista avisa.
+- Busca de conversas (`campo_busca`, `modelos.casa_busca`) e código secreto das
+  trancadas (`nucleo/codigo_secreto.py`: PBKDF2 com sal, só o resumo no
+  config). Digitar o código na busca libera o tipo Trancadas (no fim da caixa
+  de tipos); Trocar de filtro, Ctrl+Shift+T, minimizar ou reabrir escondem. Opção
+  `trancadas_exigir_codigo` (Privacidade, padrão ligada); sem código definido
+  elas ficam escondidas. O código é definido em Configurações, Privacidade
+  (campos sob a caixa; `ModeloConfiguracoes.erro_codigo/acao_codigo`); mudar
+  ou desligar pede o código atual e não há redefinição: parear o WhatsApp de
+  novo apaga o código (`_limpar_codigo_trancadas`).
 - `Conversa.trancada` (WhatsApp "Trancar conversa"; coluna nova): vem do
   `locked` das conversas do pacote de histórico. Fora de todos os tipos, só
-  no tipo `trancadas`; aviso de mensagem nova sem nome nem conteúdo. O
+  no tipo `trancadas`; sem aviso de mensagem nova. O
   neonize 0.5.2 não repassa o `lockChatAction` e o whatsmeow não o guarda
   (`chat_settings` só tem mudo, fixada e arquivada): sem estado ao vivo.
+- Contatos do Telegram: `contatos_da_conta` lê `contacts.GetContacts` (sem
+  bots nem apagados); o botão é "Trazer das contas". Nova mensagem lista
+  contatos e conversas filtrando enquanto se digita (`candidatos` devolve o
+  telefone; busca por dígitos).
+- Nova mensagem (Ctrl+N): `DialogoNovaMensagem` (conta só se há 2+ conectadas),
+  `nucleo/nova_mensagem.py` (`tipo_de_destino`, `candidatos`), provedor
+  `resolver_destinatario` (Telegram: `get_entity`) e `id_do_telefone` (WhatsApp).
+- Privacidade do WhatsApp e do Telegram em Configurações > Privacidade (Telegram:
+  `GetPrivacy/SetPrivacy` com as chaves StatusTimestamp, About e ChatInvite, e
+  `GlobalPrivacySettings.hide_read_marks`; `valor_das_regras`, `ErroPrivacidade`).
+- Privacidade do WhatsApp em Configurações > Privacidade (`nucleo/
+  privacidade_conta.py`; provedor `privacidade()`, `definir_privacidade()`,
+  `privacidade_status()`): visto por último, online, recado (`status` no
+  whatsmeow), confirmação de leitura e quem adiciona a grupos; aplicar relê e
+  confere. Status (stories) só leitura: o whatsmeow só tem `GetStatusPrivacy`.
+- Contas ativáveis: `ativa` (padrão verdadeiro) no registro da conta;
+  `Contas.ativar/desativar/esta_ativa`, `iniciar_salvas` e `reconectar` pulam as
+  desativadas (continuam em `Contas.contas`, para o serviço ser conhecido);
+  menu Contas > Ativar ou desativar contas (`wx.MultiChoiceDialog`).
+- Padrão de falar pouco: `falar_novas`, `confirmar_envio`, `falar_reacoes`,
+  `falar_quem_toca` e `seq_falar_*` vêm desmarcadas (quem já salvou mantém).
+- Fala da sequência de áudios configurável: `modelos.anuncio_sequencia` e as
+  opções `seq_falar_proximo/tipo/quem/duracao/velocidade/fim` (Mídias; o fim
+  vem de `_fim_da_sequencia`, só com 2+ áudios na sequência). Na
+  sequência elas substituem `falar_quem_toca`, que fica só para o 1º áudio. As seis vêm desmarcadas por padrão.
+- Arquivadas e trancadas (fechadas) não avisam: `_conversa_muda` em
+  `_ev_nova` e `_ev_atualizada` (sem som, fala nem texto na barra).
 - `Conversa.arquivada` (coluna nova no banco). Telegram: duas buscas
   (`folder=0` e `folder=1`, a principal não traz as arquivadas) e
   `arquivar_conversa` (`edit_folder`); item de menu Arquivar/desarquivar

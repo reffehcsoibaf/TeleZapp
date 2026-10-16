@@ -31,25 +31,28 @@ class DialogoContato(wx.Dialog):
         self.contas = contas
         lay = wx.BoxSizer(wx.VERTICAL)
 
-        def campo(rotulo, ctrl):
+        def campo(rotulo, criar, expandir=0):
+            # o rotulo nasce ANTES do controle: o leitor de tela usa o texto
+            # que vem logo antes do controle como o nome dele
             lay.Add(wx.StaticText(self, label=rotulo), 0,
                     wx.LEFT | wx.RIGHT | wx.TOP, 10)
-            lay.Add(ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
-        self.conta = wx.Choice(self, choices=[r for _, r in contas],
-                               name="Conta")
+            ctrl = criar()
+            lay.Add(ctrl, expandir, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+            return ctrl
+        self.conta = campo("Conta", lambda: wx.Choice(
+            self, choices=[r for _, r in contas], name="Conta"))
         self.conta.SetSelection(0)
         if travar_conta or len(contas) == 1:
             self.conta.Enable(False)
-        campo("Conta", self.conta)
-        self.nome = wx.TextCtrl(self, value=nome, name="Nome",
-                                size=(380, -1))
-        campo("Nome", self.nome)
+        self.nome = campo("Nome", lambda: wx.TextCtrl(
+            self, value=nome, name="Nome", size=(380, -1)))
         self.telefone = None
         if pedir_telefone:
-            self.telefone = wx.TextCtrl(self, value=telefone,
-                                        name="Telefone com DDD",
-                                        size=(380, -1))
-            campo("Telefone com DDD (opcional ao editar)", self.telefone)
+            self.telefone = campo(
+                "Telefone com DDD (opcional ao editar)",
+                lambda: wx.TextCtrl(self, value=telefone,
+                                    name="Telefone com DDD",
+                                    size=(380, -1)))
         lay.Add(self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL), 0,
                 wx.ALL | wx.ALIGN_RIGHT, 10)
         self.SetSizerAndFit(lay)
@@ -86,7 +89,7 @@ class GerenciadorContatos(wx.Dialog):
         for chave, rotulo in (("add", "&Adicionar..."),
                               ("editar", "&Editar..."),
                               ("remover", "&Remover"),
-                              ("trazer", "&Trazer do WhatsApp")):
+                              ("trazer", "&Trazer das contas")):
             b = wx.Button(self, label=rotulo)
             self.botoes[chave] = b
             linha.Add(b, 0, wx.RIGHT, 6)
@@ -239,3 +242,106 @@ def dialogo_salvar_pessoa(pai, contas, nome, telefone=""):
     finally:
         dlg.Destroy()
     return (nome, m.normalizar_telefone(tel) or "") if nome else None
+
+
+class DialogoNovaMensagem(wx.Dialog):
+    """Conta (so se houver mais de uma), destinatario e texto. Abaixo do
+    campo Para, uma lista com os contatos e conversas que casam com o que
+    foi digitado (vazio = todos)."""
+
+    LIMITE_LISTA = 200
+
+    def __init__(self, pai, contas, buscar):
+        """contas: [(conta_id, rotulo)] das contas conectadas; buscar(
+        conta_id, texto) -> [(id, nome, telefone)]."""
+        super().__init__(pai, title="Nova mensagem",
+                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+        self.contas, self.buscar = contas, buscar
+        self._achados = []
+        lay = wx.BoxSizer(wx.VERTICAL)
+
+        def campo(rotulo, criar, expandir=0):
+            # o rotulo nasce ANTES do controle: o leitor de tela usa o texto
+            # que vem logo antes do controle como o nome dele
+            lay.Add(wx.StaticText(self, label=rotulo), 0,
+                    wx.LEFT | wx.RIGHT | wx.TOP, 10)
+            ctrl = criar()
+            lay.Add(ctrl, expandir, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+            return ctrl
+        self.conta = None
+        if len(contas) > 1:
+            self.conta = campo("Enviar pela conta", lambda: wx.Choice(
+                self, choices=[r for _, r in contas],
+                name="Enviar pela conta"))
+            self.conta.SetSelection(0)
+            self.conta.Bind(wx.EVT_CHOICE, lambda e: self._atualizar())
+        self.para = campo(
+            "Para (digite para buscar nos contatos e conversas, ou um "
+            "número com DDD ou @usuário)",
+            lambda: wx.TextCtrl(self, name="Para", size=(420, -1),
+                                style=wx.TE_PROCESS_ENTER))
+        self.para.Bind(wx.EVT_TEXT, lambda e: self._atualizar())
+        self.para.Bind(wx.EVT_TEXT_ENTER, lambda e: self._ir_para_lista())
+        self.lista = campo(
+            "Contatos encontrados (Enter escolhe)",
+            lambda: wx.ListBox(self, name="Contatos encontrados",
+                               size=(420, 120)), 1)
+        self.lista.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self._escolher())
+        self.texto = campo(
+            "Mensagem",
+            lambda: wx.TextCtrl(self, name="Mensagem", size=(420, 100),
+                                style=wx.TE_MULTILINE))
+        botoes = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
+        lay.Add(botoes, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+        self.SetSizerAndFit(lay)
+        self.CentreOnParent()
+        self._atualizar()
+        self.para.SetFocus()
+
+    def _conta_id(self):
+        i = max(self.conta.GetSelection(), 0) if self.conta else 0
+        return self.contas[i][0]
+
+    def _atualizar(self):
+        self._achados = self.buscar(
+            self._conta_id(), self.para.GetValue())[:self.LIMITE_LISTA]
+        from telezapp.nucleo import nova_mensagem as nm
+        self.lista.Set([nm.rotulo(n, t) for _, n, t in self._achados]
+                       or ["Nenhum contato encontrado"])
+
+    def _selecionado(self):
+        i = self.lista.GetSelection()
+        return self._achados[i] if 0 <= i < len(self._achados) else None
+
+    def _ir_para_lista(self):
+        if self._achados:
+            self.lista.SetSelection(0)
+            self.lista.SetFocus()
+
+    def _escolher(self):
+        """Enter ou duplo clique na lista: vai para a mensagem."""
+        if self._selecionado() is not None:
+            self.texto.SetFocus()
+
+    def escolhido(self):
+        """(conta_id, destino, texto, pessoa): pessoa e (id, nome) da lista,
+        se uma foi escolhida, senao None (vale o texto de Para)."""
+        sel = self._selecionado()
+        pessoa = (sel[0], sel[1]) if sel else None
+        destino = self.para.GetValue().strip() or (sel[1] if sel else "")
+        return (self._conta_id(), destino, self.texto.GetValue().strip(),
+                pessoa)
+
+
+def dialogo_nova_mensagem(pai, contas, buscar):
+    """(conta_id, destino, texto, pessoa) ou None se cancelar ou deixar sem
+    destino ou sem texto."""
+    dlg = DialogoNovaMensagem(pai, contas, buscar)
+    try:
+        if dlg.ShowModal() != wx.ID_OK:
+            return None
+        conta_id, destino, texto, pessoa = dlg.escolhido()
+    finally:
+        dlg.Destroy()
+    return (conta_id, destino, texto, pessoa) \
+        if (destino or pessoa) and texto else None

@@ -63,15 +63,60 @@ class Contas:
         p.iniciar()
         return True
 
+    def esta_ativa(self, conta_id):
+        """Conta ligada ao servico (a padrao). Desativada, ela so mostra o
+        que ja esta guardado neste computador."""
+        for dados in self.cfg.contas():
+            if dados["id"] == conta_id:
+                return dados.get("ativa", True) is not False
+        return True
+
     def iniciar_salvas(self):
         for dados in self.cfg.contas():
             conta = Conta(dados["id"], dados.get("servico", "telegram"),
                           dados.get("telefone", ""), dados.get("nome", ""))
             self._historico[conta.id] = dados.get("historico", "recentes")
+            if dados.get("ativa", True) is False:
+                self.contas[conta.id] = conta
+                self.barramento.publicar(ev.EstadoConta(
+                    conta.id, ev.DESCONECTADA, "desativada"))
+                log.info("conta %s desativada: não conecta", conta.id)
+                continue
             if not self._ligar(conta):
                 self.barramento.publicar(ev.Aviso(
                     conta.id, "Não foi possível iniciar a conta %s." % (
                         conta.nome or conta.id), True))
+
+    def _guardar_ativa(self, conta_id, ativa):
+        for dados in self.cfg.contas():
+            if dados["id"] == conta_id:
+                dados["ativa"] = ativa
+                self.cfg.salvar_conta(dados)
+                return True
+        return False
+
+    def desativar(self, conta_id):
+        """Desconecta a conta e a deixa desligada ate ser ativada. As
+        conversas e mensagens guardadas continuam na tela."""
+        if not self._guardar_ativa(conta_id, False):
+            return False
+        p = self.provedores.pop(conta_id, None)
+        if p is not None:
+            p.parar()
+        self.barramento.publicar(ev.EstadoConta(
+            conta_id, ev.DESCONECTADA, "desativada"))
+        log.info("conta %s desativada", conta_id)
+        return True
+
+    def ativar(self, conta_id):
+        """Liga de novo uma conta desativada (conecta na hora)."""
+        conta = self.contas.get(conta_id)
+        if conta is None or not self._guardar_ativa(conta_id, True):
+            return False
+        log.info("conta %s ativada", conta_id)
+        if conta_id in self.provedores:
+            return True
+        return self._ligar(conta)
 
     def adicionar(self, servico, telefone_sugerido="", historico="recentes"):
         """Comeca o login de uma conta nova. False se nao foi possivel.
@@ -113,7 +158,8 @@ class Contas:
         p = self.provedores.pop(conta_id, None)
         if p is not None:
             p.parar()
-        return conta is not None and self._ligar(conta)
+        return conta is not None and self.esta_ativa(conta_id) and \
+            self._ligar(conta)
 
     def parear_de_novo(self, conta_id, historico="recentes"):
         """WhatsApp desconectado pelo celular: apaga so a sessao e pareia de

@@ -1125,6 +1125,43 @@ class ProvedorWhatsApp(Provedor):
             dados["erro"] = type(e).__name__
         return dados
 
+    # nomes que o neonize usa para cada valor de privacidade
+    _VALORES_PRIVACIDADE = {2: "all", 3: "contacts", 4: "contact_blacklist",
+                            5: "match_last_seen", 6: "known", 7: "none"}
+
+    def privacidade(self):
+        if self.cliente is None or not self._conectada:
+            return None
+        try:
+            c = self.cliente.get_privacy_settings()
+        except Exception:
+            log.exception("não consegui ler a privacidade da conta")
+            return None
+        v = self._VALORES_PRIVACIDADE.get
+        return {"last": v(c.LastSeen), "online": v(c.Online),
+                "status": v(c.Status), "readreceipts": v(c.ReadReceipts),
+                "groupadd": v(c.GroupAdd)}
+
+    def definir_privacidade(self, campo, valor):
+        from neonize.utils.enum import PrivacySetting, PrivacySettingType
+        self.cliente.set_privacy_setting(PrivacySettingType(campo),
+                                         PrivacySetting(valor))
+
+    def privacidade_status(self):
+        if self.cliente is None or not self._conectada:
+            return None
+        try:
+            itens = list(self.cliente.get_status_privacy())
+        except Exception:
+            log.info("não consegui ler quem vê o status")
+            return None
+        if not itens:
+            return None
+        padrao = next((i for i in itens if i.IsDefault), itens[0])
+        tipo = {1: "contacts", 2: "blacklist", 3: "whitelist"}.get(
+            padrao.Type, "contacts")
+        return tipo, len(padrao.List)
+
     def id_do_telefone(self, telefone):
         digitos = re.sub(r"\D", "", telefone or "")
         return digitos + "@s.whatsapp.net" if digitos else ""

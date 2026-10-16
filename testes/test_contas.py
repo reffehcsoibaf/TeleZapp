@@ -93,3 +93,35 @@ def test_parear_de_novo_e_remover_apagam_a_sessao(tmp_path, monkeypatch):
     assert contas.banco.conversas("whatsapp-1") == []
     assert contas.provedor("whatsapp-1") is None
     assert cm.apagar_sessao is not None
+
+
+def test_conta_desativada_nao_conecta_mas_continua_listada(tmp_path,
+                                                           monkeypatch):
+    cfg, b, contas, criados = montar(tmp_path, monkeypatch)
+    estados = []
+    b.ouvir(lambda e: estados.append((e.conta_id, e.estado))
+            if isinstance(e, ev.EstadoConta) else None)
+    cfg.salvar_conta({"id": "telegram-1", "servico": "telegram", "nome": "A"})
+    cfg.salvar_conta({"id": "telegram-2", "servico": "telegram", "nome": "B",
+                      "ativa": False})
+    contas.iniciar_salvas()
+    assert [p.conta.id for p in criados] == ["telegram-1"]
+    assert contas.provedor("telegram-2") is None
+    assert contas.servico("telegram-2") == "telegram"   # segue conhecida
+    assert not contas.esta_ativa("telegram-2") and contas.esta_ativa("telegram-1")
+    assert ("telegram-2", ev.DESCONECTADA) in estados
+    assert not contas.reconectar("telegram-2")          # nao liga sozinha
+
+
+def test_ativar_e_desativar_conta(tmp_path, monkeypatch):
+    cfg, b, contas, criados = montar(tmp_path, monkeypatch)
+    cfg.salvar_conta({"id": "telegram-1", "servico": "telegram", "nome": "A"})
+    contas.iniciar_salvas()
+    p = criados[0]
+    assert contas.desativar("telegram-1")
+    assert p.parado and contas.provedor("telegram-1") is None
+    assert cfg.contas()[0]["ativa"] is False and not contas.esta_ativa("telegram-1")
+    assert contas.ativar("telegram-1")
+    assert criados[1].iniciado and contas.provedor("telegram-1") is criados[1]
+    assert cfg.contas()[0]["ativa"] is True
+    assert not contas.desativar("nao-existe")

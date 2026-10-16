@@ -21,6 +21,10 @@ class ErroMidia(Exception):
     """Falha esperada ao baixar uma midia; o texto e dito a pessoa."""
 
 
+class ErroPrivacidade(Exception):
+    """Nao deu para mudar a privacidade; o texto e dito a pessoa."""
+
+
 class DownloadCancelado(Exception):
     """A pessoa cancelou o download."""
 
@@ -110,6 +114,26 @@ class Provedor(ABC):
         """Dados do servico sobre a conversa, para o menu Depurar (como o
         nome foi achado, identificadores). Dicionario; vazio se nao houver."""
         return {}
+
+    def privacidade(self):
+        """{campo: valor} da privacidade da conta (ver nucleo/
+        privacidade_conta.py), ou None se o servico nao tem ou nao deu
+        para ler."""
+        return None
+
+    def definir_privacidade(self, campo, valor):
+        """Muda uma escolha de privacidade na conta."""
+        raise NotImplementedError
+
+    def privacidade_status(self):
+        """(tipo, quantas) de quem pode ver o status: contacts, blacklist
+        ou whitelist; None se nao souber."""
+        return None
+
+    def resolver_destinatario(self, texto):
+        """(conversa_id, nome) de quem o texto (@usuario, telefone) indica,
+        ou None se o servico nao achou ou nao sabe."""
+        return None
 
     def contatos_da_conta(self):
         """[(id, nome, telefone)] da agenda que o servico mantem na conta;
