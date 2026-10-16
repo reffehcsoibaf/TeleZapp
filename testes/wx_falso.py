@@ -26,6 +26,7 @@ WXK_UP, WXK_DOWN, WXK_HOME, WXK_END, WXK_PAGEUP, WXK_PAGEDOWN = range(
     315, 321)
 EVT_CLOSE = EVT_CHAR_HOOK = EVT_MENU = EVT_LISTBOX_DCLICK = object()
 EVT_CONTEXT_MENU = EVT_KEY_DOWN = EVT_BUTTON = EVT_LISTBOX = object()
+EVT_CHOICE = EVT_TEXT = object()
 DefaultPosition = (-1, -1)
 mensagens = []          # o que passou por MessageBox
 resposta_messagebox = [NO]
@@ -140,6 +141,14 @@ class SingleChoiceDialog:
         pass
 
 
+class MultiChoiceDialog(SingleChoiceDialog):
+    def SetSelections(self, itens):
+        self.marcadas = list(itens)
+
+    def GetSelections(self):
+        return getattr(self, "novas", self.marcadas)
+
+
 class Dialog(Frame):
     def SetSizer(self, s):
         pass
@@ -217,6 +226,22 @@ class Panel(Janela):
 
     def Layout(self):
         pass
+
+
+class Choice(Janela):
+    def __init__(self, *a, choices=(), **k):
+        super().__init__()
+        self.itens, self.sel = list(choices), -1
+
+    def Set(self, itens):
+        self.itens, self.sel = list(itens), -1
+
+    def GetSelection(self):
+        return self.sel
+
+    def SetSelection(self, i):
+        assert 0 <= i < len(self.itens), (i, len(self.itens))
+        self.sel = i
 
 
 class StaticText(Janela):

@@ -166,7 +166,8 @@ def test_config_e_contas(tmp_path, monkeypatch):
 def test_config_corrompida_usa_padroes(tmp_path, monkeypatch):
     monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path))
     (tmp_path / "config.json").write_text("{nao e json", encoding="utf-8")
-    assert config.Config().get("falar_novas") is True
+    assert config.Config().get("falar_novas") is False
+    assert config.Config().get("som") is True
 
 
 def test_credenciais_do_arquivo_de_testes(tmp_path, monkeypatch):
@@ -273,3 +274,105 @@ def test_detalhes_mostram_nome_ou_telefone_nunca_o_codigo_do_recibo():
     assert "Lida a Contato sem nome em" in t
     assert "Lida a +5551900000000 em" in t
     assert "@" not in t
+
+
+def test_codigo_secreto_das_trancadas():
+    from telezapp.nucleo import codigo_secreto as cs
+    dados = cs.criar("2468")
+    assert "2468" not in str(dados)                  # so o resumo
+    assert cs.confere("2468", dados)
+    assert not cs.confere("2469", dados)
+    assert not cs.confere("246", dados) and not cs.confere("abcd", dados)
+    assert not cs.confere("2468", None) and not cs.confere("2468", {})
+    assert cs.valido("1234") and cs.valido("123456789012")
+    assert not cs.valido("123") and not cs.valido("1234567890123")
+    assert not cs.valido("12a4") and not cs.valido("١٢٣٤")
+    assert cs.criar("2468")["sal"] != dados["sal"]   # sal novo a cada vez
+    import pytest
+    with pytest.raises(ValueError):
+        cs.criar("12")
+
+
+def test_anuncio_de_sequencia_configuravel():
+    from telezapp.nucleo import modelos as m
+    x = m.Mensagem("c", "1", "1", autor="Ana", tipo=m.VOZ, segundos=12)
+    assert m.anuncio_sequencia(x, "1,5x") == (
+        "Próximo áudio. Tocando mensagem de voz de Ana, 12 segundos, a 1,5x.")
+    assert m.anuncio_sequencia(x, proximo=False, tipo=False, duracao=False,
+                               mostrar_velocidade=False) == "De Ana."
+    assert m.anuncio_sequencia(x, quem=False, duracao=False) == (
+        "Próximo áudio. Tocando mensagem de voz.")
+    assert m.anuncio_sequencia(x, tipo=False, quem=False, duracao=False,
+                               mostrar_velocidade=False) == "Próximo áudio."
+    assert m.anuncio_sequencia(x, proximo=False, tipo=False, quem=False,
+                               duracao=False, mostrar_velocidade=False) == ""
+    minha = m.Mensagem("c", "2", "2", minha=True, tipo=m.VOZ)
+    assert m.anuncio_sequencia(minha, proximo=False) == \
+        "Tocando sua mensagem de voz."
+
+
+def test_privacidade_do_whatsapp_regras():
+    from telezapp.nucleo import privacidade_conta as pw
+    lido = {"last": "contacts", "online": "all", "status": "none",
+            "readreceipts": "all", "groupadd": "contact_blacklist"}
+    assert not pw.ilegivel(lido) and pw.ilegivel(None) and pw.ilegivel({})
+    assert [c.nome for c in pw.desconhecidos(lido)] == ["groupadd"]
+    last = pw.CAMPOS[0]
+    assert pw.indice(last, "contacts") == 1 and pw.indice(last, "xyz") == -1
+    # so entra o que mudou; posicao -1 ou ausente fica como esta
+    escolhido = {"last": 2, "online": 0, "readreceipts": 1, "groupadd": -1}
+    assert pw.mudancas(lido, escolhido) == [("last", "none"),
+                                            ("readreceipts", "none")]
+    pedidas = [("last", "none"), ("readreceipts", "none")]
+    assert pw.nao_confirmadas(pedidas, dict(lido, last="none")) == \
+        ["readreceipts"]
+    assert pw.nao_confirmadas(pedidas, None) == ["last", "readreceipts"]
+    assert pw.texto_status("contacts", 0) == "Meus contatos"
+    assert pw.texto_status("blacklist", 3) == "Meus contatos, exceto 3 pessoas"
+    assert pw.texto_status("whitelist", 1) == "Somente 1 pessoa"
+
+
+def test_privacidade_do_telegram_regras():
+    from telezapp.nucleo import privacidade_conta as pw
+    from telezapp.provedores.telegram import valor_das_regras
+
+    def regra(nome):
+        return type(nome, (), {})()
+    assert valor_das_regras([regra("PrivacyValueAllowAll")]) == "all"
+    assert valor_das_regras([regra("PrivacyValueAllowContacts"),
+                             regra("PrivacyValueDisallowAll")]) == "contacts"
+    assert valor_das_regras([regra("PrivacyValueDisallowAll")]) == "none"
+    # excecoes por pessoa: so no aplicativo, a caixa fica sem escolha
+    assert valor_das_regras([regra("PrivacyValueAllowUsers"),
+                             regra("PrivacyValueDisallowAll")]) is None
+    assert valor_das_regras([]) is None and valor_das_regras(None) is None
+    nomes = [c.nome for c in pw.campos_do("telegram")]
+    assert nomes == ["last", "status", "readreceipts", "groupadd"]   # sem online
+    assert pw.campos_do("telegram")[0].rotulo.endswith("visto por último e online")
+    assert len(pw.campos_do("whatsapp")) == 5
+
+
+def test_nova_mensagem_tipo_de_destino_e_candidatos():
+    from telezapp.nucleo import modelos as m
+    from telezapp.nucleo import nova_mensagem as nm
+    assert nm.tipo_de_destino("@ana_99") == nm.USUARIO
+    assert nm.tipo_de_destino("(51) 99999-8888") == nm.TELEFONE
+    assert nm.tipo_de_destino("+55 51 99999 8888") == nm.TELEFONE
+    assert nm.tipo_de_destino("Ana Souza") == nm.NOME
+    assert nm.tipo_de_destino("@") == nm.NOME
+    contatos = [("t1", "10", "Ana Souza", "+5551999998888")]
+    conversas = [m.Conversa("t1", "10", "Ana Souza", tipo="privada"),
+                 m.Conversa("t1", "20", "Ana Maria", tipo="privada"),
+                 m.Conversa("t1", "30", "Anagrupo", tipo="grupo")]
+    assert nm.candidatos("ana", contatos, conversas) == [
+        ("10", "Ana Souza", "+5551999998888"),
+        ("20", "Ana Maria", "")]                    # sem repetir, sem grupo
+    assert nm.candidatos("maria", contatos, conversas) == [
+        ("20", "Ana Maria", "")]
+    assert nm.candidatos("+5551999998888", contatos, conversas) == [
+        ("10", "Ana Souza", "+5551999998888")]
+    assert nm.candidatos("99999 8888", contatos, conversas) == [
+        ("10", "Ana Souza", "+5551999998888")]    # so os digitos contam
+    assert len(nm.candidatos("", contatos, conversas)) == 2   # vazio: todos
+    assert nm.rotulo("Ana", "+55") == "Ana, +55" and nm.rotulo("Ana") == "Ana"
+    assert nm.candidatos("zzz", contatos, conversas) == []

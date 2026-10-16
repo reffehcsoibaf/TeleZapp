@@ -21,6 +21,10 @@ class ErroMidia(Exception):
     """Falha esperada ao baixar uma midia; o texto e dito a pessoa."""
 
 
+class ErroPrivacidade(Exception):
+    """Nao deu para mudar a privacidade; o texto e dito a pessoa."""
+
+
 class DownloadCancelado(Exception):
     """A pessoa cancelou o download."""
 
@@ -100,10 +104,46 @@ class Provedor(ABC):
         de chamadas enxerga; listas vazias se nao houver."""
         return [], []
 
+    def arquivar_conversa(self, conversa_id, arquivar):
+        """Arquiva (ou desarquiva) a conversa na conta do servico. Devolve
+        True se o servico foi avisado; False quando so da para guardar no
+        TeleZapp."""
+        return False
+
     def depurar_conversa(self, conversa_id):
         """Dados do servico sobre a conversa, para o menu Depurar (como o
         nome foi achado, identificadores). Dicionario; vazio se nao houver."""
         return {}
+
+    def privacidade(self):
+        """{campo: valor} da privacidade da conta (ver nucleo/
+        privacidade_conta.py), ou None se o servico nao tem ou nao deu
+        para ler."""
+        return None
+
+    def definir_privacidade(self, campo, valor):
+        """Muda uma escolha de privacidade na conta."""
+        raise NotImplementedError
+
+    def privacidade_status(self):
+        """(tipo, quantas) de quem pode ver o status: contacts, blacklist
+        ou whitelist; None se nao souber."""
+        return None
+
+    def resolver_destinatario(self, texto):
+        """(conversa_id, nome) de quem o texto (@usuario, telefone) indica,
+        ou None se o servico nao achou ou nao sabe."""
+        return None
+
+    def contatos_da_conta(self):
+        """[(id, nome, telefone)] da agenda que o servico mantem na conta;
+        vazio por padrao. Leitura local e rapida."""
+        return []
+
+    def id_do_telefone(self, telefone):
+        """Id de conversa de quem tem esse telefone ('+5551...'), ou ''
+        quando o servico nao deixa saber sem consultar a rede."""
+        return ""
 
     def nome_de_participante(self, participante_id):
         """Nome para mostrar de quem aparece num recibo (entregue, lida);

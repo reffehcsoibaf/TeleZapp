@@ -35,7 +35,7 @@
 <p>O TeleZapp reúne o WhatsApp e o Telegram numa só janela do Windows, pensada para quem usa leitor de tela, como o NVDA. Todos os controles são os do próprio Windows, sem telas desenhadas à mão.</p>
 
 <h2 id="menu">O menu</h2>
-<p>Aperte Alt para abrir o Menu. Ele tem um submenu para cada assunto: Contas, Conversa, Mensagem, Mídias, Exibição, Depurar e Ajuda, e no fim o item Sair. Use a seta para baixo para percorrer, a seta para a direita para entrar num submenu, a seta para a esquerda para voltar e Esc para fechar.</p>
+<p>Aperte Alt para abrir o Menu. Ele tem um submenu para cada assunto: Contas, Contatos, Conversa, Mensagem, Mídias, Exibição, Depurar e Ajuda, e no fim o item Sair. Use a seta para baixo para percorrer, a seta para a direita para entrar num submenu, a seta para a esquerda para voltar e Esc para fechar.</p>
 
 <h2 id="contas">Adicionar e remover contas</h2>
 <p>No Menu, em Contas, escolha adicionar uma conta do Telegram ou do WhatsApp.</p>
@@ -72,10 +72,14 @@
 <p>Na caixa de digitação, Enter envia e Shift Enter faz uma nova linha. Esc fecha a conversa, e o que você digitou e não enviou fica guardado como rascunho. Para responder a uma mensagem, selecione-a e use Control Shift R; Esc cancela a resposta.</p>
 <p>Em Exibição você escolhe a ordem em que cada mensagem é lida (autor e hora primeiro, conteúdo primeiro, ou autor só quando muda) e liga ou desliga o som e a fala das mensagens novas.</p>
 
+<h3>Reações, edições e mensagens apagadas (WhatsApp)</h3>
+<p>Quando alguém reage a uma mensagem, a reação aparece no fim da linha dela, por exemplo "reações: 👍 de Ana"; com mais de três, só a contagem, e os detalhes (Alt Enter) listam todas. Se a reação for a uma mensagem sua, o TeleZapp também fala quem reagiu, com qual emoji e o começo da mensagem; essa fala pode ser desligada em Configurações, categoria Avisos, "Falar reações às minhas mensagens".</p>
+<p>Uma mensagem editada mostra o texto novo e termina com "(editada)". Uma mensagem apagada para todos pelo autor passa a ser lida como "mensagem apagada". Isso só vale para mensagens que o TeleZapp já tinha guardado.</p>
+
 <h2 id="midias">Fotos, vídeos, áudios e documentos</h2>
 <p>Numa mensagem com mídia, Enter (ou Control O) abre a mídia dentro do TeleZapp. Se ela ainda não foi baixada, o TeleZapp baixa primeiro e avisa o andamento pelo leitor de tela; Esc cancela. Control B baixa sem abrir.</p>
 <p>Em áudios e mensagens de voz, o padrão é só tocar, sem abrir janela: Enter de novo na mesma mensagem pausa e continua, e Esc para o áudio. Se preferir o player em janela, com avançar, voltar e posição, mude em Menu, Mídias, Enter em áudio. Formatos que o TeleZapp não toca sozinho, como m4a, sempre abrem a janela.</p>
-<p>Por padrão, quando um áudio ou mensagem de voz termina, o próximo áudio da conversa toca em seguida (baixando antes, se precisar), e o leitor de tela fala "Próximo áudio" com o nome de quem enviou. Esc para tudo. Você desliga isso em Menu, Mídias, Áudios em sequência. A sequência só vale para o modo sem janela.</p>
+<p>Por padrão, quando um áudio ou mensagem de voz termina, o próximo áudio da conversa toca em seguida (baixando antes, se precisar), e o leitor de tela fala "Próximo áudio" com o nome de quem enviou. Esc para tudo. Em Menu, Mídias, Áudios em sequência você escolhe entre três comportamentos: tocar todos os áudios da conversa em sequência (o padrão, que pula as mensagens que não são áudio), tocar só os áudios seguidos, parando na primeira mensagem que não for áudio (por exemplo, com três áudios, um texto e mais dois áudios, toca os três primeiros e para antes do texto), ou parar quando o áudio terminar. A sequência só vale para o modo sem janela.</p>
 <h3>Velocidade do áudio</h3>
 <p>Áudios e mensagens de voz tocam de 0,25x até 3x sem mudar o tom da voz. Em Menu, Mídias: Áudio mais rápido (Control Shift Seta para cima), Áudio mais lento (Control Shift Seta para baixo), Velocidade normal (Control Shift 0) e Velocidade do áudio, que abre uma lista. A mudança vale na hora, até para o áudio que está tocando, e o leitor de tela fala, por exemplo, "Velocidade 1,5x". No player em janela, os botões Mais rápido e Mais lento e as teclas + e - fazem o mesmo.</p>
 <p>O passo é ajustável em Menu, Mídias, Passo da velocidade do áudio: de 0,25 em 0,25 (0,25x a 3x), de 0,5 em 0,5 (0,5x a 3x) ou de 1 em 1 (1x, 2x e 3x). Ao trocar o passo, a velocidade vai para o valor mais próximo que ele permite. A velocidade vale para todos os áudios e fica guardada. Em vídeos, e em áudios que abrem pelo player do Windows (como m4a), o tom pode acompanhar a velocidade.</p>

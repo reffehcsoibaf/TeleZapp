@@ -130,7 +130,13 @@ class ClienteFalso:
     def add_event_handler(self, f, evento):
         self.handlers.append(f)
 
-    async def iter_dialogs(self, limit=None, archived=None):
+    async def iter_dialogs(self, limit=None, folder=None, archived=None):
+        if folder == 1:
+            yield types.SimpleNamespace(
+                id=77, name="Velha", unread_count=0, date=DATA,
+                input_entity="peer77", is_group=False, is_channel=False,
+                dialog=types.SimpleNamespace(read_outbox_max_id=0))
+            return
         for d in (
             types.SimpleNamespace(
                 id=10, name="Ana", unread_count=2, date=DATA,
@@ -260,9 +266,12 @@ def test_sessao_salva_conecta_e_lista_conversas(ambiente):
         pronta = esperar(ambiente.fila, ev.ContaPronta)
         assert pronta.telefone == "+5551999998888" and pronta.nome == "Fábio"
         convs = esperar(ambiente.fila, ev.ConversasAtualizadas).conversas
-        assert [(c.nome, c.tipo, c.nao_lidas) for c in convs] == [
-            ("Ana", "privada", 2), ("Família", "grupo", 0)]
-        assert len(ambiente.banco.conversas("t1")) == 2
+        assert [(c.nome, c.tipo, c.nao_lidas, c.arquivada) for c in convs] == [
+            ("Ana", "privada", 2, False), ("Família", "grupo", 0, False),
+            ("Velha", "privada", 0, True)]       # a da pasta de arquivadas
+        assert len(ambiente.banco.conversas("t1")) == 3
+        assert [c.arquivada for c in ambiente.banco.conversas("t1")
+                if c.nome == "Velha"] == [True]
         assert len(cliente.handlers) == 3
 
         p.carregar_mensagens("10")
@@ -559,3 +568,16 @@ def test_grupo_renomeado_no_telegram_atualiza_a_conversa(ambiente):
         assert ambiente.fila.empty()
     finally:
         p.parar()
+
+
+def test_voz_ja_tocada_em_outro_aparelho_chega_como_ouvida():
+    ja_ouvida = tg.converter(mensagem(1, voice=object(), media=object(),
+                                      sender=ANA, media_unread=False),
+                             "t1", 10)
+    nova = tg.converter(mensagem(2, voice=object(), media=object(),
+                                 sender=ANA, media_unread=True), "t1", 10)
+    assert m.extras_de(ja_ouvida)["ouvida"] is True
+    assert m.extras_de(nova)["ouvida"] is False
+    minha = tg.converter(mensagem(3, voice=object(), media=object(),
+                                  out=True, media_unread=False), "t1", 10)
+    assert m.extras_de(minha)["ouvida"] is False

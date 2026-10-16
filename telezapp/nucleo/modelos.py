@@ -6,6 +6,7 @@ import json
 import os
 import re
 import time
+import unicodedata
 from dataclasses import dataclass
 
 SERVICOS = {"telegram": "Telegram", "whatsapp": "WhatsApp"}
@@ -55,6 +56,8 @@ class Conversa:
     nao_lidas: int = 0
     data: float = 0.0          # momento da ultima mensagem (timestamp)
     lidas_ate: int = 0         # Telegram: ultima msg minha lida pelo outro
+    arquivada: bool = False    # arquivada no servico (so no filtro Arquivadas)
+    trancada: bool = False     # WhatsApp: "Trancar conversa" do celular
 
     @property
     def chave(self):
@@ -100,7 +103,11 @@ def extras_de(msg):
             "botoes": list(dados.get("botoes") or []),
             "mencoes": list(dados.get("mencoes") or []),
             "acoes": list(dados.get("acoes") or []),
-            "original": dados.get("original") or ""}
+            "original": dados.get("original") or "",
+            "editada": bool(dados.get("editada")),
+            "apagada": bool(dados.get("apagada")),
+            "ouvida": bool(dados.get("ouvida")),
+            "reacoes": list(dados.get("reacoes") or [])}
 
 
 def guardar_extras(msg, links=(), botoes=(), mencoes=(), acoes=(),
@@ -120,6 +127,35 @@ def guardar_extras(msg, links=(), botoes=(), mencoes=(), acoes=(),
         dados["original"] = original    # JSON da mensagem com botoes
     msg.extras = json.dumps(dados, ensure_ascii=False) if dados else ""
     return msg
+
+
+def atualizar_extras(msg, **campos):
+    """Muda so as chaves dadas dos extras (editada, apagada, reacoes...),
+    mantendo links, botoes e o resto. Valor vazio ou falso remove a chave."""
+    try:
+        dados = json.loads(msg.extras) if msg.extras else {}
+    except ValueError:
+        dados = {}
+    if not isinstance(dados, dict):
+        dados = {}
+    for chave, valor in campos.items():
+        if valor in (None, False, "", [], {}):
+            dados.pop(chave, None)
+        else:
+            dados[chave] = valor
+    msg.extras = json.dumps(dados, ensure_ascii=False) if dados else ""
+    return msg
+
+
+def resumo_reacoes(msg, maximo=3):
+    """'👍 de Ana, ❤ de Bruno' (ate `maximo`; com mais, so a contagem)."""
+    reacoes = extras_de(msg)["reacoes"]
+    if not reacoes:
+        return ""
+    if len(reacoes) > maximo:
+        return "%d reações" % len(reacoes)
+    return ", ".join("%s de %s" % (r.get("emoji", ""), r.get("quem", ""))
+                     for r in reacoes)
 
 
 # ------------------------------------------------------------- formatacao
@@ -164,8 +200,15 @@ def _partes(*itens):
     return ", ".join(p for p in itens if p)
 
 
-def conteudo(m):
-    """Texto falado do conteudo de uma mensagem, sem autor nem hora."""
+def conteudo(m, com_estado=True):
+    """Texto falado do conteudo de uma mensagem, sem autor nem hora.
+    `com_estado`: acrescenta "ouvida" num audio ou voz que ja foi tocado
+    (nao entra em citacoes)."""
+    extras = extras_de(m)
+    if extras["apagada"]:
+        return "mensagem apagada"
+    ouvida = "ouvida" if com_estado and extras["ouvida"] and \
+        not m.minha else ""
     legenda = ("legenda: " + m.texto) if m.texto else ""
     dur = duracao_legivel(m.segundos) if m.segundos else ""
     tam = tamanho_legivel(m.tamanho) if m.tamanho else ""
@@ -176,9 +219,9 @@ def conteudo(m):
     if m.tipo == VIDEO:
         return _partes("vídeo", dur, tam, legenda)
     if m.tipo == VOZ:
-        return _partes("mensagem de voz", dur)
+        return _partes("mensagem de voz", dur, ouvida)
     if m.tipo == AUDIO:
-        return _partes("áudio", m.nome_arquivo, dur, tam, legenda)
+        return _partes("áudio", m.nome_arquivo, dur, tam, ouvida, legenda)
     if m.tipo == DOCUMENTO:
         return _partes("documento", m.nome_arquivo, tam, legenda)
     if m.tipo == FIGURINHA:
@@ -199,9 +242,65 @@ def _juntar(cont, resto):
 LIMITE_CITACAO = 80
 
 
+def anuncio_reproducao(msg, velocidade="", proximo=False,
+                       detalhado=True):
+    """O que o leitor de tela fala quando um audio ou mensagem de voz comeca
+    a tocar: quem enviou, o que e e quanto dura.
+    'Tocando mensagem de voz de Ana, 12 segundos.' `velocidade` e o rotulo
+    ('1,5x'), dito so quando nao e a normal; `proximo`: veio da sequencia.
+    `detalhado` falso: so 'Tocando.' (com a velocidade, se nao e a normal)."""
+    if not detalhado:
+        texto = "Tocando" + (", a " + velocidade if velocidade else "") + "."
+        return ("Próximo áudio. " + texto) if proximo else texto
+    coisa = {VOZ: "mensagem de voz", AUDIO: "áudio",
+             VIDEO: "vídeo"}.get(msg.tipo, "áudio")
+    if msg.minha:
+        o_que = "sua " + coisa if msg.tipo == VOZ else "seu " + coisa
+    else:
+        o_que = coisa + (" de " + msg.autor if msg.autor else "")
+    partes = ["Tocando " + o_que]
+    if msg.segundos:
+        partes.append(duracao_legivel(msg.segundos))
+    if velocidade:
+        partes.append("a " + velocidade)
+    texto = ", ".join(partes) + "."
+    return ("Próximo áudio. " + texto) if proximo else texto
+
+
+def anuncio_sequencia(msg, velocidade="", proximo=True, tipo=True,
+                      quem=True, duracao=True, mostrar_velocidade=True):
+    """O que se fala quando um audio da sequencia comeca, conforme as
+    opcoes da pessoa. Tudo ligado = 'Próximo áudio. Tocando mensagem de voz
+    de Ana, 12 segundos, a 1,5x.'; tudo desligado = nada (texto vazio).
+    `velocidade`: rotulo ('1,5x'), vazio na velocidade normal."""
+    coisa = {VOZ: "mensagem de voz", AUDIO: "áudio",
+             VIDEO: "vídeo"}.get(msg.tipo, "áudio")
+    partes = []
+    if tipo and quem and msg.minha:
+        partes.append("Tocando " + ("sua " if msg.tipo == VOZ else "seu ")
+                      + coisa)
+    elif tipo and quem:
+        partes.append("Tocando " + coisa
+                      + (" de " + msg.autor if msg.autor else ""))
+    elif tipo:
+        partes.append("Tocando " + coisa)
+    elif quem:
+        partes.append("Enviado por você" if msg.minha else
+                      ("De " + msg.autor if msg.autor else ""))
+    if duracao and msg.segundos:
+        partes.append(duracao_legivel(msg.segundos))
+    if mostrar_velocidade and velocidade:
+        partes.append("a " + velocidade)
+    partes = [p for p in partes if p]
+    corpo = ", ".join(partes) + "." if partes else ""
+    if proximo:
+        return "Próximo áudio. " + corpo if corpo else "Próximo áudio."
+    return corpo
+
+
 def citacao(original, max_caracteres=LIMITE_CITACAO):
     """Trecho curto de uma mensagem para mostrar numa resposta."""
-    texto = " ".join(conteudo(original).split())
+    texto = " ".join(conteudo(original, com_estado=False).split())
     if len(texto) > max_caracteres:
         texto = texto[:max_caracteres].rsplit(" ", 1)[0].rstrip(" ,;:.") + "…"
     return texto
@@ -214,6 +313,8 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None):
     do autor (texto).
     """
     cont = conteudo(m).replace("\r", " ").replace("\n", " ")
+    if extras_de(m)["editada"]:
+        cont = _juntar(cont, "(editada)")
     n_links = len(itens_de_link(m))
     if n_links:
         cont = _juntar(cont, "com %d %s (Tab)" % (
@@ -224,6 +325,10 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None):
         cont = _juntar(cont, "com %d %s (Tab)" % (
             len(acoes), ("opção" if len(acoes) == 1 else "opções")
             if so_opcoes else ("botão" if len(acoes) == 1 else "botões")))
+    reacoes = resumo_reacoes(m)
+    if reacoes:
+        cont = _juntar(cont, "reações: " + reacoes if " de " in reacoes
+                       else "com " + reacoes)
     if m.resposta_a:
         if isinstance(respondida, Mensagem):
             quem = "você" if respondida.minha else (
@@ -245,6 +350,80 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None):
         prefixo = ("%s: " % autor) if mudou else ""
         return _juntar(prefixo + cont, estado)
     return _juntar("%s, %s: %s" % (autor, hora, cont), estado)
+
+
+FILTROS_TIPO = (("todas", "Todas as conversas"),
+                ("nao_lidas", "Não lidas"),
+                ("pessoais", "Pessoais"),
+                ("grupos", "Grupos"),
+                ("canais", "Canais"),
+                ("arquivadas", "Arquivadas"),
+                ("trancadas", "Trancadas no celular"))
+CONTA_TODAS = "todas"
+
+
+def tipos_visiveis(trancadas):
+    """FILTROS_TIPO; o tipo Trancadas so entra quando liberado."""
+    return tuple(t for t in FILTROS_TIPO if trancadas or t[0] != "trancadas")
+
+
+def _sem_acento(texto):
+    return "".join(c for c in unicodedata.normalize("NFD", texto.lower())
+                   if unicodedata.category(c) != "Mn")
+
+
+def casa_busca(nome, busca):
+    """Todas as palavras da busca aparecem no nome (sem maiusculas nem
+    acentos)? Busca vazia casa com tudo."""
+    alvo = _sem_acento(nome or "")
+    return all(p in alvo for p in _sem_acento(busca or "").split())
+ROTULO_TODAS_AS_CONTAS = "Todas as contas"
+
+
+def passa_filtro(c, tipo="todas", conta=CONTA_TODAS, busca=""):
+    """A conversa aparece na lista? `conta`: "todas", um servico
+    ("telegram", "whatsapp") ou "conta:<id>". `tipo`: ver FILTROS_TIPO. As
+    arquivadas so aparecem no tipo Arquivadas. Valor desconhecido nao
+    filtra."""
+    if busca and not casa_busca(c.nome, busca):
+        return False
+    if conta in SERVICOS and c.servico != conta:
+        return False
+    if conta.startswith("conta:") and c.conta_id != conta[6:]:
+        return False
+    if tipo == "trancadas":
+        return bool(c.trancada)
+    if c.trancada:
+        return False             # trancada: so no tipo Trancadas
+    if tipo == "arquivadas":
+        return bool(c.arquivada)
+    if c.arquivada:
+        return False
+    if tipo == "nao_lidas":
+        return c.nao_lidas > 0
+    if tipo == "pessoais":
+        return c.tipo == "privada"
+    if tipo == "grupos":
+        return c.tipo == "grupo"
+    if tipo == "canais":
+        return c.tipo == "canal"
+    return True
+
+
+def opcoes_de_conta(contas):
+    """[(valor, rotulo)] do filtro de conta. contas: [(id, servico, nome)].
+    Todas as contas, os servicos que tem conta e, para o servico com mais de
+    uma conta, cada conta."""
+    opcoes = [(CONTA_TODAS, ROTULO_TODAS_AS_CONTAS)]
+    for servico, nome_servico in SERVICOS.items():
+        do_servico = [c for c in contas if c[1] == servico]
+        if not do_servico:
+            continue
+        opcoes.append((servico, nome_servico))
+        if len(do_servico) > 1:
+            opcoes += [("conta:" + i, "%s, %s" % (n, nome_servico))
+                       for i, _, n in do_servico]
+    return opcoes
 
 
 def rotulo_conversa(c):
@@ -324,6 +503,14 @@ def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
                       if m.data else "-"),
         "Tipo: %s" % NOMES_TIPOS.get(m.tipo, m.tipo),
     ]
+    extras_m = extras_de(m)
+    if extras_m["editada"]:
+        linhas.append("Editada: sim")
+    if extras_m["apagada"]:
+        linhas.append("Apagada pelo autor: sim")
+    for r in extras_m["reacoes"]:
+        linhas.append("Reação: %s de %s" % (r.get("emoji", ""),
+                                            r.get("quem", "")))
     if m.nome_arquivo:
         linhas.append("Arquivo: %s" % m.nome_arquivo)
     if m.tamanho:

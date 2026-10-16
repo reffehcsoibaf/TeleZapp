@@ -43,6 +43,7 @@ SO_CONTROLE = {"senderKeyDistributionMessage", "messageContextInfo",
                "messageHistoryNotice"}
 # Tipos de recibo do neonize (Receipt.Type)
 RECIBO_ENTREGUE, RECIBO_LIDO, RECIBO_LIDO_POR_MIM, RECIBO_OUVIDO = 1, 4, 5, 6
+RECIBO_OUVIDO_POR_MIM = 7     # toquei a voz ou audio no celular
 MAX_GUARDADAS = 2000
 # Sem o aviso de fim da sincronia, os avisos voltam depois deste tempo
 TEMPO_MAX_SINCRONIA = 45
@@ -52,6 +53,7 @@ ESPERAS_RECONEXAO = (3, 10, 30, 60, 120)
 HIST_ENTREGUE, HIST_LIDA, HIST_OUVIDA = 3, 4, 5
 # Conversas que nao sao conversas para a pessoa
 IGNORAR_CONVERSAS = ("status@broadcast",)
+INTERVALO_ARQUIVADAS = 60   # segundos entre conferencias das arquivadas
 IGNORAR_SERVIDORES = ("newsletter", "broadcast")
 
 # Quanto historico pedir ao celular no pareamento: chave -> (rotulo, dias).
@@ -91,6 +93,10 @@ def desembrulhar(msg):
 
 SEM_NOME = "Contato sem nome"
 CANAL_SEM_NOME = "Canal"
+
+
+class ListaDeTransmissao(Exception):
+    """Envio para uma lista de transmissao: a biblioteca nao suporta."""
 
 
 def parece_codigo(nome):
@@ -633,6 +639,9 @@ class ProvedorWhatsApp(Provedor):
         self._sem_nome_registrados = set()
         self._conectada = False
         self._cache_mencoes = {}   # jid mencionado -> nome, id, telefone
+        self._grupos_lidos = {}    # grupo -> quando os participantes foram lidos
+        self._arquivada_vista = {}  # conversa -> arquivada, como o celular disse
+        self._ultima_conferencia = 0.0
         self._sincronizando = False
         self._progresso_historico = 0   # 0 = nada em andamento
         self._recebidas_na_sincronia = 0
@@ -742,6 +751,15 @@ class ProvedorWhatsApp(Provedor):
                     log.warning("evento %s não existe nesta versão", nome)
                     continue
                 self.cliente.event(classe)(funcao)
+            # avisos de estado do celular (arquivar, trancar): so as versoes
+            # novas do neonize os repassam; nas antigas vale a conferencia
+            # periodica das arquivadas
+            for nome, funcao in (("ChatArchiveEv", self._ao_arquivar),
+                                 ("ChatLockEv", self._ao_trancar)):
+                classe = getattr(nev, nome, None)
+                if classe is not None:
+                    self.cliente.event(classe)(funcao)
+                    log.info("aviso %s ligado", nome)
             self.cliente.event.qr(self._ao_qr)
             self._estado(ev.CONECTANDO)
             self._inicio = time.perf_counter()
@@ -761,6 +779,12 @@ class ProvedorWhatsApp(Provedor):
             try:
                 tarefa = self._fila.get(timeout=0.5)
             except queue.Empty:
+                if self._conectada and time.time() - \
+                        self._ultima_conferencia >= INTERVALO_ARQUIVADAS:
+                    try:
+                        self._conferir_arquivadas()
+                    except Exception:
+                        log.exception("erro ao conferir as arquivadas")
                 continue
             try:
                 tarefa()
@@ -904,7 +928,89 @@ class ProvedorWhatsApp(Provedor):
 
     def atualizar_conversas(self):
         self._publicar_conversas()
+        self._fila.put(self._conferir_arquivadas)
         self._fila.put(self._atualizar_nomes_de_grupos)
+
+    def _arquivada_no_celular(self, conversa_id):
+        """True/False como o celular deixou a conversa (armazem local do
+        whatsmeow, que os avisos do celular mantem em dia); None se o
+        armazem nao conhece a conversa."""
+        usuario, servidor = jid_de_texto(conversa_id)
+        jid = _jid_obj(usuario, servidor)
+        candidatos = [jid]
+        if servidor == "s.whatsapp.net":
+            try:                      # o armazem pode guardar sob o LID
+                lid = self.cliente.get_lid_from_pn(jid)
+                if lid.User:
+                    candidatos.append(lid)
+            except Exception:
+                pass
+        for alvo in candidatos:
+            try:
+                dados = self.cliente.chat_settings.get_chat_settings(alvo)
+            except Exception:
+                continue
+            if dados.Found:
+                return bool(dados.Archived)
+        return None
+
+    def _marcar_conversa(self, evento, campo, valor):
+        """Poe uma marca (arquivada, trancada) numa conversa que o celular
+        acabou de mudar; so conversas que o TeleZapp ja conhece."""
+        cid = self._id_da_conversa(evento.JID)
+        with self._trava:
+            conv = self._conversas.get(cid)
+            if conv is None or getattr(conv, campo) == valor:
+                return False
+            setattr(conv, campo, valor)
+        log.info("conversa %s no celular: %s=%s", "mudou", campo, valor)
+        self.banco.salvar_conversas([conv])
+        self._publicar_conversas()
+        return True
+
+    def _ao_arquivar(self, cliente, evento):
+        try:
+            valor = bool(evento.Action.archived)
+            with self._trava:
+                self._arquivada_vista[self._id_da_conversa(evento.JID)] = valor
+            self._marcar_conversa(evento, "arquivada", valor)
+        except Exception:
+            log.exception("erro ao tratar o aviso de arquivar")
+
+    def _ao_trancar(self, cliente, evento):
+        try:
+            self._marcar_conversa(evento, "trancada",
+                                  bool(evento.Action.locked))
+        except Exception:
+            log.exception("erro ao tratar o aviso de trancar")
+
+    def _conferir_arquivadas(self):
+        """Poe em cada conversa a marca de arquivada que o celular tem. O
+        celular manda isso como aviso de estado (nao ha evento no neonize),
+        entao e lido do armazem a cada INTERVALO_ARQUIVADAS segundos. A
+        primeira leitura de uma conversa vale; depois so conta se o valor
+        do celular mudou (assim o que se arquiva aqui nao e desfeito)."""
+        if not self._conectada or self.cliente is None:
+            return
+        self._ultima_conferencia = time.time()
+        with self._trava:
+            convs = [c for c in self._conversas.values()
+                     if c.id not in IGNORAR_CONVERSAS]
+        mudou = []
+        for conv in convs:
+            valor = self._arquivada_no_celular(conv.id)
+            if valor is None:
+                continue
+            visto = self._arquivada_vista.get(conv.id)
+            self._arquivada_vista[conv.id] = valor
+            if valor != visto and valor != conv.arquivada:
+                conv.arquivada = valor
+                mudou.append(conv)
+        if mudou:
+            log.info("arquivadas conferidas: %d conversas mudaram de lugar",
+                     len(mudou))
+            self.banco.salvar_conversas(mudou)
+            self._publicar_conversas()
 
     def _atualizar_nomes_de_grupos(self):
         """Pergunta ao WhatsApp o nome atual de todos os grupos e corrige os
@@ -966,8 +1072,12 @@ class ProvedorWhatsApp(Provedor):
         """Nome do contato (agenda), senao o nome de registro (perfil da
         pessoa, nome verificado da empresa) e, por ultimo, o telefone. Nunca
         o codigo interno do WhatsApp."""
-        pushname = pushname or self._apelidos.get(jid_texto(jid), "")
         alvo = self._numero_do_jid(jid)
+        da_agenda = self.banco.nome_de_contato(
+            self.conta.id, jid_texto(alvo), jid_texto(jid))
+        if da_agenda:
+            return da_agenda        # o nome dado no TeleZapp vale mais
+        pushname = pushname or self._apelidos.get(jid_texto(jid), "")
         empresa = ""
         for tentativa in (alvo, jid) if alvo is not jid else (jid,):
             try:
@@ -1015,6 +1125,61 @@ class ProvedorWhatsApp(Provedor):
             dados["erro"] = type(e).__name__
         return dados
 
+    # nomes que o neonize usa para cada valor de privacidade
+    _VALORES_PRIVACIDADE = {2: "all", 3: "contacts", 4: "contact_blacklist",
+                            5: "match_last_seen", 6: "known", 7: "none"}
+
+    def privacidade(self):
+        if self.cliente is None or not self._conectada:
+            return None
+        try:
+            c = self.cliente.get_privacy_settings()
+        except Exception:
+            log.exception("não consegui ler a privacidade da conta")
+            return None
+        v = self._VALORES_PRIVACIDADE.get
+        return {"last": v(c.LastSeen), "online": v(c.Online),
+                "status": v(c.Status), "readreceipts": v(c.ReadReceipts),
+                "groupadd": v(c.GroupAdd)}
+
+    def definir_privacidade(self, campo, valor):
+        from neonize.utils.enum import PrivacySetting, PrivacySettingType
+        self.cliente.set_privacy_setting(PrivacySettingType(campo),
+                                         PrivacySetting(valor))
+
+    def privacidade_status(self):
+        if self.cliente is None or not self._conectada:
+            return None
+        try:
+            itens = list(self.cliente.get_status_privacy())
+        except Exception:
+            log.info("não consegui ler quem vê o status")
+            return None
+        if not itens:
+            return None
+        padrao = next((i for i in itens if i.IsDefault), itens[0])
+        tipo = {1: "contacts", 2: "blacklist", 3: "whitelist"}.get(
+            padrao.Type, "contacts")
+        return tipo, len(padrao.List)
+
+    def id_do_telefone(self, telefone):
+        digitos = re.sub(r"\D", "", telefone or "")
+        return digitos + "@s.whatsapp.net" if digitos else ""
+
+    def contatos_da_conta(self):
+        """[(id, nome, telefone)] da agenda sincronizada com a conta (os
+        contatos salvos no celular ou so no WhatsApp). Leitura local."""
+        achados = []
+        for c in self.cliente.contact.get_all_contacts():
+            nome = c.Info.FullName or c.Info.FirstName
+            if not nome or parece_codigo(nome):
+                continue
+            alvo = self._numero_do_jid(c.JID)
+            if alvo.Server != "s.whatsapp.net" or not alvo.User:
+                continue
+            achados.append((jid_texto(alvo), nome, "+" + alvo.User))
+        return achados
+
     def nome_de_participante(self, participante_id):
         """Nome de quem entregou/leu uma mensagem, para os detalhes."""
         if self.cliente is None or "@" not in (participante_id or ""):
@@ -1026,24 +1191,88 @@ class ProvedorWhatsApp(Provedor):
             return ""
         return "" if nome == SEM_NOME else nome
 
-    def _dados_mencao(self, jid_txt):
-        """{'nome', 'id', 'telefone'} de quem foi mencionado (com cache)."""
+    def _lembrar_apelido(self, jid, pushname):
+        """Guarda o nome de perfil que veio numa mensagem, sob o endereco
+        original (LID ou telefone) e sob o telefone, para as mencoes."""
+        try:
+            self._apelidos[jid_texto(jid)] = pushname
+            alvo = self._numero_do_jid(jid)
+            if alvo is not jid:
+                self._apelidos.setdefault(jid_texto(alvo), pushname)
+        except Exception:
+            log.info("não consegui guardar um nome de perfil")
+
+    def _aprender_do_grupo(self, grupo):
+        """Le a lista de participantes do grupo: o WhatsApp informa o
+        telefone de quem aparece so como LID e, em alguns grupos, o nome.
+        No maximo uma consulta por grupo a cada 10 minutos."""
+        agora = time.time()
+        if agora - self._grupos_lidos.get(grupo, 0) < 600:
+            return
+        self._grupos_lidos[grupo] = agora
+        usuario, servidor = jid_de_texto(grupo)
+        info = self.cliente.get_group_info(_jid_obj(usuario, servidor))
+        for p in info.Participants:
+            lid, pn = jid_texto(p.LID), jid_texto(p.PhoneNumber)
+            if p.LID.User and p.PhoneNumber.User:
+                self._lid_para_numero.setdefault(lid, pn)
+            if p.DisplayName and not parece_codigo(p.DisplayName):
+                for chave in (lid, pn, jid_texto(p.JID)):
+                    if chave and chave != "@":
+                        self._apelidos.setdefault(chave, p.DisplayName)
+
+    def _nome_verificado_de(self, jid):
+        """Nome verificado de uma empresa, pela consulta de usuario."""
+        try:
+            for u in self.cliente.get_user_info(jid):
+                nome = u.UserInfo.VerifiedName.Details.verifiedName
+                if nome:
+                    return nome
+        except Exception:
+            log.info("sem nome verificado para uma menção")
+        return ""
+
+    def _dados_mencao(self, jid_txt, grupo=""):
+        """{'nome', 'id', 'telefone'} de quem foi mencionado (com cache).
+        Um resultado so com o telefone nao fica no cache: o nome de perfil
+        pode chegar depois, numa mensagem da pessoa.
+
+        Fontes, em ordem: agenda, nome de perfil visto nas mensagens e no
+        historico, lista de participantes do grupo, mensagens guardadas e
+        nome verificado de empresa."""
         achado = self._cache_mencoes.get(jid_txt)
         if achado is not None:
             return achado
         usuario, servidor = jid_de_texto(jid_txt)
-        jid = _jid_obj(usuario, servidor)
-        if servidor == "lid":
+
+        def resolver():
+            jid = self._numero_do_jid(_jid_obj(usuario, servidor))
+            tel = "+" + jid.User if jid.Server == "s.whatsapp.net" else ""
+            nome = self._nome_contato(
+                jid, self._apelidos.get(jid_txt, "")) or usuario
+            return jid, tel, nome
+
+        def sem_nome(nome, tel):
+            return nome in (tel, SEM_NOME, usuario)
+        jid, telefone, nome = resolver()
+        if sem_nome(nome, telefone) and grupo:
             try:
-                pn = self.cliente.get_pn_from_lid(jid)
-                if pn.User:
-                    jid = pn
+                self._aprender_do_grupo(grupo)
+                jid, telefone, nome = resolver()
             except Exception:
-                log.info("sem número para uma menção com endereço LID")
-        telefone = "+" + jid.User if jid.Server == "s.whatsapp.net" else ""
-        achado = {"nome": self._nome_contato(jid) or usuario,
-                  "id": jid_texto(jid), "telefone": telefone}
-        self._cache_mencoes[jid_txt] = achado
+                log.info("não consegui ler os participantes do grupo")
+        if sem_nome(nome, telefone):
+            try:
+                guardado = self.banco.nome_do_remetente(
+                    self.conta.id, {jid_txt, jid_texto(jid)})
+            except Exception:
+                guardado = ""
+            nome = guardado or nome
+        if sem_nome(nome, telefone):
+            nome = self._nome_verificado_de(jid) or nome
+        achado = {"nome": nome, "id": jid_texto(jid), "telefone": telefone}
+        if not sem_nome(nome, telefone):
+            self._cache_mencoes[jid_txt] = achado
         return achado
 
     def _enriquecer_mencoes(self, msg):
@@ -1057,7 +1286,7 @@ class ProvedorWhatsApp(Provedor):
             if not men.get("jid") or men.get("nome"):
                 continue
             try:
-                men.update(self._dados_mencao(men["jid"]))
+                men.update(self._dados_mencao(men["jid"], msg.conversa_id))
             except Exception:
                 log.exception("erro ao achar o nome de uma menção")
                 continue
@@ -1240,10 +1469,25 @@ class ProvedorWhatsApp(Provedor):
             origem = info.MessageSource
             grupo = bool(origem.IsGroup)
             cid = self._id_da_conversa(origem.Chat)
+            chat_da_msg = origem.Chat
+            if origem.Chat.Server == "broadcast" and \
+                    cid not in IGNORAR_CONVERSAS:
+                # Lista de transmissao: o WhatsApp nao deixa responder nela.
+                # A mensagem recebida vai para a conversa com quem a enviou
+                # (como no celular); a que eu mandei pela lista e ignorada.
+                if origem.IsFromMe:
+                    return
+                cid = self._id_da_conversa(origem.Sender)
+                chat_da_msg = origem.Sender
+                grupo = False
             autor = ""
+            if not origem.IsFromMe and info.Pushname:
+                self._lembrar_apelido(origem.Sender, info.Pushname)
             if grupo and not origem.IsFromMe:
                 autor = self._nome_contato(
                     origem.Sender, info.Pushname or nome_verificado(info))
+            if self._tratar_alteracao(evento, cid, info, origem):
+                return
             msg, remetente = converter(evento, self.conta.id, cid, autor)
             if msg is None:
                 # So controle (chave de grupo, reacao...). O ID NAO entra em
@@ -1270,7 +1514,7 @@ class ProvedorWhatsApp(Provedor):
                 if ficha:
                     self.banco.salvar_fichas(
                         [(self.conta.id, cid, msg.id, ficha)])
-            conv = self._conversa(cid, origem.Chat,
+            conv = self._conversa(cid, chat_da_msg,
                                   info.Pushname or nome_verificado(info), grupo,
                                   msg.data)
             if not grupo and conv.nome.startswith("+") and \
@@ -1298,6 +1542,64 @@ class ProvedorWhatsApp(Provedor):
                                                      silenciosa=silenciosa))
         except Exception:
             log.exception("erro ao tratar mensagem recebida")
+
+    def _tratar_alteracao(self, evento, cid, info, origem):
+        """Reacao, edicao ou 'apagar para todos' de uma mensagem que ja
+        conhecemos. True se o evento era disso (nao e uma mensagem nova)."""
+        interna = desembrulhar(evento.Message)
+        presentes = set(campos(interna))
+        if "reactionMessage" in presentes:
+            r = interna.reactionMessage
+            alvo = r.key.ID
+            quem_id = jid_texto(origem.Sender)
+            quem = "Você" if origem.IsFromMe else self._nome_contato(
+                origem.Sender, info.Pushname or nome_verificado(info))
+            emoji = r.text
+
+            def aplicar(x):
+                reacoes = [y for y in m.extras_de(x)["reacoes"]
+                           if y.get("id") != quem_id]
+                if emoji:
+                    reacoes.append({"id": quem_id, "quem": quem,
+                                    "emoji": emoji})
+                m.atualizar_extras(x, reacoes=reacoes)
+            self._alterar(cid, alvo, aplicar, "reacao", quem, emoji)
+            return True
+        if "protocolMessage" in presentes:
+            p = interna.protocolMessage
+            if not p.HasField("type") or not p.key.ID:
+                return False
+            alvo = p.key.ID
+            if p.type == p.REVOKE:
+                def apagar(x):
+                    x.texto = ""
+                    m.atualizar_extras(x, apagada=True, links=[], botoes=[],
+                                       acoes=[], original="")
+                self._alterar(cid, alvo, apagar, "apagada")
+                return True
+            if p.type == p.MESSAGE_EDIT:
+                novo = conteudo_de(desembrulhar(p.editedMessage))
+                if novo is None:
+                    return True
+
+                def editar(x):
+                    x.texto = novo[1] or ""
+                    m.atualizar_extras(x, editada=True)
+                self._alterar(cid, alvo, editar, "editada")
+                return True
+        return False
+
+    def _alterar(self, cid, alvo, aplicar, motivo, quem="", emoji=""):
+        """Aplica `aplicar` a mensagem guardada, grava e avisa a interface.
+        Se a mensagem e de antes do TeleZapp guardar, nao faz nada."""
+        x = self.banco.mensagem(self.conta.id, cid, alvo)
+        if x is None:
+            log.info("%s de uma mensagem que não está guardada", motivo)
+            return
+        aplicar(x)
+        self.banco.salvar_mensagens([x])
+        self.barramento.publicar(ev.MensagemAtualizada(
+            self.conta.id, cid, x, motivo, quem, emoji))
 
     def baixar_arquivo(self, msg, base, progresso, cancelado):
         dados = self.banco.ficha(msg.conta_id, msg.conversa_id, msg.id)
@@ -1499,6 +1801,8 @@ class ProvedorWhatsApp(Provedor):
         try:
             if not self._conectada:
                 raise ConnectionError("sem conexão")
+            if conversa_id.endswith("@broadcast"):
+                raise ListaDeTransmissao()
             if construir is None:
                 resp = self.cliente.send_message(
                     self._jid(conversa_id),
@@ -1510,8 +1814,13 @@ class ProvedorWhatsApp(Provedor):
                         str(e)[:300],
                         (" (resposta de botão %s)" % descricao_acao)
                         if descricao_acao else "", exc_info=True)
-            motivo = "sem conexão" if isinstance(e, ConnectionError) else \
-                "erro do WhatsApp (%s)" % type(e).__name__
+            if isinstance(e, ConnectionError):
+                motivo = "sem conexão"
+            elif isinstance(e, ListaDeTransmissao):
+                motivo = "listas de transmissão não aceitam envio pelo " \
+                         "TeleZapp"
+            else:
+                motivo = "erro do WhatsApp (%s)" % type(e).__name__
             self.barramento.publicar(ev.EnvioFalhou(
                 self.conta.id, conversa_id, texto, motivo,
                 devolver_texto=construir is None))
@@ -1676,6 +1985,14 @@ class ProvedorWhatsApp(Provedor):
                 self.banco.atualizar_conversa(self.conta.id, cid, nao_lidas=0)
                 self._publicar_conversas()
                 return
+            if tipo == RECIBO_OUVIDO_POR_MIM:
+                # voz ou audio recebido que eu toquei em outro aparelho
+                for alvo in list(e.MessageIDs):
+                    self._alterar(
+                        cid, alvo,
+                        lambda x: m.atualizar_extras(x, ouvida=True)
+                        if not x.minha else None, "ouvida")
+                return
             estado = {RECIBO_ENTREGUE: m.ENTREGUE, RECIBO_LIDO: m.LIDA,
                       RECIBO_OUVIDO: m.LIDA}.get(tipo)
             if estado is None or origem.IsFromMe:
@@ -1765,6 +2082,10 @@ class ProvedorWhatsApp(Provedor):
                                    parece_codigo(conv.nome))):
                     conv.nome = nome
                 conv.data = max(conv.data, data)
+                if c.HasField("archived"):
+                    conv.arquivada = bool(c.archived)
+                if c.HasField("locked"):
+                    conv.trancada = bool(c.locked)
                 if c.HasField("unreadCount"):
                     conv.nao_lidas = int(c.unreadCount)
             if not grupo:
@@ -1791,10 +2112,14 @@ class ProvedorWhatsApp(Provedor):
             self.banco.salvar_mensagens(msgs)
             if fichas:
                 self.banco.salvar_fichas(fichas)
-        log.info("histórico guardado: %d conversas e %d mensagens em %.2fs",
-                 len(convs), len(msgs), time.perf_counter() - inicio)
+        log.info("histórico guardado: %d conversas e %d mensagens em %.2fs "
+                 "(%d arquivadas, %d trancadas no celular)",
+                 len(convs), len(msgs), time.perf_counter() - inicio,
+                 sum(1 for c in convs if c.arquivada),
+                 sum(1 for c in convs if c.trancada))
         if convs:
             self._publicar_conversas()
+            self._fila.put(self._conferir_arquivadas)
 
     def _normalizar_id(self, texto):
         usuario, servidor = jid_de_texto(texto)
