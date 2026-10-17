@@ -38,6 +38,13 @@ def pasta_da_conversa(conta_id, conversa_id):
     return pasta
 
 
+def apagar_conversa(conta_id, conversa_id):
+    """Apaga a pasta de midias da conversa (sem cria-la)."""
+    sub = hashlib.sha1(conversa_id.encode("utf-8")).hexdigest()[:12]
+    shutil.rmtree(os.path.join(pasta_midias(), _limpo(conta_id, 80), sub),
+                  ignore_errors=True)
+
+
 def caminho_base(msg):
     """Caminho do arquivo, sem a extensao quando o nome nao a traz."""
     pasta = pasta_da_conversa(msg.conta_id, msg.conversa_id)

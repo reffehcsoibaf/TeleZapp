@@ -110,6 +110,26 @@ class Provedor(ABC):
         TeleZapp."""
         return False
 
+    def fixar_conversa(self, conversa_id, fixar):
+        """Fixa (ou desafixa) a conversa na conta. True se o servico foi
+        avisado; False quando so da para guardar no TeleZapp."""
+        return False
+
+    def silenciar_conversa(self, conversa_id, silenciar, segundos=0):
+        """Silencia a conversa por `segundos` (0 = para sempre) ou tira o
+        silencio. True se o servico foi avisado."""
+        return False
+
+    # True nos servicos em que o TeleZapp sabe apagar a conversa na conta
+    # (no celular), alem de apaga-la aqui
+    APAGA_NA_CONTA = False
+
+    def apagar_conversa(self, conversa_id, ultima=None):
+        """Apaga a conversa na conta do servico (no celular). `ultima`: a
+        mensagem mais nova que o TeleZapp tem, ou None. Devolve True se o
+        servico foi avisado."""
+        return False
+
     def depurar_conversa(self, conversa_id):
         """Dados do servico sobre a conversa, para o menu Depurar (como o
         nome foi achado, identificadores). Dicionario; vazio se nao houver."""

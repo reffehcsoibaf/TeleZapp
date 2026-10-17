@@ -227,6 +227,21 @@ _REGRA_DO_VALOR = {"all": "InputPrivacyValueAllowAll",
                    "none": "InputPrivacyValueDisallowAll"}
 
 
+def silencio_do_dialogo(d):
+    """0.0 (com som), -1.0 (para sempre) ou o timestamp do fim do silencio
+    de um dialogo do Telegram."""
+    try:
+        ate = d.dialog.notify_settings.mute_until
+    except AttributeError:
+        return 0.0
+    if not ate:
+        return 0.0
+    ate = ate.timestamp() if hasattr(ate, "timestamp") else float(ate)
+    if ate <= time.time():
+        return 0.0
+    return -1.0 if ate > time.time() + 5 * 365 * 86400 else ate
+
+
 def tipo_da_conversa(dialogo):
     if getattr(dialogo, "is_channel", False) and not \
             getattr(dialogo, "is_group", False):
@@ -545,13 +560,40 @@ class ProvedorTelegram(Provedor):
                     nao_lidas=d.unread_count or 0,
                     data=d.date.timestamp() if d.date else 0.0,
                     lidas_ate=getattr(d.dialog, "read_outbox_max_id", 0) or 0,
-                    arquivada=pasta == 1)
+                    arquivada=pasta == 1,
+                    fixada=bool(getattr(d, "pinned", False)),
+                    silenciada_ate=silencio_do_dialogo(d))
                 self._conversas[cid] = c
                 lista.append(c)
         self.banco.salvar_conversas(lista)
         log.info("conversas: %d em %.2fs", len(lista),
                  time.perf_counter() - inicio)
         self.barramento.publicar(ev.ConversasAtualizadas(self.conta.id, lista))
+
+    def fixar_conversa(self, conversa_id, fixar):
+        """Fixa a conversa no topo (ou tira a fixacao) na conta."""
+        entidade = self._entidades.get(conversa_id)
+        if entidade is None:
+            return False
+        from telethon.tl.functions.messages import ToggleDialogPinRequest
+        self._agendar(self.cliente(ToggleDialogPinRequest(
+            peer=entidade, pinned=bool(fixar))))
+        return True
+
+    def silenciar_conversa(self, conversa_id, silenciar, segundos=0):
+        """Silencia a conversa por `segundos` (0 = para sempre) ou reativa."""
+        entidade = self._entidades.get(conversa_id)
+        if entidade is None:
+            return False
+        from telethon.tl.functions.account import UpdateNotifySettingsRequest
+        from telethon.tl.types import InputNotifyPeer, InputPeerNotifySettings
+        ate = 0
+        if silenciar:
+            ate = int(time.time() + segundos) if segundos else 2 ** 31 - 1
+        self._agendar(self.cliente(UpdateNotifySettingsRequest(
+            peer=InputNotifyPeer(peer=entidade),
+            settings=InputPeerNotifySettings(mute_until=ate))))
+        return True
 
     def arquivar_conversa(self, conversa_id, arquivar):
         """Move a conversa para a pasta Arquivadas (ou de volta) na conta."""

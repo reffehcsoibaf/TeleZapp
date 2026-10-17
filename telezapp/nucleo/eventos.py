@@ -39,6 +39,15 @@ class ConversasAtualizadas:
 
 
 @dataclass
+class ConversaApagadaNoCelular:
+    """A pessoa apagou a conversa no celular (aviso de estado do WhatsApp).
+    `data`: quando, em segundos."""
+    conta_id: str
+    conversa_id: str
+    data: float = 0.0
+
+
+@dataclass
 class MensagensCarregadas:
     conta_id: str
     conversa_id: str

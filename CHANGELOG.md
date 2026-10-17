@@ -3,6 +3,93 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.17.0
+
+Foco inicial na conta.
+
+- `Janela.comecar` põe o foco em `cx_conta` (antes `lista_conv`) ao abrir.
+- `_preencher_conversas` atualiza a lista no lugar (`SetString`/`Append`/
+  `Delete`) e só repõe a seleção se o índice mudou, em vez de `Set()` a cada
+  mudança de ordem: o NVDA repetia o nome da conversa durante as atualizações.
+- Menu de contexto na lista de conversas (`_menu_conversa`, botão direito ou
+  tecla Menu/Shift+F10): Abrir, Arquivar/Desarquivar, Salvar como contato
+  (só pessoas) e Depurar conversa (só com a depuração ligada). Age sobre a
+  conversa selecionada; `_arquivar_conversa`, `_salvar_pessoa` e
+  `_depurar_conversa` aceitam `conv`.
+- Trancar pelo TeleZapp (`_trancar_conversa`; Menu, Conversa, e no menu de
+  contexto): marca `Conversa.trancada` só no TeleZapp, como o arquivar do
+  WhatsApp. As trancadas por aqui ficam em `trancadas_locais` na config e são
+  reaplicadas em `_juntar_conversas` (o Telegram recria as conversas a cada
+  leitura). Destrancar tira da lista; uma trancada no celular destrancada aqui
+  só vale até o celular mudar. Se o celular destranca uma conversa trancada
+  aqui, ela continua trancada aqui até ser destrancada aqui.
+- Limpeza de mídias e mensagens (Menu, Mídias, Limpar mídias e mensagens):
+  `nucleo/limpeza.py` (`Filtros`, `selecionar`, `apagar`), `interface/limpeza.py`
+  (`DialogoLimpeza`). Escolhe entre só as mídias baixadas ou as mensagens
+  (com as mídias delas); filtros: conta, conversa, tipo (inclui texto), idade
+  em dias e tamanho mínimo. Mostra a contagem e o espaço e só apaga depois do
+  Sim.
+- Registro do que foi limpo: tabela `limpas` (`alvo` 'mensagem' ou 'midia'),
+  `Banco.registrar_limpeza`, `foi_limpa`, `apagar_mensagens`, `apagar_fichas`,
+  `mensagens_para_limpar`, `todas_midias`. `salvar_mensagens` e
+  `Janela._mesclar`/`_ev_nova` descartam mensagens limpas; `GerenteMidias.baixar`
+  e `_abrir_midia` recusam mídias limpas (`TEXTO_LIMPA`); a ficha de download
+  do WhatsApp é apagada. Só um novo pareamento
+  (`Contas.parear_de_novo` -> `esquecer_limpezas`) ou remover a conta
+  (`apagar_conta`) zera o registro.
+- Apagar conversa (menu de contexto da lista, `Janela._apagar_conversa`,
+  `Banco.apagar_conversa`, `armazem.apagar_conversa`): tira do banco a
+  conversa, mensagens, recibos, fichas, mídias (arquivos e pasta) e posição, e
+  registra em `apagadas` a data da última mensagem (`ate`). Conversas e
+  mensagens com `data <= ate` são descartadas em `salvar_conversas`,
+  `salvar_mensagens`, `_juntar_conversas`, `_mesclar` e `_ev_nova`; a
+  conversa volta quando chega mensagem mais nova. Novo pareamento
+  (`esquecer_limpezas`) e remover a conta zeram o registro. Só local: a
+  conta não é afetada.
+- Conversa apagada no celular (WhatsApp): o whatsmeow emite `events.DeleteChat`
+  na sincronia de estado, mas o neonize não o repassava. A DLL de teste ganhou
+  o evento 51 (`ChatDeleteEv`, mensagem `ChatDelete` no proto, `case
+  *events.DeleteChat` em `goneonize/main.go`, `neonize/events.py` e
+  `aioze/events.py`). `WhatsApp._ao_apagar_conversa` tira a conversa do
+  provedor e publica `ev.ConversaApagadaNoCelular`; `Janela._ev_conversa_apagada`
+  apaga aqui como em "Apagar conversa" (`_remover_conversa_local`), mas só se a
+  conversa não tem mensagem mais nova que o aviso (margem de 5 s).
+- Apagar no TeleZapp e no celular (WhatsApp): "Apagar conversa..." pergunta
+  "Apagar aqui e no celular", "Apagar só aqui" ou "Cancelar" quando a conta
+  está conectada (`Provedor.APAGA_NA_CONTA`). `WhatsApp.apagar_conversa` monta o
+  aviso de estado `deleteChat` (REGULAR_HIGH, versão 6, faixa de mensagens até a
+  última guardada, apagando também as mídias do celular: índice "1") e o manda com
+  `send_app_state`, numa thread; o resultado é falado. Exigiu corrigir a DLL
+  de teste: `DecodePatchInfo` do neonize comparava ponteiros de enum
+  (`PatchInfo_X.Enum()`) e nunca casava, deixando o tipo do patch vazio, e não
+  tratava REGULAR_HIGH/REGULAR_LOW. Corrigido em `utils/decoder.go` (branch
+  `fix/patchinfo-type` do worktree neonize-fix). O Telegram não entra: apagar
+  o diálogo lá sai de grupos e canais.
+- Conversas fixadas e silenciadas: `Conversa.fixada` e `silenciada_ate` (0 com
+  som, -1 para sempre, senão o timestamp; `Conversa.silenciada()`), colunas
+  novas no banco (esquema 10). Fixadas vão para o topo (`_ordenar`) e o
+  rótulo ganha ", fixada" e ", silenciada"; tipos novos Fixadas e Silenciadas
+  em `FILTROS_TIPO`; conversa silenciada fechada não avisa mensagem nova
+  (`_conversa_muda`). WhatsApp: histórico (`pinned`, `muteEndTime`), avisos
+  ao vivo `ChatPinEv`/`ChatMuteEv` (DLL de teste, eventos 47 e 48) e a
+  conferência de 60 s agora lê Arquivada, Fixada e MutedUntil do armazém numa
+  consulta só (`_ajustes_no_celular`). Telegram: `d.pinned` e
+  `notify_settings.mute_until` (sem aviso ao vivo; vale a cada leitura).
+- Fixar e silenciar pelo TeleZapp (Menu, Conversa, e no menu de contexto):
+  `Janela._fixar_conversa` e `_silenciar_conversa` (8 horas, 1 semana ou
+  sempre) mudam aqui na hora e avisam a conta numa thread
+  (`fixar_conversa`/`silenciar_conversa` nos provedores). WhatsApp manda
+  `pin_v1` (versão 5, REGULAR_LOW) e `mute` (versão 2, REGULAR_HIGH) com
+  `send_app_state`; Telegram usa `ToggleDialogPinRequest` e
+  `UpdateNotifySettingsRequest`. Se o serviço não aceita, a fala avisa que
+  ficou só no TeleZapp.
+- Configurações > Privacidade: a leitura da conta (`privacidade.ler`, que vai ao
+  serviço) roda em thread (`_trocar_conta_priv`, `_priv_lido`); a categoria
+  abre na hora com as caixas apagadas e "Lendo a privacidade da conta...".
+  O resultado fica em cache enquanto a janela está aberta.
+  A categoria Privacidade passou para a última posição da lista
+  (`nucleo/configuracoes.categorias`), depois de Avançado.
+
 ## 2026.10.16.9
 
 Nova mensagem, contatos do Telegram e rótulos para o NVDA.

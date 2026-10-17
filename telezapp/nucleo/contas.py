@@ -171,6 +171,8 @@ class Contas:
         if p is not None:
             p.parar()
         apagar_sessao(conta_id)
+        if self.banco is not None:
+            self.banco.esquecer_limpezas(conta_id)   # pode voltar
         self._historico[conta_id] = historico
         log.info("pareando de novo a conta %s (histórico: %s)", conta_id,
                  historico)

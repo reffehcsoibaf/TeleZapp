@@ -528,6 +528,29 @@ def mime_da_ficha(dados):
     return ""
 
 
+def fim_do_silencio(valor, ms=False):
+    """Fim do silencio como o WhatsApp manda (segundos, ou milissegundos
+    com ms=True; -1 ou um numero enorme = para sempre) -> 0.0 (com som),
+    -1.0 (para sempre) ou o timestamp em segundos."""
+    valor = int(valor or 0)
+    if valor == 0:
+        return 0.0
+    if valor < 0 or valor >= 2 ** 62:
+        return -1.0
+    if ms:
+        valor /= 1000
+    return -1.0 if valor > 4e9 else float(valor)
+
+
+def silencio_do_armazem(valor):
+    """O mesmo para MutedUntil do armazem do whatsmeow (segundos; o tempo
+    zero do Go vem negativo e quer dizer sem silencio)."""
+    valor = float(valor or 0)
+    if valor <= 0:
+        return 0.0
+    return -1.0 if valor > 4e9 else valor
+
+
 def jid_de_texto(texto):
     """'usuario@servidor' -> (usuario, servidor)."""
     if "@" not in (texto or ""):
@@ -641,6 +664,7 @@ class ProvedorWhatsApp(Provedor):
         self._cache_mencoes = {}   # jid mencionado -> nome, id, telefone
         self._grupos_lidos = {}    # grupo -> quando os participantes foram lidos
         self._arquivada_vista = {}  # conversa -> arquivada, como o celular disse
+        self._ajustes_vistos = {}   # (conversa, campo) -> fixada/silenciada
         self._ultima_conferencia = 0.0
         self._sincronizando = False
         self._progresso_historico = 0   # 0 = nada em andamento
@@ -755,7 +779,10 @@ class ProvedorWhatsApp(Provedor):
             # novas do neonize os repassam; nas antigas vale a conferencia
             # periodica das arquivadas
             for nome, funcao in (("ChatArchiveEv", self._ao_arquivar),
-                                 ("ChatLockEv", self._ao_trancar)):
+                                 ("ChatLockEv", self._ao_trancar),
+                                 ("ChatPinEv", self._ao_fixar),
+                                 ("ChatMuteEv", self._ao_silenciar),
+                                 ("ChatDeleteEv", self._ao_apagar_conversa)):
                 classe = getattr(nev, nome, None)
                 if classe is not None:
                     self.cliente.event(classe)(funcao)
@@ -931,10 +958,10 @@ class ProvedorWhatsApp(Provedor):
         self._fila.put(self._conferir_arquivadas)
         self._fila.put(self._atualizar_nomes_de_grupos)
 
-    def _arquivada_no_celular(self, conversa_id):
-        """True/False como o celular deixou a conversa (armazem local do
-        whatsmeow, que os avisos do celular mantem em dia); None se o
-        armazem nao conhece a conversa."""
+    def _ajustes_no_celular(self, conversa_id):
+        """Arquivada, fixada e silenciada como o celular deixou a conversa
+        (armazem local do whatsmeow, que os avisos do celular mantem em
+        dia); None se o armazem nao conhece a conversa."""
         usuario, servidor = jid_de_texto(conversa_id)
         jid = _jid_obj(usuario, servidor)
         candidatos = [jid]
@@ -951,7 +978,7 @@ class ProvedorWhatsApp(Provedor):
             except Exception:
                 continue
             if dados.Found:
-                return bool(dados.Archived)
+                return dados
         return None
 
     def _marcar_conversa(self, evento, campo, valor):
@@ -977,12 +1004,135 @@ class ProvedorWhatsApp(Provedor):
         except Exception:
             log.exception("erro ao tratar o aviso de arquivar")
 
+    def _ao_fixar(self, cliente, evento):
+        try:
+            self._marcar_conversa(evento, "fixada",
+                                  bool(evento.Action.pinned))
+        except Exception:
+            log.exception("erro ao tratar o aviso de fixar")
+
+    def _ao_silenciar(self, cliente, evento):
+        try:
+            a = evento.Action
+            if not a.muted:
+                ate = 0.0
+            elif a.HasField("muteEndTimestamp"):
+                ate = fim_do_silencio(a.muteEndTimestamp, ms=True)
+            else:
+                ate = -1.0
+            self._marcar_conversa(evento, "silenciada_ate", ate)
+        except Exception:
+            log.exception("erro ao tratar o aviso de silenciar")
+
     def _ao_trancar(self, cliente, evento):
         try:
             self._marcar_conversa(evento, "trancada",
                                   bool(evento.Action.locked))
         except Exception:
             log.exception("erro ao tratar o aviso de trancar")
+
+    def _enviar_estado(self, indice, versao, tipo, valor, conversa_id):
+        """Manda um aviso de estado (fixar, silenciar...) ao WhatsApp, como
+        o celular faz para os outros aparelhos. True se foi aceito."""
+        if self.cliente is None or not self._conectada or \
+                "@" not in (conversa_id or ""):
+            return False
+        try:
+            from neonize.proto.Neonize_pb2 import MutationInfo, PatchInfo
+            usuario, servidor = jid_de_texto(conversa_id)
+            patch = PatchInfo(
+                Timestamp=time.time_ns(), Type=tipo,
+                Mutations=[MutationInfo(
+                    Index=[indice, "%s@%s" % (usuario, servidor)],
+                    Version=versao, Value=valor)])
+            self.cliente.send_app_state(patch)
+            return True
+        except Exception:
+            log.exception("não consegui avisar o WhatsApp (%s)", indice)
+            return False
+
+    def fixar_conversa(self, conversa_id, fixar):
+        from neonize.proto.Neonize_pb2 import PatchInfo
+        from neonize.proto.waSyncAction.WAWebProtobufSyncAction_pb2 import (
+            PinAction, SyncActionValue)
+        return self._enviar_estado(
+            "pin_v1", 5, PatchInfo.REGULAR_LOW,
+            SyncActionValue(pinAction=PinAction(pinned=bool(fixar))),
+            conversa_id)
+
+    def silenciar_conversa(self, conversa_id, silenciar, segundos=0):
+        from neonize.proto.Neonize_pb2 import PatchInfo
+        from neonize.proto.waSyncAction.WAWebProtobufSyncAction_pb2 import (
+            MuteAction, SyncActionValue)
+        acao = MuteAction(muted=bool(silenciar))
+        if silenciar:
+            acao.muteEndTimestamp = int((time.time() + segundos) * 1000) \
+                if segundos else -1
+        return self._enviar_estado(
+            "mute", 2, PatchInfo.REGULAR_HIGH,
+            SyncActionValue(muteAction=acao), conversa_id)
+
+    APAGA_NA_CONTA = True
+
+    def apagar_conversa(self, conversa_id, ultima=None):
+        """Apaga a conversa no celular, com as midias: manda o aviso de estado
+        `deleteChat` (o mesmo que o celular manda aos outros aparelhos). Devolve True
+        se o WhatsApp aceitou."""
+        if self.cliente is None or not self._conectada or \
+                "@" not in (conversa_id or ""):
+            return False
+        try:
+            from neonize.proto.Neonize_pb2 import MutationInfo, PatchInfo
+            from neonize.proto.waCommon.WACommon_pb2 import MessageKey
+            from neonize.proto.waSyncAction.WAWebProtobufSyncAction_pb2 import (
+                DeleteChatAction, SyncActionMessage, SyncActionMessageRange,
+                SyncActionValue)
+            usuario, servidor = jid_de_texto(conversa_id)
+            jid = "%s@%s" % (usuario, servidor)
+            agora = int(time.time())
+            quando = int(ultima.data) if ultima is not None and \
+                ultima.data else agora
+            # limite da faixa = agora, para cobrir ate a ultima mensagem (com
+            # o horario dela a conversa continuava no celular, com ela)
+            faixa = SyncActionMessageRange(
+                lastMessageTimestamp=max(agora, quando))
+            if ultima is not None and not ultima.id.startswith("local-"):
+                chave = MessageKey(remoteJID=jid, fromMe=bool(ultima.minha),
+                                   ID=ultima.id)
+                if servidor == "g.us" and not ultima.minha and \
+                        ultima.remetente:
+                    chave.participant = ultima.remetente
+                faixa.messages.append(SyncActionMessage(
+                    key=chave, timestamp=quando))
+            patch = PatchInfo(
+                Timestamp=time.time_ns(), Type=PatchInfo.REGULAR_HIGH,
+                Mutations=[MutationInfo(
+                    Index=["deleteChat", jid, "1"], Version=6,
+                    Value=SyncActionValue(
+                        deleteChatAction=DeleteChatAction(
+                            messageRange=faixa)))])
+            self.cliente.send_app_state(patch)
+            with self._trava:
+                self._conversas.pop(conversa_id, None)
+            log.info("conversa apagada no celular a pedido do TeleZapp")
+            return True
+        except Exception:
+            log.exception("não consegui apagar a conversa no celular")
+            return False
+
+    def _ao_apagar_conversa(self, cliente, evento):
+        """A conversa foi apagada no celular: sai das conversas do
+        provedor e a interface decide se apaga tambem (so se nao ha mensagem
+        mais nova que o aviso)."""
+        try:
+            cid = self._id_da_conversa(evento.JID)
+            with self._trava:
+                self._conversas.pop(cid, None)
+            log.info("conversa apagada no celular")
+            self.barramento.publicar(ev.ConversaApagadaNoCelular(
+                self.conta.id, cid, float(evento.Timestamp)))
+        except Exception:
+            log.exception("erro ao tratar o aviso de apagar conversa")
 
     def _conferir_arquivadas(self):
         """Poe em cada conversa a marca de arquivada que o celular tem. O
@@ -998,13 +1148,25 @@ class ProvedorWhatsApp(Provedor):
                      if c.id not in IGNORAR_CONVERSAS]
         mudou = []
         for conv in convs:
-            valor = self._arquivada_no_celular(conv.id)
-            if valor is None:
+            dados = self._ajustes_no_celular(conv.id)
+            if dados is None:
                 continue
+            valor = bool(dados.Archived)
             visto = self._arquivada_vista.get(conv.id)
             self._arquivada_vista[conv.id] = valor
-            if valor != visto and valor != conv.arquivada:
+            alterada = valor != visto and valor != conv.arquivada
+            if alterada:
                 conv.arquivada = valor
+            for campo, novo in (
+                    ("fixada", bool(dados.Pinned)),
+                    ("silenciada_ate",
+                     silencio_do_armazem(dados.MutedUntil))):
+                visto = self._ajustes_vistos.get((conv.id, campo))
+                self._ajustes_vistos[(conv.id, campo)] = novo
+                if novo != visto and novo != getattr(conv, campo):
+                    setattr(conv, campo, novo)
+                    alterada = True
+            if alterada:
                 mudou.append(conv)
         if mudou:
             log.info("arquivadas conferidas: %d conversas mudaram de lugar",
@@ -2086,6 +2248,10 @@ class ProvedorWhatsApp(Provedor):
                     conv.arquivada = bool(c.archived)
                 if c.HasField("locked"):
                     conv.trancada = bool(c.locked)
+                if c.HasField("pinned"):
+                    conv.fixada = int(c.pinned) > 0
+                if c.HasField("muteEndTime"):
+                    conv.silenciada_ate = fim_do_silencio(c.muteEndTime)
                 if c.HasField("unreadCount"):
                     conv.nao_lidas = int(c.unreadCount)
             if not grupo:

@@ -158,7 +158,7 @@ Todos os itens abaixo estão implementados (conferido no código em
 | Ideia | Viabilidade |
 |---|---|
 | IA multiprovedores (transcrição, descrição de imagem e vídeo, PDF acessível) | Viável |
-| Limpeza de conversas com filtros e total antes de confirmar | Viável depois da etapa 3 |
+| Limpeza de conversas com filtros e total antes de confirmar | Feita (17/10/2026): mídias baixadas ou mensagens, com registro (`limpas`) para não voltarem; só um novo pareamento zera |
 | Privacidade, editar perfil, bloquear e desbloquear | Viável nos dois serviços |
 | Enquetes | Viável nos dois |
 | Status: postar, curtir, responder | Viável no WhatsApp, com cuidado |

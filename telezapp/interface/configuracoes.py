@@ -8,6 +8,8 @@ OK, Cancelar e Aplicar. A descricao de cada opcao e falada pelo programa
 logo depois do foco (F1 repete); nao e um texto da janela, porque o NVDA le
 todos os textos fixos de uma janela ao abri-la.
 """
+import threading
+
 import wx
 
 from telezapp.nucleo.configuracoes import (CATEGORIA_BUSCA,
@@ -219,11 +221,43 @@ class DialogoConfiguracoes(wx.Dialog):
         self._trocar_conta_priv(self._priv_conta)
 
     def _trocar_conta_priv(self, conta_id):
-        """Mostra nas caixas o que a conta tem (lido agora do servico) e
-        so os campos que o servico dela oferece."""
-        from telezapp.nucleo import privacidade_conta as pw
+        """Mostra nas caixas o que a conta tem. A leitura vai ao servico e
+        pode demorar, entao roda fora da janela: enquanto isso as caixas
+        ficam apagadas e a categoria abre e responde na hora."""
         self._priv_conta = conta_id
-        lido = self.privacidade.ler(conta_id) or {}
+        cache = getattr(self, "_priv_cache", None)
+        if cache is None:
+            cache = self._priv_cache = {}
+        self._priv_ficha = getattr(self, "_priv_ficha", 0) + 1
+        ficha = self._priv_ficha
+        if conta_id in cache:
+            self._priv_aplicar(conta_id, cache[conta_id])
+            return
+        for rot, c in self._priv_caixas.values():
+            c.Enable(False)
+        self._priv_rot_status.Show(True)
+        self._priv_status.Show(True)
+        self._priv_status.SetValue("Lendo a privacidade da conta...")
+        self.painel.Layout()
+
+        def ler():
+            try:
+                lido = self.privacidade.ler(conta_id) or {}
+            except Exception:
+                lido = {}
+            wx.CallAfter(self._priv_lido, ficha, conta_id, lido)
+        threading.Thread(target=ler, daemon=True, name="privacidade").start()
+
+    def _priv_lido(self, ficha, conta_id, lido):
+        if not self or ficha != self._priv_ficha:
+            return      # a janela fechou ou a pessoa trocou de conta
+        self._priv_cache[conta_id] = lido
+        self._priv_aplicar(conta_id, lido)
+        if self.fala is not None:
+            self.fala.falar("Privacidade da conta carregada.")
+
+    def _priv_aplicar(self, conta_id, lido):
+        from telezapp.nucleo import privacidade_conta as pw
         valores = lido.get("valores")
         campos = {c.nome: c for c in pw.campos_do(lido.get("servico"))}
         for nome, (rot, caixa) in self._priv_caixas.items():

@@ -16,8 +16,10 @@ def categorias():
     for o in config.OPCOES:
         if o.categoria not in vistas:
             vistas.append(o.categoria)
-    # "Avancado" fica por ultimo: e o que quase ninguem precisa
-    return sorted(vistas, key=lambda c: c == "Avançado")
+    # "Avancado" quase ninguem precisa, e "Privacidade" (que consulta a
+    # conta) fica na ultima posicao por enquanto
+    fim = {"Avançado": 1, "Privacidade": 2}
+    return sorted(vistas, key=lambda c: fim.get(c, 0))
 
 
 class ModeloConfiguracoes:

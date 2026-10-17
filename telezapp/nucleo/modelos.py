@@ -58,10 +58,20 @@ class Conversa:
     lidas_ate: int = 0         # Telegram: ultima msg minha lida pelo outro
     arquivada: bool = False    # arquivada no servico (so no filtro Arquivadas)
     trancada: bool = False     # WhatsApp: "Trancar conversa" do celular
+    fixada: bool = False       # fixada no topo da lista
+    silenciada_ate: float = 0.0   # 0 = com som; -1 = para sempre; senao ate
+                                  # quando (timestamp)
 
     @property
     def chave(self):
         return (self.conta_id, self.id)
+
+    def silenciada(self, agora=None):
+        """Em silencio agora? (o silencio com hora marcada expira sozinho)"""
+        ate = self.silenciada_ate
+        if ate == 0:
+            return False
+        return ate < 0 or ate > (agora if agora is not None else time.time())
 
 
 @dataclass
@@ -357,6 +367,8 @@ FILTROS_TIPO = (("todas", "Todas as conversas"),
                 ("pessoais", "Pessoais"),
                 ("grupos", "Grupos"),
                 ("canais", "Canais"),
+                ("fixadas", "Fixadas"),
+                ("silenciadas", "Silenciadas"),
                 ("arquivadas", "Arquivadas"),
                 ("trancadas", "Trancadas no celular"))
 CONTA_TODAS = "todas"
@@ -407,6 +419,10 @@ def passa_filtro(c, tipo="todas", conta=CONTA_TODAS, busca=""):
         return c.tipo == "grupo"
     if tipo == "canais":
         return c.tipo == "canal"
+    if tipo == "fixadas":
+        return bool(c.fixada)
+    if tipo == "silenciadas":
+        return c.silenciada()
     return True
 
 
@@ -428,6 +444,10 @@ def opcoes_de_conta(contas):
 
 def rotulo_conversa(c):
     base = "%s, %s" % (c.nome, SERVICOS.get(c.servico, c.servico))
+    if c.fixada:
+        base += ", fixada"
+    if c.silenciada():
+        base += ", silenciada"
     if c.nao_lidas == 1:
         return base + ", 1 não lida"
     if c.nao_lidas > 1:
