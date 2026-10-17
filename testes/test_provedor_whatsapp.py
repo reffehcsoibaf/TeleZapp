@@ -225,6 +225,8 @@ class ClienteFalso:
 
     def mark_read(self, *ids, chat, sender, receipt):
         self.lidas.append((list(ids), wa.jid_texto(chat), sender.User))
+        self.recibos = getattr(self, "recibos", [])
+        self.recibos.append(receipt.name)
 
 
 @pytest.fixture
@@ -543,6 +545,21 @@ def test_grupo_do_historico_marca_lida_com_cada_remetente(amb):
     lidas = sorted(amb.c.lidas)
     assert lidas == [(["G2"], "123@g.us", "5552"), (["G3"], "123@g.us",
                                                     "5553")]
+
+
+def test_voz_ouvida_aqui_manda_o_recibo_de_reproduzida(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    voz = m.Mensagem("w1", "5551@s.whatsapp.net", "V1", tipo=m.VOZ,
+                     segundos=4, data=TS)
+    amb.p.marcar_ouvida(voz)
+    amb.p.enviar_texto("5551@s.whatsapp.net", "x")     # espera a fila
+    esperar(amb.fila, ev.MensagemNova)
+    assert amb.c.lidas == [(["V1"], "5551@s.whatsapp.net", "5551")]
+    assert amb.c.recibos == ["PLAYED"]
+    minha = m.Mensagem("w1", "5551@s.whatsapp.net", "V2", tipo=m.VOZ,
+                       minha=True)
+    amb.p.marcar_ouvida(minha)                  # a propria voz: nada a avisar
+    assert len(amb.c.lidas) == 1
 
 
 def test_recibos_por_participante_e_status_guardado(amb):

@@ -64,6 +64,10 @@ class Provedor(ABC):
     def marcar_como_lida(self, conversa_id):
         """Avisa o servico que a pessoa leu a conversa."""
 
+    def marcar_ouvida(self, mensagem):
+        """Avisa o servico que a pessoa tocou esta voz ou audio recebido
+        (a marca de ouvida tambem aparece no celular)."""
+
     def enviar_arquivo(self, conversa_id, anexo, legenda=""):
         """Envia foto, video, audio, documento ou nota de voz (`anexo`, ver
         midia.envio). Volta na hora; o upload roda fora da fila de texto.

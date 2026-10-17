@@ -83,6 +83,14 @@ Foco inicial na conta.
   `send_app_state`; Telegram usa `ToggleDialogPinRequest` e
   `UpdateNotifySettingsRequest`. Se o serviço não aceita, a fala avisa que
   ficou só no TeleZapp.
+- Voz ouvida nos dois sentidos: `Janela._marcar_ouvida` agora chama
+  `Provedor.marcar_ouvida`. WhatsApp manda o recibo `PLAYED` (ou `PLAYED_SELF`
+  com a confirmação de leitura desligada, para só os próprios aparelhos
+  saberem) com `mark_read`; Telegram usa `messages.ReadMessageContents`
+  (`channels.` nos canais). Do celular para cá, o WhatsApp já tratava o
+  recibo `played-self`; o Telegram ganhou o aviso ao vivo
+  (`UpdateReadMessagesContents` e a versão de canal, `_ao_conteudo_lido`,
+  `Banco.mensagens_por_id`), que antes só valia ao carregar a conversa.
 - Configurações > Privacidade: a leitura da conta (`privacidade.ler`, que vai ao
   serviço) roda em thread (`_trocar_conta_priv`, `_priv_lido`); a categoria
   abre na hora com as caixas apagadas e "Lendo a privacidade da conta...".

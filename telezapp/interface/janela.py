@@ -2882,6 +2882,12 @@ class Janela(wx.Frame):
             self.banco.salvar_mensagens([x])
         except Exception:
             log.exception("erro ao guardar que o áudio foi ouvido")
+        prov = self.contas.provedor(x.conta_id) if self.contas else None
+        if prov is not None:
+            try:
+                prov.marcar_ouvida(x)      # a marca tambem vai ao celular
+            except Exception:
+                log.exception("erro ao avisar que o áudio foi ouvido")
         if (x.conta_id, x.conversa_id) == self.atual:
             self._preencher_mensagens()
 

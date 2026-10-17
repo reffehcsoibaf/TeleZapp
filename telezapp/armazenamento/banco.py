@@ -320,6 +320,22 @@ class Banco:
                 (conta_id, conversa_id, limite)).fetchall()
         return [_msg(l) for l in reversed(linhas)]
 
+    def mensagens_por_id(self, conta_id, ids, conversa_id=None):
+        """Mensagens guardadas com esses ids (no Telegram o id da mensagem
+        e unico na conta, fora dos canais)."""
+        ids = [str(i) for i in ids]
+        if not ids:
+            return []
+        sql = ("SELECT %s FROM mensagens WHERE conta_id=? AND id IN (%s)"
+               % (", ".join(_CAMPOS_MSG), ", ".join("?" * len(ids))))
+        args = [conta_id, *ids]
+        if conversa_id is not None:
+            sql += " AND conversa_id=?"
+            args.append(conversa_id)
+        with self._trava:
+            linhas = self._con.execute(sql, args).fetchall()
+        return [_msg(l) for l in linhas]
+
     def nome_do_remetente(self, conta_id, remetentes):
         """Nome (autor) mais recente com que alguem dessa lista de enderecos
         aparece nas mensagens guardadas, sem contar telefones soltos."""

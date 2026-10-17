@@ -2125,6 +2125,35 @@ class ProvedorWhatsApp(Provedor):
         log.info("leitura confirmada ao WhatsApp (%d mensagens)",
                  len(pendentes))
 
+    def marcar_ouvida(self, mensagem):
+        """A pessoa tocou esta voz ou audio recebido: o WhatsApp recebe o
+        recibo de reproduzida (a marca de ouvida aparece no celular)."""
+        if mensagem.minha:
+            return
+        self._fila.put(lambda: self._enviar_ouvida(mensagem))
+
+    def _enviar_ouvida(self, x):
+        from neonize.utils.enum import ReceiptType
+        if self.cliente is None or not self._conectada:
+            return
+        remetente = x.remetente or (
+            x.conversa_id if not x.conversa_id.endswith("@g.us") else "")
+        if not remetente:
+            return
+        # com a confirmacao de leitura desligada o WhatsApp so avisa os
+        # proprios aparelhos, sem contar a quem enviou
+        recibo = ReceiptType.PLAYED
+        try:
+            valores = self.privacidade() or {}
+            if valores.get("readreceipts") == "none":
+                recibo = ReceiptType.PLAYED_SELF
+        except Exception:
+            pass
+        self.cliente.mark_read(
+            x.id, chat=self._jid(x.conversa_id),
+            sender=_jid_obj(*jid_de_texto(remetente)), receipt=recibo)
+        log.info("reprodução confirmada ao WhatsApp (%s)", recibo.name)
+
     def _id_do_participante(self, jid):
         """Numero de quem recebeu ou leu (troca o endereco LID pelo numero
         quando o WhatsApp informa)."""

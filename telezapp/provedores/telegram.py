@@ -451,6 +451,7 @@ class ProvedorTelegram(Provedor):
 
     async def _conectar(self):
         from telethon import events
+        from telethon.tl import types as tipos
         self._estado(ev.CONECTANDO)
         inicio = time.perf_counter()
         self.cliente = self._novo_cliente()
@@ -474,6 +475,10 @@ class ProvedorTelegram(Provedor):
             self._ao_ler, events.MessageRead(inbox=False))
         self.cliente.add_event_handler(self._ao_acao_no_chat,
                                        events.ChatAction())
+        self.cliente.add_event_handler(
+            self._ao_conteudo_lido,
+            events.Raw((tipos.UpdateReadMessagesContents,
+                        tipos.UpdateChannelReadMessagesContents)))
         self._estado(ev.CONECTADA)
         self._pronto.set()
         await self._atualizar_conversas()
@@ -960,6 +965,42 @@ class ProvedorTelegram(Provedor):
                                       key=lambda c: -c.data)))
         except Exception:
             log.exception("erro ao tratar mudança no chat")
+
+    async def _ao_conteudo_lido(self, upd):
+        """Voz ou audio tocado em outro aparelho: passa a constar ouvido."""
+        from telethon import utils
+        from telethon.tl import types as T
+        ids = list(getattr(upd, "messages", []) or [])
+        conversa = None
+        if isinstance(upd, T.UpdateChannelReadMessagesContents):
+            conversa = str(utils.get_peer_id(T.PeerChannel(upd.channel_id)))
+        for x in self.banco.mensagens_por_id(self.conta.id, ids, conversa):
+            if x.minha or x.tipo not in (m.VOZ, m.AUDIO) or \
+                    m.extras_de(x)["ouvida"]:
+                continue
+            m.atualizar_extras(x, ouvida=True)
+            self.banco.salvar_mensagens([x])
+            self.barramento.publicar(ev.MensagemAtualizada(
+                self.conta.id, x.conversa_id, x, "ouvida"))
+
+    def marcar_ouvida(self, mensagem):
+        """A pessoa tocou esta voz ou audio recebido: avisa o Telegram."""
+        if not mensagem.minha:
+            self._agendar(self._enviar_ouvida(mensagem))
+
+    async def _enviar_ouvida(self, x):
+        from telethon.tl import functions, types as T
+        try:
+            ident = int(x.id)
+        except ValueError:
+            return
+        ent = await self._entidade(x.conversa_id)
+        if isinstance(ent, T.InputPeerChannel):
+            await self.cliente(functions.channels.ReadMessageContentsRequest(
+                channel=ent, id=[ident]))
+        else:
+            await self.cliente(functions.messages.ReadMessageContentsRequest(
+                id=[ident]))
 
     async def _ao_ler(self, evento):
         try:
