@@ -133,6 +133,7 @@ def j(tmp_path, monkeypatch):
     janela = jm.Janela(cfg, banco, b)
     janela.contas = ContasFalsas()
     janela.comecar()
+    janela.lista_conv.SetFocus()      # o foco inicial e a caixa de conta
     janela.b = b
     b.publicar(ev.EstadoConta("t1", ev.CONECTADA))
     b.publicar(ev.ConversasAtualizadas("t1", [
