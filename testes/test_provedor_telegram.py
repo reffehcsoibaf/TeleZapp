@@ -356,9 +356,9 @@ def test_mensagem_recebida_e_leitura(ambiente):
                 return ANA
 
             async def get_input_chat():
-                return "peer77"
+                return "peer88"
             evento = types.SimpleNamespace(
-                message=mensagem(50, "nova", sender=ANA), chat_id=77,
+                message=mensagem(50, "nova", sender=ANA), chat_id=88,
                 is_group=False, is_channel=False, get_chat=get_chat,
                 get_input_chat=get_input_chat)
             await receber(evento)
