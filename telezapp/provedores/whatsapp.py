@@ -1194,6 +1194,36 @@ class ProvedorWhatsApp(Provedor):
         except Exception:
             log.exception("erro ao tratar o aviso de apagar mensagem")
 
+    ACEITA_CONTATOS = True
+
+    def salvar_contato(self, conversa_id, nome, telefone=""):
+        """O nome dado no TeleZapp passa a valer no WhatsApp da conta: manda
+        o aviso de estado `contact` (o do WhatsApp Web ao adicionar um
+        contato), com `saveOnPrimaryAddressbook` desligado, entao o celular
+        reconhece a pessoa sem gravar nada na agenda do aparelho. True se o
+        WhatsApp aceitou."""
+        nome = (nome or "").strip()
+        if not nome or conversa_id.endswith("@g.us") or "@" not in conversa_id:
+            return False
+        from neonize.proto.Neonize_pb2 import PatchInfo
+        from neonize.proto.waSyncAction.WAWebProtobufSyncAction_pb2 import (
+            ContactAction, SyncActionValue)
+        usuario, servidor = jid_de_texto(conversa_id)
+        if servidor != "s.whatsapp.net":
+            return False
+        jid = "%s@%s" % (usuario, servidor)
+        acao = ContactAction(fullName=nome, firstName=nome.split()[0],
+                             saveOnPrimaryAddressbook=False, pnJID=jid)
+        try:
+            lid = self.cliente.get_lid_from_pn(_jid_obj(usuario, servidor))
+            if lid.User:
+                acao.lidJID = "%s@%s" % (lid.User, lid.Server)
+        except Exception:
+            pass
+        return self._enviar_estado(
+            "contact", 2, PatchInfo.CRITICAL_UNBLOCK_LOW,
+            SyncActionValue(contactAction=acao), conversa_id)
+
     def apagar_mensagem(self, mensagem, para_todos=False):
         """Apaga a mensagem no WhatsApp: para todos (so as minhas, o mesmo
         'apagar para todos' do celular) ou so para mim (aviso de estado

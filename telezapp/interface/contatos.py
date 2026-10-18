@@ -7,6 +7,8 @@ O nome dado aqui vale nas conversas, nos autores e nas mencoes. A janela so
 desenha: quem guarda e o banco, e quem renomeia as conversas e quem chama
 (`ao_mudar`).
 """
+import threading
+
 import wx
 
 from telezapp.nucleo import modelos as m
@@ -19,6 +21,27 @@ def rotulo_contato(c, servico, conta):
     _, _, nome, telefone = c
     partes = [nome] + ([telefone] if telefone else [])
     return "%s, %s (%s)" % (", ".join(partes), servico, conta)
+
+
+def avisar_conta(prov, conversa_id, nome, telefone, falar):
+    """Conta ao servico o nome dado a um contato (em segundo plano), para a
+    conta reconhecer a pessoa. So fala se o servico aceitou ou se tentou e
+    nao deu; provedor que nao sabe fazer isso nao diz nada."""
+    if prov is None or not hasattr(prov, "salvar_contato"):
+        return
+
+    def enviar():
+        try:
+            ok = bool(prov.salvar_contato(conversa_id, nome, telefone))
+        except Exception:
+            ok = False
+        if ok:
+            wx.CallAfter(falar, "Contato %s salvo também na conta." % nome)
+        elif getattr(prov, "ACEITA_CONTATOS", False):
+            wx.CallAfter(falar, "Não consegui avisar a conta. O nome ficou "
+                                "só no TeleZapp.")
+    threading.Thread(target=enviar, daemon=True,
+                     name="avisar-contato").start()
 
 
 class DialogoContato(wx.Dialog):
@@ -164,6 +187,8 @@ class GerenciadorContatos(wx.Dialog):
         id_ = self.contas.provedor(conta_id).id_do_telefone(telefone)
         self.banco.salvar_contato(conta_id, id_, nome, telefone)
         self._mudou((conta_id, id_), "Contato %s adicionado." % nome)
+        avisar_conta(self.contas.provedor(conta_id), id_, nome, telefone,
+                     self.falar)
 
     def _editar(self):
         c = self._selecionado()
@@ -189,6 +214,8 @@ class GerenciadorContatos(wx.Dialog):
         telefone = m.normalizar_telefone(tel) or c[3]
         self.banco.salvar_contato(c[0], c[1], nome, telefone)
         self._mudou((c[0], c[1]), "Contato %s salvo." % nome)
+        avisar_conta(self.contas.provedor(c[0]), c[1], nome, telefone,
+                     self.falar)
 
     def _remover(self):
         c = self._selecionado()

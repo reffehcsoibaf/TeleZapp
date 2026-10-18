@@ -118,6 +118,15 @@ Foco inicial na conta.
   `secretEncryptedMessage` (edição cifrada de evento ou enquete: passa a ser só
   controle, `SO_CONTROLE`, em vez de uma linha vazia). As mensagens antigas
   que já estavam guardadas como "tipo do WhatsApp: ..." não mudam.
+- Contato do TeleZapp reconhecido pelo WhatsApp: `WhatsApp.salvar_contato`
+  manda o aviso de estado `contact` (coleção `critical_unblock_low`, versão 2)
+  com `ContactAction(fullName, firstName, pnJID, lidJID quando conhecido,
+  saveOnPrimaryAddressbook=False)`, o mesmo do WhatsApp Web ao adicionar um
+  contato: o celular reconhece a pessoa e nada é gravado na agenda do
+  aparelho. Chamado ao adicionar e editar contatos e ao salvar a pessoa da
+  conversa (`contatos.avisar_conta`, em segundo plano). "Trazer das contas"
+  não devolve nada à conta, e remover um contato do TeleZapp não o remove do
+  WhatsApp. O Telegram fica de fora.
 - Configurações > Privacidade: a leitura da conta (`privacidade.ler`, que vai ao
   serviço) roda em thread (`_trocar_conta_priv`, `_priv_lido`); a categoria
   abre na hora com as caixas apagadas e "Lendo a privacidade da conta...".

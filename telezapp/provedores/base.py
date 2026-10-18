@@ -69,6 +69,14 @@ class Provedor(ABC):
         mim). True se o servico foi avisado."""
         return False
 
+    ACEITA_CONTATOS = False     # sabe avisar a conta do nome de um contato
+
+    def salvar_contato(self, conversa_id, nome, telefone=""):
+        """Avisa a conta do nome dado a este contato, para o proprio servico
+        reconhecer a pessoa. True se foi aceito; False quando o contato
+        fica so no TeleZapp."""
+        return False
+
     def marcar_ouvida(self, mensagem):
         """Avisa o servico que a pessoa tocou esta voz ou audio recebido
         (a marca de ouvida tambem aparece no celular)."""

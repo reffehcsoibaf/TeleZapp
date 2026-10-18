@@ -1548,3 +1548,20 @@ def test_tipos_novos_ganham_texto_e_o_de_edicao_nao_vira_mensagem():
     # edicao de evento ou enquete (cifrada): so controle, nao e mensagem
     assert wa.conteudo_de(E.Message(
         secretEncryptedMessage=E.SecretEncryptedMessage())) is None
+
+
+def test_contato_salvo_no_telezapp_vai_ao_whatsapp_sem_tocar_a_agenda(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    assert amb.p.salvar_contato("5551988887777@s.whatsapp.net", "Ana Maria")
+    patch = amb.c.patches[-1]
+    assert patch.Type == N.PatchInfo.CRITICAL_UNBLOCK_LOW
+    mut = patch.Mutations[0]
+    assert list(mut.Index) == ["contact", "5551988887777@s.whatsapp.net"]
+    assert mut.Version == 2
+    acao = mut.Value.contactAction
+    assert acao.fullName == "Ana Maria" and acao.firstName == "Ana"
+    assert acao.saveOnPrimaryAddressbook is False          # so no WhatsApp
+    assert acao.pnJID == "5551988887777@s.whatsapp.net"
+    # grupos e nome vazio nao sao contatos
+    assert not amb.p.salvar_contato("123@g.us", "Grupo")
+    assert not amb.p.salvar_contato("5551988887777@s.whatsapp.net", "  ")

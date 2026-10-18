@@ -2557,6 +2557,9 @@ class Janela(wx.Frame):
                                   telefone or base)
         self._renomear_pelos_contatos()
         self.fala.falar("Contato %s salvo." % nome, interromper=True)
+        contatos.avisar_conta(
+            self.contas.provedor(conv.conta_id), conv.id, nome,
+            telefone or base, lambda t: self.fala.falar(t))
 
     def _renomear_pelos_contatos(self):
         """Poe nas conversas com pessoas o nome da agenda e, onde a pessoa
