@@ -1637,3 +1637,11 @@ def test_colecao_fora_de_sincronia_e_recuperada_e_o_envio_repete(amb):
     x = m.Mensagem("w1", "5551@s.whatsapp.net", "M1", data=TS)
     assert amb.p.favoritar_mensagem(x, True)
     assert len(tentativas) == 2
+
+
+def test_envelopes_novos_do_whatsapp_sao_abertos():
+    for envelope in ("groupMentionedMessage", "spoilerMessage",
+                     "questionMessage"):
+        msg = E.Message(**{envelope: E.FutureProofMessage(
+            message=E.Message(conversation="oi @todos"))})
+        assert wa.conteudo_de(wa.desembrulhar(msg))[1] == "oi @todos", envelope

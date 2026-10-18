@@ -164,6 +164,12 @@ Foco inicial na conta.
   (`ESPERA_DA_RECUPERACAO`). O iPhone responde na hora com o WhatsApp
   aberto; senão a pessoa é avisada para abri-lo e o TeleZapp tenta de novo ao
   reconectar. A reparação roda numa thread própria (`_conferir_estado`).
+- Resposta cujo original o próprio TeleZapp tirou: a linha diz "em resposta a
+  uma mensagem que foi limpa deste computador" ou "de antes de a conversa ser
+  apagada", e "Ir para a mensagem respondida" explica o motivo
+  (`Janela._motivo_do_original_ausente`), em vez de "mais antiga". Mais
+  envelopes do WhatsApp abertos (`EMBRULHOS`: menção a todos, spoiler,
+  pergunta...).
 - Configurações > Privacidade: a leitura da conta (`privacidade.ler`, que vai ao
   serviço) roda em thread (`_trocar_conta_priv`, `_priv_lido`); a categoria
   abre na hora com as caixas apagadas e "Lendo a privacidade da conta...".

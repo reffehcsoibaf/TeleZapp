@@ -32,7 +32,11 @@ log = logging.getLogger("telezapp.whatsapp")
 EMBRULHOS = ("deviceSentMessage", "ephemeralMessage", "viewOnceMessage",
              "viewOnceMessageV2", "viewOnceMessageV2Extension",
              "documentWithCaptionMessage", "editedMessage",
-             "associatedChildMessage", "commentMessage")
+             "associatedChildMessage", "commentMessage",
+             # outros envelopes (FutureProofMessage) do WhatsApp
+             "groupMentionedMessage", "spoilerMessage", "botInvokeMessage",
+             "limitSharingMessage", "questionMessage", "questionReplyMessage",
+             "botForwardedMessage", "groupStatusMessage")
 # Campos sem conteudo para a pessoa (chaves, controle): a mensagem e ignorada
 SO_CONTROLE = {"senderKeyDistributionMessage", "messageContextInfo",
                "protocolMessage", "reactionMessage", "pollUpdateMessage",

@@ -2146,7 +2146,9 @@ class Janela(wx.Frame):
                 itens.append(m.texto_marcador(self.marcador_n))
                 mapa.append(MARCADOR)
             itens.append(m.formatar(x, self.estilo, anterior,
-                                    respondida=self._original(x, porid)))
+                                    respondida=self._original(x, porid)
+                                    or self._motivo_do_original_ausente(x)
+                                    or None))
             mapa.append(x.id)
             anterior = x
         if not itens:
@@ -2238,6 +2240,19 @@ class Janela(wx.Frame):
         bipe("erro")
         self.fala.falar("Nenhuma mensagem não lida nesta conversa.",
                         interromper=True)
+
+    def _motivo_do_original_ausente(self, x):
+        """Por que a mensagem respondida nao esta aqui, quando foi o proprio
+        TeleZapp que a tirou (limpeza ou conversa apagada); '' se nao se
+        sabe."""
+        if not x.resposta_a or self.banco is None:
+            return ""
+        if self.banco.foi_limpa(x.conta_id, x.conversa_id, x.resposta_a):
+            return "uma mensagem que foi limpa deste computador"
+        if self.banco.apagada_ate(x.conta_id, x.conversa_id) is not None:
+            return ("uma mensagem de antes de a conversa ser apagada deste "
+                    "computador")
+        return ""
 
     def _original(self, x, porid):
         """A mensagem que `x` responde: da lista ou, se ficou fora dela, do
@@ -2692,8 +2707,14 @@ class Janela(wx.Frame):
             o = self.banco.mensagem(x.conta_id, x.conversa_id, x.resposta_a)
             if o is None:
                 bipe("erro")
-                self.fala.falar("A mensagem original não está guardada no "
-                                "TeleZapp.")
+                motivo = self._motivo_do_original_ausente(x)
+                self.fala.falar(
+                    "A mensagem original foi %s." % (
+                        "limpa deste computador"
+                        if "limpa" in motivo else
+                        "apagada deste computador junto com a conversa")
+                    if motivo else
+                    "A mensagem original não está guardada no TeleZapp.")
                 return
             self._mesclar(self.atual, [o])
             self._preencher_mensagens(x.id)

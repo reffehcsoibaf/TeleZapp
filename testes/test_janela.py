@@ -2329,3 +2329,21 @@ def test_favoritar_mensagem_marca_na_linha_e_fica_no_banco(j):
     j._favoritar_mensagem()
     assert "(favorita)" not in j.lista_msgs.itens[j.mapa.index("2")]
     assert j.banco.favoritas() == set()
+
+
+def test_resposta_cujo_original_foi_tirado_pelo_telezapp_diz_isso(j):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    r = msg("4", "concordo", conversa="10")
+    r.resposta_a = "2"
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg("3", "b", conversa="10"), r]))
+    linha = lambda: j.lista_msgs.itens[j.mapa.index("4")]
+    assert "mais antiga" in linha()                  # nao se sabe por que falta
+    j.banco.registrar_limpeza([("t1", "10", "2")], "mensagem")
+    j._preencher_mensagens()
+    assert "foi limpa deste computador" in linha()
+    j.banco.esquecer_limpezas("t1")                  # so resta a conversa apagada
+    j.banco.apagar_conversa("t1", "10", 1)
+    j._preencher_mensagens()
+    assert "antes de a conversa ser apagada" in linha()
