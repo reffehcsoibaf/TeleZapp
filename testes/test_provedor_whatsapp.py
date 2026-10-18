@@ -1565,3 +1565,17 @@ def test_contato_salvo_no_telezapp_vai_ao_whatsapp_sem_tocar_a_agenda(amb):
     # grupos e nome vazio nao sao contatos
     assert not amb.p.salvar_contato("123@g.us", "Grupo")
     assert not amb.p.salvar_contato("5551988887777@s.whatsapp.net", "  ")
+
+
+def test_pessoa_da_mensagem_de_grupo_vira_telefone_e_renomeia_o_autor(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    x = m.Mensagem("w1", "123@g.us", "G1", autor="Bia", data=TS,
+                   remetente="5552@s.whatsapp.net")
+    id_, tel, ids = amb.p.pessoa_da_mensagem(x)
+    assert (id_, tel) == ("5552@s.whatsapp.net", "+5552")
+    assert "5552@s.whatsapp.net" in ids
+    assert amb.p.pessoa_da_mensagem(
+        m.Mensagem("w1", "123@g.us", "G2", minha=True)) is None
+    amb.banco.salvar_mensagens([x])
+    assert amb.banco.renomear_autor("w1", ids, "Beatriz") == 1
+    assert amb.banco.mensagem("w1", "123@g.us", "G1").autor == "Beatriz"

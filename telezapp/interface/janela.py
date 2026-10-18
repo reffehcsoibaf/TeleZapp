@@ -280,6 +280,8 @@ class Janela(wx.Frame):
         item(m_ctt, "contatos", "&Gerenciar contatos...")
         item(m_ctt, "salvar_pessoa",
              "&Salvar a pessoa desta conversa como contato...")
+        item(m_ctt, "salvar_autor",
+             "Salvar quem enviou a &mensagem como contato...")
 
         m_conv = wx.Menu()
         item(m_conv, "ir_conv", "Ir para a lista de &conversas\tAlt+1")
@@ -402,6 +404,7 @@ class Janela(wx.Frame):
             "esconder_trancadas": lambda e: self._esconder_trancadas(),
             "contatos": lambda e: self._gerenciar_contatos(),
             "salvar_pessoa": lambda e: self._salvar_pessoa(),
+            "salvar_autor": lambda e: self._salvar_autor(),
             "logs": lambda e: self._abrir_logs(),
             "sair": lambda e: self.Close(),
             "configuracoes": lambda e: self._configuracoes(),
@@ -2561,6 +2564,46 @@ class Janela(wx.Frame):
             self.contas.provedor(conv.conta_id), conv.id, nome,
             telefone or base, lambda t: self.fala.falar(t))
 
+    def _salvar_autor(self, x=None):
+        """Salva como contato quem enviou a mensagem (a de um grupo, por
+        exemplo): o nome vale nas mensagens dela e, no WhatsApp, a conta
+        tambem passa a reconhece-lo."""
+        from telezapp.interface import contatos
+        if x is None:
+            x = self._mensagem_selecionada()
+        if x is None:
+            self.fala.falar("Selecione uma mensagem.")
+            return
+        prov = self.contas.provedor(x.conta_id) if self.contas else None
+        pessoa = prov.pessoa_da_mensagem(x) if prov is not None else None
+        if pessoa is None:
+            self.fala.falar("Não achei o telefone de quem enviou esta "
+                            "mensagem.")
+            return
+        id_, telefone, ids = pessoa
+        nome = self.banco.nome_de_contato(x.conta_id, id_) or (
+            x.autor if x.autor and not x.autor.startswith("+") else "")
+        servico = m.SERVICOS.get(self.contas.servico(x.conta_id), "")
+        escolha = contatos.dialogo_salvar_pessoa(
+            self, [(x.conta_id, servico)], nome, telefone)
+        if escolha is None:
+            return
+        nome, tel = escolha
+        tel = tel or telefone
+        self.banco.salvar_contato(x.conta_id, id_, nome, tel)
+        self.banco.renomear_autor(x.conta_id, ids, nome)
+        for lista in self.cache.values():
+            for y in lista:
+                if y.conta_id == x.conta_id and not y.minha and \
+                        y.remetente in ids:
+                    y.autor = nome
+        self._renomear_pelos_contatos()
+        if self.atual:
+            self._preencher_mensagens()
+        self.fala.falar("Contato %s salvo." % nome, interromper=True)
+        contatos.avisar_conta(prov, id_, nome, tel,
+                              lambda t: self.fala.falar(t))
+
     def _renomear_pelos_contatos(self):
         """Poe nas conversas com pessoas o nome da agenda e, onde a pessoa
         removeu o contato, pede os nomes de novo ao servico."""
@@ -2691,6 +2734,10 @@ class Janela(wx.Frame):
                   ("Copiar texto", self._copiar),
                   ("Detalhes", self._detalhes),
                   ("Apagar mensagem...", self._apagar_mensagem)]
+        sel = self._mensagem_selecionada()
+        if not sel.minha and sel.remetente:
+            opcoes.append(("Salvar quem enviou como contato...",
+                           self._salvar_autor))
         if self._mensagem_selecionada().resposta_a:
             opcoes.insert(1, ("Ir para a mensagem respondida",
                               self._ir_para_respondida))

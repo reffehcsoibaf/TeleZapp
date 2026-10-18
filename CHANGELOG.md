@@ -127,6 +127,12 @@ Foco inicial na conta.
   conversa (`contatos.avisar_conta`, em segundo plano). "Trazer das contas"
   não devolve nada à conta, e remover um contato do TeleZapp não o remove do
   WhatsApp. O Telegram fica de fora.
+- Salvar quem enviou a mensagem como contato (Menu, Contatos, e menu de
+  contexto da lista de mensagens, nas mensagens recebidas com remetente):
+  `Janela._salvar_autor`, `Provedor.pessoa_da_mensagem` (o endereço LID do
+  remetente vira o telefone) e `Banco.renomear_autor`, que põe o nome nas
+  mensagens já guardadas e no cache. Também avisa a conta
+  (`contatos.avisar_conta`). Só no WhatsApp: o Telegram não guarda o remetente.
 - Configurações > Privacidade: a leitura da conta (`privacidade.ler`, que vai ao
   serviço) roda em thread (`_trocar_conta_priv`, `_priv_lido`); a categoria
   abre na hora com as caixas apagadas e "Lendo a privacidade da conta...".

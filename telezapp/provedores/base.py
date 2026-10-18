@@ -69,6 +69,12 @@ class Provedor(ABC):
         mim). True se o servico foi avisado."""
         return False
 
+    def pessoa_da_mensagem(self, mensagem):
+        """Quem enviou a mensagem recebida, para salvar como contato:
+        (id da conversa com a pessoa, '+telefone', [ids pelos quais ela
+        aparece]) ou None se nao der para saber."""
+        return None
+
     ACEITA_CONTATOS = False     # sabe avisar a conta do nome de um contato
 
     def salvar_contato(self, conversa_id, nome, telefone=""):

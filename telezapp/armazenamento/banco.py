@@ -336,6 +336,19 @@ class Banco:
             linhas = self._con.execute(sql, args).fetchall()
         return [_msg(l) for l in linhas]
 
+    def renomear_autor(self, conta_id, remetentes, nome):
+        """Poe `nome` como autor das mensagens recebidas de quem aparece por
+        qualquer um desses enderecos. Devolve quantas mudaram."""
+        remetentes = [r for r in remetentes if r]
+        if not remetentes:
+            return 0
+        with self._trava, self._con:
+            return self._con.execute(
+                "UPDATE mensagens SET autor=? WHERE conta_id=? AND minha=0 "
+                "AND autor<>? AND remetente IN (%s)"
+                % ", ".join("?" * len(remetentes)),
+                (nome, conta_id, nome, *remetentes)).rowcount
+
     def nome_do_remetente(self, conta_id, remetentes):
         """Nome (autor) mais recente com que alguem dessa lista de enderecos
         aparece nas mensagens guardadas, sem contar telefones soltos."""

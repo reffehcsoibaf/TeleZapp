@@ -1196,6 +1196,20 @@ class ProvedorWhatsApp(Provedor):
 
     ACEITA_CONTATOS = True
 
+    def pessoa_da_mensagem(self, mensagem):
+        """Quem enviou a mensagem (num grupo, o remetente; o endereco LID
+        vira o telefone quando o WhatsApp o informa)."""
+        if mensagem.minha or not mensagem.remetente or \
+                self.cliente is None:
+            return None
+        usuario, servidor = jid_de_texto(mensagem.remetente)
+        alvo = self._numero_do_jid(_jid_obj(usuario, servidor))
+        if alvo.Server != "s.whatsapp.net" or not alvo.User:
+            return None
+        id_ = jid_texto(alvo)
+        return id_, "+" + alvo.User, [id_, mensagem.remetente,
+                                      "%s@%s" % (usuario, servidor)]
+
     def salvar_contato(self, conversa_id, nome, telefone=""):
         """O nome dado no TeleZapp passa a valer no WhatsApp da conta: manda
         o aviso de estado `contact` (o do WhatsApp Web ao adicionar um
