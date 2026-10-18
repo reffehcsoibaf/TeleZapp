@@ -759,6 +759,7 @@ class ProvedorWhatsApp(Provedor):
                 "LoggedOutEv": self._ao_sair,
                 "DisconnectedEv": self._ao_desconectar,
                 "MessageEv": self._ao_receber,
+                "UndecryptableMessageEv": self._ao_indecifravel,
                 "GroupInfoEv": self._ao_grupo_mudou,
                 "JoinedGroupEv": self._ao_entrou_no_grupo,
                 "ReceiptEv": self._ao_recibo,
@@ -1656,6 +1657,12 @@ class ProvedorWhatsApp(Provedor):
                 # _vistas: num grupo, quem troca a chave de envio manda a
                 # chave e o texto no mesmo pacote, e o whatsmeow entrega dois
                 # eventos com o mesmo ID; o do texto vem depois.
+                ignorados = sorted(set(campos(desembrulhar(evento.Message)))
+                                   - {"senderKeyDistributionMessage",
+                                      "messageContextInfo"})
+                if ignorados:
+                    log.info("evento sem conteúdo para mostrar: id=%s "
+                             "campos=%s", info.ID, ", ".join(ignorados))
                 return
             with self._trava:
                 if info.ID in self._vistas:      # outro evento ja tratou
@@ -1704,6 +1711,51 @@ class ProvedorWhatsApp(Provedor):
                                                      silenciosa=silenciosa))
         except Exception:
             log.exception("erro ao tratar mensagem recebida")
+
+    def _ao_indecifravel(self, cliente, evento):
+        """O WhatsApp entregou uma mensagem que nao deu para decifrar (chave
+        do grupo que ainda nao chegou, por exemplo). O whatsmeow pede de novo
+        ao remetente e, se der certo, a mensagem chega depois, com o mesmo
+        id. Enquanto isso fica uma marca no lugar dela, para a conversa nao
+        parecer faltar uma mensagem."""
+        try:
+            info = evento.Info
+            origem = info.MessageSource
+            cid = self._id_da_conversa(origem.Chat)
+            log.warning(
+                "mensagem não decifrada: id=%s conversa=%s remetente=%s "
+                "indisponível=%s modo=%s", info.ID, cid,
+                jid_texto(origem.Sender), bool(evento.IsUnavailable),
+                int(evento.DecryptFailMode))
+            if origem.Chat.Server == "broadcast" or cid in IGNORAR_CONVERSAS \
+                    or int(evento.DecryptFailMode) == 2:   # DECRYPT_FAIL_HIDE
+                return
+            with self._trava:
+                if info.ID in self._vistas:
+                    return
+            grupo = bool(origem.IsGroup)
+            minha = bool(origem.IsFromMe)
+            nome = info.Pushname or nome_verificado(info)
+            autor = ""
+            if grupo and not minha:
+                autor = self._nome_contato(origem.Sender, nome)
+            msg = m.Mensagem(
+                conta_id=self.conta.id, conversa_id=cid, id=info.ID,
+                autor=autor, minha=minha,
+                data=segundos(info.Timestamp) or time.time(),
+                tipo=m.AGUARDANDO, estado=m.ENVIADA if minha else "",
+                remetente="" if minha else jid_texto(origem.Sender))
+            conv = self._conversa(cid, origem.Chat, nome, grupo, msg.data)
+            if not grupo and not minha and not msg.autor:
+                msg.autor = conv.nome
+            with self._trava:
+                conv.data = max(conv.data, msg.data)
+            self.banco.salvar_conversas([conv])
+            self.banco.salvar_mensagens([msg])
+            self.barramento.publicar(ev.MensagemNova(msg, conv,
+                                                     silenciosa=True))
+        except Exception:
+            log.exception("erro ao tratar mensagem não decifrada")
 
     def _tratar_alteracao(self, evento, cid, info, origem):
         """Reacao, edicao ou 'apagar para todos' de uma mensagem que ja

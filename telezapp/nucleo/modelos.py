@@ -15,10 +15,14 @@ SERVICOS = {"telegram": "Telegram", "whatsapp": "WhatsApp"}
 TEXTO, FOTO, VIDEO, VOZ, AUDIO, DOCUMENTO, FIGURINHA, OUTRO = (
     "texto", "foto", "video", "voz", "audio", "documento", "figurinha",
     "outro")
+# Marca de lugar de uma mensagem que o WhatsApp avisou mas nao conseguiu
+# entregar (nao decifrada); a mensagem de verdade, com o mesmo id, a substitui
+AGUARDANDO = "aguardando"
 NOMES_TIPOS = {
     TEXTO: "texto", FOTO: "foto", VIDEO: "vídeo", VOZ: "mensagem de voz",
     AUDIO: "áudio", DOCUMENTO: "documento", FIGURINHA: "figurinha",
     OUTRO: "mensagem sem suporte ainda",
+    AGUARDANDO: "mensagem ainda não recebida",
 }
 
 # Estados de uma mensagem enviada
@@ -236,6 +240,9 @@ def conteudo(m, com_estado=True):
         return _partes("documento", m.nome_arquivo, tam, legenda)
     if m.tipo == FIGURINHA:
         return _partes("figurinha", m.texto)
+    if m.tipo == AGUARDANDO:
+        return ("mensagem ainda não recebida: o WhatsApp não entregou o "
+                "conteúdo, ela pode chegar depois")
     return _partes(NOMES_TIPOS[OUTRO], m.texto)
 
 

@@ -91,6 +91,13 @@ Foco inicial na conta.
   recibo `played-self`; o Telegram ganhou o aviso ao vivo
   (`UpdateReadMessagesContents` e a versão de canal, `_ao_conteudo_lido`,
   `Banco.mensagens_por_id`), que antes só valia ao carregar a conversa.
+- Mensagem do WhatsApp que não deu para decifrar (`UndecryptableMessageEv`,
+  `WhatsApp._ao_indecifravel`): registra o aviso no log (id, conversa,
+  remetente, modo) e deixa no lugar da mensagem uma marca do tipo
+  `AGUARDANDO` ("mensagem ainda não recebida"), sem alerta. O whatsmeow pede de
+  novo ao remetente; quando a de verdade chega, com o mesmo id, ela substitui
+  a marca (`INSERT OR REPLACE` e o cache por id). Eventos que só trazem
+  controle e eram ignorados sem rastro agora deixam uma linha no log.
 - Configurações > Privacidade: a leitura da conta (`privacidade.ler`, que vai ao
   serviço) roda em thread (`_trocar_conta_priv`, `_priv_lido`); a categoria
   abre na hora com as caixas apagadas e "Lendo a privacidade da conta...".

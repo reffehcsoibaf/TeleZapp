@@ -1448,3 +1448,38 @@ def test_avisos_de_arquivar_e_trancar_do_celular(tmp_path):
         JID=jid("9999"), Action=types.SimpleNamespace(archived=True)))
     assert [x.arquivada for x in banco.conversas("w1")] == [True]
     banco.fechar()
+
+
+def test_mensagem_nao_decifrada_deixa_marca_e_a_de_verdade_a_substitui(amb):
+    info = N.MessageInfo(
+        MessageSource=N.MessageSource(
+            Chat=jid("123", "g.us"), IsGroup=True, Sender=jid("5552")),
+        ID="G9", Pushname="Bia", Timestamp=TS)
+    amb.f["UndecryptableMessage"](amb.c, N.UndecryptableMessage(
+        Info=info, IsUnavailable=False,
+        DecryptFailMode=N.UndecryptableMessage.DECRYPT_FAIL_SHOW))
+    marca = esperar(amb.fila, ev.MensagemNova)
+    assert marca.mensagem.tipo == m.AGUARDANDO and marca.silenciosa
+    assert marca.mensagem.id == "G9"
+    assert "ainda não recebida" in m.conteudo(marca.mensagem)
+    # o pedido de novo ao remetente deu certo: a mensagem chega com o mesmo id
+    amb.f["Message"](amb.c, evento(
+        "G9", E.Message(conversation="oi do grupo"), chat="123", grupo=True,
+        remetente="5552"))
+    real = esperar(amb.fila, ev.MensagemNova)
+    assert real.mensagem.id == "G9" and real.mensagem.texto == "oi do grupo"
+    guardadas = amb.banco.mensagens("w1", "123@g.us")
+    assert [(x.id, x.tipo) for x in guardadas] == [("G9", m.TEXTO)]
+
+
+def test_mensagem_nao_decifrada_que_o_whatsapp_manda_esconder_so_registra(amb):
+    info = N.MessageInfo(
+        MessageSource=N.MessageSource(
+            Chat=jid("5551"), IsGroup=False, Sender=jid("5551")),
+        ID="X1", Timestamp=TS)
+    amb.f["UndecryptableMessage"](amb.c, N.UndecryptableMessage(
+        Info=info, IsUnavailable=True,
+        DecryptFailMode=N.UndecryptableMessage.DECRYPT_FAIL_HIDE))
+    amb.f["Message"](amb.c, evento("X2", E.Message(conversation="e")))
+    primeira = esperar(amb.fila, ev.MensagemNova)
+    assert primeira.mensagem.id == "X2"       # a marca nao foi criada
