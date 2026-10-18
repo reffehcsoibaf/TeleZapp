@@ -588,6 +588,13 @@ def mime_da_ficha(dados):
     return ""
 
 
+# Colecoes do estado do aplicativo (arquivar, fixar, favoritar, contatos...)
+COLECOES_DE_ESTADO = ("regular_high", "regular_low", "regular",
+                      "critical_unblock_low", "critical_block")
+COLECAO_DO_TIPO = {1: "critical_block", 2: "critical_unblock_low",
+                   3: "regular_low", 4: "regular_high", 5: "regular"}
+
+
 def fim_do_silencio(valor, ms=False):
     """Fim do silencio como o WhatsApp manda (segundos, ou milissegundos
     com ms=True; -1 ou um numero enorme = para sempre) -> 0.0 (com som),
@@ -654,6 +661,8 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
     m.guardar_extras(msg, botoes=botoes_do_whatsapp(interna_),
                      mencoes=mencoes_do_contexto(ctx), acoes=acoes_,
                      original=original_com_acoes(interna_, acoes_))
+    if wmi.starred:
+        m.atualizar_extras(msg, favorita=True)
     return msg, remetente
 
 
@@ -725,6 +734,7 @@ class ProvedorWhatsApp(Provedor):
         self._grupos_lidos = {}    # grupo -> quando os participantes foram lidos
         self._arquivada_vista = {}  # conversa -> arquivada, como o celular disse
         self._ajustes_vistos = {}   # (conversa, campo) -> fixada/silenciada
+        self._recuperando = set()   # colecoes do estado em recuperacao
         self._ultima_conferencia = 0.0
         self._sincronizando = False
         self._progresso_historico = 0   # 0 = nada em andamento
@@ -821,6 +831,7 @@ class ProvedorWhatsApp(Provedor):
                 "MessageEv": self._ao_receber,
                 "UndecryptableMessageEv": self._ao_indecifravel,
                 "MessageDeleteForMeEv": self._ao_apagar_mensagem,
+                "MessageStarEv": self._ao_favoritar_mensagem,
                 "GroupInfoEv": self._ao_grupo_mudou,
                 "JoinedGroupEv": self._ao_entrou_no_grupo,
                 "ReceiptEv": self._ao_recibo,
@@ -962,6 +973,86 @@ class ProvedorWhatsApp(Provedor):
                                                 telefone))
         self._estado(ev.CONECTADA)
         self._publicar_conversas()
+        self._fila.put(self._conferir_estado)
+
+    def _conferir_estado(self):
+        """Confere as colecoes do estado do aplicativo. Se uma saiu de
+        sincronia ("mismatching LTHash"), as mudancas feitas no celular
+        deixam de chegar e as daqui sao recusadas. Roda fora da fila, porque
+        pedir a copia ao celular pode levar um minuto."""
+        threading.Thread(target=self._conferir_colecoes, daemon=True,
+                         name="estado-do-app").start()
+
+    def _conferir_colecoes(self):
+        for nome in COLECOES_DE_ESTADO:
+            self._reparar_colecao(nome, forcar=False)
+
+    def _reparar_colecao(self, nome, forcar=True):
+        """Sincroniza a colecao. Se nao bate: baixa tudo de novo e, se ainda
+        assim nao bate (acontece quando o celular reescreve registros antigos
+        e o whatsmeow nao consegue conferir), pede ao celular uma copia nova
+        do estado. True se terminou bem."""
+        fetch = getattr(self.cliente, "fetch_app_state", None)
+        if fetch is None or not self._conectada:
+            return False
+        try:
+            fetch(nome, full_sync=forcar)
+            if forcar:
+                log.info("estado %s baixado de novo", nome)
+            return True
+        except Exception as e:
+            if "LTHash" not in str(e):
+                log.warning("não consegui sincronizar o estado %s: %s",
+                            nome, e)
+                return False
+            if not forcar:
+                log.warning("estado %s fora de sincronia; baixando de novo",
+                            nome)
+                return self._reparar_colecao(nome, forcar=True)
+            return self._recuperar_colecao(nome)
+
+    ESPERA_DA_RECUPERACAO = 90      # segundos, no total
+    PASSO_DA_RECUPERACAO = 5        # segundos entre as conferencias
+
+    def _recuperar_colecao(self, nome):
+        """Pede ao celular a copia do estado e espera ela chegar. O iPhone so
+        responde com o WhatsApp aberto, entao, se nao vier, a pessoa e
+        avisada."""
+        with self._trava:
+            if nome in self._recuperando:
+                return False
+            self._recuperando.add(nome)
+        try:
+            log.warning("estado %s: pedindo ao celular uma copia nova", nome)
+            try:
+                self.cliente.request_app_state_recovery(nome)
+            except Exception as e:
+                log.warning("não consegui pedir a cópia do estado: %s", e)
+                return False
+            fim = time.time() + self.ESPERA_DA_RECUPERACAO
+            while time.time() < fim:
+                if self._parar.wait(self.PASSO_DA_RECUPERACAO):
+                    return False
+                try:
+                    self.cliente.fetch_app_state(nome)
+                    log.info("estado %s recuperado com a cópia do celular",
+                             nome)
+                    return True
+                except Exception as e:
+                    if "LTHash" not in str(e):
+                        log.warning("estado %s: %s", nome, e)
+                        return False
+            log.warning("o celular não respondeu ao pedido do estado %s",
+                        nome)
+            self._avisar(
+                "Para as mudanças do celular (favoritar, apagar, silenciar) "
+                "voltarem a chegar, abra o WhatsApp no celular e deixe-o "
+                "aberto por um minuto; o TeleZapp tenta de novo ao "
+                "reconectar.", False)
+            return False
+        finally:
+            with self._trava:
+                self._recuperando.discard(nome)
 
     def _ao_fim_sincronia(self, cliente, e):
         with self._trava:
@@ -1109,7 +1200,16 @@ class ProvedorWhatsApp(Provedor):
                     Index=[indice, "%s@%s" % (usuario, servidor),
                            *extra],
                     Version=versao, Value=valor)])
-            self.cliente.send_app_state(patch)
+            try:
+                self.cliente.send_app_state(patch)
+            except Exception as e:
+                # colecao fora de sincronia: baixa de novo e tenta mais uma
+                if "LTHash" not in str(e) and "409" not in str(e):
+                    raise
+                if not self._reparar_colecao(COLECAO_DO_TIPO.get(
+                        int(tipo), "regular_high")):
+                    raise
+                self.cliente.send_app_state(patch)
             return True
         except Exception:
             log.exception("não consegui avisar o WhatsApp (%s)", indice)
@@ -1187,6 +1287,8 @@ class ProvedorWhatsApp(Provedor):
     def _ao_apagar_mensagem(self, cliente, evento):
         """Mensagem apagada so para mim no celular: a interface tira daqui."""
         try:
+            if evento.FromFullSync:
+                return      # exclusao antiga, de antes: nao apaga daqui
             cid = self._id_da_conversa(evento.ChatJID)
             log.info("mensagem apagada no celular")
             self.barramento.publicar(ev.MensagemApagadaNoCelular(
@@ -1238,6 +1340,35 @@ class ProvedorWhatsApp(Provedor):
             "contact", 2, PatchInfo.CRITICAL_UNBLOCK_LOW,
             SyncActionValue(contactAction=acao), conversa_id)
 
+    FAVORITA_NA_CONTA = True
+
+    def _ao_favoritar_mensagem(self, cliente, evento):
+        """Mensagem favoritada (ou nao) no celular."""
+        try:
+            favorita = bool(evento.Action.starred)
+            self._alterar(
+                self._id_da_conversa(evento.ChatJID), evento.MessageID,
+                lambda x: m.atualizar_extras(x, favorita=favorita),
+                "favorita")
+        except Exception:
+            log.exception("erro ao tratar o aviso de favoritar")
+
+    def favoritar_mensagem(self, mensagem, favoritar):
+        """Avisa o WhatsApp (aviso de estado `star`, o do celular) que a
+        mensagem foi favoritada ou desfavoritada. True se foi aceito."""
+        from neonize.proto.Neonize_pb2 import PatchInfo
+        from neonize.proto.waSyncAction.WAWebProtobufSyncAction_pb2 import (
+            StarAction, SyncActionValue)
+        remetente = "0"
+        if not mensagem.minha and mensagem.conversa_id.endswith("@g.us") \
+                and mensagem.remetente:
+            remetente = mensagem.remetente
+        return self._enviar_estado(
+            "star", 2, PatchInfo.REGULAR_HIGH,
+            SyncActionValue(starAction=StarAction(starred=bool(favoritar))),
+            mensagem.conversa_id,
+            extra=(mensagem.id, "1" if mensagem.minha else "0", remetente))
+
     def apagar_mensagem(self, mensagem, para_todos=False):
         """Apaga a mensagem no WhatsApp: para todos (so as minhas, o mesmo
         'apagar para todos' do celular) ou so para mim (aviso de estado
@@ -1278,6 +1409,8 @@ class ProvedorWhatsApp(Provedor):
         provedor e a interface decide se apaga tambem (so se nao ha mensagem
         mais nova que o aviso)."""
         try:
+            if evento.FromFullSync:
+                return      # exclusao antiga, de antes: nao apaga daqui
             cid = self._id_da_conversa(evento.JID)
             with self._trava:
                 self._conversas.pop(cid, None)

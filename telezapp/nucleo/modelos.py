@@ -121,6 +121,7 @@ def extras_de(msg):
             "editada": bool(dados.get("editada")),
             "apagada": bool(dados.get("apagada")),
             "ouvida": bool(dados.get("ouvida")),
+            "favorita": bool(dados.get("favorita")),
             "reacoes": list(dados.get("reacoes") or [])}
 
 
@@ -332,6 +333,8 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None):
     cont = conteudo(m).replace("\r", " ").replace("\n", " ")
     if extras_de(m)["editada"]:
         cont = _juntar(cont, "(editada)")
+    if extras_de(m)["favorita"]:
+        cont = _juntar(cont, "(favorita)")
     n_links = len(itens_de_link(m))
     if n_links:
         cont = _juntar(cont, "com %d %s (Tab)" % (

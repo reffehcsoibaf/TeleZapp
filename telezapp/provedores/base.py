@@ -69,6 +69,14 @@ class Provedor(ABC):
         mim). True se o servico foi avisado."""
         return False
 
+    # True nos servicos em que a mensagem favorita tambem vale na conta
+    FAVORITA_NA_CONTA = False
+
+    def favoritar_mensagem(self, mensagem, favoritar):
+        """Marca (ou desmarca) a mensagem como favorita na conta do servico.
+        True se o servico foi avisado."""
+        return False
+
     def pessoa_da_mensagem(self, mensagem):
         """Quem enviou a mensagem recebida, para salvar como contato:
         (id da conversa com a pessoa, '+telefone', [ids pelos quais ela

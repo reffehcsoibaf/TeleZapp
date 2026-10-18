@@ -63,6 +63,10 @@ class DialogoLimpeza(wx.Dialog):
             "Só as maiores que quantos MB (0 = qualquer tamanho)",
             lambda: wx.SpinCtrl(self, min=0, max=100000, initial=0,
                                 name="Tamanho mínimo em MB"))
+        self.favoritas = wx.CheckBox(
+            self, label="Manter as mensagens &favoritas")
+        self.favoritas.SetValue(True)
+        lay.Add(self.favoritas, 0, wx.ALL, 10)
         self.conta.SetSelection(0)
         self.tipo.SetSelection(0)
         self.conta.Bind(wx.EVT_CHOICE, lambda e: self._montar_conversas())
@@ -93,7 +97,8 @@ class DialogoLimpeza(wx.Dialog):
             o_que=(limpeza.MENSAGENS if self.o_que.GetSelection() == 1
                    else limpeza.MIDIAS),
             conta_id=conta, conversa_id=conv[1], tipos=TIPOS[i][1],
-            dias=self.dias.GetValue(), mb=self.mb.GetValue())
+            dias=self.dias.GetValue(), mb=self.mb.GetValue(),
+            manter_favoritas=self.favoritas.GetValue())
 
     def _apagar(self):
         sel = limpeza.selecionar(self.banco, self.filtros())

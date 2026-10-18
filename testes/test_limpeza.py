@@ -79,3 +79,20 @@ def test_fixada_e_silenciada_no_rotulo_nos_filtros_e_no_banco(tmp_path):
     lida = b.conversas("c")[0]
     assert lida.fixada and lida.silenciada_ate == -1.0
     b.fechar()
+
+
+def test_limpeza_mantem_as_favoritas_e_pode_incluir_todas(tmp_path):
+    b, _, arq = _banco(tmp_path)
+    fav = b.mensagem("c", "v", "0")                  # a que tem a midia
+    m.atualizar_extras(fav, favorita=True)
+    b.salvar_mensagens([fav])
+    assert b.favoritas() == {("c", "v", "0")}
+    f = limpeza.Filtros(o_que=limpeza.MENSAGENS, dias=30)
+    assert limpeza.selecionar(b, f).quantidade == 1          # so a "1"
+    f.manter_favoritas = False
+    assert limpeza.selecionar(b, f).quantidade == 2
+    # a midia da favorita tambem fica
+    assert limpeza.selecionar(b, limpeza.Filtros(dias=30)).quantidade == 0
+    assert limpeza.selecionar(
+        b, limpeza.Filtros(dias=30, manter_favoritas=False)).quantidade == 1
+    assert m.formatar(fav, m.ESTILO_AUTOR_PRIMEIRO).count("(favorita)") == 1

@@ -311,6 +311,8 @@ class Janela(wx.Frame):
         item(m_msg, "copiar", "&Copiar texto\tCtrl+Shift+C")
         item(m_msg, "detalhes", "&Detalhes\tAlt+Enter")
         item(m_msg, "ir_respondida", "Ir para a mensagem respondi&da")
+        item(m_msg, "favoritar_msg",
+             "&Favoritar ou desfavoritar a mensagem\tCtrl+Shift+F")
         item(m_msg, "apagar_msg", "&Apagar mensagem...")
         m_msg.AppendSeparator()
         item(m_msg, "abrir_midia", "&Abrir mídia\tCtrl+O")
@@ -425,6 +427,7 @@ class Janela(wx.Frame):
             "ir_respondida": lambda e: self._ir_para_respondida(),
             "detalhes": lambda e: self._detalhes(),
             "apagar_msg": lambda e: self._apagar_mensagem(),
+            "favoritar_msg": lambda e: self._favoritar_mensagem(),
             "dep_msg": lambda e: self._depurar_mensagem(),
             "dep_conv": lambda e: self._depurar_conversa(),
             "ajuda": lambda e: dialogos.mostrar_texto(
@@ -1244,7 +1247,7 @@ class Janela(wx.Frame):
             self.fala.falar("Nenhuma conversa selecionada.")
             return
         prov = self.contas.provedor(conv.conta_id)
-        no_celular = bool(prov and prov.APAGA_NA_CONTA and
+        no_celular = bool(prov and getattr(prov, "APAGA_NA_CONTA", False) and
                           self.estados.get(conv.conta_id) == ev.CONECTADA)
         texto = ("Apagar a conversa com %s? As mensagens e as mídias dela "
                  "serão apagadas deste computador. Ela só volta se chegar "
@@ -1290,6 +1293,28 @@ class Janela(wx.Frame):
             "Conversa apagada também no celular." if ok else
             "Não consegui apagar a conversa no celular. Ela foi apagada só "
             "aqui.", interromper=True))
+
+    def _favoritar_mensagem(self, x=None):
+        """Marca a mensagem como favorita, ou tira a marca. Favoritas nao
+        entram na limpeza; no WhatsApp a conta tambem e avisada."""
+        if x is None:
+            x = self._mensagem_selecionada()
+        if x is None:
+            return
+        if x.id.startswith("local-"):
+            self.fala.falar("Esta mensagem ainda está sendo enviada.")
+            return
+        favorita = not m.extras_de(x)["favorita"]
+        m.atualizar_extras(x, favorita=favorita)
+        self.banco.salvar_mensagens([x])
+        self._preencher_mensagens()
+        prov = self.contas.provedor(x.conta_id) if self.contas else None
+        if prov is not None and getattr(prov, "FAVORITA_NA_CONTA", False):
+            self._avisar_conta(
+                x, lambda p: p.favoritar_mensagem(x, favorita),
+                "O serviço não aceitou. A marca ficou só no TeleZapp.")
+        self.fala.falar("Mensagem favoritada." if favorita
+                        else "Mensagem desfavoritada.", interromper=True)
 
     def _apagar_mensagem(self, x=None):
         """Apaga a mensagem selecionada aqui e na conta (para todos, quando
@@ -2735,6 +2760,8 @@ class Janela(wx.Frame):
                   ("Detalhes", self._detalhes),
                   ("Apagar mensagem...", self._apagar_mensagem)]
         sel = self._mensagem_selecionada()
+        opcoes.insert(0, ("Desfavoritar" if m.extras_de(sel)["favorita"]
+                          else "Favoritar", self._favoritar_mensagem))
         if not sel.minha and sel.remetente:
             opcoes.append(("Salvar quem enviou como contato...",
                            self._salvar_autor))

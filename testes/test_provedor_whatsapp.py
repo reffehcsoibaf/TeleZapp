@@ -1579,3 +1579,61 @@ def test_pessoa_da_mensagem_de_grupo_vira_telefone_e_renomeia_o_autor(amb):
     amb.banco.salvar_mensagens([x])
     assert amb.banco.renomear_autor("w1", ids, "Beatriz") == 1
     assert amb.banco.mensagem("w1", "123@g.us", "G1").autor == "Beatriz"
+
+
+def test_favoritar_vai_ao_whatsapp_e_vem_do_celular(amb):
+    from neonize.proto.waSyncAction import WAWebProtobufSyncAction_pb2 as SA
+    amb.f["Connected"](amb.c, N.Connected())
+    x = m.Mensagem("w1", "123@g.us", "G1", remetente="5552@s.whatsapp.net",
+                   data=TS)
+    assert amb.p.favoritar_mensagem(x, True)
+    mut = amb.c.patches[-1].Mutations[0]
+    assert list(mut.Index) == ["star", "123@g.us", "G1", "0",
+                               "5552@s.whatsapp.net"]
+    assert mut.Version == 2 and mut.Value.starAction.starred
+    # do celular: a mensagem guardada ganha a marca
+    amb.banco.salvar_mensagens([x])
+    amb.f["MessageStar"](amb.c, N.MessageStar(
+        ChatJID=jid("123", "g.us"), IsFromMe=False, MessageID="G1",
+        Timestamp=TS, FromFullSync=False,
+        Action=SA.StarAction(starred=True)))
+    e = esperar(amb.fila, ev.MensagemAtualizada)
+    assert e.motivo == "favorita" and m.extras_de(e.mensagem)["favorita"]
+
+
+def test_colecao_fora_de_sincronia_e_recuperada_e_o_envio_repete(amb):
+    c = amb.c
+    c.sincronias, c.recuperacoes = [], []
+    estado = {"regular_high": "estragada"}      # estragada, recuperada
+
+    def fetch_app_state(nome, full_sync=False):
+        c.sincronias.append((nome, full_sync))
+        if estado.get(nome) == "estragada" and not c.recuperacoes:
+            raise RuntimeError("failed to verify patch v59: mismatching LTHash")
+        if estado.get(nome) == "estragada":
+            estado[nome] = "recuperada"     # o celular respondeu
+    c.fetch_app_state = fetch_app_state
+    c.request_app_state_recovery = lambda nome: c.recuperacoes.append(nome)
+    amb.p.PASSO_DA_RECUPERACAO = 0.01      # sem esperar de verdade
+    amb.f["Connected"](amb.c, N.Connected())
+    for _ in range(100):
+        if estado["regular_high"] == "recuperada":
+            break
+        threading.Event().wait(0.05)
+    assert ("regular_high", False) in c.sincronias
+    assert ("regular_high", True) in c.sincronias          # baixou de novo
+    assert c.recuperacoes == ["regular_high"]              # e pediu ao celular
+    assert estado["regular_high"] == "recuperada"
+    assert ("regular_low", True) not in c.sincronias       # as boas ficam
+
+    # um envio recusado por conflito: repara a colecao e tenta mais uma vez
+    tentativas = []
+
+    def send_app_state(patch):
+        tentativas.append(1)
+        if len(tentativas) == 1:
+            raise RuntimeError('409 conflict ... mismatching LTHash')
+    c.send_app_state = send_app_state
+    x = m.Mensagem("w1", "5551@s.whatsapp.net", "M1", data=TS)
+    assert amb.p.favoritar_mensagem(x, True)
+    assert len(tentativas) == 2

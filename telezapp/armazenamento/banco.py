@@ -526,6 +526,13 @@ class Banco:
         """'mensagem', 'midia' ou None."""
         return self._mapa_limpas().get((conta_id, conversa_id, mensagem_id))
 
+    def favoritas(self):
+        """{(conta_id, conversa_id, id)} das mensagens marcadas favoritas."""
+        with self._trava:
+            return set(self._con.execute(
+                "SELECT conta_id, conversa_id, id FROM mensagens WHERE "
+                "extras LIKE '%\"favorita\": true%'").fetchall())
+
     def mensagens_para_limpar(self, conta_id="", conversa_id="", tipos=(),
                               antes=None, minimo=0):
         """[(conta_id, conversa_id, id, tipo, tamanho, data)] que passam

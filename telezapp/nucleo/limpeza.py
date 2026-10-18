@@ -20,6 +20,7 @@ class Filtros:
     tipos: tuple = ()             # () = todos os tipos
     dias: int = 0                 # so as de ha mais de N dias (0 = todas)
     mb: int = 0                   # so as maiores que N MB (0 = qualquer)
+    manter_favoritas: bool = True  # as favoritas nao entram na limpeza
 
 
 @dataclass
@@ -46,10 +47,11 @@ def selecionar(banco, filtros, agora=None):
     corte = agora - filtros.dias * DIA if filtros.dias else None
     minimo = filtros.mb * 1048576
     sel = Selecao(filtros.o_que)
+    favoritas = banco.favoritas() if filtros.manter_favoritas else set()
     if filtros.o_que == MENSAGENS:
-        sel.itens = banco.mensagens_para_limpar(
+        sel.itens = [linha for linha in banco.mensagens_para_limpar(
             filtros.conta_id, filtros.conversa_id, filtros.tipos, corte,
-            minimo)
+            minimo) if tuple(linha[:3]) not in favoritas]
         for conta, conversa, mensagem, *_ in sel.itens:
             reg = banco.midia(conta, conversa, mensagem)
             if reg:
@@ -60,6 +62,8 @@ def selecionar(banco, filtros, agora=None):
         if filtros.conta_id and conta != filtros.conta_id:
             continue
         if filtros.conversa_id and conversa != filtros.conversa_id:
+            continue
+        if (conta, conversa, linha[2]) in favoritas:
             continue
         if filtros.tipos and tipo not in filtros.tipos:
             continue

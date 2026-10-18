@@ -133,6 +133,37 @@ Foco inicial na conta.
   remetente vira o telefone) e `Banco.renomear_autor`, que põe o nome nas
   mensagens já guardadas e no cache. Também avisa a conta
   (`contatos.avisar_conta`). Só no WhatsApp: o Telegram não guarda o remetente.
+- Mensagens favoritas: chave `favorita` nos extras (`extras_de`), "(favorita)"
+  na linha, `Janela._favoritar_mensagem` (Menu, Mensagem, Ctrl+Shift+F, e menu
+  de contexto). No WhatsApp vai e vem com a conta: aviso de estado `star`
+  (versão 2, REGULAR_HIGH) e o evento 53 da DLL de teste (`MessageStarEv`,
+  `events.Star`), mais `WebMessageInfo.starred` no histórico. No Telegram vale
+  só no TeleZapp (`Provedor.FAVORITA_NA_CONTA`).
+- Limpeza: caixa "Manter as mensagens favoritas" (ligada por padrão,
+  `Filtros.manter_favoritas`, `Banco.favoritas`): as favoritas e as mídias
+  delas ficam fora de `selecionar`.
+- Estado do aplicativo fora de sincronia (`mismatching LTHash`): depois de
+  mandar avisos de estado daqui, as coleções `regular_high` e
+  `critical_unblock_low` ficaram sem aplicar os avisos do celular (favoritar,
+  desfavoritar...) e recusavam os daqui (409). A DLL de teste ganhou
+  `FetchAppState` (`NewClient.fetch_app_state(nome, full_sync)`, nova no
+  `_binder.py` e no `client.py`). `WhatsApp._conferir_estado` roda ao
+  conectar: sincroniza cada coleção e, se ela não bate, baixa de novo;
+  `_enviar_estado` faz o mesmo e repete o envio uma vez quando o WhatsApp
+  recusa por conflito. Na sincronia completa só os estados (arquivada,
+  fixada, silenciada, favorita) são aplicados: apagar conversa e apagar
+  mensagem do celular só valem ao vivo (`FromFullSync` é ignorado).
+- Causa do `mismatching LTHash`: o celular reescreve registros antigos do
+  estado (troca de endereço telefone/LID, nova chave) e o whatsmeow não
+  consegue conferir o patch, mesmo com a coleção baixada do zero
+  (tulir/whatsmeow#858; ferramenta de diagnóstico em
+  `goneonize/cmd/diag`, que mostra as mutações do patch que falha). O
+  caminho oficial é pedir ao celular uma cópia nova: a DLL de teste ganhou
+  `RequestAppStateRecovery` (`NewClient.request_app_state_recovery`), que o
+  `_recuperar_colecao` usa depois do download completo e espera até 90 s
+  (`ESPERA_DA_RECUPERACAO`). O iPhone responde na hora com o WhatsApp
+  aberto; senão a pessoa é avisada para abri-lo e o TeleZapp tenta de novo ao
+  reconectar. A reparação roda numa thread própria (`_conferir_estado`).
 - Configurações > Privacidade: a leitura da conta (`privacidade.ler`, que vai ao
   serviço) roda em thread (`_trocar_conta_priv`, `_priv_lido`); a categoria
   abre na hora com as caixas apagadas e "Lendo a privacidade da conta...".

@@ -2315,3 +2315,17 @@ def test_apagar_mensagem_aqui_pergunta_e_avisa_a_conta(j):
         wx_falso.resposta_messagebox[0] = wx_falso.NO
     assert "2" not in j.mapa
     assert j.banco.foi_limpa("t1", "10", "2") == "mensagem"
+
+
+def test_favoritar_mensagem_marca_na_linha_e_fica_no_banco(j):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg("1", "a", conversa="10"), msg("2", "b", conversa="10")]))
+    selecionar(j, "2")
+    j._favoritar_mensagem()
+    assert "(favorita)" in j.lista_msgs.itens[j.mapa.index("2")]
+    assert j.banco.favoritas() == {("t1", "10", "2")}
+    j._favoritar_mensagem()
+    assert "(favorita)" not in j.lista_msgs.itens[j.mapa.index("2")]
+    assert j.banco.favoritas() == set()
