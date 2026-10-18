@@ -223,6 +223,14 @@ class ClienteFalso:
         with open(path, "wb") as f:
             f.write(b"conteudo")
 
+    def send_app_state(self, patch):
+        self.patches = getattr(self, "patches", [])
+        self.patches.append(patch)
+
+    def revoke_message(self, chat, sender, message_id):
+        self.revogadas = getattr(self, "revogadas", [])
+        self.revogadas.append((wa.jid_texto(chat), message_id))
+
     def mark_read(self, *ids, chat, sender, receipt):
         self.lidas.append((list(ids), wa.jid_texto(chat), sender.User))
         self.recibos = getattr(self, "recibos", [])
@@ -1483,3 +1491,60 @@ def test_mensagem_nao_decifrada_que_o_whatsapp_manda_esconder_so_registra(amb):
     amb.f["Message"](amb.c, evento("X2", E.Message(conversation="e")))
     primeira = esperar(amb.fila, ev.MensagemNova)
     assert primeira.mensagem.id == "X2"       # a marca nao foi criada
+
+
+def test_mensagem_apagada_no_celular_vira_evento(amb):
+    amb.f["MessageDeleteForMe"](amb.c, N.MessageDeleteForMe(
+        ChatJID=jid("123", "g.us"), IsFromMe=False, MessageID="G7",
+        Timestamp=TS, FromFullSync=False))
+    e = esperar(amb.fila, ev.MensagemApagadaNoCelular)
+    assert (e.conversa_id, e.mensagem_id) == ("123@g.us", "G7")
+
+
+def test_apagar_mensagem_aqui_avisa_o_whatsapp(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    outra = m.Mensagem("w1", "123@g.us", "G7", remetente="5552@s.whatsapp.net",
+                       data=TS)
+    assert amb.p.apagar_mensagem(outra)             # so para mim
+    mut = amb.c.patches[0].Mutations[0]
+    assert list(mut.Index) == ["deleteMessageForMe", "123@g.us", "G7", "0",
+                               "5552@s.whatsapp.net"]
+    assert mut.Version == 3 and mut.Value.deleteMessageForMeAction.deleteMedia
+    minha = m.Mensagem("w1", "5551@s.whatsapp.net", "M1", minha=True,
+                       data=TS)
+    assert amb.p.apagar_mensagem(minha, para_todos=True)      # para todos
+    assert amb.c.revogadas == [("5551@s.whatsapp.net", "M1")]
+    assert not amb.p.apagar_mensagem(outra, para_todos=True)  # so as minhas
+
+
+
+def test_tipos_novos_ganham_texto_e_o_de_edicao_nao_vira_mensagem():
+    video = E.VideoMessage(seconds=7, fileLength=1234, caption="")
+    tipo, texto, seg, _, tam = wa.conteudo_de(E.Message(ptvMessage=video))
+    assert (tipo, seg, tam) == (m.VIDEO, 7, 1234)
+    ficha = wa.ficha_de(E.Message(ptvMessage=E.VideoMessage(
+        mimetype="video/mp4", directPath="/d", fileLength=9)))
+    assert E.Message.FromString(ficha).HasField("videoMessage")
+    assert wa.mime_da_ficha(ficha) == "video/mp4"
+
+    contatos = E.ContactsArrayMessage(contacts=[
+        E.ContactMessage(displayName="Ana"),
+        E.ContactMessage(displayName="Bia")])
+    assert wa.conteudo_de(E.Message(contactsArrayMessage=contatos))[1] == \
+        "2 contatos: Ana, Bia"
+
+    evento_ = E.EventMessage(name="Aniversário", startTime=TS,
+                             location=E.LocationMessage(name="Salão"),
+                             description="Levar bolo")
+    texto = wa.conteudo_de(E.Message(eventMessage=evento_))[1]
+    assert texto.startswith("evento: Aniversário, início ")
+    assert "local: Salão" in texto and texto.endswith("\nLevar bolo")
+
+    produto = E.ProductMessage(product=E.ProductMessage.ProductSnapshot(
+        title="Cadeira", currencyCode="BRL", priceAmount1000=129900))
+    assert wa.conteudo_de(E.Message(productMessage=produto))[1] == \
+        "produto: Cadeira, BRL 129.90"
+
+    # edicao de evento ou enquete (cifrada): so controle, nao e mensagem
+    assert wa.conteudo_de(E.Message(
+        secretEncryptedMessage=E.SecretEncryptedMessage())) is None

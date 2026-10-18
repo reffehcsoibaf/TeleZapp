@@ -98,6 +98,26 @@ Foco inicial na conta.
   novo ao remetente; quando a de verdade chega, com o mesmo id, ela substitui
   a marca (`INSERT OR REPLACE` e o cache por id). Eventos que só trazem
   controle e eram ignorados sem rastro agora deixam uma linha no log.
+- Apagar mensagem nos dois sentidos (Menu, Mensagem, e menu de contexto da
+  lista de mensagens): `Janela._apagar_mensagem` pergunta e tira a mensagem
+  daqui na hora (`limpeza.apagar_mensagem`: apaga a mídia, a mensagem e
+  registra em `limpas`, então não volta por histórico nem nova leitura). As
+  minhas têm "Apagar para todos" (`revoke_message`) ou "só para mim"; as dos
+  outros, só "para mim" (aviso de estado `deleteMessageForMe`, versão 3,
+  REGULAR_HIGH, com a mídia). Telegram: `delete_messages(revoke=...)`. Do
+  celular para cá: a DLL de teste ganhou o evento 52 (`MessageDeleteForMeEv`,
+  `events.DeleteForMe`) e o Telegram usa `events.MessageDeleted`; ambos
+  publicam `ev.MensagemApagadaNoCelular` (`Janela._ev_mensagem_apagada`).
+  "Apagar para todos" feito pelo remetente continua aparecendo como "mensagem
+  apagada", como no WhatsApp.
+- Tipos do WhatsApp que apareciam como "mensagem sem suporte ainda":
+  `ptvMessage` (mensagem de vídeo: vira vídeo e baixa pela ficha como
+  `videoMessage`), `contactsArrayMessage` ("N contatos: nomes"),
+  `eventMessage` ("evento: nome, início, fim, local, link, descrição" ou
+  "evento cancelado"), `productMessage` ("produto: título, preço, link") e
+  `secretEncryptedMessage` (edição cifrada de evento ou enquete: passa a ser só
+  controle, `SO_CONTROLE`, em vez de uma linha vazia). As mensagens antigas
+  que já estavam guardadas como "tipo do WhatsApp: ..." não mudam.
 - Configurações > Privacidade: a leitura da conta (`privacidade.ler`, que vai ao
   serviço) roda em thread (`_trocar_conta_priv`, `_priv_lido`); a categoria
   abre na hora com as caixas apagadas e "Lendo a privacidade da conta...".

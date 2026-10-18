@@ -2282,3 +2282,36 @@ def test_nova_mensagem_com_pessoa_escolhida_na_lista_nao_resolve_o_texto(
     j._resolver_destino = lambda *a: (_ for _ in ()).throw(AssertionError)
     j._nova_mensagem()
     assert enviados == [("t1", "20")]
+
+
+def test_mensagem_apagada_no_celular_some_da_lista_e_nao_volta(j):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg("1", "a", conversa="10"), msg("2", "b", conversa="10"),
+        msg("3", "c", conversa="10")]))
+    assert "2" in j.mapa
+    j.b.publicar(ev.MensagemApagadaNoCelular("t1", "10", "2"))
+    assert "2" not in j.mapa and "1" in j.mapa and "3" in j.mapa
+    # a mesma mensagem chegando de novo (historico) nao volta
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg("2", "b", conversa="10")]))
+    assert "2" not in j.mapa
+
+
+def test_apagar_mensagem_aqui_pergunta_e_avisa_a_conta(j):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg("1", "a", conversa="10"), msg("2", "b", conversa="10")]))
+    selecionar(j, "2")
+    wx_falso.resposta_messagebox[0] = wx_falso.NO
+    j._apagar_mensagem()
+    assert "2" in j.mapa                          # disse nao: nada muda
+    wx_falso.resposta_messagebox[0] = wx_falso.YES
+    try:
+        j._apagar_mensagem()
+    finally:
+        wx_falso.resposta_messagebox[0] = wx_falso.NO
+    assert "2" not in j.mapa
+    assert j.banco.foi_limpa("t1", "10", "2") == "mensagem"

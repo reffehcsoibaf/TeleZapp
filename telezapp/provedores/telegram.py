@@ -475,6 +475,8 @@ class ProvedorTelegram(Provedor):
             self._ao_ler, events.MessageRead(inbox=False))
         self.cliente.add_event_handler(self._ao_acao_no_chat,
                                        events.ChatAction())
+        self.cliente.add_event_handler(self._ao_mensagens_apagadas,
+                                       events.MessageDeleted())
         self.cliente.add_event_handler(
             self._ao_conteudo_lido,
             events.Raw((tipos.UpdateReadMessagesContents,
@@ -965,6 +967,29 @@ class ProvedorTelegram(Provedor):
                                       key=lambda c: -c.data)))
         except Exception:
             log.exception("erro ao tratar mudança no chat")
+
+    async def _ao_mensagens_apagadas(self, evento):
+        """Mensagens apagadas em outro aparelho (ou por quem as enviou)."""
+        chat = getattr(evento, "chat_id", None)
+        conversa = str(chat) if chat else None
+        for x in self.banco.mensagens_por_id(
+                self.conta.id, evento.deleted_ids, conversa):
+            self.barramento.publicar(ev.MensagemApagadaNoCelular(
+                self.conta.id, x.conversa_id, x.id))
+
+    def apagar_mensagem(self, mensagem, para_todos=False):
+        """Apaga a mensagem no Telegram (para todos, ou so para mim onde o
+        Telegram deixa)."""
+        try:
+            ident = int(mensagem.id)
+        except ValueError:
+            return False
+        self._agendar(self._apagar_mensagem(mensagem, ident, para_todos))
+        return True
+
+    async def _apagar_mensagem(self, mensagem, ident, para_todos):
+        ent = await self._entidade(mensagem.conversa_id)
+        await self.cliente.delete_messages(ent, [ident], revoke=para_todos)
 
     async def _ao_conteudo_lido(self, upd):
         """Voz ou audio tocado em outro aparelho: passa a constar ouvido."""

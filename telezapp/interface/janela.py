@@ -29,6 +29,7 @@ from telezapp.provedores.base import ErroPrivacidade
 from telezapp.nucleo import codigo_secreto
 from telezapp.nucleo import depuracao
 from telezapp.nucleo import eventos as ev
+from telezapp.nucleo import limpeza
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import paginas
 from telezapp.nucleo.midias import TEXTO_LIMPA
@@ -308,6 +309,7 @@ class Janela(wx.Frame):
         item(m_msg, "copiar", "&Copiar texto\tCtrl+Shift+C")
         item(m_msg, "detalhes", "&Detalhes\tAlt+Enter")
         item(m_msg, "ir_respondida", "Ir para a mensagem respondi&da")
+        item(m_msg, "apagar_msg", "&Apagar mensagem...")
         m_msg.AppendSeparator()
         item(m_msg, "abrir_midia", "&Abrir mídia\tCtrl+O")
         item(m_msg, "baixar_midia", "&Baixar mídia sem abrir\tCtrl+B")
@@ -419,6 +421,7 @@ class Janela(wx.Frame):
             "copiar": lambda e: self._copiar(),
             "ir_respondida": lambda e: self._ir_para_respondida(),
             "detalhes": lambda e: self._detalhes(),
+            "apagar_msg": lambda e: self._apagar_mensagem(),
             "dep_msg": lambda e: self._depurar_mensagem(),
             "dep_conv": lambda e: self._depurar_conversa(),
             "ajuda": lambda e: dialogos.mostrar_texto(
@@ -906,6 +909,7 @@ class Janela(wx.Frame):
             ev.ContaPronta: self._ev_conta_pronta,
             ev.ConversasAtualizadas: self._ev_conversas,
             ev.ConversaApagadaNoCelular: self._ev_conversa_apagada,
+            ev.MensagemApagadaNoCelular: self._ev_mensagem_apagada,
             ev.MensagensCarregadas: self._ev_mensagens,
             ev.MensagemNova: self._ev_nova,
             ev.EnvioFalhou: self._ev_falha,
@@ -1283,6 +1287,76 @@ class Janela(wx.Frame):
             "Conversa apagada também no celular." if ok else
             "Não consegui apagar a conversa no celular. Ela foi apagada só "
             "aqui.", interromper=True))
+
+    def _apagar_mensagem(self, x=None):
+        """Apaga a mensagem selecionada aqui e na conta (para todos, quando
+        e minha e a pessoa escolhe, ou so para mim). Nao volta por historico
+        nem por nova leitura."""
+        if x is None:
+            x = self._mensagem_selecionada()
+        if x is None:
+            return
+        if x.id.startswith("local-"):
+            self.fala.falar("Esta mensagem ainda está sendo enviada.")
+            return
+        prov = self.contas.provedor(x.conta_id) if self.contas else None
+        na_conta = prov is not None and \
+            self.estados.get(x.conta_id) == ev.CONECTADA
+        para_todos = False
+        if na_conta and x.minha:
+            dlg = wx.MessageDialog(
+                self, "Apagar esta mensagem? Ela some daqui e do celular.",
+                "Apagar mensagem",
+                wx.YES_NO | wx.CANCEL | wx.CANCEL_DEFAULT | wx.ICON_QUESTION)
+            dlg.SetYesNoCancelLabels("Apagar para todos", "Apagar só para mim",
+                                     "Cancelar")
+            try:
+                r = dlg.ShowModal()
+            finally:
+                dlg.Destroy()
+            if r == wx.ID_CANCEL:
+                return
+            para_todos = r == wx.ID_YES
+        else:
+            r = wx.MessageBox(
+                "Apagar esta mensagem?" + (
+                    " Ela some daqui e do celular." if na_conta else
+                    " A conta não está conectada: ela some só daqui."),
+                "Apagar mensagem",
+                wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
+            if r != wx.YES:
+                return
+        self._remover_mensagem_local(x.conta_id, x.conversa_id, x.id)
+        if na_conta:
+            threading.Thread(
+                target=self._apagar_na_conta, args=(prov, x, para_todos),
+                daemon=True, name="apagar-mensagem").start()
+        self.fala.falar("Mensagem apagada.", interromper=True)
+
+    def _apagar_na_conta(self, prov, x, para_todos):
+        try:
+            ok = bool(prov.apagar_mensagem(x, para_todos))
+        except Exception:
+            log.exception("erro ao apagar a mensagem na conta")
+            ok = False
+        if not ok:
+            wx.CallAfter(lambda: self.fala.falar(
+                "Não consegui apagar a mensagem na conta. Ela foi apagada só "
+                "aqui.", interromper=True))
+
+    def _remover_mensagem_local(self, conta_id, conversa_id, mensagem_id):
+        limpeza.apagar_mensagem(self.banco, conta_id, conversa_id,
+                                mensagem_id)
+        self._tirar_da_memoria({(conta_id, conversa_id, mensagem_id)})
+
+    def _ev_mensagem_apagada(self, e):
+        """Mensagem apagada no celular: some daqui tambem."""
+        aberta = (e.conta_id, e.conversa_id) == self.atual
+        self._remover_mensagem_local(e.conta_id, e.conversa_id,
+                                     e.mensagem_id)
+        if aberta:
+            self.fala.falar("Uma mensagem desta conversa foi apagada no "
+                            "celular.")
 
     def _ev_conversa_apagada(self, e):
         """Conversa apagada no celular: apaga aqui tambem, a menos que ja
@@ -2612,7 +2686,8 @@ class Janela(wx.Frame):
         menu = wx.Menu()
         opcoes = [("Responder", self._responder),
                   ("Copiar texto", self._copiar),
-                  ("Detalhes", self._detalhes)]
+                  ("Detalhes", self._detalhes),
+                  ("Apagar mensagem...", self._apagar_mensagem)]
         if self._mensagem_selecionada().resposta_a:
             opcoes.insert(1, ("Ir para a mensagem respondida",
                               self._ir_para_respondida))
@@ -3065,10 +3140,13 @@ class Janela(wx.Frame):
         """Depois de limpar mensagens: tira da memoria o que saiu do banco."""
         if selecao.o_que != "mensagens":
             return
-        tiradas = {(c, v, i) for c, v, i, *_ in selecao.itens}
+        self._tirar_da_memoria({(c, v, i) for c, v, i, *_ in selecao.itens})
+
+    def _tirar_da_memoria(self, chaves):
+        """Tira as mensagens (conta, conversa, id) do cache e da lista."""
         for chave, lista in list(self.cache.items()):
             self.cache[chave] = [x for x in lista if (
-                x.conta_id, x.conversa_id, x.id) not in tiradas]
+                x.conta_id, x.conversa_id, x.id) not in chaves]
         if self.atual:
             self._preencher_mensagens()
 

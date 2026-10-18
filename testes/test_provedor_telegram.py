@@ -94,6 +94,7 @@ class ClienteFalso:
         self.enviadas = []
         self.lidas = []
         self.requisicoes = []
+        self.apagadas = []
         self.pedidos_codigo = []
         self.handlers = []
         self.desconectou = False
@@ -221,6 +222,9 @@ class ClienteFalso:
     async def send_read_acknowledge(self, ent):
         self.lidas.append(ent)
 
+    async def delete_messages(self, ent, ids, revoke=True):
+        self.apagadas.append((ent, list(ids), revoke))
+
     async def __call__(self, requisicao):
         self.requisicoes.append(requisicao)
 
@@ -277,7 +281,7 @@ def test_sessao_salva_conecta_e_lista_conversas(ambiente):
         assert len(ambiente.banco.conversas("t1")) == 3
         assert [c.arquivada for c in ambiente.banco.conversas("t1")
                 if c.nome == "Velha"] == [True]
-        assert len(cliente.handlers) == 4
+        assert len(cliente.handlers) == 5
 
         p.carregar_mensagens("10")
         msgs = esperar(ambiente.fila, ev.MensagensCarregadas).mensagens
@@ -354,7 +358,7 @@ def test_mensagem_recebida_e_leitura(ambiente):
     p.iniciar()
     try:
         esperar(ambiente.fila, ev.ConversasAtualizadas)
-        receber, ler, _, _ = cliente.handlers
+        receber, ler, _, _, _ = cliente.handlers
 
         async def chegar():
             async def get_chat():
@@ -396,7 +400,7 @@ def test_voz_ouvida_aqui_avisa_o_telegram_e_ouvida_la_marca_aqui(ambiente):
             time.sleep(0.05)
         assert cliente.requisicoes[0].id == [60]
         # tocada no celular: a mensagem passa a constar ouvida
-        conteudo_lido = cliente.handlers[3]
+        conteudo_lido = cliente.handlers[4]
         asyncio.run_coroutine_threadsafe(
             conteudo_lido(types.SimpleNamespace(messages=[60])),
             p._loop).result(5)
@@ -404,6 +408,33 @@ def test_voz_ouvida_aqui_avisa_o_telegram_e_ouvida_la_marca_aqui(ambiente):
         assert e.motivo == "ouvida" and m.extras_de(e.mensagem)["ouvida"]
         assert m.extras_de(
             ambiente.banco.mensagem("t1", "10", "60"))["ouvida"]
+    finally:
+        p.parar()
+
+
+def test_mensagem_apagada_no_celular_e_apagada_daqui(ambiente):
+    import asyncio
+    cliente = ClienteFalso()
+    p = ambiente.criar(cliente)
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ConversasAtualizadas)
+        ambiente.banco.salvar_mensagens([
+            m.Mensagem("t1", "10", "61", texto="oi", data=time.time())])
+        apagadas = cliente.handlers[3]
+        asyncio.run_coroutine_threadsafe(
+            apagadas(types.SimpleNamespace(deleted_ids=[61], chat_id=None)),
+            p._loop).result(5)
+        e = esperar(ambiente.fila, ev.MensagemApagadaNoCelular)
+        assert (e.conversa_id, e.mensagem_id) == ("10", "61")
+        # apagada aqui: o Telegram recebe o pedido, para todos ou so para mim
+        x = m.Mensagem("t1", "10", "61")
+        assert p.apagar_mensagem(x, para_todos=True)
+        for _ in range(100):
+            if cliente.apagadas:
+                break
+            time.sleep(0.05)
+        assert cliente.apagadas == [("peer10", [61], True)]
     finally:
         p.parar()
 

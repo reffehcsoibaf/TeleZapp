@@ -64,6 +64,11 @@ class Provedor(ABC):
     def marcar_como_lida(self, conversa_id):
         """Avisa o servico que a pessoa leu a conversa."""
 
+    def apagar_mensagem(self, mensagem, para_todos=False):
+        """Apaga a mensagem na conta do servico (para todos, ou so para
+        mim). True se o servico foi avisado."""
+        return False
+
     def marcar_ouvida(self, mensagem):
         """Avisa o servico que a pessoa tocou esta voz ou audio recebido
         (a marca de ouvida tambem aparece no celular)."""

@@ -40,7 +40,10 @@ SO_CONTROLE = {"senderKeyDistributionMessage", "messageContextInfo",
                # cabecalho de album (as fotos e videos chegam um a um),
                # aviso de grupo mencionado em status e aviso de historico
                "albumMessage", "groupStatusMentionMessage",
-               "messageHistoryNotice"}
+               "messageHistoryNotice",
+               # edicao de um evento ou de uma enquete, cifrada com o segredo
+               # da mensagem original: nao traz mensagem nova
+               "secretEncryptedMessage"}
 # Tipos de recibo do neonize (Receipt.Type)
 RECIBO_ENTREGUE, RECIBO_LIDO, RECIBO_LIDO_POR_MIM, RECIBO_OUVIDO = 1, 4, 5, 6
 RECIBO_OUVIDO_POR_MIM = 7     # toquei a voz ou audio no celular
@@ -407,6 +410,39 @@ def nome_verificado(info):
         return ""
 
 
+def _texto_do_evento(x):
+    """'evento: nome, inicio, local, descricao' (ou 'evento cancelado')."""
+    partes = ["evento cancelado" if x.isCanceled else "evento: " + x.name]
+    if x.isCanceled and x.name:
+        partes.append(x.name)
+    if x.startTime:
+        partes.append("início " + time.strftime(
+            "%d/%m/%Y %H:%M", time.localtime(x.startTime)))
+    if x.endTime:
+        partes.append("fim " + time.strftime(
+            "%d/%m/%Y %H:%M", time.localtime(x.endTime)))
+    local = x.location.name or x.location.address
+    if local:
+        partes.append("local: " + local)
+    if x.joinLink:
+        partes.append("link: " + x.joinLink)
+    texto = ", ".join(partes)
+    return texto + ("\n" + x.description if x.description else "")
+
+
+def _texto_do_produto(x):
+    """'produto: titulo, preco, descricao' de uma mensagem de catalogo."""
+    p = x.product
+    partes = ["produto: " + (p.title or "sem nome")]
+    if p.priceAmount1000:
+        partes.append("%s %.2f" % (p.currencyCode or "",
+                                   p.priceAmount1000 / 1000))
+    if p.URL:
+        partes.append(p.URL)
+    texto = ", ".join(p_.strip() for p_ in partes)
+    return _partes_texto(texto, p.description, x.body)
+
+
 def conteudo_de(interna):
     """(tipo, texto, segundos, nome_arquivo, tamanho) ou None se a mensagem
     nao tem nada para mostrar (chaves, reacoes, controle)."""
@@ -447,6 +483,19 @@ def conteudo_de(interna):
     if "contactMessage" in presentes:
         return m.OUTRO, "contato: " + interna.contactMessage.displayName, 0, \
             "", 0
+    if "ptvMessage" in presentes:       # mensagem de video (bolinha)
+        x = interna.ptvMessage
+        return m.VIDEO, x.caption, x.seconds, "", x.fileLength
+    if "contactsArrayMessage" in presentes:
+        x = interna.contactsArrayMessage
+        nomes = [c.displayName for c in x.contacts if c.displayName]
+        return m.OUTRO, "%d contatos: %s" % (
+            len(x.contacts), ", ".join(nomes)) if nomes else \
+            "%d contatos" % len(x.contacts), 0, "", 0
+    if "eventMessage" in presentes:
+        return m.OUTRO, _texto_do_evento(interna.eventMessage), 0, "", 0
+    if "productMessage" in presentes:
+        return m.OUTRO, _texto_do_produto(interna.productMessage), 0, "", 0
     texto = texto_estruturado(interna, presentes)
     if texto:
         return m.TEXTO, texto, 0, "", 0
@@ -502,6 +551,17 @@ def ficha_de(interna):
     """O minimo que o WhatsApp exige para baixar a midia depois (chaves e
     caminho), sem miniatura nem resposta citada. None se nao ha midia."""
     from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import Message
+    try:
+        if interna.HasField("ptvMessage"):
+            # mensagem de video: e um VideoMessage, mas o whatsmeow so baixa
+            # pelo campo videoMessage
+            video = type(interna.ptvMessage)()
+            video.CopyFrom(interna.ptvMessage)
+            for campo in ("contextInfo", "JPEGThumbnail", "caption"):
+                video.ClearField(campo)
+            return Message(videoMessage=video).SerializeToString()
+    except (ValueError, AttributeError):
+        pass
     for nome in CAMPOS_MIDIA:
         try:
             if not interna.HasField(nome):
@@ -760,6 +820,7 @@ class ProvedorWhatsApp(Provedor):
                 "DisconnectedEv": self._ao_desconectar,
                 "MessageEv": self._ao_receber,
                 "UndecryptableMessageEv": self._ao_indecifravel,
+                "MessageDeleteForMeEv": self._ao_apagar_mensagem,
                 "GroupInfoEv": self._ao_grupo_mudou,
                 "JoinedGroupEv": self._ao_entrou_no_grupo,
                 "ReceiptEv": self._ao_recibo,
@@ -1032,7 +1093,8 @@ class ProvedorWhatsApp(Provedor):
         except Exception:
             log.exception("erro ao tratar o aviso de trancar")
 
-    def _enviar_estado(self, indice, versao, tipo, valor, conversa_id):
+    def _enviar_estado(self, indice, versao, tipo, valor, conversa_id,
+                       extra=()):
         """Manda um aviso de estado (fixar, silenciar...) ao WhatsApp, como
         o celular faz para os outros aparelhos. True se foi aceito."""
         if self.cliente is None or not self._conectada or \
@@ -1044,7 +1106,8 @@ class ProvedorWhatsApp(Provedor):
             patch = PatchInfo(
                 Timestamp=time.time_ns(), Type=tipo,
                 Mutations=[MutationInfo(
-                    Index=[indice, "%s@%s" % (usuario, servidor)],
+                    Index=[indice, "%s@%s" % (usuario, servidor),
+                           *extra],
                     Version=versao, Value=valor)])
             self.cliente.send_app_state(patch)
             return True
@@ -1119,6 +1182,51 @@ class ProvedorWhatsApp(Provedor):
             return True
         except Exception:
             log.exception("não consegui apagar a conversa no celular")
+            return False
+
+    def _ao_apagar_mensagem(self, cliente, evento):
+        """Mensagem apagada so para mim no celular: a interface tira daqui."""
+        try:
+            cid = self._id_da_conversa(evento.ChatJID)
+            log.info("mensagem apagada no celular")
+            self.barramento.publicar(ev.MensagemApagadaNoCelular(
+                self.conta.id, cid, evento.MessageID))
+        except Exception:
+            log.exception("erro ao tratar o aviso de apagar mensagem")
+
+    def apagar_mensagem(self, mensagem, para_todos=False):
+        """Apaga a mensagem no WhatsApp: para todos (so as minhas, o mesmo
+        'apagar para todos' do celular) ou so para mim (aviso de estado
+        `deleteMessageForMe`). True se o WhatsApp aceitou."""
+        if self.cliente is None or not self._conectada:
+            return False
+        try:
+            if para_todos:
+                if not mensagem.minha:
+                    return False
+                self.cliente.revoke_message(
+                    self._jid(mensagem.conversa_id),
+                    self.cliente.get_me().JID, mensagem.id)
+                return True
+            from neonize.proto.Neonize_pb2 import PatchInfo
+            from neonize.proto.waSyncAction.WAWebProtobufSyncAction_pb2 import (
+                DeleteMessageForMeAction, SyncActionValue)
+            remetente = "0"
+            if not mensagem.minha and \
+                    mensagem.conversa_id.endswith("@g.us") and \
+                    mensagem.remetente:
+                remetente = mensagem.remetente
+            return self._enviar_estado(
+                "deleteMessageForMe", 3, PatchInfo.REGULAR_HIGH,
+                SyncActionValue(
+                    deleteMessageForMeAction=DeleteMessageForMeAction(
+                        deleteMedia=True,
+                        messageTimestamp=int(mensagem.data))),
+                mensagem.conversa_id,
+                extra=(mensagem.id, "1" if mensagem.minha else "0",
+                       remetente))
+        except Exception:
+            log.exception("não consegui apagar a mensagem no WhatsApp")
             return False
 
     def _ao_apagar_conversa(self, cliente, evento):

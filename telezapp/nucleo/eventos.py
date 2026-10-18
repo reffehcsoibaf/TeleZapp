@@ -48,6 +48,15 @@ class ConversaApagadaNoCelular:
 
 
 @dataclass
+class MensagemApagadaNoCelular:
+    """A pessoa apagou uma mensagem para si no celular (ou em outro
+    aparelho)."""
+    conta_id: str
+    conversa_id: str
+    mensagem_id: str
+
+
+@dataclass
 class MensagensCarregadas:
     conta_id: str
     conversa_id: str

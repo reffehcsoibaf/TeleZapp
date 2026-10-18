@@ -112,3 +112,20 @@ def apagar(banco, selecao):
     banco.apagar_fichas(feitas)
     banco.registrar_limpeza(feitas, "midia")
     return len(feitas), liberados, falhas
+
+
+def apagar_mensagem(banco, conta_id, conversa_id, mensagem_id):
+    """Apaga uma mensagem, a midia dela, e registra para nao voltar. Devolve
+    os bytes liberados."""
+    liberados = 0
+    reg = banco.midia(conta_id, conversa_id, mensagem_id)
+    if reg:
+        try:
+            liberados = _tamanho(*reg)
+            _apagar_arquivo(reg[0])
+        except OSError:
+            liberados = 0
+    chave = [(conta_id, conversa_id, mensagem_id)]
+    banco.apagar_mensagens(chave)
+    banco.registrar_limpeza(chave, "mensagem")
+    return liberados
