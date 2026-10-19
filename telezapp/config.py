@@ -88,6 +88,34 @@ def pasta_temporaria():
     return pasta("temp")
 
 
+def pasta_sons():
+    """Os arquivos de som que a pessoa escolheu para os avisos."""
+    return pasta("sons")
+
+
+def importar_som(origem):
+    """Copia o arquivo de som para a pasta de sons (se ainda nao estiver
+    nela) e devolve o nome dele la dentro. Um nome ja usado por outro arquivo
+    ganha um numero."""
+    destino_dir = pasta_sons()
+    nome = os.path.basename(origem)
+    destino = os.path.join(destino_dir, nome)
+    if os.path.normcase(os.path.abspath(origem)) == \
+            os.path.normcase(os.path.abspath(destino)):
+        return nome
+    base, ext = os.path.splitext(nome)
+    n = 1
+    while os.path.exists(destino):
+        if os.path.getsize(destino) == os.path.getsize(origem) and \
+                open(destino, "rb").read() == open(origem, "rb").read():
+            return os.path.basename(destino)       # ja e o mesmo arquivo
+        n += 1
+        nome = "%s (%d)%s" % (base, n, ext)
+        destino = os.path.join(destino_dir, nome)
+    shutil.copyfile(origem, destino)
+    return nome
+
+
 def limpar_temporarios():
     """Apaga o conteudo da pasta temporaria (na abertura e no fechamento)."""
     caminho = os.path.join(pasta_dados(), "temp")
@@ -107,6 +135,7 @@ class Opcao:
     descricao: str
     escolhas: tuple = ()     # vazio: sim ou nao; senao (valor, rotulo)
     numero: tuple = ()       # (minimo, maximo): numero digitado, sem lista
+    som: str = ""            # evento de som (ver EVENTOS_SOM): "" = outra opcao
 
 
 OPCOES = (
@@ -138,6 +167,14 @@ OPCOES = (
           "que definiu em Menu, Conversa, Código secreto das conversas "
           "trancadas. Sem código definido elas ficam escondidas. Desmarcada, "
           "o tipo Trancadas no celular aparece sempre."),
+    Opcao("verificar_atualizacoes",
+          "Avisar quando houver versão nova do TeleZapp", "Atualizações",
+          True,
+          "Ao abrir, consulta as versões publicadas no GitHub e avisa se há "
+          "uma mais nova. Só lê a lista de versões; não baixa nem instala "
+          "nada. O GitHub vê o endereço de internet do computador, como em "
+          "qualquer site. Também dá para consultar quando quiser, em Ajuda, "
+          "Verificar atualizações."),
     Opcao("depuracao", "Modo de depuração", "Avançado", False,
           "Guarda, no seu computador, a estrutura original das últimas 500 "
           "mensagens do WhatsApp para o menu Depurar mostrar. Contém o texto "
@@ -166,12 +203,41 @@ OPCOES = (
           "Na janela de configurações, o TeleZapp fala a explicação de cada "
           "opção logo depois que você chega nela. Desmarcada, a explicação "
           "só é falada com F1."),
-    Opcao("audio_janela", "Enter em áudio e mensagem de voz", "Mídias", "sem",
+    Opcao("audio_janela", "Ao reproduzir áudio e mensagem de voz", "Mídias",
+          "sem",
           "Só tocar começa a tocar sem abrir janela: Enter de novo pausa e "
           "continua, e Esc para. O player em janela tem avançar, voltar e "
           "posição.",
           (("sem", "Só tocar, sem janela"),
            ("janela", "Abrir a janela do player"))),
+    Opcao("enter_audio", "Enter numa mensagem de voz ou áudio", "Mídias",
+          "abrir", "O que o Enter faz numa mensagem de voz ou áudio. "
+          "Transcrever usa os provedores de Inteligência artificial e, se a "
+          "transcrição já existe, só a mostra. Control O sempre reproduz e "
+          "Control B sempre só baixa.",
+          (("abrir", "Reproduzir (baixa antes, se preciso)"),
+           ("baixar", "Só baixar"),
+           ("ia", "Transcrever (ou mostrar a transcrição)"))),
+    Opcao("enter_imagem", "Enter numa foto ou figurinha", "Mídias", "abrir",
+          "O que o Enter faz numa foto ou figurinha. Descrever usa os "
+          "provedores de Inteligência artificial e, se a descrição já "
+          "existe, só a mostra.",
+          (("abrir", "Abrir (baixa antes, se preciso)"),
+           ("baixar", "Só baixar"),
+           ("ia", "Descrever (ou mostrar a descrição)"))),
+    Opcao("enter_video", "Enter num vídeo", "Mídias", "abrir",
+          "O que o Enter faz num vídeo. Descrever usa o provedor de "
+          "Inteligência artificial que aceita vídeo e, se a descrição já "
+          "existe, só a mostra.",
+          (("abrir", "Abrir (baixa antes, se preciso)"),
+           ("baixar", "Só baixar"),
+           ("ia", "Descrever (ou mostrar a descrição)"))),
+    Opcao("enter_pdf", "Enter num PDF", "Mídias", "abrir",
+          "O que o Enter faz num documento PDF. Converter usa os provedores "
+          "de Inteligência artificial e, se o texto já existe, só o mostra.",
+          (("abrir", "Abrir (baixa antes, se preciso)"),
+           ("baixar", "Só baixar"),
+           ("ia", "Converter em texto acessível (ou mostrar o texto)"))),
     Opcao("audio_sequencia", "Áudios em sequência", "Mídias", "sim",
           "O que acontece quando um áudio ou mensagem de voz termina (sem "
           "janela). Todos da conversa: toca o próximo áudio, pulando as "
@@ -243,6 +309,74 @@ OPCOES = (
 )
 
 
+# Sons dos eventos: (nome em acessibilidade.fala.bipe, rotulo, descricao).
+# O valor guardado e "" (som padrao do TeleZapp), "desligado" ou o caminho de
+# um arquivo de som (WAV, Ogg, MP3, FLAC...).
+EVENTOS_SOM = (
+    ("nova", "mensagem recebida",
+     "Tocado quando chega uma mensagem nova. A opção Som ao receber "
+     "mensagem, em Avisos, continua ligando e desligando este aviso."),
+    ("enviada", "mensagem enviada",
+     "Tocado quando uma mensagem, um arquivo ou uma tarefa em segundo plano "
+     "(salvar a conversa, fazer o backup) termina bem."),
+    ("erro", "erro",
+     "Tocado quando algo não pôde ser feito, como um envio que falhou."),
+    ("conectado", "conta conectada",
+     "Tocado quando uma conta termina de conectar."),
+    ("pronto", "código ou QR pronto",
+     "Tocado quando o código de pareamento ou o QR Code fica pronto."),
+    ("atualizado", "QR Code atualizado",
+     "Tocado quando o QR Code do pareamento é trocado por um novo."),
+    ("toque", "toque de chamada recebida",
+     "Repetido enquanto uma chamada está tocando para você. A opção Som de "
+     "chamada, em Avisos, continua ligando e desligando este toque."),
+    ("chamando", "tom de chamada feita",
+     "Repetido enquanto você espera a outra pessoa atender. A opção Som de "
+     "chamada, em Avisos, continua ligando e desligando este tom."),
+    ("desligada", "chamada encerrada",
+     "Tocado quando uma chamada termina."),
+    ("nova_aberta", "mensagem recebida na conversa aberta",
+     "Tocado quando chega uma mensagem na conversa que você está vendo. "
+     "Com o som padrão, toca o mesmo som de mensagem recebida (e segue a "
+     "escolha dele)."),
+    ("nova_grupo", "mensagem recebida num grupo",
+     "Tocado quando chega uma mensagem num grupo que não está aberto. Com o "
+     "som padrão, toca o mesmo som de mensagem recebida."),
+    ("desconectada", "conta desconectada",
+     "Tocado quando uma conta que estava conectada cai."),
+    ("reconectada", "conta reconectada",
+     "Tocado quando uma conta que tinha caído volta a conectar. Com o som "
+     "padrão, toca o mesmo som de conta conectada."),
+    ("falha_envio", "mensagem ou arquivo que não saiu",
+     "Tocado quando um envio falha. Com o som padrão, toca o mesmo som de "
+     "erro."),
+    ("download_pronto", "download de mídia concluído",
+     "Tocado quando uma mídia que você pediu para baixar termina. Os "
+     "downloads automáticos não tocam."),
+    ("tarefa_pronta", "backup, restauração ou conversa salva",
+     "Tocado quando terminam tarefas longas, como fazer o backup, restaurar "
+     "ou salvar o conteúdo de uma conversa. Com o som padrão, toca o mesmo "
+     "som de mensagem enviada."),
+)
+def _opcoes_de_ia():
+    from telezapp.nucleo.ia import catalogo
+    return (
+        Opcao("ia_perfil", "Tamanho das descrições", "Inteligência "
+              "artificial", "medio", "Quanto o provedor escreve ao descrever "
+              "imagens, figurinhas e vídeos. Transcrições e PDFs sempre "
+              "saem completos.", tuple(catalogo.PERFIS)),
+    )
+
+
+OPCOES = OPCOES + _opcoes_de_ia()
+OPCOES = OPCOES + tuple(
+    Opcao("som_" + nome, "Som de " + rotulo, "Sons", "",
+          descricao + " Escolha o som padrão do TeleZapp, nenhum som ou um "
+          "arquivo de som seu; Ouvir toca o que estiver escolhido.",
+          som=nome)
+    for nome, rotulo, descricao in EVENTOS_SOM)
+
+
 def _sem_acento(texto):
     return "".join(c for c in unicodedata.normalize("NFD", texto.lower())
                    if unicodedata.category(c) != "Mn")
@@ -262,6 +396,10 @@ def buscar_opcoes(texto):
 
 PADROES = {o.chave: o.padrao for o in OPCOES}
 PADROES.update({
+    "ia_ordem": {},          # tarefa -> provedores ligados, na ordem de tentativa
+    "ia_lista_modelos": {},  # provedor -> modelos que ele ofereceu
+    "ia_modelos": {},        # provedor -> modelo escolhido ("" = o padrao)
+    "ia_consentimento": [],  # provedores que a pessoa autorizou a receber midia
     "contas": [],            # [{"id", "servico", "telefone", "nome"}]
     "chamada_microfone": "",     # nome do microfone usado nas chamadas
     "chamada_saida": "",         # nome da saida de som das chamadas

@@ -647,3 +647,122 @@ def test_voz_ja_tocada_em_outro_aparelho_chega_como_ouvida():
     minha = tg.converter(mensagem(3, voice=object(), media=object(),
                                   out=True, media_unread=False), "t1", 10)
     assert m.extras_de(minha)["ouvida"] is False
+
+
+def test_contato_do_telegram_mostra_o_telefone_e_vira_pessoa():
+    contato = types.SimpleNamespace(first_name="Ana", last_name="Lima",
+                                    phone_number="5551999998888", user_id=77)
+    x = tg.converter(mensagem(3, contact=contato, media=object()), "t1", 1)
+    assert x.tipo == m.OUTRO
+    assert x.texto == "contato: Ana Lima, +5551999998888"
+    assert m.extras_de(x)["mencoes"] == [{
+        "nome": "Ana Lima", "telefone": "+5551999998888", "id": "77"}]
+
+
+def test_telegram_diz_quando_a_conta_nao_pode_escrever():
+    def ent(nome, **k):
+        cls = type(nome, (), {})
+        o = cls()
+        for a, v in dict(broadcast=False, left=False, creator=False,
+                         admin_rights=None, banned_rights=None,
+                         default_banned_rights=None, deactivated=False).items():
+            setattr(o, a, k.get(a, v))
+        return o
+    sem_envio = types.SimpleNamespace(send_messages=True)
+    assert not tg.somente_leitura_do_telegram(None)
+    assert not tg.somente_leitura_do_telegram(ent("User"))
+    assert tg.somente_leitura_do_telegram(ent("Channel", broadcast=True))
+    assert not tg.somente_leitura_do_telegram(
+        ent("Channel", broadcast=True, creator=True))
+    assert not tg.somente_leitura_do_telegram(ent(
+        "Channel", broadcast=True,
+        admin_rights=types.SimpleNamespace(post_messages=True)))
+    assert tg.somente_leitura_do_telegram(ent("Channel", left=True))
+    assert tg.somente_leitura_do_telegram(ent(
+        "Channel", default_banned_rights=sem_envio))
+    assert not tg.somente_leitura_do_telegram(ent(
+        "Channel", default_banned_rights=sem_envio,
+        admin_rights=types.SimpleNamespace(post_messages=False)))
+    assert tg.somente_leitura_do_telegram(ent("Chat", deactivated=True))
+    assert tg.somente_leitura_do_telegram(ent("ChannelForbidden"))
+
+
+def test_administrar_grupo_do_telegram_monta_os_pedidos_certos():
+    import asyncio
+    from telethon.tl import functions, types as T
+    ent = T.Channel(id=1, title="G", photo=T.ChatPhotoEmpty(), date=DATA,
+                    megagroup=True, access_hash=5,
+                    default_banned_rights=T.ChatBannedRights(
+                        until_date=None, send_media=True))
+    usuario = T.User(id=9, first_name="Bia")
+    pedidos, chamadas = [], []
+
+    class Cliente:
+        async def __call__(self, req):
+            pedidos.append(req)
+            return types.SimpleNamespace(link="https://t.me/+abc")
+
+        async def get_entity(self, quem):
+            return ent if quem == 1 else usuario
+
+        async def get_input_entity(self, e):
+            return T.InputPeerChannel(1, 5)
+
+        async def kick_participant(self, e, u):
+            chamadas.append(("kick", u.id))
+
+        async def edit_admin(self, e, u, is_admin=True, **k):
+            chamadas.append(("admin", u.id, is_admin))
+
+        async def delete_dialog(self, e):
+            chamadas.append(("sair",))
+    p = tg.ProvedorTelegram.__new__(tg.ProvedorTelegram)
+    p.cliente = Cliente()
+
+    def rodar(acao, valor=None):
+        return asyncio.run(p._administrar("1", acao, valor))
+    assert rodar("nome", "Novo") == (True, "Nome do grupo mudado.")
+    assert isinstance(pedidos[-1], functions.channels.EditTitleRequest)
+    assert rodar("descricao", "Sobre")[0]
+    assert isinstance(pedidos[-1], functions.messages.EditChatAboutRequest)
+    ok, texto = rodar("anuncio", True)
+    direitos = pedidos[-1].banned_rights
+    assert ok and direitos.send_messages and direitos.send_media   # manteve
+    assert rodar("trancado", True)[0]
+    assert pedidos[-1].banned_rights.change_info
+    assert rodar("adicionar", "@bia")[0]
+    assert isinstance(pedidos[-1], functions.channels.InviteToChannelRequest)
+    assert rodar("adicionar", "")[0] is False
+    assert rodar("remover", "9")[0] and chamadas[-1] == ("kick", 9)
+    assert rodar("promover", "9")[0] and chamadas[-1] == ("admin", 9, True)
+    assert rodar("rebaixar", "9")[0] and chamadas[-1] == ("admin", 9, False)
+    assert rodar("link") == (True, "https://t.me/+abc")
+    assert rodar("revogar_link")[0]
+    assert pedidos[-1].legacy_revoke_permanent
+    assert rodar("sair")[0] and chamadas[-1] == ("sair",)
+    assert rodar("xyz") == (False, "Ação desconhecida.")
+
+
+def test_links_do_telegram_viram_botao_de_entrar():
+    links = [("https://t.me/+AbCdEfGhIjKlMn", "convite"),
+             ("https://t.me/joinchat/XyZ1234567890", "antigo"),
+             ("https://t.me/turma_do_bairro", "publico"),
+             ("https://t.me/turma_do_bairro?start=1", "repetido"),
+             ("https://t.me/addstickers/Pacote", "figurinhas"),
+             ("https://t.me/c/123/45", "mensagem"),
+             ("https://t.me/canal/123", "mensagem de canal"),
+             ("https://exemplo.com/t.me/x", "outro site")]
+    entradas = tg.entradas_do_telegram(links)
+    assert [(e["modo"], e.get("codigo") or e.get("usuario"))
+            for e in entradas] == [
+        ("convite", "AbCdEfGhIjKlMn"), ("convite", "XyZ1234567890"),
+        ("publico", "turma_do_bairro")]
+    assert entradas[2]["rotulo"] == "Entrar em @turma_do_bairro (grupo ou canal)"
+    class MessageEntityUrl:
+        offset, length = 5, 29
+    texto = "olha https://t.me/+AbCdEfGhIjKlMn"
+    x = tg.converter(mensagem(5, texto, sender=ANA,
+                              entities=[MessageEntityUrl()]), "t1", 1)
+    acoes = m.extras_de(x)["acoes"]
+    assert [a["tipo"] for a in acoes] == ["entrar"]
+    assert acoes[0]["codigo"] == "AbCdEfGhIjKlMn"

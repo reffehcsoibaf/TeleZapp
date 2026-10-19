@@ -8,8 +8,18 @@ import os
 import time
 from dataclasses import dataclass, field
 
+from telezapp.nucleo import modelos as m
+
 DIA = 86400
 MIDIAS, MENSAGENS = "midias", "mensagens"
+
+
+# Os tipos como a limpeza e o resumo de espaco os agrupam: (rotulo, tipos)
+GRUPOS_TIPOS = (("mensagens de texto", (m.TEXTO,)), ("fotos", (m.FOTO,)),
+                ("vídeos", (m.VIDEO,)),
+                ("mensagens de voz e áudios", (m.VOZ, m.AUDIO)),
+                ("documentos", (m.DOCUMENTO,)),
+                ("figurinhas", (m.FIGURINHA,)))
 
 
 @dataclass
@@ -133,3 +143,29 @@ def apagar_mensagem(banco, conta_id, conversa_id, mensagem_id):
     banco.apagar_mensagens(chave)
     banco.registrar_limpeza(chave, "mensagem")
     return liberados
+
+
+def resumo_de_espaco(banco, n_conversas):
+    """Texto do espaco usado: conversas, mensagens de texto, midias baixadas
+    (quantas e quanto ocupam) e o mesmo por tipo, como na limpeza."""
+    por_tipo = {}                  # tipo -> [quantidade, bytes]
+    for _, _, _, tipo, caminho, tamanho, _ in banco.todas_midias():
+        if not os.path.isfile(caminho):
+            continue
+        item = por_tipo.setdefault(tipo, [0, 0])
+        item[0] += 1
+        item[1] += _tamanho(caminho, tamanho)
+    total_n = sum(q for q, _ in por_tipo.values())
+    total_b = sum(b for _, b in por_tipo.values())
+    linhas = ["Conversas: %d." % n_conversas,
+              "Mensagens de texto: %d." % banco.contar_mensagens(m.TEXTO),
+              "Mídias baixadas: %d no total, ocupando %s." % (
+                  total_n, m.tamanho_legivel(total_b)),
+              "", "Mídias por tipo:"]
+    for rotulo, tipos in GRUPOS_TIPOS[1:]:
+        q = sum(por_tipo.get(t, [0, 0])[0] for t in tipos)
+        b = sum(por_tipo.get(t, [0, 0])[1] for t in tipos)
+        linhas.append("%s: %s." % (rotulo.capitalize(), (
+            "%d, ocupando %s" % (q, m.tamanho_legivel(b))) if q
+            else "nenhuma"))
+    return "\n".join(linhas)

@@ -161,6 +161,67 @@ class Provedor(ABC):
         servico foi avisado."""
         return False
 
+    # True nos servicos em que o TeleZapp sabe tirar a conta de um grupo
+    SAI_DE_GRUPO = False
+
+    def sair_do_grupo(self, conversa_id):
+        """Tira a conta do grupo. Devolve True se o servico aceitou."""
+        return False
+
+    # Editar mensagem propria: quanto tempo depois do envio o servico deixa
+    # (segundos); 0 = nao sabe editar
+    JANELA_EDICAO = 0
+
+    def editar_mensagem(self, msg, texto):
+        """Troca o texto de uma mensagem de texto minha. Responde pelo
+        barramento: MensagemAtualizada(motivo "editada") ou Aviso."""
+
+    # ---- janela de detalhes da conversa (chamadas que esperam o servico:
+    # rodam fora da thread da interface)
+    def dados_do_contato(self, conversa_id):
+        """{'telefone', 'usuario', 'nome_no_perfil', 'recado'} da pessoa; as
+        chaves que o servico nao informa ficam de fora."""
+        return {}
+
+    def detalhes_do_grupo(self, conversa_id):
+        """Dicionario do grupo (nome, descricao, criado_em, dono, anuncio,
+        trancado, comunidade, sou_admin, participantes=[{id, nome, telefone,
+        admin, dono}]) ou None se o servico nao informa."""
+        return None
+
+    def detalhes_do_canal(self, conversa_id):
+        """Dicionario do canal (nome, descricao, seguidores, verificado,
+        silenciado, papel, criado_em, link) ou None."""
+        return None
+
+    def grupos_em_comum(self, pessoa_id):
+        """[(conversa_id, nome)] dos grupos que a conta divide com a pessoa."""
+        return []
+
+    def administrar_grupo(self, conversa_id, acao, valor=None):
+        """Ferramentas de administrador (nome, descricao, anuncio, trancado,
+        adicionar, remover, promover, rebaixar, link, revogar_link, sair).
+        Devolve (ok, texto)."""
+        return False, "Esta conta não administra grupos por aqui."
+
+    def administrar_canal(self, conversa_id, acao, valor=None):
+        """Ferramentas do canal (silenciar, deixar_de_seguir). (ok, texto)."""
+        return False, "Esta conta não gerencia canais por aqui."
+
+    def previa_do_convite(self, msg, acao):
+        """Dados do grupo ou canal de um convite (acao do tipo "entrar"):
+        {'nome', 'membros', 'descricao', 'ja_participa', 'erro'}; so 'erro'
+        quando o convite nao vale. Espera o servico (thread propria)."""
+        return {"erro": "Esta conta não entra em grupos por aqui."}
+
+    def entrar_no_grupo(self, msg, acao):
+        """Entra no grupo ou canal do convite. Devolve (ok, texto)."""
+        return False, "Esta conta não entra em grupos por aqui."
+
+    def conversa_aberta(self, conversa_id):
+        """A pessoa abriu a conversa: o servico pode conferir (sem travar) se
+        ela ainda pode escrever nela, marcando `somente_leitura`."""
+
     def depurar_conversa(self, conversa_id):
         """Dados do servico sobre a conversa, para o menu Depurar (como o
         nome foi achado, identificadores). Dicionario; vazio se nao houver."""

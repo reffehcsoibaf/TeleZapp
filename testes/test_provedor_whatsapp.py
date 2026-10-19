@@ -1645,3 +1645,341 @@ def test_envelopes_novos_do_whatsapp_sao_abertos():
         msg = E.Message(**{envelope: E.FutureProofMessage(
             message=E.Message(conversation="oi @todos"))})
         assert wa.conteudo_de(wa.desembrulhar(msg))[1] == "oi @todos", envelope
+
+
+def test_mensagem_minha_para_quem_nao_esta_nos_contatos_nao_poe_meu_nome(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento("M1", E.Message(conversation="oi"),
+                                   chat="5511912617423", de_mim=True,
+                                   pushname="Meu Nome"))
+    conv = esperar(amb.fila, ev.MensagemNova).conversa
+    assert conv.nome != "Meu Nome"
+    assert conv.nome.startswith("+")
+
+
+def test_aviso_de_conversa_lida_no_celular_zera_as_nao_lidas(tmp_path):
+    b = ev.Barramento()
+    banco = Banco(str(tmp_path / "s.db"))
+    p = wa.ProvedorWhatsApp(m.Conta("w1", "whatsapp"), b, banco,
+                            pasta_sessoes=str(tmp_path),
+                            fabrica_cliente=ClienteFalso)
+    c = m.Conversa("w1", "5551@s.whatsapp.net", "A", "whatsapp",
+                   nao_lidas=3, data=TS)
+    banco.salvar_conversas([c])
+    p._conversas = {c.id: c}
+
+    def aviso(lida, ate=None):
+
+        class Faixa:
+            lastMessageTimestamp = ate or 0
+
+        class Acao:
+            read = lida
+
+            @staticmethod
+            def HasField(nome):
+                return ate is not None
+            messageRange = Faixa
+        return types.SimpleNamespace(JID=jid("5551"), Action=Acao)
+    p._ao_marcar_lida(None, aviso(False))                 # marcada como nao lida
+    assert c.nao_lidas == 3
+    p._ao_marcar_lida(None, aviso(True, TS - 600))        # ha mensagem mais nova
+    assert c.nao_lidas == 3
+    p._ao_marcar_lida(None, aviso(True, TS))
+    assert c.nao_lidas == 0
+    assert banco.conversas("w1")[0].nao_lidas == 0
+    banco.fechar()
+
+
+def test_cartao_de_contato_mostra_o_telefone_e_vira_pessoa_da_mensagem():
+    vcard = ("BEGIN:VCARD\nVERSION:3.0\nFN:Ana Souza\n"
+             "TEL;type=CELL;waid=5551999998888:+55 51 99999-8888\nEND:VCARD")
+    um = E.Message(contactMessage=E.ContactMessage(
+        displayName="Ana Souza", vcard=vcard))
+    assert wa.conteudo_de(um)[1] == "contato: Ana Souza, +5551999998888"
+    assert wa.contatos_da_mensagem(um) == [{
+        "nome": "Ana Souza", "telefone": "+5551999998888",
+        "id": "5551999998888@s.whatsapp.net"}]
+    msg, _ = wa.converter(evento("C1", um), "w1", "c")
+    assert m.extras_de(msg)["mencoes"][0]["id"] == \
+        "5551999998888@s.whatsapp.net"
+    varios = E.Message(contactsArrayMessage=E.ContactsArrayMessage(contacts=[
+        E.ContactMessage(displayName="Ana", vcard=vcard),
+        E.ContactMessage(displayName="Bia")]))
+    texto = wa.conteudo_de(varios)[1]
+    assert texto == "2 contatos: Ana, +5551999998888; Bia"
+    assert [p["nome"] for p in wa.contatos_da_mensagem(varios)] == [
+        "Ana", "Bia"]
+    sem_waid = E.Message(contactMessage=E.ContactMessage(
+        displayName="Cao", vcard="BEGIN:VCARD\nTEL:11 2222-3333\nEND:VCARD"))
+    assert wa.contatos_da_mensagem(sem_waid) == [
+        {"nome": "Cao", "telefone": "11 2222-3333", "id": ""}]
+
+
+def test_resposta_em_particular_a_mensagem_de_grupo_diz_de_qual_grupo(
+        tmp_path):
+    b = ev.Barramento()
+    banco = Banco(str(tmp_path / "s.db"))
+    p = wa.ProvedorWhatsApp(m.Conta("w1", "whatsapp"), b, banco,
+                            pasta_sessoes=str(tmp_path),
+                            fabrica_cliente=ClienteFalso)
+    banco.salvar_mensagens([m.Mensagem(
+        "w1", "123@g.us", "G1", autor="Bia", texto="oi pessoal",
+        remetente="5551999990000@s.whatsapp.net")])
+    msg = p._mensagem_de_texto("5551999990000@s.whatsapp.net", "falo aqui",
+                               "G1")
+    ctx = msg.extendedTextMessage.contextInfo
+    assert ctx.stanzaID == "G1" and ctx.remoteJID == "123@g.us"
+    assert ctx.quotedMessage.conversation == "oi pessoal"
+    assert ctx.participant == "5551999990000@s.whatsapp.net"
+    # resposta normal, na mesma conversa: sem remoteJID
+    banco.salvar_mensagens([m.Mensagem(
+        "w1", "5551999990000@s.whatsapp.net", "P1", texto="e ai",
+        remetente="5551999990000@s.whatsapp.net")])
+    normal = p._mensagem_de_texto("5551999990000@s.whatsapp.net", "ok", "P1")
+    assert not normal.extendedTextMessage.contextInfo.remoteJID
+    banco.fechar()
+
+
+def test_grupo_so_de_admins_vira_somente_leitura_para_quem_nao_e_admin(
+        tmp_path):
+    b = ev.Barramento()
+    banco = Banco(str(tmp_path / "s.db"))
+    p = wa.ProvedorWhatsApp(m.Conta("w1", "whatsapp"), b, banco,
+                            pasta_sessoes=str(tmp_path),
+                            fabrica_cliente=ClienteFalso)
+    c = m.Conversa("w1", "123@g.us", "Aviso", "whatsapp", "grupo")
+    banco.salvar_conversas([c])
+    p._conversas = {c.id: c}
+    p._conectada = True
+
+    def info(anuncio, admin):
+        return N.GroupInfo(
+            GroupAnnounce=N.GroupAnnounce(IsAnnounce=anuncio),
+            Participants=[
+                N.GroupParticipant(JID=jid("5551999990000"), IsAdmin=admin),
+                N.GroupParticipant(JID=jid("5551888880000"), IsAdmin=True)])
+    dados = {"info": info(True, False)}
+    p.cliente = types.SimpleNamespace(
+        get_group_info=lambda j_: dados["info"],
+        get_me=lambda: types.SimpleNamespace(
+            JID=jid("5551999990000"), LID=jid("")))
+    p._conferir_escrita(c.id, True)
+    assert c.somente_leitura and banco.conversas("w1")[0].somente_leitura
+    dados["info"] = info(True, True)                 # virei admin
+    p._conferir_escrita(c.id, True)
+    assert not c.somente_leitura
+    dados["info"] = info(False, False)               # todos podem escrever
+    p._conferir_escrita(c.id, True)
+    assert not c.somente_leitura
+
+    def sai(j_):
+        raise RuntimeError("403 forbidden")
+    p.cliente.get_group_info = sai                   # nao participo mais
+    p._conferir_escrita(c.id, True)
+    assert c.somente_leitura
+    canal = m.Conversa("w1", "999@newsletter", "Canal", "whatsapp", "canal")
+    p._conversas[canal.id] = canal
+    p._publicar_conversas()
+    assert canal.somente_leitura
+    banco.fechar()
+
+
+def test_editar_mensagem_manda_a_edicao_e_atualiza_o_texto(tmp_path):
+    b = ev.Barramento()
+    banco = Banco(str(tmp_path / "s.db"))
+    p = wa.ProvedorWhatsApp(m.Conta("w1", "whatsapp"), b, banco,
+                            pasta_sessoes=str(tmp_path),
+                            fabrica_cliente=ClienteFalso)
+    cid = "5551@s.whatsapp.net"
+    x = m.Mensagem("w1", cid, "E1", minha=True, texto="oi", data=TS)
+    banco.salvar_mensagens([x])
+    enviados = []
+    p.cliente = types.SimpleNamespace(
+        edit_message=lambda chat, id_, nova: enviados.append(
+            (id_, nova.conversation)))
+    p._conectada = True
+    publicados = []
+    p.barramento = types.SimpleNamespace(
+        publicar=lambda e: publicados.append(e))
+    p._editar(x, "oi, tudo bem?")
+    assert enviados == [("E1", "oi, tudo bem?")]
+    guardada = banco.mensagem("w1", cid, "E1")
+    assert guardada.texto == "oi, tudo bem?"
+    assert m.extras_de(guardada)["editada"]
+    assert publicados[-1].motivo == "editada"
+    p.cliente = types.SimpleNamespace(
+        edit_message=lambda *a: (_ for _ in ()).throw(RuntimeError("x")))
+    p._editar(x, "outra")
+    assert isinstance(publicados[-1], ev.Aviso)
+    assert banco.mensagem("w1", cid, "E1").texto == "oi, tudo bem?"
+    banco.fechar()
+
+
+def _provedor_com_cliente(tmp_path, cliente):
+    b = ev.Barramento()
+    banco = Banco(str(tmp_path / "s.db"))
+    p = wa.ProvedorWhatsApp(m.Conta("w1", "whatsapp"), b, banco,
+                            pasta_sessoes=str(tmp_path),
+                            fabrica_cliente=ClienteFalso)
+    p.cliente = cliente
+    p._conectada = True
+    return p, banco
+
+
+def _grupo_info(nome="Turma"):
+    return N.GroupInfo(
+        JID=jid("123", "g.us"), GroupName=N.GroupName(Name=nome),
+        GroupTopic=N.GroupTopic(Topic="Aviso", TopicID="T1"),
+        GroupAnnounce=N.GroupAnnounce(IsAnnounce=True),
+        GroupCreated=TS,
+        Participants=[
+            N.GroupParticipant(JID=jid("5551999990000"), IsAdmin=True),
+            N.GroupParticipant(JID=jid("5551888880000"),
+                               DisplayName="Bia"),
+            N.GroupParticipant(JID=jid("77", "lid"),
+                               PhoneNumber=jid("5551777770000"),
+                               IsSuperAdmin=True, IsAdmin=True)])
+
+
+def test_detalhes_do_grupo_lista_participantes_e_diz_se_sou_admin(tmp_path):
+    cliente = types.SimpleNamespace(
+        get_group_info=lambda j_: _grupo_info(),
+        get_me=lambda: types.SimpleNamespace(
+            JID=jid("5551999990000"), LID=jid("")),
+        contact=types.SimpleNamespace(
+            get_contact=lambda j_: types.SimpleNamespace(
+                FullName="", FirstName="", PushName="", BusinessName="")))
+    p, banco = _provedor_com_cliente(tmp_path, cliente)
+    d = p.detalhes_do_grupo("123@g.us")
+    assert d["nome"] == "Turma" and d["descricao"] == "Aviso"
+    assert d["anuncio"] and d["sou_admin"] and not d["comunidade"]
+    nomes = [x["id"] for x in d["participantes"]]
+    assert nomes[0] == "5551777770000@s.whatsapp.net"      # dono primeiro
+    assert [x["admin"] for x in d["participantes"]] == [True, True, False]
+    assert sum(1 for x in d["participantes"] if x["eu"]) == 1
+    assert p.detalhes_do_grupo("5551@s.whatsapp.net") is None
+    banco.fechar()
+
+
+def test_grupos_em_comum_acha_pelo_telefone_ou_pelo_lid(tmp_path):
+    outro = _grupo_info("Outro")
+    outro.JID.CopyFrom(jid("456", "g.us"))
+    cliente = types.SimpleNamespace(
+        get_joined_groups=lambda: [_grupo_info(), outro,
+                                   N.GroupInfo(GroupName=N.GroupName(
+                                       Name="Sem ela"))])
+    p, banco = _provedor_com_cliente(tmp_path, cliente)
+    achados = p.grupos_em_comum("5551888880000@s.whatsapp.net")
+    assert [g[1] for g in achados] == ["Outro", "Turma"]
+    assert p.grupos_em_comum("5559@s.whatsapp.net") == []
+    banco.fechar()
+
+
+def test_administrar_grupo_chama_o_whatsapp_e_traduz_a_resposta(tmp_path):
+    chamadas = []
+    cliente = types.SimpleNamespace(
+        set_group_name=lambda j_, nome: chamadas.append(("nome", nome)),
+        set_group_announce=lambda j_, v: chamadas.append(("anuncio", v)),
+        get_group_info=lambda j_: _grupo_info(),
+        set_group_topic=lambda j_, ant, novo, t: chamadas.append(
+            ("topico", ant, t)),
+        update_group_participants=lambda j_, lista, acao: chamadas.append(
+            (acao.value, lista[0].User)) or [],
+        get_group_invite_link=lambda j_, revogar: "https://chat/x")
+    p, banco = _provedor_com_cliente(tmp_path, cliente)
+    cid = "123@g.us"
+    assert p.administrar_grupo(cid, "nome", "Novo")[0]
+    assert p.administrar_grupo(cid, "descricao", "Texto")[0]
+    assert p.administrar_grupo(cid, "anuncio", True)[0]
+    assert p.administrar_grupo(cid, "adicionar", "+55 51 99999-1111")[0]
+    assert p.administrar_grupo(cid, "promover",
+                               "5551888880000@s.whatsapp.net")[0]
+    assert p.administrar_grupo(cid, "link") == (True, "https://chat/x")
+    ok, texto = p.administrar_grupo(cid, "adicionar", "12")
+    assert not ok and "número" in texto
+    assert chamadas[0] == ("nome", "Novo")
+    assert chamadas[1][:2] == ("topico", "T1")
+    assert ("add", "5551999991111") in chamadas
+    assert ("promote", "5551888880000") in chamadas
+
+    def recusa(*a):
+        raise RuntimeError("403")
+    cliente.set_group_name = recusa
+    ok, texto = p.administrar_grupo(cid, "nome", "X")
+    assert not ok and "RuntimeError" in texto
+    banco.fechar()
+
+
+def test_detalhes_do_canal(tmp_path):
+    meta = N.NewsletterThreadMetadata(
+        Name=N.NewsletterText(Text="Canal"),
+        Description=N.NewsletterText(Text="Sobre"), SubscriberCount=1234,
+        VerificationState=1, InviteCode="abc")
+    info = N.NewsletterMetadata(
+        ThreadMeta=meta, ViewerMeta=N.NewsletterViewerMetadata(Mute=1, Role=3))
+    p, banco = _provedor_com_cliente(tmp_path, types.SimpleNamespace(
+        get_newsletter_info=lambda j_: info))
+    d = p.detalhes_do_canal("999@newsletter")
+    assert (d["nome"], d["seguidores"], d["verificado"], d["silenciado"],
+            d["papel"], d["sou_admin"]) == ("Canal", 1234, True, True,
+                                             "administrador", True)
+    assert d["link"] == "https://whatsapp.com/channel/abc"
+    banco.fechar()
+
+
+def test_convite_de_grupo_e_link_viram_botao_de_entrar():
+    convite = E.Message(groupInviteMessage=E.GroupInviteMessage(
+        groupJID="123@g.us", inviteCode="ABCDEFGHIJKLMNOPQRST",
+        inviteExpiration=1790000000, groupName="Turma"))
+    msg, _ = wa.converter(evento("I1", convite), "w1", "c")
+    acoes = m.extras_de(msg)["acoes"]
+    assert [a["tipo"] for a in acoes] == ["entrar"]
+    assert acoes[0]["rotulo"] == "Entrar no grupo Turma"
+    assert acoes[0]["codigo"] == "ABCDEFGHIJKLMNOPQRST"
+    assert acoes[0]["expira"] == 1790000000 and acoes[0]["grupo"] == "123@g.us"
+    link = E.Message(conversation="entra aqui "
+                     "https://chat.whatsapp.com/KLMNOPQRSTABCDEFGHIJ valeu")
+    msg, _ = wa.converter(evento("I2", link), "w1", "c")
+    acoes = m.extras_de(msg)["acoes"]
+    assert len(acoes) == 1 and acoes[0]["codigo"] == "KLMNOPQRSTABCDEFGHIJ"
+    assert "link" in acoes[0]["rotulo"]
+    # o mesmo codigo no convite e no texto nao vira dois botoes
+    dobro = E.Message(extendedTextMessage=E.ExtendedTextMessage(
+        text="https://chat.whatsapp.com/ABCDEFGHIJKLMNOPQRST"))
+    assert len(wa.entradas_de_grupo(dobro, "https://chat.whatsapp.com/"
+                                    "ABCDEFGHIJKLMNOPQRST")) == 1
+
+
+def test_entrar_no_grupo_pelo_convite_ou_pelo_link(tmp_path):
+    chamadas = []
+    cliente = types.SimpleNamespace(
+        join_group_with_invite=lambda g, q, c, e: chamadas.append(
+            ("convite", g.User, q.User, c, e)),
+        join_group_with_link=lambda c: chamadas.append(("link", c)),
+        get_group_info_from_invite=lambda g, q, c, e: _grupo_info("Turma"),
+        get_group_info_from_link=lambda c: _grupo_info("Do link"),
+        get_me=lambda: types.SimpleNamespace(JID=jid("1"), LID=jid("")))
+    p, banco = _provedor_com_cliente(tmp_path, cliente)
+    msg = m.Mensagem("w1", "5551@s.whatsapp.net", "I1",
+                     remetente="5551@s.whatsapp.net")
+    por_convite = {"tipo": "entrar", "codigo": "ABC", "grupo": "123@g.us",
+                   "expira": 17}
+    por_link = {"tipo": "entrar", "codigo": "XYZ"}
+    assert p.previa_do_convite(msg, por_convite)["nome"] == "Turma"
+    assert p.previa_do_convite(msg, por_link)["nome"] == "Do link"
+    assert p.previa_do_convite(msg, por_link)["membros"] == 3
+    assert p.entrar_no_grupo(msg, por_convite) == (True, "Você entrou no grupo.")
+    assert p.entrar_no_grupo(msg, por_link)[0]
+    assert chamadas == [("convite", "123", "5551", "ABC", 17),
+                        ("link", "XYZ")]
+
+    def recusa(*a):
+        raise RuntimeError("gone")
+    cliente.join_group_with_link = recusa
+    cliente.get_group_info_from_link = recusa
+    ok, texto = p.entrar_no_grupo(msg, por_link)
+    assert not ok and "convite" in texto
+    assert "erro" in p.previa_do_convite(msg, por_link)
+    banco.fechar()

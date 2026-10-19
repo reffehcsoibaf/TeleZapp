@@ -96,3 +96,25 @@ def test_limpeza_mantem_as_favoritas_e_pode_incluir_todas(tmp_path):
     assert limpeza.selecionar(
         b, limpeza.Filtros(dias=30, manter_favoritas=False)).quantidade == 1
     assert m.formatar(fav, m.ESTILO_AUTOR_PRIMEIRO).count("(favorita)") == 1
+
+
+def test_resumo_de_espaco_conta_conversas_textos_e_midias_por_tipo(tmp_path):
+    import os
+    from telezapp.armazenamento.banco import Banco
+    from telezapp.nucleo import modelos as m
+    banco = Banco(str(tmp_path / "b.db"))
+    banco.salvar_mensagens([
+        m.Mensagem("t1", "1", "1", texto="oi"),
+        m.Mensagem("t1", "1", "2", texto="oi de novo"),
+        m.Mensagem("t1", "1", "3", tipo=m.FOTO)])
+    foto = tmp_path / "f.jpg"
+    foto.write_bytes(b"x" * 2048)
+    banco.registrar_midia("t1", "1", "3", m.FOTO, str(foto), 2048, 1.0)
+    banco.registrar_midia("t1", "1", "9", m.VIDEO,
+                          str(tmp_path / "sumiu.mp4"), 99, 1.0)
+    texto = limpeza.resumo_de_espaco(banco, 4)
+    assert "Conversas: 4." in texto
+    assert "Mensagens de texto: 2." in texto
+    assert "Mídias baixadas: 1 no total, ocupando 2 KB." in texto
+    assert "Fotos: 1, ocupando 2 KB." in texto
+    assert "Vídeos: nenhuma." in texto

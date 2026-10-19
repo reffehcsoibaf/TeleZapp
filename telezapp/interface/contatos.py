@@ -11,6 +11,7 @@ import threading
 
 import wx
 
+from telezapp.interface import colagem
 from telezapp.nucleo import modelos as m
 
 TELEFONE_DE_TESTE = "+5500000000000"
@@ -314,16 +315,42 @@ class DialogoNovaMensagem(wx.Dialog):
             lambda: wx.ListBox(self, name="Contatos encontrados",
                                size=(420, 120)), 1)
         self.lista.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self._escolher())
-        self.texto = campo(
-            "Mensagem",
-            lambda: wx.TextCtrl(self, name="Mensagem", size=(420, 100),
-                                style=wx.TE_MULTILINE))
+        self.anexos = []          # midias coladas em Mensagem
+        self.rot_texto = wx.StaticText(self, label="Mensagem")
+        lay.Add(self.rot_texto, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.texto = wx.TextCtrl(self, name="Mensagem", size=(420, 100),
+                                 style=wx.TE_MULTILINE)
+        lay.Add(self.texto, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        self.fala = getattr(pai, "fala", None)
+        self.texto.Bind(wx.EVT_TEXT_PASTE, self._ao_colar)
+        self.texto.Bind(wx.EVT_CHAR_HOOK, self._tecla_texto)
         botoes = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
         lay.Add(botoes, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
         self.SetSizerAndFit(lay)
         self.CentreOnParent()
         self._atualizar()
         self.para.SetFocus()
+
+    def _rotular_texto(self):
+        self.rot_texto.SetLabel("Mensagem" if not self.anexos else
+                                "Mensagem. %s, o texto vira legenda" %
+                                colagem.descricao(self.anexos))
+
+    def _ao_colar(self, evt):
+        if self.fala is None:
+            evt.Skip()
+            return
+        colagem.colar(evt, self.fala, self.anexos, self._rotular_texto)
+
+    def _tecla_texto(self, evt):
+        """Esc com midia colada remove a midia, em vez de fechar o dialogo."""
+        if evt.GetKeyCode() == wx.WXK_ESCAPE and self.anexos:
+            colagem.descartar(self.anexos)
+            self._rotular_texto()
+            if self.fala is not None:
+                self.fala.falar("Mídia colada removida.")
+            return
+        evt.Skip()
 
     def _conta_id(self):
         i = max(self.conta.GetSelection(), 0) if self.conta else 0
@@ -351,24 +378,28 @@ class DialogoNovaMensagem(wx.Dialog):
             self.texto.SetFocus()
 
     def escolhido(self):
-        """(conta_id, destino, texto, pessoa): pessoa e (id, nome) da lista,
-        se uma foi escolhida, senao None (vale o texto de Para)."""
+        """(conta_id, destino, texto, pessoa, anexos): pessoa e (id, nome)
+        da lista, se uma foi escolhida, senao None (vale o texto de Para);
+        anexos, as midias coladas."""
         sel = self._selecionado()
         pessoa = (sel[0], sel[1]) if sel else None
         destino = self.para.GetValue().strip() or (sel[1] if sel else "")
         return (self._conta_id(), destino, self.texto.GetValue().strip(),
-                pessoa)
+                pessoa, list(self.anexos))
 
 
 def dialogo_nova_mensagem(pai, contas, buscar):
-    """(conta_id, destino, texto, pessoa) ou None se cancelar ou deixar sem
-    destino ou sem texto."""
+    """(conta_id, destino, texto, pessoa, anexos) ou None se cancelar ou
+    deixar sem destino ou sem nada para enviar (texto ou midia colada)."""
     dlg = DialogoNovaMensagem(pai, contas, buscar)
     try:
         if dlg.ShowModal() != wx.ID_OK:
+            colagem.descartar(dlg.anexos)
             return None
-        conta_id, destino, texto, pessoa = dlg.escolhido()
+        conta_id, destino, texto, pessoa, anexos = dlg.escolhido()
     finally:
         dlg.Destroy()
-    return (conta_id, destino, texto, pessoa) \
-        if (destino or pessoa) and texto else None
+    if (destino or pessoa) and (texto or anexos):
+        return conta_id, destino, texto, pessoa, anexos
+    colagem.descartar(anexos)
+    return None

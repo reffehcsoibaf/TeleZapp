@@ -25,6 +25,7 @@ credenciais*.txt
 logs/
 empacotado/
 build-pyinstaller/
+lancamento/
 dist/
 build/
 *.spec

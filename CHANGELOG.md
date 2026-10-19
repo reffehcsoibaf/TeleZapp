@@ -3,6 +3,166 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.18.0
+
+Copiar por tipo de conteúdo e colar mídia na caixa.
+
+- `modelos.conteudos_copiaveis(msg)` lista `(tipo, rótulo, valor)` com um item
+  por tipo de conteúdo (legenda/texto, mídia, cada link); sem nada, cai no
+  texto falado. `_menu_mensagem` monta os itens "Copiar ..." a partir dela e
+  `_copiar_conteudo` copia texto/endereço ou o arquivo baixado (`wx.FileDataObject`
+  e, na foto, também `BitmapDataObject`, num `DataObjectComposite`).
+  Control Shift C segue copiando `texto or conteudo`.
+- Colar na caixa (`EVT_TEXT_PASTE` → `_ao_colar`): lista de arquivos do
+  Explorer, ou bitmap quando não há texto na área de transferência (salvo em
+  PNG na pasta temporária), vira `envio.Anexo` em `Janela.anexos`, sem enviar.
+  Texto puro segue o fluxo normal (`evt.Skip()`). Enter (`_enviar_texto` →
+  `_enviar_anexos`) manda cada anexo; o texto da caixa é a legenda do primeiro
+  que aceita (não áudio/voz), senão vai como texto depois. Esc na caixa
+  (`_sair_da_caixa`) descarta; abrir/fechar conversa também.
+- A leitura da área de transferência foi para `interface/colagem.py`
+  (`ler`, `colar`, `descartar`), usada pela caixa da janela e pelo campo
+  Mensagem de `DialogoNovaMensagem`, que agora devolve
+  `(conta_id, destino, texto, pessoa, anexos)`; `_nova_mensagem` põe os anexos
+  em `Janela.anexos` antes de `_enviar_texto`. Esc no campo remove a mídia.
+- Salvar o conteúdo da conversa (`_salvar_conversa`, menu de contexto da
+  lista e Menu, Conversa): `nucleo/exportar.gravar_zip` grava `conversa.txt`
+  (UTF-8 com BOM) e `midias/<data>_<id>_<nome>` das mídias baixadas e não
+  limpas, numa thread; o aviso final vem por `wx.CallAfter`. Pasta lembrada
+  em `pasta_exportar`; `dialogos.escolher_destino_zip`.
+- `modelos.quem_enviou` (nome da conversa privada, agenda, nome guardado,
+  telefone) substitui "Desconhecido" na lista, na fala e no arquivo salvo;
+  `formatar(..., quem=)` recebe o resultado de `Janela._quem_enviou` (com
+  cache, limpo ao abrir conversa ou mexer nos contatos). No estilo "autor só
+  quando muda" o remetente também conta como mudança.
+- Modo de seleção (Control Espaço / Espaço / Esc em `_char_hook`):
+  `modo_conv`/`marc_conv` (chaves) e `modo_msg`/`marc_msg` (ids); o prefixo
+  "Marcada: " entra nos rótulos (`_com_marca`) e os `_preencher_*` atualizam
+  no lugar. Com marcas, os menus de contexto viram `_opcoes_em_massa_conv/msg`
+  (`_massa_conversas`, `_massa_mensagens`; uma pergunta só ao apagar). A
+  seleção de mensagens zera ao abrir ou fechar a conversa.
+- Apagar conversa de grupo: `dialogos.escolher_acao_grupo` (limpar, apagar
+  da lista, sair, sair e apagar). `_limpar_conversa` usa `limpeza` (todas as
+  mensagens, favoritas incluídas) e mantém a conversa; `_sair_do_grupo` chama
+  `Provedor.sair_do_grupo` (`SAI_DE_GRUPO`; WhatsApp `leave_group`, Telegram
+  `delete_dialog`) numa thread e só tira da lista se deu certo.
+- WhatsApp: em mensagem `IsFromMe` o `Pushname` é o da própria conta; deixa
+  de ser passado a `_conversa` (as duas chamadas ao vivo), e `_conversa`
+  renomeia conversa privada que ficou com o nome da conta.
+- WhatsApp: `ChatMarkAsReadEv` passa a ser tratado (`_ao_marcar_lida`): zera
+  `nao_lidas` se não há mensagem mais nova que a marca (`messageRange`). Os
+  recibos de outro aparelho meu (lida/ouvida) agora vão para o log, para
+  diagnosticar a marca de ouvida.
+- Atualização: `nucleo/atualizacao.py` lê as Releases do GitHub
+  (`consultar`, `mais_nova`, `e_mais_nova`); `Janela._verificar_atualizacoes`
+  (Ajuda, e 8 s depois de abrir se `verificar_atualizacoes`); só avisa, não
+  instala. `ferramentas/publicar.py` monta o zip, o SHA-256 e as notas
+  (`lancamento/`) e, com `--publicar`, chama `gh release create`
+  (pré-lançamento por padrão).
+- Backup e restauração: `nucleo/backup.py` (zip com `pyzipper`, AES-256 com
+  senha opcional; partes configuracoes, contas, conversas, midias;
+  `criar`, `ler_manifesto`, `restaurar`, `aplicar_pendente`). Configurações
+  se aplicam na hora por `_aplicar_opcao`; o resto vai para `restauracao/` e
+  `__main__` chama `aplicar_pendente` antes de abrir o banco, guardando o
+  anterior em `antes-da-restauracao/`, e acerta os caminhos de `midias`.
+  `Banco.copiar_para` usa a API de backup do SQLite. `OPCOES_FORA`
+  (depuração e exigência do código) nunca são restauradas. Nova dependência:
+  `pyzipper`. Telas em `interface/backup.py`. Ao terminar, `_reiniciar`
+  fecha a janela e um `cmd` separado (`timeout` + `start`) abre outra instância.
+- Sons dos eventos: `config.EVENTOS_SOM` gera as opções `som_<evento>`
+  (categoria Sons, `Opcao.som`); valor "" (padrão), "desligado" ou caminho.
+  `fala.definir_sons`/`acao_do_som`/`bipe(tipo, valor=None)`; arquivo toca
+  por `soundfile` + `sounddevice` (`_tocar_arquivo`, 15 s no máximo) e cai
+  no beep se falhar. O valor é o nome do arquivo em `config.pasta_sons()`
+  (`importar_som` copia para lá); caminho completo antigo ainda vale. A pasta
+  `sons/` vai na parte configuracoes do backup e volta na hora; arquivo que
+  sumiu cai no beep. Menu Ajuda, Abrir a pasta de sons. `DialogoConfiguracoes._criar_som` (caixa + Ouvir);
+  `Janela._carregar_sons` ao abrir e ao mudar uma opção `som_*`.
+- Contatos recebidos: `whatsapp.telefones_do_vcard` e `contatos_da_mensagem`
+  (um item por TEL, `waid=` dá o id) entram em `mencoes` (nome, telefone, id)
+  nos dois caminhos de conversão; o texto traz o telefone. Telegram:
+  `msg.contact` gera o mesmo item e o telefone no texto.
+- `modelos.conteudo`: tipo `OUTRO` com texto descritivo (contato, enquete...)
+  mostra só o texto; "mensagem sem suporte ainda" só para o não reconhecido
+  (texto vazio ou "tipo do WhatsApp: ...").
+- Encaminhar: `nucleo/encaminhar.py` (`preparar` → `Item` texto ou arquivo,
+  `destinos`, `filtrar`); `interface/encaminhar.py` (`DialogoEncaminhar`,
+  CheckListBox com busca e marcas persistentes); `Janela._encaminhar`
+  (Ctrl+Shift+E, menu de contexto e modo de seleção) reenvia por
+  `enviar_texto`/`enviar_arquivo` da conta de cada destino. Não usa o
+  encaminhamento nativo (sem o rótulo "Encaminhada"); mídia só se baixada.
+- Responder em particular: `Janela._responder_em_particular` abre/cria a
+  conversa privada de `pessoa_da_mensagem` e põe a mensagem do grupo em
+  `resposta_a`; `_mensagem_de_texto` do WhatsApp, quando a citada está em
+  outra conversa, copia texto/autor dela e põe `contextInfo.remoteJID`.
+  Só onde o provedor sabe achar o telefone (WhatsApp).
+- Mais eventos de som: `nova_aberta`, `nova_grupo`, `desconectada`,
+  `reconectada`, `falha_envio`, `download_pronto`, `tarefa_pronta`
+  (`config.EVENTOS_SOM`). `fala.HERDA` faz o evento tocar o som (e seguir a
+  escolha) de outro quando não tem escolha própria (`tom_padrao`,
+  `acao_do_som` recursivo). `_ev_estado` guarda `_caiu` para só tocar
+  "reconectada" depois de uma queda.
+- Conversas somente leitura: `Conversa.somente_leitura` (coluna nova no
+  banco). WhatsApp: canais sempre; grupos por `_conferir_escrita` (anúncio
+  sem ser admin, ou 403 = saí) ao abrir (`conversa_aberta`) e ao mudar o
+  grupo. Telegram: `somente_leitura_do_telegram(entidade)`. Janela:
+  `_mostrar_conversa(True, False)`, `_somente_leitura()` barra
+  responder/enviar/anexar, `_ev_conversas` reage à mudança, e
+  `encaminhar.destinos` as ignora.
+- Editar mensagem: `Provedor.JANELA_EDICAO`/`editar_mensagem` (WhatsApp:
+  `edit_message` do neonize com `_mensagem_de_texto`, mantendo a citação;
+  Telegram: `edit_message`); sucesso vira `MensagemAtualizada("editada")`,
+  falha vira `Aviso`. Janela: `_pode_editar`, `_editar_mensagem` (F2),
+  `_salvar_edicao`, `_cancelar_edicao`, rótulo "Editando sua mensagem";
+  a caixa guarda o rascunho enquanto edita.
+- Detalhes da conversa: `nucleo/detalhes.py` (`classes`, `midias`,
+  `estatisticas`, `linhas_de_uso`; filtros foto/vídeo/link/documento/
+  figurinha/contato/voz/áudio); `interface/detalhes.py` (`ControleDetalhes`,
+  `DialogoTexto`, `DialogoLista`, `DialogoAdministrar`); `Janela`:
+  `_detalhes_da_conversa` (Ctrl+I), `_opcoes_da_conversa` (itens do menu
+  compartilhados com membros e grupos em comum), `_garantir_conversa`,
+  `_ver_na_conversa`. Provedores: `dados_do_contato`, `detalhes_do_grupo`,
+  `detalhes_do_canal`, `grupos_em_comum`, `administrar_grupo`,
+  `administrar_canal`. Telegram: `_administrar` (nome, descrição, direitos
+  padrão do grupo, adicionar, remover, promover, link, sair).
+  `administrar_canal` só no WhatsApp.
+- Entrar em grupos: ações do tipo `entrar` em `extras["acoes"]`
+  (`whatsapp.entradas_de_grupo`: `groupInviteMessage` e links
+  chat.whatsapp.com; `telegram.entradas_do_telegram`: t.me/+, joinchat e
+  t.me/nome). `Janela._tocar_acao` desvia para `_entrar_no_grupo` (prévia
+  em thread, confirmação, `entrar_no_grupo`). Provedores:
+  `previa_do_convite` e `entrar_no_grupo` (neonize `join_group_with_invite`/
+  `with_link`, `get_group_info_from_*`; Telethon `CheckChatInvite`,
+  `ImportChatInvite`, `JoinChannel`).
+- Provedores de IA: pacote `nucleo/ia` (`catalogo`: provedores, capacidades,
+  limites; `prompts`; `provedores`: `montar_pedido`/`ler_resposta` puros para
+  Gemini, OpenAI, Claude, Groq e OpenRouter, transcrição multipart na OpenAI
+  e Groq; `servico`: `executar`, `testar`, HTTP por urllib; `cofre`: chaves
+  cifradas com DPAPI em `ia_chaves.json`, fora do backup). Opções
+  `ia_audio/imagem/video/pdf/perfil` e `ia_modelos`/`ia_consentimento` em
+  `Config`. Janela: `_opcoes_ia`, `_ia_processar` (consentimento, download
+  prévio por `_ia_pendentes`, thread), `_ia_pronto` (grava `extras["ia"]`),
+  `_ia_ver`; `modelos.trecho_da_ia` na linha e `conteudos_copiaveis`.
+  Configurações: bloco de chaves/modelos em `_criar_ia`, `_IaParaConfig`.
+  Ordem de tentativa: `ia_ordem` (tarefa → provedores ligados, em ordem;
+  substitui as opções `ia_audio/imagem/video/pdf`), `servico.executar_em_ordem`
+  (passa ao próximo em `PROXIMO_PROVEDOR`), lista de modelos por GET
+  (`pedido_de_modelos`, `ler_modelos`, `listar_modelos`, cache
+  `ia_lista_modelos`), `cadeia_de_modelos` (automático) e a caixa combinada
+  de modelos em `_criar_ia`. `ia_ordem` e `ia_modelos` entram no backup.
+  `servico.enviar_pela_rede` manda `User-Agent: TeleZapp/<versão>` (a Groq,
+  atrás da Cloudflare, dava 403 erro 1010 ao User-Agent do Python e parecia
+  chave recusada) e `_erro_http` lê o corpo (o Gemini responde 400 a chave
+  inválida).
+  A tela de IA ficou com a ordem das tarefas e um botão por provedor que abre
+  `DialogoProvedorIA` (chave, combo de modelo, Obter modelos, Testar).
+  Opções `enter_audio/imagem/video/pdf` (abrir, baixar ou ia) em
+  `Janela._enter_na_midia`; `_opcoes_ia` é o primeiro item de `_menu_mensagem`.
+  Fica para depois: modo automático por conversa, vídeo para outros
+  provedores (quadros), arquivos acima de 14 MB, perguntas de acompanhamento.
+- `_enviar_arquivo` foi dividido: `_enviar_anexo` recebe o anexo já preparado.
+- `_rotular_caixa` monta o rótulo da caixa (resposta e mídias coladas).
+
 ## 2026.10.17.0
 
 Foco inicial na conta.

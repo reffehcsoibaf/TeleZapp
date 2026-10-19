@@ -35,6 +35,11 @@ class ModeloConfiguracoes:
         # (campo -> posicao escolhida na caixa)
         self.priv_carregado = {}
         self.priv_escolhido = {}
+        # chaves e modelos dos provedores de IA ainda nao aplicados:
+        # {provedor: texto}; chave vazia = apagar a chave guardada
+        self.ia_chaves = {}
+        self.ia_modelos = {}
+        self.ia_ordens = {}       # tarefa -> provedores ligados, em ordem
 
     # ------------------------------------------------------------ consulta
     def lista_de_categorias(self):
@@ -157,9 +162,49 @@ class ModeloConfiguracoes:
         ordem = [o.chave for o in config.OPCOES]
         return [(c, self.pendentes[c]) for c in ordem if c in self.pendentes]
 
+    def ia_definir_chave(self, provedor, chave):
+        """Chave digitada; campo vazio = nao mexer na que esta guardada."""
+        if chave.strip():
+            self.ia_chaves[provedor] = chave.strip()
+        else:
+            self.ia_chaves.pop(provedor, None)
+
+    def ia_apagar_chave(self, provedor):
+        self.ia_chaves[provedor] = ""
+
+    def ia_definir_modelo(self, provedor, modelo):
+        atual = (self.cfg.get("ia_modelos") or {}).get(provedor, "")
+        if modelo.strip() == atual:
+            self.ia_modelos.pop(provedor, None)
+        else:
+            self.ia_modelos[provedor] = modelo.strip()
+
+    def ia_ordem(self, tarefa):
+        """Provedores ligados para a tarefa, na ordem de tentativa."""
+        if tarefa in self.ia_ordens:
+            return list(self.ia_ordens[tarefa])
+        return list((self.cfg.get("ia_ordem") or {}).get(tarefa, []))
+
+    def ia_definir_ordem(self, tarefa, ligados):
+        if list(ligados) == list((self.cfg.get("ia_ordem") or {}).get(
+                tarefa, [])):
+            self.ia_ordens.pop(tarefa, None)
+        else:
+            self.ia_ordens[tarefa] = list(ligados)
+
+    def ia_mudancas(self):
+        """{'chaves', 'modelos', 'ordem'} do que mudou, ou None."""
+        if not self.ia_chaves and not self.ia_modelos and not self.ia_ordens:
+            return None
+        return {"chaves": dict(self.ia_chaves),
+                "modelos": dict(self.ia_modelos),
+                "ordem": {t: list(v) for t, v in self.ia_ordens.items()}}
+
     def aplicar(self, aplicador):
         """Entrega cada mudanca ao aplicador(chave, valor) e zera."""
         feitas = self.mudancas()
+        ia = self.ia_mudancas()
+        self.ia_chaves, self.ia_modelos, self.ia_ordens = {}, {}, {}
         acao = self.acao_codigo() if not self.erro_codigo() else None
         priv = self.priv_mudancas()
         self.priv_escolhido = {}
@@ -173,4 +218,7 @@ class ModeloConfiguracoes:
         if priv:
             aplicador("privacidade_conta", priv)
             feitas.append(("privacidade_conta", priv))
+        if ia:
+            aplicador("ia_credenciais", ia)
+            feitas.append(("ia_credenciais", ia))
         return [c for c, _ in feitas]

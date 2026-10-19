@@ -9,6 +9,21 @@ só janela, pensado desde o início para ser usado com **leitores de tela**
 > na mesma janela, com pareamento por código ou QR Code; 3) mídias (foto,
 > vídeo, documento e nota de voz); 4) várias contas, avisos e configurações.
 
+## Aviso
+
+O TeleZapp é um software **experimental**, em desenvolvimento. Pode ter erros,
+inclusive em mensagens e conversas. Use por sua conta e risco. Não é um
+produto oficial do WhatsApp nem do Telegram, e a licença (GPL 3) não dá
+garantia.
+
+## Baixar
+
+As versões ficam em [Releases](https://github.com/reffehcsoibaf/TeleZapp/releases):
+baixe o zip, extraia a pasta e abra `TeleZapp.exe`. Para atualizar, feche o
+programa e troque a pasta; os dados ficam em `%APPDATA%\TeleZapp`. Em
+Ajuda, Verificar atualizações, o programa diz se há versão nova. Quem
+mantém o projeto monta a Release com `python ferramentas\publicar.py`.
+
 ## Objetivos
 
 - Trocar **mensagens, fotos, vídeos, áudios e documentos** (prioridade).

@@ -65,6 +65,8 @@ class Conversa:
     fixada: bool = False       # fixada no topo da lista
     silenciada_ate: float = 0.0   # 0 = com som; -1 = para sempre; senao ate
                                   # quando (timestamp)
+    somente_leitura: bool = False  # a conta nao pode escrever aqui (canal,
+                                   # grupo so de admins, grupo que saiu...)
 
     @property
     def chave(self):
@@ -122,7 +124,9 @@ def extras_de(msg):
             "apagada": bool(dados.get("apagada")),
             "ouvida": bool(dados.get("ouvida")),
             "favorita": bool(dados.get("favorita")),
-            "reacoes": list(dados.get("reacoes") or [])}
+            "reacoes": list(dados.get("reacoes") or []),
+            "ia": dados.get("ia") if isinstance(dados.get("ia"), dict)
+            else {}}
 
 
 def guardar_extras(msg, links=(), botoes=(), mencoes=(), acoes=(),
@@ -244,6 +248,10 @@ def conteudo(m, com_estado=True):
     if m.tipo == AGUARDANDO:
         return ("mensagem ainda não recebida: o WhatsApp não entregou o "
                 "conteúdo, ela pode chegar depois")
+    if m.texto and not m.texto.startswith("tipo do WhatsApp"):
+        # contato, enquete, local, convite, evento, produto...: o TeleZapp
+        # entende e descreve; so o que ele nao reconhece diz "sem suporte"
+        return m.texto
     return _partes(NOMES_TIPOS[OUTRO], m.texto)
 
 
@@ -324,11 +332,63 @@ def citacao(original, max_caracteres=LIMITE_CITACAO):
     return texto
 
 
-def formatar(m, estilo, anterior=None, agora=None, respondida=None):
+def _telefone_do_endereco(remetente):
+    """'+5551999998888' de '5551999998888@s.whatsapp.net'; o proprio endereco
+    quando nao e um telefone (@lid, por exemplo)."""
+    usuario, _, dominio = (remetente or "").partition("@")
+    if dominio == "s.whatsapp.net" and usuario.isdigit():
+        return "+" + usuario
+    return remetente or ""
+
+
+def quem_enviou(msg, conv=None, nome_do_remetente=None):
+    """Quem enviou, na lista e no arquivo salvo: o autor da mensagem; sem ele, o nome
+    da conversa (se e com uma pessoa), o nome que a agenda ou as outras
+    mensagens guardadas dao ao remetente, o telefone dele e, so no fim,
+    Desconhecido. `nome_do_remetente(msg)` e opcional."""
+    if msg.minha:
+        return "Você"
+    if msg.autor:
+        return msg.autor
+    if conv is not None and conv.tipo == "privada" and conv.nome:
+        return conv.nome
+    if nome_do_remetente is not None and msg.remetente:
+        nome = nome_do_remetente(msg)
+        if nome:
+            return nome
+    return _telefone_do_endereco(msg.remetente) or "Desconhecido"
+
+
+LIMITE_IA_NA_LINHA = 300
+
+
+def rotulo_da_ia(msg):
+    """"transcrição" ou "descrição", conforme o que a IA fez na mensagem."""
+    ia = extras_de(msg)["ia"]
+    if not ia.get("texto"):
+        return ""
+    return "transcrição" if ia.get("genero") == "audio" else (
+        "texto do PDF" if ia.get("genero") == "pdf" else "descrição")
+
+
+def trecho_da_ia(msg):
+    """O comeco do texto feito pela IA, para a linha da mensagem."""
+    rotulo = rotulo_da_ia(msg)
+    if not rotulo:
+        return ""
+    texto = " ".join(extras_de(msg)["ia"]["texto"].split())
+    if len(texto) > LIMITE_IA_NA_LINHA:
+        texto = texto[:LIMITE_IA_NA_LINHA].rstrip() + "… (o menu mostra tudo)"
+    return "%s: %s" % (rotulo, texto)
+
+
+def formatar(m, estilo, anterior=None, agora=None, respondida=None,
+             quem=None):
     """Uma linha da lista de mensagens, no estilo escolhido.
 
     respondida: a mensagem respondida (Mensagem), se conhecida; ou só o nome
-    do autor (texto).
+    do autor (texto). quem: nome de quem enviou, quando a mensagem nao traz
+    o autor (ver quem_enviou).
     """
     cont = conteudo(m).replace("\r", " ").replace("\n", " ")
     if extras_de(m)["editada"]:
@@ -345,6 +405,7 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None):
         cont = _juntar(cont, "com %d %s (Tab)" % (
             len(acoes), ("opção" if len(acoes) == 1 else "opções")
             if so_opcoes else ("botão" if len(acoes) == 1 else "botões")))
+    cont = _juntar(cont, trecho_da_ia(m))
     reacoes = resumo_reacoes(m)
     if reacoes:
         cont = _juntar(cont, "reações: " + reacoes if " de " in reacoes
@@ -359,7 +420,7 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None):
             cont = _juntar(cont, "em resposta a %s" % respondida)
         else:
             cont = _juntar(cont, "em resposta a uma mensagem mais antiga")
-    autor = "Você" if m.minha else (m.autor or "Desconhecido")
+    autor = "Você" if m.minha else (m.autor or quem or "Desconhecido")
     estado = m.estado if (m.minha and m.estado) else ""
     hora = hora_legivel(m.data, agora)
     if estilo == ESTILO_CONTEUDO_PRIMEIRO:
@@ -502,6 +563,34 @@ def itens_de_link(m):
         juntar("Link: " + (texto or url), url)
     for rotulo, url in extras["botoes"]:
         juntar("Botão: " + (rotulo or url), url)
+    return itens
+
+
+def conteudos_copiaveis(msg, maximo_links=12):
+    """O que da para copiar da mensagem, um item por tipo de conteudo:
+    [(tipo, rotulo, valor)], com tipo "texto" (valor = o texto), "midia"
+    (valor vazio: o arquivo baixado) ou "link" (valor = o endereco). Uma
+    mensagem so com texto tem so o texto; uma foto com legenda e link tem a
+    legenda, a foto e o link. Sem nada para copiar (mensagem apagada, sem
+    suporte), sobra o texto falado da mensagem."""
+    itens = []
+    if extras_de(msg)["apagada"]:
+        return [("texto", "Copiar texto", conteudo(msg))]
+    ia = extras_de(msg)["ia"].get("texto")
+    midia = msg.tipo in (FOTO, VIDEO, VOZ, AUDIO, DOCUMENTO, FIGURINHA)
+    if msg.texto and msg.tipo not in (VOZ, FIGURINHA):
+        itens.append(("texto", "Copiar legenda" if midia else "Copiar texto",
+                      msg.texto))
+    if midia:
+        itens.append(("midia", "Copiar " + NOMES_TIPOS[msg.tipo], ""))
+    if ia:
+        itens.append(("texto", "Copiar " + rotulo_da_ia(msg), ia))
+    links = itens_de_link(msg)[:maximo_links]
+    for rotulo, url in links:
+        itens.append(("link", "Copiar link" if len(links) == 1
+                      else "Copiar " + rotulo, url))
+    if not itens:
+        itens.append(("texto", "Copiar texto", conteudo(msg)))
     return itens
 
 

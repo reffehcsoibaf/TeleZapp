@@ -76,6 +76,17 @@ def main():
                       wx.OK | wx.ICON_INFORMATION)
         return 0
     config.limpar_temporarios()   # sobras de uma abertura anterior
+    try:
+        from telezapp.nucleo import backup
+        trocadas = backup.aplicar_pendente(config.pasta_dados())
+        if trocadas:
+            log.info("backup restaurado: %s", ", ".join(trocadas))
+    except Exception:
+        log.error("falha ao restaurar o backup:\n%s", traceback.format_exc())
+        caixa_de_erro("O %s não conseguiu terminar de restaurar o backup. "
+                      "O que havia antes está na pasta antes-da-restauracao, "
+                      "dentro da pasta de dados. Detalhes no log:\n%s"
+                      % (NOME, arquivo_log))
 
     cfg = config.Config()
     banco = Banco(os.path.join(config.pasta(), "telezapp.db"))

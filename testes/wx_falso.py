@@ -16,12 +16,13 @@ DEFAULT_DIALOG_STYLE = RESIZE_BORDER = 0
 LB_SINGLE = LB_HSCROLL = TE_MULTILINE = TE_PASSWORD = TE_READONLY = 0
 VERTICAL = HORIZONTAL = EXPAND = ALL = BOTTOM = TOP = LEFT = RIGHT = 0
 ALIGN_RIGHT = ALIGN_CENTER = RA_SPECIFY_COLS = TE_PROCESS_ENTER = 0
-EVT_RADIOBOX = EVT_TEXT_ENTER = EVT_SIZE = object()
+EVT_RADIOBOX = EVT_TEXT_ENTER = EVT_TEXT_PASTE = EVT_SIZE = object()
 TE_CENTER = 0
 WHITE = (255, 255, 255)
 escolha_lista = [0]       # o que o SingleChoiceDialog "escolhe"
 resposta_lista = [ID_OK]
 WXK_ESCAPE, WXK_RETURN, WXK_NUMPAD_ENTER = 27, 13, 370
+WXK_DELETE, WXK_SPACE = 127, 32
 WXK_UP, WXK_DOWN, WXK_HOME, WXK_END, WXK_PAGEUP, WXK_PAGEDOWN = range(
     315, 321)
 EVT_CLOSE = EVT_CHAR_HOOK = EVT_MENU = EVT_LISTBOX_DCLICK = object()
@@ -308,6 +309,9 @@ class TextCtrl(Janela):
         self.valor = ""
 
     def SetInsertionPoint(self, i):
+        pass
+
+    def SetInsertionPointEnd(self):
         pass
 
     def GetFont(self):

@@ -270,6 +270,67 @@ Decisão do responsável: seguir com as chamadas depois do experimento 9.
   silêncio; empacotamento com a NTgCalls (PyInstaller) e as dependências
   Go/C++ para a conferência de licenças; vídeo e grupos.
 
+## Versão 2026.10.18.0 (18/10/2026)
+
+O que entrou neste dia, com as decisões que não aparecem só no código. O texto
+para o usuário está em `telezapp/ajuda/novidades.html`; o técnico, em
+`CHANGELOG.md`. **Nada disto foi visto ainda no app real** (só testes
+automáticos): a lista do que falta testar fica na memória do projeto.
+
+- **Mensagens**: copiar por tipo de conteúdo; colar mídia (Control V) como
+  anexo que espera o Enter, com o texto da caixa de legenda (também em Nova
+  mensagem); editar mensagem (F2; 15 min no WhatsApp, 48 h no Telegram);
+  encaminhar por reenvio do conteúdo, sem o rótulo "Encaminhada" (decisão do
+  responsável); responder em particular a mensagem de grupo; contatos
+  recebidos viram botão "Iniciar conversa com" e o aviso "sem suporte" só
+  fica para o que não é reconhecido; botão "Entrar no grupo" para convites de
+  administrador e links (chat.whatsapp.com, t.me).
+- **Conversas**: modo de seleção (Control Espaço) com ações em massa; Delete
+  apaga; apagar grupo pergunta entre limpar, apagar da lista e sair do grupo;
+  salvar conteúdo em .zip; conversas somente leitura escondem a caixa e os
+  botões de envio; janela de detalhes (Control I) com mídias filtradas,
+  membros, grupos em comum e administração de grupo (WhatsApp e Telegram) e
+  de canal (WhatsApp).
+- **Sincronia com o WhatsApp**: aviso de conversa lida no celular
+  (`ChatMarkAsReadEv`). A marca de "ouvida" feita no celular com o TeleZapp
+  fechado **não chega**: o aviso é efêmero e não há outra fonte. Rejeitada a
+  aproximação "conversa lida = áudios ouvidos" (o responsável quer saber o
+  que realmente ouviu).
+- **Sons**: 16 eventos, cada um com som padrão, sem som ou arquivo na pasta
+  `sons` (dentro da pasta de dados, no backup). Eventos novos acompanham o
+  som do evento parecido enquanto não têm escolha própria.
+- **Backup e restauração**: .zip com senha opcional (AES-256 por `pyzipper`);
+  partes escolhidas; configurações valem na hora e o resto troca na próxima
+  abertura, guardando o anterior em `antes-da-restauracao`. Depuração e
+  exigência do código secreto nunca são restauradas por arquivo. As chaves de
+  IA nunca entram.
+- **Distribuição**: `ferramentas/publicar.py` monta zip, hash e notas;
+  Ajuda, Verificar atualizações só avisa. Instalar, portátil e atualizador
+  ficam para perto do lançamento (decisão do responsável). Aviso de software
+  experimental no README, no guia, em Sobre e nas notas da Release. Para
+  quem recebe um zip: apagar a pasta antiga antes de extrair (instrução dada
+  pelo responsável, não automática).
+- **Inteligência artificial**: provedores Gemini, OpenAI, Claude, Groq e
+  OpenRouter (`nucleo/ia`), desenho dos adaptadores como no WinZapp
+  (GPL-3). Por tarefa (voz/áudio, imagem e figurinha, vídeo, PDF) o
+  responsável organiza a ordem de tentativa; se um falha, vai ao próximo.
+  Chaves cifradas pelo DPAPI do Windows, fora de backup e log; consentimento
+  por provedor antes do primeiro envio. Modelos padrão vieram do catálogo do
+  WinZapp (Gemini 3.8 Flash entra no gratuito; Gemini tem modo automático com
+  alternativos). Aprendizados: a Groq (Cloudflare) devolve 403, erro 1010, ao
+  User-Agent do Python, e a OpenAI devolve 429 `insufficient_quota` sem
+  saldo; ambos pareciam "chave recusada". O Enter em mídia é configurável
+  (abrir, baixar ou usar a IA). Fica para depois: modo automático por
+  conversa, vídeo fora do Gemini (quadros), arquivos acima de 14 MB e
+  perguntas de acompanhamento.
+- **Chamadas do WhatsApp (pesquisa, em espera)**: o neonize só tem a
+  sinalização. O WhatsApp Web ganhou chamadas (jul/2026) e o WA-JS aciona a
+  pilha de VoIP dele; o WinZapp já faz chamadas assim (WPPConnect + Chrome,
+  áudio ligado ao Python). Plano proposto, não iniciado: experimento (Playwright
+  + Edge + WA-JS, pareamento por código como segundo aparelho, medir tempo e
+  memória), opcional e desligado por padrão, sem trocar o acesso atual às
+  mensagens pelo WPPConnect. O responsável deixou o assunto de lado.
+
 ## Próximos passos sugeridos
 
 1. ~~Grupo 1 do plano acima~~ (concluído).
@@ -278,8 +339,13 @@ Decisão do responsável: seguir com as chamadas depois do experimento 9.
    pendências da seção acima, exceto a velocidade do áudio, já feita).
 3. ~~Adicionar o aviso de licença nos arquivos~~ (SPDX presente em todos os
    `.py` do pacote); conferir ainda as licenças de terceiros pendentes.
-4. Etapa 4 (ver o plano). ~~Janela de configurações~~ (2026.10.15.2). Falta:
-   sons de eventos com arquivos e opções, backup e restauração das
-   configurações, ordem das informações da mensagem, instalador, portátil,
-   desinstalação limpa, atualização com janela de novidades e assinatura.
+4. Etapa 4 (ver o plano). ~~Janela de configurações~~ (2026.10.15.2),
+   ~~sons de eventos~~ e ~~backup e restauração~~ (2026.10.18.0). Falta:
+   ordem das informações da mensagem, instalador, portátil, desinstalação
+   limpa, atualização com janela de novidades e assinatura.
+   Distribuição (2026-10-18): um só zip por versão nas Releases do GitHub,
+   montado por `ferramentas/publicar.py` (pré-lançamento, aviso de software
+   experimental) e checagem de versão nova em Ajuda (feita, só avisa).
+   Falta: instalar e criar cópia portátil dentro do app (como o NVDA),
+   atualizador que troca a pasta com conferência do hash, assinatura.
 5. Testes de estabilidade e de arquivos maiores.

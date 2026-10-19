@@ -20,6 +20,7 @@ import queue
 import re
 import threading
 import time
+import uuid
 
 from telezapp import config
 from telezapp.midia import armazem
@@ -137,6 +138,78 @@ def _contexto(interna):
         except (ValueError, AttributeError):
             continue
     return None
+
+
+def _valor_vcard(linha):
+    return linha.split(":", 1)[1].strip() if ":" in linha else ""
+
+
+def telefones_do_vcard(vcard):
+    """[(telefone legivel, id do WhatsApp ou '')] dos TEL de um vCard. O
+    parametro waid= diz o numero no WhatsApp; sem ele, so o texto."""
+    achados = []
+    for linha in (vcard or "").replace("\r", "").split("\n"):
+        if not linha.upper().startswith(("TEL", "ITEM1.TEL", "ITEM2.TEL")):
+            continue
+        achou = re.search(r"waid=(\d+)", linha, re.I)
+        texto = _valor_vcard(linha)
+        digitos = achou.group(1) if achou else ""
+        if digitos:
+            achados.append(("+" + digitos, digitos + "@s.whatsapp.net"))
+        elif texto:
+            achados.append((texto, ""))
+    return achados
+
+
+def contatos_da_mensagem(interna, presentes=None):
+    """[{'nome', 'telefone', 'id'}] dos cartoes de contato (um ou varios) da
+    mensagem, um item por telefone. Entram nas pessoas da mensagem, e Enter
+    numa delas abre a conversa."""
+    cartoes = []
+    try:
+        if interna.HasField("contactMessage"):
+            cartoes.append(interna.contactMessage)
+        if interna.HasField("contactsArrayMessage"):
+            cartoes += list(interna.contactsArrayMessage.contacts)
+    except (ValueError, AttributeError):
+        return []
+    pessoas = []
+    for c in cartoes:
+        nome = c.displayName or ""
+        tels = telefones_do_vcard(c.vcard) or [("", "")]
+        for tel, id_ in tels[:3]:
+            if nome or tel:
+                pessoas.append({"nome": nome, "telefone": tel, "id": id_})
+    return pessoas
+
+
+RE_CONVITE_WHATSAPP = re.compile(
+    r"chat\.whatsapp\.com/(?:invite/)?([A-Za-z0-9]{20,24})")
+
+
+def entradas_de_grupo(interna, texto=""):
+    """Botoes "Entrar no grupo": o convite que um administrador manda (para
+    quem so aceita grupos de contatos) e os links chat.whatsapp.com do texto.
+    Entram junto das acoes da mensagem, com tipo "entrar"."""
+    entradas, vistos = [], set()
+    try:
+        if interna.HasField("groupInviteMessage"):
+            x = interna.groupInviteMessage
+            if x.inviteCode:
+                vistos.add(x.inviteCode)
+                nome = x.groupName or "sem nome"
+                entradas.append({
+                    "tipo": "entrar", "rotulo": "Entrar no grupo " + nome,
+                    "codigo": x.inviteCode, "grupo": x.groupJID,
+                    "expira": int(x.inviteExpiration or 0), "nome": nome})
+    except (ValueError, AttributeError):
+        pass
+    for codigo in RE_CONVITE_WHATSAPP.findall(texto or ""):
+        if codigo not in vistos:
+            vistos.add(codigo)
+            entradas.append({"tipo": "entrar", "rotulo": "Entrar no grupo "
+                             "(link de convite)", "codigo": codigo})
+    return entradas
 
 
 def mencoes_do_contexto(ctx):
@@ -485,16 +558,25 @@ def conteudo_de(interna):
             "convite para o grupo: " + (x.groupName or "sem nome"),
             x.caption), 0, "", 0
     if "contactMessage" in presentes:
-        return m.OUTRO, "contato: " + interna.contactMessage.displayName, 0, \
-            "", 0
+        x = interna.contactMessage
+        tels = [t for t, _ in telefones_do_vcard(x.vcard)]
+        return m.OUTRO, ", ".join(p for p in (
+            "contato: " + (x.displayName or "sem nome"),
+            ", ".join(tels)) if p), 0, "", 0
     if "ptvMessage" in presentes:       # mensagem de video (bolinha)
         x = interna.ptvMessage
         return m.VIDEO, x.caption, x.seconds, "", x.fileLength
     if "contactsArrayMessage" in presentes:
         x = interna.contactsArrayMessage
-        nomes = [c.displayName for c in x.contacts if c.displayName]
+        nomes = []
+        for c in x.contacts:
+            tels = [t for t, _ in telefones_do_vcard(c.vcard)]
+            nome = ", ".join(p for p in (c.displayName, *tels[:1]) if p)
+            if nome:
+                nomes.append(nome)
         return m.OUTRO, "%d contatos: %s" % (
-            len(x.contacts), ", ".join(nomes)) if nomes else \
+            len(x.contacts), ("; " if any(", " in n for n in nomes)
+                              else ", ").join(nomes)) if nomes else \
             "%d contatos" % len(x.contacts), 0, "", 0
     if "eventMessage" in presentes:
         return m.OUTRO, _texto_do_evento(interna.eventMessage), 0, "", 0
@@ -542,7 +624,9 @@ def converter(evento, conta_id, conversa_id, autor=""):
     interna_ = desembrulhar(evento.Message)
     acoes_ = acoes_do_whatsapp(interna_)
     m.guardar_extras(msg, botoes=botoes_do_whatsapp(interna_),
-                     mencoes=mencoes_do_contexto(ctx), acoes=acoes_,
+                     mencoes=mencoes_do_contexto(ctx) +
+                     contatos_da_mensagem(interna_),
+                     acoes=acoes_ + entradas_de_grupo(interna_, msg.texto),
                      original=original_com_acoes(interna_, acoes_))
     return msg, msg.remetente
 
@@ -663,7 +747,9 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
     interna_ = desembrulhar(wmi.message)
     acoes_ = acoes_do_whatsapp(interna_)
     m.guardar_extras(msg, botoes=botoes_do_whatsapp(interna_),
-                     mencoes=mencoes_do_contexto(ctx), acoes=acoes_,
+                     mencoes=mencoes_do_contexto(ctx) +
+                     contatos_da_mensagem(interna_),
+                     acoes=acoes_ + entradas_de_grupo(interna_, msg.texto),
                      original=original_com_acoes(interna_, acoes_))
     if wmi.starred:
         m.atualizar_extras(msg, favorita=True)
@@ -735,6 +821,7 @@ class ProvedorWhatsApp(Provedor):
         self._sem_nome_registrados = set()
         self._conectada = False
         self._cache_mencoes = {}   # jid mencionado -> nome, id, telefone
+        self._escrita_conferida = {}   # grupo -> quando conferi se posso escrever
         self._grupos_lidos = {}    # grupo -> quando os participantes foram lidos
         self._arquivada_vista = {}  # conversa -> arquivada, como o celular disse
         self._ajustes_vistos = {}   # (conversa, campo) -> fixada/silenciada
@@ -859,7 +946,8 @@ class ProvedorWhatsApp(Provedor):
                                  ("ChatLockEv", self._ao_trancar),
                                  ("ChatPinEv", self._ao_fixar),
                                  ("ChatMuteEv", self._ao_silenciar),
-                                 ("ChatDeleteEv", self._ao_apagar_conversa)):
+                                 ("ChatDeleteEv", self._ao_apagar_conversa),
+                                 ("ChatMarkAsReadEv", self._ao_marcar_lida)):
                 classe = getattr(nev, nome, None)
                 if classe is not None:
                     self.cliente.event(classe)(funcao)
@@ -1106,6 +1194,9 @@ class ProvedorWhatsApp(Provedor):
     # ----------------------------------------------------------- conversas
     def _publicar_conversas(self):
         with self._trava:
+            for c in self._conversas.values():
+                if c.tipo == "canal":
+                    c.somente_leitura = True     # canais: so quem administra
             lista = sorted(self._conversas.values(), key=lambda c: -c.data)
         self.barramento.publicar(ev.ConversasAtualizadas(self.conta.id,
                                                          lista))
@@ -1180,6 +1271,33 @@ class ProvedorWhatsApp(Provedor):
             self._marcar_conversa(evento, "silenciada_ate", ate)
         except Exception:
             log.exception("erro ao tratar o aviso de silenciar")
+
+    def _ao_marcar_lida(self, cliente, evento):
+        """Conversa lida no celular (ou em outro aparelho), inclusive o que o
+        celular fez com o TeleZapp fechado e chega na sincronia ao conectar:
+        zera as nao lidas, a menos que ja haja mensagem mais nova que a
+        marca."""
+        try:
+            a = evento.Action
+            if not a.read:
+                return
+            cid = self._id_da_conversa(evento.JID)
+            ate = segundos(a.messageRange.lastMessageTimestamp)                 if a.HasField("messageRange") else 0
+            with self._trava:
+                self._nao_lidas.pop(cid, None)
+                conv = self._conversas.get(cid)
+                if conv is None or conv.nao_lidas == 0:
+                    return
+                if ate and conv.data > ate + 5:
+                    log.info("conversa marcada como lida no celular, mas há "
+                             "mensagem mais nova: mantida como não lida")
+                    return
+                conv.nao_lidas = 0
+            log.info("conversa marcada como lida no celular")
+            self.banco.atualizar_conversa(self.conta.id, cid, nao_lidas=0)
+            self._publicar_conversas()
+        except Exception:
+            log.exception("erro ao tratar o aviso de conversa lida")
 
     def _ao_trancar(self, cliente, evento):
         try:
@@ -1286,6 +1404,311 @@ class ProvedorWhatsApp(Provedor):
             return True
         except Exception:
             log.exception("não consegui apagar a conversa no celular")
+            return False
+
+    # ----------------------------------------- detalhes da conversa
+    def _eu(self, info):
+        """O participante do grupo que e esta conta, ou None."""
+        eu = self.cliente.get_me()
+        meus = {eu.JID.User, eu.LID.User} - {""}
+        for p in info.Participants:
+            if meus & {p.JID.User, p.LID.User, p.PhoneNumber.User}:
+                return p
+        return None
+
+    def _id_da_pessoa(self, p):
+        """O id da conversa particular com o participante (o telefone, e nao
+        o endereco LID, quando o WhatsApp informa)."""
+        return jid_texto(p.PhoneNumber) if p.PhoneNumber.User else \
+            jid_texto(self._numero_do_jid(p.JID))
+
+    def dados_do_contato(self, conversa_id):
+        dados = {}
+        if self.cliente is None or not self._conectada or \
+                "@" not in conversa_id:
+            return dados
+        usuario, servidor = jid_de_texto(conversa_id)
+        jid = self._numero_do_jid(_jid_obj(usuario, servidor))
+        if jid.Server == "s.whatsapp.net" and jid.User:
+            dados["telefone"] = "+" + jid.User
+        try:
+            apelido = self._apelidos.get(jid_texto(jid), "")
+            info = self.cliente.contact.get_contact(jid)
+            apelido = info.PushName or apelido
+            if apelido and not parece_codigo(apelido):
+                dados["nome_no_perfil"] = apelido
+        except Exception:
+            pass
+        try:
+            for u in self.cliente.get_user_info(jid):
+                if u.UserInfo.Status:
+                    dados["recado"] = u.UserInfo.Status
+                break
+        except Exception:
+            log.info("sem o recado do contato")
+        return dados
+
+    def detalhes_do_grupo(self, conversa_id):
+        if self.cliente is None or not self._conectada or \
+                not conversa_id.endswith("@g.us"):
+            return None
+        usuario, servidor = jid_de_texto(conversa_id)
+        info = self.cliente.get_group_info(_jid_obj(usuario, servidor))
+        eu = self._eu(info)
+        meus = {x.User for x in (self.cliente.get_me().JID,
+                                 self.cliente.get_me().LID)} - {""}
+        participantes = []
+        for p in info.Participants:
+            pessoa = self._numero_do_jid(p.JID) if not p.PhoneNumber.User \
+                else p.PhoneNumber
+            tel = "+" + pessoa.User if pessoa.Server == "s.whatsapp.net" \
+                and pessoa.User else ""
+            nome = self._nome_contato(pessoa, p.DisplayName)
+            if tel and nome == tel:
+                nome = p.DisplayName or tel
+            participantes.append({
+                "id": self._id_da_pessoa(p), "nome": nome, "telefone": tel,
+                "admin": bool(p.IsAdmin or p.IsSuperAdmin),
+                "dono": bool(p.IsSuperAdmin),
+                "eu": bool(meus & {p.JID.User, p.LID.User,
+                                   p.PhoneNumber.User})})
+        participantes.sort(key=lambda x: (not x["dono"], not x["admin"],
+                                          x["nome"].lower()))
+        dono = ""
+        if info.OwnerPN.User:
+            dono = self._nome_contato(info.OwnerPN)
+        subgrupos = []
+        if info.GroupParent.IsParent:
+            try:
+                for alvo in self.cliente.get_sub_groups(
+                        _jid_obj(usuario, servidor)):
+                    subgrupos.append((jid_texto(alvo.JID),
+                                      alvo.GroupName.Name or "Grupo"))
+            except Exception:
+                log.info("sem a lista de grupos da comunidade")
+        return {"subgrupos": subgrupos,
+            "nome": info.GroupName.Name, "descricao": info.GroupTopic.Topic,
+            "id_descricao": info.GroupTopic.TopicID,
+            "criado_em": float(info.GroupCreated or 0), "dono": dono,
+            "anuncio": bool(info.GroupAnnounce.IsAnnounce),
+            "trancado": bool(info.GroupLocked.isLocked),
+            "comunidade": bool(info.GroupParent.IsParent),
+            "da_comunidade": bool(info.GroupLinkedParent.LinkedParentJID.User),
+            "sou_admin": bool(eu is not None and (eu.IsAdmin or
+                                                  eu.IsSuperAdmin)),
+            "participantes": participantes}
+
+    def detalhes_do_canal(self, conversa_id):
+        if self.cliente is None or not self._conectada or \
+                not conversa_id.endswith("@newsletter"):
+            return None
+        usuario, servidor = jid_de_texto(conversa_id)
+        info = self.cliente.get_newsletter_info(_jid_obj(usuario, servidor))
+        meta, eu = info.ThreadMeta, info.ViewerMeta
+        papel = {1: "seguidor", 2: "visitante", 3: "administrador",
+                 4: "dono"}.get(int(eu.Role), "")
+        codigo = meta.InviteCode
+        return {
+            "nome": meta.Name.Text, "descricao": meta.Description.Text,
+            "seguidores": int(meta.SubscriberCount),
+            "verificado": int(meta.VerificationState) == 1,
+            "silenciado": int(eu.Mute) == 1, "papel": papel,
+            "criado_em": float(meta.CreationTime or 0),
+            "link": ("https://whatsapp.com/channel/" + codigo) if codigo
+            else "",
+            "sou_admin": papel in ("administrador", "dono")}
+
+    def grupos_em_comum(self, pessoa_id):
+        if self.cliente is None or not self._conectada:
+            return []
+        usuario = jid_de_texto(pessoa_id)[0]
+        alvo = self._numero_do_jid(_jid_obj(*jid_de_texto(pessoa_id)))
+        procurados = {usuario, alvo.User} - {""}
+        achados = []
+        for g in self.cliente.get_joined_groups():
+            for p in g.Participants:
+                if procurados & {p.JID.User, p.LID.User, p.PhoneNumber.User}:
+                    achados.append((jid_texto(g.JID), g.GroupName.Name
+                                    or "Grupo"))
+                    break
+        return sorted(achados, key=lambda g: g[1].lower())
+
+    def _jid_do_convite(self, msg, acao):
+        grupo = acao.get("grupo") or ""
+        convidou = msg.remetente or msg.conversa_id
+        return (_jid_obj(*jid_de_texto(grupo)) if grupo else None,
+                _jid_obj(*jid_de_texto(convidou)) if convidou else None)
+
+    def previa_do_convite(self, msg, acao):
+        if self.cliente is None or not self._conectada:
+            return {"erro": "Sem conexão com o WhatsApp."}
+        try:
+            grupo, convidou = self._jid_do_convite(msg, acao)
+            if grupo is not None and convidou is not None:
+                info = self.cliente.get_group_info_from_invite(
+                    grupo, convidou, acao["codigo"],
+                    int(acao.get("expira") or 0))
+            else:
+                info = self.cliente.get_group_info_from_link(acao["codigo"])
+        except Exception as e:
+            log.info("prévia do convite falhou: %s", type(e).__name__)
+            return {"erro": "O convite não vale mais ou foi cancelado."}
+        return {"nome": info.GroupName.Name or acao.get("nome") or "grupo",
+                "membros": len(info.Participants),
+                "descricao": info.GroupTopic.Topic, "ja_participa": bool(
+                    info.Participants and self._eu(info) is not None)}
+
+    def entrar_no_grupo(self, msg, acao):
+        if self.cliente is None or not self._conectada:
+            return False, "Sem conexão com o WhatsApp."
+        try:
+            grupo, convidou = self._jid_do_convite(msg, acao)
+            if grupo is not None and convidou is not None:
+                self.cliente.join_group_with_invite(
+                    grupo, convidou, acao["codigo"],
+                    int(acao.get("expira") or 0))
+            else:
+                self.cliente.join_group_with_link(acao["codigo"])
+        except Exception as e:
+            texto = str(e).lower()
+            log.warning("entrar no grupo falhou: %s", type(e).__name__)
+            if "already" in texto or "participant" in texto:
+                return False, "Você já está neste grupo."
+            if "approval" in texto or "request" in texto:
+                return True, ("O pedido para entrar foi enviado. Um "
+                              "administrador precisa aprovar.")
+            return False, ("O WhatsApp não deixou entrar (o convite pode "
+                           "ter expirado ou o grupo estar cheio).")
+        self._fila.put(self._atualizar_nomes_de_grupos)
+        return True, "Você entrou no grupo."
+
+    def administrar_grupo(self, conversa_id, acao, valor=None):
+        if self.cliente is None or not self._conectada:
+            return False, "Sem conexão com o WhatsApp."
+        from neonize.utils.enum import ParticipantChange
+        usuario, servidor = jid_de_texto(conversa_id)
+        jid = _jid_obj(usuario, servidor)
+        try:
+            if acao == "nome":
+                self.cliente.set_group_name(jid, valor)
+                self._renomear_grupo(conversa_id, valor)
+                return True, "Nome do grupo mudado."
+            if acao == "descricao":
+                info = self.cliente.get_group_info(jid)
+                self.cliente.set_group_topic(
+                    jid, info.GroupTopic.TopicID, uuid.uuid4().hex.upper(),
+                    valor)
+                return True, "Descrição do grupo mudada."
+            if acao == "anuncio":
+                self.cliente.set_group_announce(jid, bool(valor))
+                self._marcar_escrita_apos_mudanca(conversa_id)
+                return True, ("Agora só administradores enviam mensagens."
+                              if valor else "Agora todos enviam mensagens.")
+            if acao == "trancado":
+                self.cliente.set_group_locked(jid, bool(valor))
+                return True, ("Agora só administradores editam o grupo."
+                              if valor else "Agora todos editam o grupo.")
+            if acao in ("adicionar", "remover", "promover", "rebaixar"):
+                if acao == "adicionar":
+                    digitos = "".join(c for c in str(valor) if c.isdigit())
+                    if len(digitos) < 8:
+                        return False, "Digite o número com DDD e país."
+                    alvo = _jid_obj(digitos, "s.whatsapp.net")
+                else:
+                    alvo = _jid_obj(*jid_de_texto(valor))
+                mudanca = {"adicionar": ParticipantChange.ADD,
+                           "remover": ParticipantChange.REMOVE,
+                           "promover": ParticipantChange.PROMOTE,
+                           "rebaixar": ParticipantChange.DEMOTE}[acao]
+                resp = self.cliente.update_group_participants(
+                    jid, [alvo], mudanca)
+                for r in resp:
+                    if r.Error:
+                        return False, ("O WhatsApp recusou (erro %s)." %
+                                       r.Error)
+                return True, {"adicionar": "Participante adicionado.",
+                              "remover": "Participante removido.",
+                              "promover": "Agora é administrador.",
+                              "rebaixar": "Deixou de ser administrador."
+                              }[acao]
+            if acao in ("link", "revogar_link"):
+                return True, self.cliente.get_group_invite_link(
+                    jid, acao == "revogar_link")
+            if acao == "sair":
+                self.cliente.leave_group(jid)
+                return True, "Você saiu do grupo."
+        except Exception as e:
+            log.warning("administrar grupo (%s) falhou: %s", acao,
+                        type(e).__name__, exc_info=True)
+            return False, "O WhatsApp não aceitou (%s)." % type(e).__name__
+        return False, "Ação desconhecida."
+
+    def _marcar_escrita_apos_mudanca(self, cid):
+        self._fila.put(lambda: self._conferir_escrita(cid, True))
+
+    def administrar_canal(self, conversa_id, acao, valor=None):
+        if self.cliente is None or not self._conectada:
+            return False, "Sem conexão com o WhatsApp."
+        usuario, servidor = jid_de_texto(conversa_id)
+        jid = _jid_obj(usuario, servidor)
+        try:
+            if acao == "silenciar":
+                self.cliente.newsletter_toggle_mute(jid, bool(valor))
+                return True, ("Canal silenciado." if valor
+                              else "Som do canal reativado.")
+            if acao == "deixar_de_seguir":
+                self.cliente.unfollow_newsletter(jid)
+                return True, "Você deixou de seguir o canal."
+        except Exception as e:
+            log.warning("administrar canal (%s) falhou: %s", acao,
+                        type(e).__name__, exc_info=True)
+            return False, "O WhatsApp não aceitou (%s)." % type(e).__name__
+        return False, "Ação desconhecida."
+
+    JANELA_EDICAO = 15 * 60       # o WhatsApp deixa editar por 15 minutos
+
+    def editar_mensagem(self, msg, texto):
+        self._fila.put(lambda: self._editar(msg, texto))
+
+    def _editar(self, msg, texto):
+        try:
+            if self.cliente is None or not self._conectada:
+                raise ConnectionError("sem conexão")
+            nova = self._mensagem_de_texto(msg.conversa_id, texto,
+                                           msg.resposta_a)
+            self.cliente.edit_message(self._jid(msg.conversa_id), msg.id,
+                                      nova)
+        except Exception as e:
+            log.warning("edição falhou: %s: %s", type(e).__name__,
+                        str(e)[:200])
+            self._avisar("Não consegui editar a mensagem (%s)." % (
+                "sem conexão" if isinstance(e, ConnectionError)
+                else "o WhatsApp recusou, talvez já tenham passado 15 "
+                "minutos"), False)
+            return
+
+        def aplicar(x):
+            x.texto = texto
+            m.atualizar_extras(x, editada=True)
+        self._alterar(msg.conversa_id, msg.id, aplicar, "editada")
+        log.info("mensagem editada pelo TeleZapp")
+
+    SAI_DE_GRUPO = True
+
+    def sair_do_grupo(self, conversa_id):
+        """Sai do grupo (a conta deixa de ser participante). Bloqueia ate o
+        WhatsApp responder: chamar fora da thread da interface."""
+        if self.cliente is None or not self._conectada:
+            return False
+        usuario, servidor = jid_de_texto(conversa_id)
+        if servidor != "g.us":
+            return False
+        try:
+            self.cliente.leave_group(_jid_obj(usuario, servidor))
+            log.info("saiu do grupo a pedido do TeleZapp")
+            return True
+        except Exception:
+            log.exception("não consegui sair do grupo")
             return False
 
     def _ao_apagar_mensagem(self, cliente, evento):
@@ -1770,7 +2193,8 @@ class ProvedorWhatsApp(Provedor):
                 self._conversas[conversa_id] = conv
             elif not grupo and not canal and (
                     parece_codigo(conv.nome) or conv.nome == SEM_NOME or
-                    conv.nome.startswith("+")):
+                    conv.nome.startswith("+") or
+                    (self.conta.nome and conv.nome == self.conta.nome)):
                 # so com codigo, sem nome ou so com o telefone: tenta de novo
                 conv.nome = self._nome_contato(chat, pushname)
             if grupo and conv.nome == "Grupo" and \
@@ -1868,9 +2292,57 @@ class ProvedorWhatsApp(Provedor):
         self.banco.salvar_conversas([conv])
         self._publicar_conversas()
 
-    def _ao_grupo_mudou(self, cliente, evento):
-        """Alguem mudou os dados do grupo; aqui so o nome interessa."""
+    def conversa_aberta(self, conversa_id):
+        if conversa_id.endswith("@g.us"):
+            self._fila.put(lambda: self._conferir_escrita(conversa_id))
+
+    def _conferir_escrita(self, cid, forcar=False):
+        """Grupo so de administradores em que nao sou admin, ou grupo de que
+        saí ou fui removido: a conversa passa a ser so de leitura."""
+        agora = time.time()
+        if self.cliente is None or not self._conectada or (
+                not forcar and agora - self._escrita_conferida.get(cid, 0)
+                < 300):
+            return
+        self._escrita_conferida[cid] = agora
+        usuario, servidor = jid_de_texto(cid)
         try:
+            info = self.cliente.get_group_info(_jid_obj(usuario, servidor))
+        except Exception as e:
+            texto = str(e).lower()
+            if "403" in texto or "not-authorized" in texto or \
+                    "forbidden" in texto or "not in" in texto:
+                self._marcar_escrita(cid, False)       # nao participo mais
+            return
+        pode = True
+        if info.GroupAnnounce.IsAnnounce:
+            eu = self.cliente.get_me()
+            meus = {eu.JID.User, eu.LID.User} - {""}
+            for p in info.Participants:
+                if meus & {p.JID.User, p.LID.User, p.PhoneNumber.User}:
+                    pode = bool(p.IsAdmin or p.IsSuperAdmin)
+                    break
+        self._marcar_escrita(cid, pode)
+
+    def _marcar_escrita(self, cid, pode):
+        with self._trava:
+            conv = self._conversas.get(cid)
+            if conv is None or conv.somente_leitura == (not pode):
+                return
+            conv.somente_leitura = not pode
+        log.info("conversa de grupo: %s", "pode escrever" if pode else
+                 "somente leitura")
+        self.banco.atualizar_conversa(self.conta.id, cid,
+                                      somente_leitura=int(not pode))
+        self._publicar_conversas()
+
+    def _ao_grupo_mudou(self, cliente, evento):
+        """Alguem mudou os dados do grupo: o nome, e quem pode escrever."""
+        try:
+            if evento.HasField("Announce") or evento.Promote or \
+                    evento.Demote or evento.Leave:
+                cid = jid_texto(evento.JID)
+                self._fila.put(lambda: self._conferir_escrita(cid, True))
             if evento.HasField("Name"):
                 self._renomear_grupo(jid_texto(evento.JID), evento.Name.Name)
         except Exception:
@@ -1972,9 +2444,12 @@ class ProvedorWhatsApp(Provedor):
                 if ficha:
                     self.banco.salvar_fichas(
                         [(self.conta.id, cid, msg.id, ficha)])
-            conv = self._conversa(cid, chat_da_msg,
-                                  info.Pushname or nome_verificado(info), grupo,
-                                  msg.data)
+            # numa mensagem minha o nome de perfil e o meu, nao o da conversa
+            conv = self._conversa(
+                cid, chat_da_msg,
+                "" if origem.IsFromMe else (
+                    info.Pushname or nome_verificado(info)),
+                grupo, msg.data)
             if not grupo and conv.nome.startswith("+") and \
                     cid not in self._sem_nome_registrados:
                 self._sem_nome_registrados.add(cid)
@@ -2024,7 +2499,7 @@ class ProvedorWhatsApp(Provedor):
                     return
             grupo = bool(origem.IsGroup)
             minha = bool(origem.IsFromMe)
-            nome = info.Pushname or nome_verificado(info)
+            nome = "" if minha else (info.Pushname or nome_verificado(info))
             autor = ""
             if grupo and not minha:
                 autor = self._nome_contato(origem.Sender, nome)
@@ -2181,10 +2656,24 @@ class ProvedorWhatsApp(Provedor):
                             x.remetente or ("" if conversa_id.endswith(
                                 "@g.us") else conversa_id))
                     break
+        # resposta em particular a uma mensagem de grupo: a citada esta em
+        # outra conversa; o WhatsApp quer saber qual, e o texto e o autor
+        # vem de la
+        grupo_de_origem = ""
+        if not self.banco.mensagens_por_id(self.conta.id, [resposta_a],
+                                           conversa_id):
+            for x in self.banco.mensagens_por_id(self.conta.id,
+                                                 [resposta_a]):
+                grupo_de_origem = x.conversa_id
+                citado = citado or x.texto or m.conteudo(x)
+                remetente = remetente or x.remetente
+                break
         ctx = ContextInfo(stanzaID=resposta_a,
                           quotedMessage=Message(conversation=citado or ""))
         if remetente:
             ctx.participant = remetente
+        if grupo_de_origem:
+            ctx.remoteJID = grupo_de_origem
         return Message(extendedTextMessage=ExtendedTextMessage(
             text=texto, contextInfo=ctx))
 
@@ -2506,6 +2995,10 @@ class ProvedorWhatsApp(Provedor):
             origem = e.MessageSource
             cid = self._id_da_conversa(origem.Chat)
             tipo = int(e.Type)
+            if tipo in (RECIBO_LIDO_POR_MIM, RECIBO_OUVIDO_POR_MIM):
+                log.info("recibo de outro aparelho meu: %s (%d mensagens)",
+                         "lida" if tipo == RECIBO_LIDO_POR_MIM else "ouvida",
+                         len(e.MessageIDs))
             if tipo == RECIBO_LIDO_POR_MIM:
                 # lida no celular ou em outro aparelho
                 with self._trava:

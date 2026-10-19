@@ -8,6 +8,7 @@ grava texto de mensagens, telefones completos, codigos ou senhas.
 import asyncio
 import logging
 import os
+import re
 import threading
 import time
 
@@ -63,8 +64,35 @@ def _texto_extra(msg):
     if contato is not None:
         nome = " ".join(p for p in (getattr(contato, "first_name", ""),
                                     getattr(contato, "last_name", "")) if p)
-        return "contato: " + nome if nome else "contato"
+        telefone = getattr(contato, "phone_number", "") or ""
+        if telefone and not telefone.startswith("+"):
+            telefone = "+" + telefone
+        return ", ".join(p for p in (
+            "contato: " + nome if nome else "contato", telefone) if p)
     return ""
+
+
+def somente_leitura_do_telegram(ent):
+    """A conta nao pode escrever neste chat? Canal em que nao posta, grupo
+    que so administradores usam, grupo de que saiu ou que foi desativado."""
+    if ent is None:
+        return False
+    nome = type(ent).__name__
+    if nome in ("ChatForbidden", "ChannelForbidden") or \
+            getattr(ent, "left", False) or getattr(ent, "deactivated", False):
+        return True
+    direitos = getattr(ent, "admin_rights", None)
+    admin = bool(getattr(ent, "creator", False) or direitos)
+    if getattr(ent, "broadcast", False):
+        return not (getattr(ent, "creator", False) or (
+            direitos is not None and getattr(direitos, "post_messages",
+                                             False)))
+    for campo in ("banned_rights", "default_banned_rights"):
+        r = getattr(ent, campo, None)
+        if r is not None and getattr(r, "send_messages", False):
+            return not admin or campo == "banned_rights" and not (
+                getattr(ent, "creator", False))
+    return False
 
 
 def nome_de(entidade):
@@ -110,6 +138,41 @@ def _url_do_botao(botao):
     return ""
 
 
+RE_CONVITE_TELEGRAM = re.compile(
+    r"(?:t(?:elegram)?\.me/(?:\+|joinchat/)|tg://join\?invite=)"
+    r"([A-Za-z0-9_-]{10,})", re.I)
+RE_PUBLICO_TELEGRAM = re.compile(
+    r"(?:^|[/@])(?:https?://)?(?:t|telegram)\.me/([A-Za-z][A-Za-z0-9_]{3,31})"
+    r"/?(?:\?.*)?$", re.I)
+RESERVADOS_TELEGRAM = {"joinchat", "addstickers", "addemoji", "share",
+                       "proxy", "socks", "login", "setlanguage", "addtheme",
+                       "bg", "boost", "iv", "invoice", "contact", "c", "s",
+                       "m", "giftcode", "confirmphone"}
+
+
+def entradas_do_telegram(links):
+    """Botoes "Entrar" para os links de convite (t.me/+codigo, joinchat) e
+    de grupos e canais publicos (t.me/nome). Tipo "entrar" nas acoes."""
+    entradas, vistos = [], set()
+    for url, _texto in links:
+        achou = RE_CONVITE_TELEGRAM.search(url)
+        if achou and achou.group(1) not in vistos:
+            vistos.add(achou.group(1))
+            entradas.append({"tipo": "entrar", "modo": "convite",
+                             "codigo": achou.group(1),
+                             "rotulo": "Entrar no grupo ou canal (convite)"})
+            continue
+        publico = RE_PUBLICO_TELEGRAM.search(url)
+        if publico and publico.group(1).lower() not in RESERVADOS_TELEGRAM \
+                and "usuario:" + publico.group(1).lower() not in vistos:
+            vistos.add("usuario:" + publico.group(1).lower())
+            entradas.append({"tipo": "entrar", "modo": "publico",
+                             "usuario": publico.group(1),
+                             "rotulo": "Entrar em @%s (grupo ou canal)" %
+                             publico.group(1)})
+    return entradas
+
+
 def extras_do_telegram(msg):
     """(links, botoes, mencoes) de uma mensagem do Telethon.
 
@@ -141,6 +204,17 @@ def extras_do_telegram(msg):
             nova = {"id": str(ent.user_id), "nome": visivel}
             if nova not in mencoes:
                 mencoes.append(nova)
+    contato = getattr(msg, "contact", None)
+    if contato is not None:
+        nome_c = " ".join(p for p in (getattr(contato, "first_name", ""),
+                                      getattr(contato, "last_name", "")) if p)
+        telefone = getattr(contato, "phone_number", "") or ""
+        if telefone and not telefone.startswith("+"):
+            telefone = "+" + telefone
+        id_c = getattr(contato, "user_id", 0) or 0
+        if nome_c or telefone:
+            mencoes.append({"nome": nome_c, "telefone": telefone,
+                            "id": str(id_c) if id_c else ""})
     botoes = []
     markup = getattr(msg, "reply_markup", None)
     for linha in getattr(markup, "rows", None) or []:
@@ -186,7 +260,8 @@ def converter(msg, conta_id, conversa_id, lidas_ate=0, nome_padrao=""):
         nome_arquivo=nome_arquivo, tamanho=tamanho, estado=estado,
         resposta_a=str(resposta_a) if resposta_a else "")
     links, botoes, mencoes = extras_do_telegram(msg)
-    m.guardar_extras(nova, links, botoes, mencoes)
+    m.guardar_extras(nova, links, botoes, mencoes,
+                     acoes=entradas_do_telegram(links))
     # voz ou audio que o Telegram diz ja ter sido tocado (em outro aparelho)
     if not minha and tipo in (m.VOZ, m.AUDIO) and \
             getattr(msg, "media_unread", None) is False:
@@ -569,7 +644,9 @@ class ProvedorTelegram(Provedor):
                     lidas_ate=getattr(d.dialog, "read_outbox_max_id", 0) or 0,
                     arquivada=pasta == 1,
                     fixada=bool(getattr(d, "pinned", False)),
-                    silenciada_ate=silencio_do_dialogo(d))
+                    silenciada_ate=silencio_do_dialogo(d),
+                    somente_leitura=somente_leitura_do_telegram(
+                        getattr(d, "entity", None)))
                 self._conversas[cid] = c
                 lista.append(c)
         self.banco.salvar_conversas(lista)
@@ -608,6 +685,264 @@ class ProvedorTelegram(Provedor):
         if entidade is None:
             return False
         self._agendar(self.cliente.edit_folder(entidade, 1 if arquivar else 0))
+        return True
+
+    # ----------------------------------------- detalhes da conversa
+    def _sincrono(self, corotina, tempo=20):
+        futuro = self._agendar(corotina)
+        if futuro is None:
+            return None
+        try:
+            return futuro.result(tempo)
+        except Exception:
+            log.info("consulta ao Telegram sem resposta")
+            return None
+
+    def dados_do_contato(self, conversa_id):
+        async def ler():
+            ent = await self.cliente.get_entity(int(conversa_id))
+            dados = {}
+            if getattr(ent, "phone", None):
+                dados["telefone"] = "+" + ent.phone.lstrip("+")
+            if getattr(ent, "username", None):
+                dados["usuario"] = "@" + ent.username
+            return dados
+        return self._sincrono(ler()) or {}
+
+    def detalhes_do_grupo(self, conversa_id):
+        async def ler():
+            from telethon.tl import functions, types as T
+            ent = await self.cliente.get_entity(int(conversa_id))
+            gente = []
+            async for u in self.cliente.iter_participants(ent, limit=500):
+                papel = type(getattr(u, "participant", None)).__name__
+                gente.append({
+                    "id": str(u.id), "nome": nome_de(u),
+                    "telefone": ("+" + u.phone) if getattr(u, "phone", None)
+                    else "", "usuario": ("@" + u.username)
+                    if getattr(u, "username", None) else "",
+                    "admin": "Admin" in papel or "Creator" in papel,
+                    "dono": "Creator" in papel, "eu": bool(
+                        getattr(u, "is_self", False))})
+            gente.sort(key=lambda x: (not x["dono"], not x["admin"],
+                                      x["nome"].lower()))
+            sobre = ""
+            try:
+                if isinstance(ent, T.Channel):
+                    cheio = await self.cliente(
+                        functions.channels.GetFullChannelRequest(ent))
+                else:
+                    cheio = await self.cliente(
+                        functions.messages.GetFullChatRequest(ent.id))
+                sobre = cheio.full_chat.about or ""
+            except Exception:
+                pass
+            direitos = getattr(ent, "admin_rights", None)
+            return {
+                "nome": nome_de(ent), "descricao": sobre, "dono": "",
+                "criado_em": ent.date.timestamp() if getattr(
+                    ent, "date", None) else 0.0,
+                "anuncio": bool(getattr(getattr(
+                    ent, "default_banned_rights", None), "send_messages",
+                    False)),
+                "trancado": bool(getattr(getattr(
+                    ent, "default_banned_rights", None), "change_info",
+                    False)), "comunidade": False,
+                "da_comunidade": False,
+                "sou_admin": bool(getattr(ent, "creator", False) or direitos),
+                "participantes": gente}
+        return self._sincrono(ler(), 40)
+
+    def previa_do_convite(self, msg, acao):
+        return self._sincrono(self._previa(acao), 25) or {
+            "erro": "O Telegram não respondeu."}
+
+    async def _previa(self, acao):
+        from telethon.tl import functions, types as T
+        try:
+            if acao.get("modo") == "convite":
+                r = await self.cliente(functions.messages.CheckChatInviteRequest(
+                    acao["codigo"]))
+                if isinstance(r, T.ChatInviteAlready):
+                    return {"nome": nome_de(r.chat), "membros": 0,
+                            "descricao": "", "ja_participa": True}
+                return {"nome": r.title,
+                        "membros": int(r.participants_count or 0),
+                        "descricao": getattr(r, "about", "") or "",
+                        "ja_participa": False}
+            ent = await self.cliente.get_entity(acao["usuario"])
+            if isinstance(ent, T.User):
+                return {"erro": "Este endereço é de uma pessoa ou de um bot, "
+                                "não de um grupo ou canal."}
+            return {"nome": nome_de(ent), "membros": int(
+                getattr(ent, "participants_count", 0) or 0), "descricao": "",
+                "ja_participa": bool(not getattr(ent, "left", True))}
+        except Exception as e:
+            log.info("prévia do convite falhou: %s", type(e).__name__)
+            return {"erro": "O convite não vale mais ou foi cancelado."}
+
+    def entrar_no_grupo(self, msg, acao):
+        return self._sincrono(self._entrar(acao), 30) or (
+            False, "O Telegram não respondeu.")
+
+    async def _entrar(self, acao):
+        from telethon import errors
+        from telethon.tl import functions
+        try:
+            if acao.get("modo") == "convite":
+                await self.cliente(functions.messages.ImportChatInviteRequest(
+                    acao["codigo"]))
+            else:
+                ent = await self.cliente.get_entity(acao["usuario"])
+                await self.cliente(functions.channels.JoinChannelRequest(ent))
+        except errors.InviteRequestSentError:
+            return True, ("O pedido para entrar foi enviado. Um "
+                          "administrador precisa aprovar.")
+        except errors.UserAlreadyParticipantError:
+            return False, "Você já está neste grupo ou canal."
+        except Exception as e:
+            log.warning("entrar falhou: %s", type(e).__name__)
+            return False, ("O Telegram não deixou entrar (%s)." %
+                           type(e).__name__)
+        self._agendar(self._atualizar_conversas())
+        return True, "Você entrou."
+
+    def administrar_grupo(self, conversa_id, acao, valor=None):
+        resposta = self._sincrono(
+            self._administrar(conversa_id, acao, valor), 45)
+        return resposta or (False, "O Telegram não respondeu.")
+
+    async def _administrar(self, cid, acao, valor):
+        from telethon.tl import functions, types as T
+        try:
+            ent = await self.cliente.get_entity(int(cid))
+            peer = await self.cliente.get_input_entity(ent)
+            canal = isinstance(ent, T.Channel)
+            if acao == "nome":
+                if canal:
+                    await self.cliente(functions.channels.EditTitleRequest(
+                        ent, valor))
+                else:
+                    await self.cliente(
+                        functions.messages.EditChatTitleRequest(
+                            ent.id, valor))
+                return True, "Nome do grupo mudado."
+            if acao == "descricao":
+                await self.cliente(functions.messages.EditChatAboutRequest(
+                    peer, valor))
+                return True, "Descrição do grupo mudada."
+            if acao in ("anuncio", "trancado"):
+                atuais = getattr(ent, "default_banned_rights", None)
+                flags = {k: v for k, v in (atuais.to_dict().items()
+                                           if atuais else [])
+                         if isinstance(v, bool)}
+                flags["send_messages" if acao == "anuncio"
+                      else "change_info"] = bool(valor)
+                await self.cliente(
+                    functions.messages.EditChatDefaultBannedRightsRequest(
+                        peer, T.ChatBannedRights(until_date=None, **flags)))
+                if acao == "anuncio":
+                    return True, ("Agora só administradores enviam "
+                                  "mensagens." if valor else
+                                  "Agora todos enviam mensagens.")
+                return True, ("Agora só administradores editam o grupo."
+                              if valor else "Agora todos editam o grupo.")
+            if acao == "adicionar":
+                texto = str(valor).strip()
+                digitos = "".join(c for c in texto if c.isdigit())
+                alvo = texto if texto.startswith("@") else (
+                    "+" + digitos if digitos else "")
+                if not alvo:
+                    return False, "Digite @usuário ou o telefone com país."
+                usuario = await self.cliente.get_entity(alvo)
+                if canal:
+                    await self.cliente(functions.channels.InviteToChannelRequest(
+                        ent, [usuario]))
+                else:
+                    await self.cliente(functions.messages.AddChatUserRequest(
+                        ent.id, usuario, fwd_limit=50))
+                return True, "Participante adicionado."
+            if acao in ("remover", "promover", "rebaixar"):
+                usuario = await self.cliente.get_entity(int(valor))
+                if acao == "remover":
+                    await self.cliente.kick_participant(ent, usuario)
+                    return True, "Participante removido."
+                if acao == "promover":
+                    await self.cliente.edit_admin(
+                        ent, usuario, is_admin=True, change_info=True,
+                        delete_messages=True, ban_users=True,
+                        invite_users=True, pin_messages=True)
+                    return True, "Agora é administrador."
+                await self.cliente.edit_admin(ent, usuario, is_admin=False)
+                return True, "Deixou de ser administrador."
+            if acao in ("link", "revogar_link"):
+                convite = await self.cliente(
+                    functions.messages.ExportChatInviteRequest(
+                        peer, legacy_revoke_permanent=(
+                            True if acao == "revogar_link" else None)))
+                return True, convite.link
+            if acao == "sair":
+                await self.cliente.delete_dialog(ent)
+                return True, "Você saiu do grupo."
+        except Exception as e:
+            log.warning("administrar grupo (%s) falhou: %s", acao,
+                        type(e).__name__)
+            return False, "O Telegram não aceitou (%s)." % type(e).__name__
+        return False, "Ação desconhecida."
+
+    def detalhes_do_canal(self, conversa_id):
+        async def ler():
+            from telethon.tl import functions
+            ent = await self.cliente.get_entity(int(conversa_id))
+            cheio = await self.cliente(
+                functions.channels.GetFullChannelRequest(ent))
+            direitos = getattr(ent, "admin_rights", None)
+            usuario = getattr(ent, "username", None)
+            return {
+                "nome": nome_de(ent), "descricao": cheio.full_chat.about or "",
+                "seguidores": int(cheio.full_chat.participants_count or 0),
+                "verificado": bool(getattr(ent, "verified", False)),
+                "silenciado": False, "papel": (
+                    "dono" if getattr(ent, "creator", False) else
+                    "administrador" if direitos else "seguidor"),
+                "criado_em": ent.date.timestamp() if getattr(
+                    ent, "date", None) else 0.0,
+                "link": ("https://t.me/" + usuario) if usuario else "",
+                "sou_admin": bool(getattr(ent, "creator", False) or direitos)}
+        return self._sincrono(ler(), 30)
+
+    JANELA_EDICAO = 48 * 3600     # o Telegram deixa editar por 48 horas
+
+    def editar_mensagem(self, msg, texto):
+        self._agendar(self._editar(msg, texto))
+
+    async def _editar(self, msg, texto):
+        try:
+            ent = await self._entidade(msg.conversa_id)
+            await self.cliente.edit_message(ent, int(msg.id), texto)
+        except Exception as e:
+            log.warning("edição falhou: %s", type(e).__name__)
+            self._avisar("Não consegui editar a mensagem (%s)." %
+                         type(e).__name__, False)
+            return
+        x = self.banco.mensagem(self.conta.id, msg.conversa_id, msg.id)
+        if x is None:
+            return
+        x.texto = texto
+        m.atualizar_extras(x, editada=True)
+        self.banco.salvar_mensagens([x])
+        self.barramento.publicar(ev.MensagemAtualizada(
+            self.conta.id, msg.conversa_id, x, "editada"))
+
+    SAI_DE_GRUPO = True
+
+    def sair_do_grupo(self, conversa_id):
+        """Sai do grupo (no Telegram, sair apaga tambem o historico da
+        conta)."""
+        entidade = self._entidades.get(conversa_id)
+        if entidade is None:
+            return False
+        self._agendar(self.cliente.delete_dialog(entidade))
         return True
 
     async def _resolver_mencoes(self, mensagens):
@@ -931,7 +1266,8 @@ class ProvedorTelegram(Provedor):
                     conta_id=self.conta.id, id=cid,
                     nome=nome_de(chat) or "Sem nome", servico=self.servico,
                     tipo="grupo" if evento.is_group else (
-                        "canal" if evento.is_channel else "privada"))
+                        "canal" if evento.is_channel else "privada"),
+                    somente_leitura=somente_leitura_do_telegram(chat))
                 self._conversas[cid] = conv
             if not getattr(msg, "out", False) and msg.sender is None:
                 await evento.get_sender()

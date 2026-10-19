@@ -409,6 +409,58 @@ def escolher_arquivo(pai, pasta=""):
         dlg.Destroy()
 
 
+def escolher_acao_grupo(pai, nome, pode_sair):
+    """O que fazer com a conversa de um grupo: "limpar" (apaga as mensagens e
+    mantem o grupo na lista), "apagar" (tira da lista), "sair" (sai do grupo
+    e mantem a conversa) ou "sair_apagar". None se cancelar. Sem `pode_sair`
+    (conta desconectada ou servico que nao sai), so as duas primeiras."""
+    dlg = wx.Dialog(pai, title="Apagar conversa do grupo")
+    lay = wx.BoxSizer(wx.VERTICAL)
+    texto = ("O que fazer com a conversa do grupo %s? Limpar conversa apaga "
+             "as mensagens e as mídias daqui, e o grupo continua na lista. "
+             "Apagar da lista de conversas tira o grupo da lista; ele volta "
+             "se chegar mensagem nova. Sair do grupo tira a sua conta do "
+             "grupo." % nome)
+    lay.Add(wx.StaticText(dlg, label=texto), 0, wx.ALL, 10)
+    opcoes = [("&Limpar conversa", "limpar"),
+              ("&Apagar da lista de conversas", "apagar")]
+    if pode_sair:
+        opcoes += [("&Sair do grupo", "sair"),
+                   ("Sair do grupo e apagar da &lista", "sair_apagar")]
+    escolhida = []
+    caixa = wx.BoxSizer(wx.VERTICAL)
+    for rotulo, chave in opcoes:
+        b = wx.Button(dlg, wx.ID_ANY, rotulo)
+        b.Bind(wx.EVT_BUTTON,
+               lambda e, c=chave: (escolhida.append(c),
+                                   dlg.EndModal(wx.ID_OK)))
+        caixa.Add(b, 0, wx.EXPAND | wx.BOTTOM, 6)
+    caixa.Add(wx.Button(dlg, wx.ID_CANCEL, "Cancelar"), 0, wx.EXPAND)
+    lay.Add(caixa, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+    dlg.SetSizerAndFit(lay)
+    dlg.SetEscapeId(wx.ID_CANCEL)
+    dlg.CentreOnParent()
+    try:
+        dlg.ShowModal()
+    finally:
+        dlg.Destroy()
+    return escolhida[0] if escolhida else None
+
+
+def escolher_destino_zip(pai, nome, pasta=""):
+    """Janela do Windows para escolher onde gravar o .zip; None se cancelar."""
+    dlg = wx.FileDialog(pai, "Salvar o conteúdo da conversa", defaultDir=pasta,
+                        defaultFile=nome, wildcard="Arquivo zip|*.zip",
+                        style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT)
+    try:
+        if dlg.ShowModal() != wx.ID_OK:
+            return None
+        caminho = dlg.GetPath()
+        return caminho if caminho.lower().endswith(".zip")             else caminho + ".zip"
+    finally:
+        dlg.Destroy()
+
+
 def mostrar_mensagem(pai, titulo, texto, copiar):
     """O texto de uma mensagem, somente leitura, com os botoes Copiar texto
     e Fechar (Esc tambem fecha). `copiar(texto)` copia e avisa a pessoa."""
@@ -435,14 +487,15 @@ def mostrar_mensagem(pai, titulo, texto, copiar):
     dlg.Destroy()
 
 
-def mostrar_depuracao(pai, titulo, texto, copiar, salvar):
+def mostrar_depuracao(pai, titulo, texto, copiar, salvar,
+                      rotulo="Texto de depuração"):
     """Texto de depuracao somente leitura, com os botoes Copiar tudo e
     Salvar em arquivo. `copiar(texto)` e `salvar(texto)` fazem o trabalho e
     avisam a pessoa; a janela so os chama."""
     dlg = wx.Dialog(pai, title=titulo, size=(700, 560),
                     style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
-    rot = wx.StaticText(dlg, label="Texto de depuração")
-    caixa = wx.TextCtrl(dlg, value=texto, name="Texto de depuração",
+    rot = wx.StaticText(dlg, label=rotulo)
+    caixa = wx.TextCtrl(dlg, value=texto, name=rotulo,
                         style=wx.TE_MULTILINE | wx.TE_READONLY)
     b_copiar = wx.Button(dlg, wx.ID_ANY, "&Copiar tudo")
     b_salvar = wx.Button(dlg, wx.ID_ANY, "&Salvar em arquivo")

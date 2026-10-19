@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS conversas (
     trancada INTEGER NOT NULL DEFAULT 0,
     fixada INTEGER NOT NULL DEFAULT 0,
     silenciada_ate REAL NOT NULL DEFAULT 0,
+    somente_leitura INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (conta_id, id)
 );
 CREATE TABLE IF NOT EXISTS mensagens (
@@ -179,6 +180,9 @@ class Banco:
         if "silenciada_ate" not in conv:
             self._con.execute("ALTER TABLE conversas ADD COLUMN "
                               "silenciada_ate REAL NOT NULL DEFAULT 0")
+        if "somente_leitura" not in conv:
+            self._con.execute("ALTER TABLE conversas ADD COLUMN "
+                              "somente_leitura INTEGER NOT NULL DEFAULT 0")
         colunas = {linha[1] for linha in self._con.execute(
             "PRAGMA table_info(mensagens)")}
         if "remetente" not in colunas:
@@ -215,6 +219,16 @@ class Banco:
     def limpar_depuracao(self):
         with self._trava, self._con:
             self._con.execute("DELETE FROM depuracao")
+
+    def copiar_para(self, caminho):
+        """Grava uma copia consistente do banco (para o backup), mesmo com
+        ele em uso."""
+        with self._trava:
+            destino = sqlite3.connect(caminho)
+            try:
+                self._con.backup(destino)
+            finally:
+                destino.close()
 
     def fechar(self):
         with self._trava:
@@ -363,6 +377,13 @@ class Banco:
                 % ", ".join("?" * len(remetentes)),
                 (conta_id, *remetentes)).fetchone()
         return linha[0] if linha else ""
+
+    def contar_mensagens(self, tipo):
+        """Quantas mensagens guardadas tem esse tipo."""
+        with self._trava:
+            return self._con.execute(
+                "SELECT COUNT(*) FROM mensagens WHERE tipo=?",
+                (tipo,)).fetchone()[0]
 
     def mensagem(self, conta_id, conversa_id, mensagem_id):
         with self._trava:

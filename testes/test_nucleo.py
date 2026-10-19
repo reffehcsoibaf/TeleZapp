@@ -376,3 +376,141 @@ def test_nova_mensagem_tipo_de_destino_e_candidatos():
     assert len(nm.candidatos("", contatos, conversas)) == 2   # vazio: todos
     assert nm.rotulo("Ana", "+55") == "Ana, +55" and nm.rotulo("Ana") == "Ana"
     assert nm.candidatos("zzz", contatos, conversas) == []
+
+
+# ------------------------------------------------- copiar por tipo de conteudo
+def test_copiar_so_texto_tem_um_item():
+    assert m.conteudos_copiaveis(msg(texto="oi")) == [
+        ("texto", "Copiar texto", "oi")]
+
+
+def test_copiar_foto_com_legenda_e_link_tem_um_item_por_tipo():
+    foto = msg(tipo=m.FOTO, texto="veja https://x.com/a")
+    assert m.conteudos_copiaveis(foto) == [
+        ("texto", "Copiar legenda", "veja https://x.com/a"),
+        ("midia", "Copiar foto", ""),
+        ("link", "Copiar link", "https://x.com/a")]
+
+
+def test_copiar_midia_sem_legenda_nem_link_so_a_midia():
+    assert m.conteudos_copiaveis(msg(tipo=m.VOZ, texto="")) == [
+        ("midia", "Copiar mensagem de voz", "")]
+    assert [t for t, _, _ in m.conteudos_copiaveis(
+        msg(tipo=m.DOCUMENTO))] == ["midia"]
+
+
+def test_copiar_varios_links_diz_qual_e_qual():
+    txt = msg(texto="https://a.com e https://b.com")
+    itens = m.conteudos_copiaveis(txt)
+    assert [t for t, _, _ in itens] == ["texto", "link", "link"]
+    assert itens[1][2] == "https://a.com" and itens[2][2] == "https://b.com"
+    assert itens[1][1] != itens[2][1]
+
+
+def test_copiar_sem_nada_cai_no_texto_falado():
+    apagada = m.atualizar_extras(msg(texto="x"), apagada=True)
+    assert m.conteudos_copiaveis(apagada) == [
+        ("texto", "Copiar texto", "mensagem apagada")]
+    outro = msg(tipo=m.OUTRO, texto="")
+    assert m.conteudos_copiaveis(outro)[0][0] == "texto"
+
+
+# --------------------------------------------------- salvar a conversa (zip)
+def test_salvar_conversa_grava_texto_e_midias(tmp_path):
+    import zipfile
+    from telezapp.nucleo import exportar
+    foto = tmp_path / "f.jpg"
+    foto.write_bytes(b"JPG")
+    conv = m.Conversa("t1", "10", "Ana/Silva", "whatsapp")
+    msgs = [msg(id="1", texto="oi\ntudo bem", data=AGORA),
+            msg(id="2", tipo=m.FOTO, texto="olha", nome_arquivo="f.jpg",
+                minha=True, data=AGORA + 5),
+            msg(id="3", tipo=m.VOZ, data=AGORA + 9)]
+    destino = tmp_path / "saida.zip"
+    n, midias = exportar.gravar_zip(
+        str(destino), conv, msgs, lambda x: str(foto) if x.id == "2" else None)
+    assert (n, midias) == (3, 1)
+    with zipfile.ZipFile(destino) as z:
+        nomes = z.namelist()
+        texto = z.read("conversa.txt").decode("utf-8-sig")
+    assert any(x.startswith("midias/") and x.endswith("_f.jpg")
+               for x in nomes)
+    assert "Ana: oi\n    tudo bem" in texto
+    assert "Você: foto, legenda: olha (midias/" in texto
+    assert "mensagem de voz" in texto
+    assert exportar.nome_sugerido(conv) == "Conversa com Ana_Silva.zip"
+
+
+def test_salvar_conversa_com_erro_nao_deixa_arquivo(tmp_path):
+    import pytest
+    from telezapp.nucleo import exportar
+    conv = m.Conversa("t1", "10", "Ana")
+    destino = tmp_path / "x.zip"
+
+    def quebra(x):
+        raise RuntimeError("falhou")
+    with pytest.raises(RuntimeError):
+        exportar.gravar_zip(str(destino), conv,
+                            [msg(tipo=m.FOTO)], quebra)
+    assert not destino.exists()
+
+
+def test_salvar_conversa_identifica_quem_enviou():
+    from telezapp.nucleo import exportar as ex
+    priv = m.Conversa("t1", "10", "Ana Souza", "whatsapp", "privada")
+    grupo = m.Conversa("t1", "g", "Turma", "whatsapp", "grupo")
+    sem_autor = msg(autor="", remetente="5551999998888@s.whatsapp.net")
+    assert m.quem_enviou(msg(minha=True), priv) == "Você"
+    assert m.quem_enviou(msg(autor="Bia"), grupo) == "Bia"
+    assert m.quem_enviou(sem_autor, priv) == "Ana Souza"
+    assert m.quem_enviou(sem_autor, grupo, lambda x: "Carlos") == "Carlos"
+    assert m.quem_enviou(sem_autor, grupo) == "+5551999998888"
+    assert m.quem_enviou(msg(autor="", remetente="1234@lid"),
+                          grupo) == "1234@lid"
+    assert m.quem_enviou(msg(autor=""), grupo) == "Desconhecido"
+
+
+def test_mensagem_que_o_telezapp_entende_nao_diz_sem_suporte():
+    assert m.conteudo(msg(tipo=m.OUTRO, texto="contato: Ana, +5551")) == \
+        "contato: Ana, +5551"
+    assert m.conteudo(msg(tipo=m.OUTRO, texto="localização")) == "localização"
+    assert m.conteudo(msg(tipo=m.OUTRO, texto="tipo do WhatsApp: xyz")) == \
+        "mensagem sem suporte ainda, tipo do WhatsApp: xyz"
+    assert m.conteudo(msg(tipo=m.OUTRO, texto="")) == \
+        "mensagem sem suporte ainda"
+
+
+# ------------------------------------------------------------- encaminhar
+def test_encaminhar_prepara_texto_midia_baixada_e_explica_o_resto(tmp_path):
+    from telezapp.nucleo import encaminhar as enc
+    arq = tmp_path / "f.jpg"
+    arq.write_bytes(b"JPG")
+    item, _ = enc.preparar(msg(texto="oi"), lambda x: None)
+    assert (item.tipo, item.texto) == ("texto", "oi")
+    foto = msg(tipo=m.FOTO, texto="praia")
+    item, _ = enc.preparar(foto, lambda x: str(arq))
+    assert (item.tipo, item.caminho, item.texto) == ("arquivo", str(arq),
+                                                     "praia")
+    item, motivo = enc.preparar(foto, lambda x: None)
+    assert item is None and "não baixado" in motivo
+    voz, _ = enc.preparar(msg(tipo=m.VOZ, texto="x"), lambda x: str(arq))
+    assert voz.texto == ""                       # voz nao tem legenda
+    contato, _ = enc.preparar(msg(tipo=m.OUTRO, texto="contato: Ana"),
+                              lambda x: None)
+    assert contato.texto == "contato: Ana"
+    apagada = m.atualizar_extras(msg(texto="x"), apagada=True)
+    assert enc.preparar(apagada, lambda x: None)[0] is None
+
+
+def test_encaminhar_destinos_so_de_contas_conectadas_sem_repetir():
+    from telezapp.nucleo import encaminhar as enc
+    conversas = [m.Conversa("a", "1", "Bia"), m.Conversa("a", "2", "Ana"),
+                 m.Conversa("b", "3", "Caio"),
+                 m.Conversa("a", "9", "Secreta", trancada=True)]
+    contatos = [("a", "1", "Bia", ""), ("a", "7", "Dora", "+55"),
+                ("b", "8", "Eva", "")]
+    d = enc.destinos(conversas, contatos, lambda c: c == "a")
+    assert [x[2] for x in d] == ["Ana", "Bia", "Dora"]
+    assert [x[2] for x in enc.filtrar(d, "bi")] == ["Bia"]
+    assert len(enc.destinos(conversas, [], lambda c: True,
+                            trancadas=True)) == 4

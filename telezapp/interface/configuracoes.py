@@ -8,9 +8,13 @@ OK, Cancelar e Aplicar. A descricao de cada opcao e falada pelo programa
 logo depois do foco (F1 repete); nao e um texto da janela, porque o NVDA le
 todos os textos fixos de uma janela ao abri-la.
 """
+import os
 import threading
 
 import wx
+
+from telezapp import config
+from telezapp.acessibilidade.fala import bipe
 
 from telezapp.nucleo.configuracoes import (CATEGORIA_BUSCA,
                                            ModeloConfiguracoes)
@@ -18,7 +22,7 @@ from telezapp.nucleo.configuracoes import (CATEGORIA_BUSCA,
 
 class DialogoConfiguracoes(wx.Dialog):
     def __init__(self, pai, cfg, aplicador, categoria_inicial=None,
-                 fala=None, privacidade=None):
+                 fala=None, privacidade=None, ia=None):
         """aplicador(chave, valor) executa uma mudanca (efeitos incluidos)."""
         super().__init__(pai, title="Configurações do TeleZapp",
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
@@ -27,6 +31,7 @@ class DialogoConfiguracoes(wx.Dialog):
         self.fala = fala
         # contas do WhatsApp e leitura da privacidade delas (ver janela)
         self.privacidade = privacidade
+        self.ia = ia                 # chaves e testes dos provedores de IA
         self._espera = None          # fala da descricao agendada
         self._opcao_em_foco = None
         self.Bind(wx.EVT_CHAR_HOOK, self._ao_tecla)
@@ -134,11 +139,69 @@ class DialogoConfiguracoes(wx.Dialog):
         if categoria == "Privacidade" and self.privacidade is not None \
                 and not self.modelo.busca.strip():
             self._criar_privacidade_conta()
+        if categoria == "Inteligência artificial" and self.ia is not None \
+                and not self.modelo.busca.strip():
+            self._criar_ia()
         self.painel.Layout()
         self.painel.FitInside()
 
+    def _criar_som(self, o):
+        """Som de um evento: uma caixa com o som padrao, sem som, o arquivo
+        escolhido e "Escolher um arquivo...", e o botao Ouvir."""
+        p = self.painel
+        self.lay_painel.Add(wx.StaticText(p, label=o.rotulo + ":"), 0,
+                            wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        c = wx.Choice(p, name=o.rotulo)
+        botao = wx.Button(p, label="Ouvir o " + o.rotulo.lower())
+        linha = wx.BoxSizer(wx.HORIZONTAL)
+        linha.Add(c, 0, wx.RIGHT, 8)
+        linha.Add(botao, 0)
+
+        def montar(valor):
+            itens = [("", "Som padrão do TeleZapp"), ("desligado", "Sem som")]
+            if valor not in ("", "desligado"):
+                itens.append((valor, "Arquivo: " + os.path.basename(valor)))
+            itens.append((None, "Escolher um arquivo de som..."))
+            c.Set([r for _, r in itens])
+            c.SetSelection([v for v, _ in itens].index(valor))
+            c.itens = itens
+
+        def escolheu(evt):
+            valor = c.itens[c.GetSelection()][0]
+            if valor is None:
+                atual = self.modelo.valor(o.chave)
+                dlg = wx.FileDialog(
+                    p, "Escolha o arquivo de som",
+                    defaultDir=config.pasta_sons(),
+                    wildcard="Sons|*.wav;*.ogg;*.opus;*.mp3;*.flac|"
+                             "Todos os arquivos|*.*",
+                    style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST)
+                try:
+                    if dlg.ShowModal() == wx.ID_OK:
+                        try:
+                            # fica na pasta de sons do TeleZapp
+                            valor = config.importar_som(dlg.GetPath())
+                        except OSError:
+                            valor = dlg.GetPath()
+                    else:
+                        valor = atual
+                finally:
+                    dlg.Destroy()
+                montar(valor)
+            self.modelo.definir(o.chave, valor)
+        c.Bind(wx.EVT_CHOICE, escolheu)
+        botao.Bind(wx.EVT_BUTTON, lambda e: bipe(
+            o.som, self.modelo.valor(o.chave)))
+        montar(self.modelo.valor(o.chave))
+        c.Bind(wx.EVT_SET_FOCUS, lambda e, o=o: self._ao_focar(e, o))
+        self.lay_painel.Add(linha, 0, wx.ALL, 8)
+        self.controles[o.chave] = c
+
     def _criar_opcao(self, o):
         p = self.painel
+        if o.som:
+            self._criar_som(o)
+            return
         if o.numero:
             self.lay_painel.Add(wx.StaticText(p, label=o.rotulo + ":"), 0,
                                 wx.LEFT | wx.RIGHT | wx.TOP, 8)
@@ -170,6 +233,131 @@ class DialogoConfiguracoes(wx.Dialog):
         self.controles[o.chave] = c
         if o.chave == "trancadas_exigir_codigo":
             self._criar_campos_codigo()
+
+    # ------------------------------------ provedores de IA
+    def _criar_ia(self):
+        """Ordem dos provedores de cada tarefa e, depois, um botao por
+        provedor que abre a janela dele (chave, modelo e testes)."""
+        from telezapp.nucleo.ia import catalogo
+        p = self.painel
+        self._ia_listas = {}
+        self._ia_botoes = {}
+        self.lay_painel.Add(wx.StaticText(
+            p, label="Provedores de cada tarefa: marque os que podem "
+                     "receber os arquivos e ponha na ordem em que devem ser "
+                     "tentados. Se um falhar, o TeleZapp passa para o "
+                     "próximo. Sem nenhum marcado, a tarefa fica desligada."),
+            0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        for tarefa in catalogo.TAREFAS:
+            nome = catalogo.NOMES_DE_TAREFA[tarefa]
+            capazes = catalogo.provedores_da_tarefa(tarefa)
+            nomes = dict(capazes)
+            ligados = [c for c in self.modelo.ia_ordem(tarefa) if c in nomes]
+            chaves = ligados + [c for c, _ in capazes if c not in ligados]
+            self.lay_painel.Add(wx.StaticText(p, label=nome + ":"), 0,
+                                wx.LEFT | wx.RIGHT | wx.TOP, 8)
+            lista = wx.CheckListBox(p, choices=[nomes[c] for c in chaves],
+                                    size=(380, -1), name=nome)
+            for k, c in enumerate(chaves):
+                lista.Check(k, c in ligados)
+            if chaves:
+                lista.SetSelection(0)
+            self._ia_listas[tarefa] = (lista, chaves)
+            lista.Bind(wx.EVT_CHECKLISTBOX, lambda e, t=tarefa:
+                       self._ia_ordem_mudou(t))
+            linha = wx.BoxSizer(wx.HORIZONTAL)
+            linha.Add(lista, 0, wx.RIGHT, 8)
+            for rotulo, passo in (("Subir", -1), ("Descer", 1)):
+                b = wx.Button(p, label="%s na ordem: %s" % (rotulo, nome))
+                b.Bind(wx.EVT_BUTTON, lambda e, t=tarefa, d=passo:
+                       self._ia_mover(t, d))
+                linha.Add(b, 0, wx.RIGHT | wx.ALIGN_BOTTOM, 6)
+            self.lay_painel.Add(linha, 0, wx.LEFT | wx.RIGHT, 8)
+        self.lay_painel.Add(wx.StaticText(
+            p, label="Provedores (chave e modelo de cada um):"), 0,
+            wx.LEFT | wx.RIGHT | wx.TOP, 12)
+        for prov in catalogo.PROVEDORES.values():
+            b = wx.Button(p, label=self._rotulo_provedor_ia(prov.chave))
+            b.Bind(wx.EVT_BUTTON, lambda e, k=prov.chave:
+                   self._configurar_provedor_ia(k))
+            self._ia_botoes[prov.chave] = b
+            self.lay_painel.Add(b, 0, wx.ALL, 6)
+
+    def _rotulo_provedor_ia(self, provedor):
+        """"Google Gemini: chave guardada, modelo automático..." """
+        from telezapp.nucleo.ia import catalogo
+        pendentes = self.modelo.ia_chaves
+        if provedor in pendentes:
+            chave = ("chave será apagada ao aplicar"
+                     if pendentes[provedor] == "" else
+                     "chave nova, será guardada ao aplicar")
+        else:
+            chave = "chave guardada" if self.ia.tem(provedor) else "sem chave"
+        escolhido = self.modelo.ia_modelos.get(
+            provedor, self.ia.modelo(provedor))
+        return "%s: %s, modelo %s. Configurar..." % (
+            catalogo.PROVEDORES[provedor].nome, chave,
+            escolhido or "automático")
+
+    def _atualizar_botoes_ia(self):
+        for provedor, botao in getattr(self, "_ia_botoes", {}).items():
+            try:
+                botao.SetLabel(self._rotulo_provedor_ia(provedor))
+            except RuntimeError:
+                pass         # a categoria foi trocada e os botoes sumiram
+
+    def _configurar_provedor_ia(self, provedor):
+        dlg = DialogoProvedorIA(self, provedor, self.ia, self.fala,
+                                self.modelo.ia_modelos.get(
+                                    provedor, self.ia.modelo(provedor)),
+                                provedor in self.modelo.ia_chaves and
+                                self.modelo.ia_chaves[provedor] == "")
+        try:
+            if dlg.ShowModal() == wx.ID_OK:
+                if dlg.apagar:
+                    self.modelo.ia_apagar_chave(provedor)
+                else:
+                    self.modelo.ia_definir_chave(provedor, dlg.chave)
+                self.modelo.ia_definir_modelo(provedor, dlg.modelo)
+        finally:
+            dlg.Destroy()
+        self._atualizar_botoes_ia()
+        botao = self._ia_botoes.get(provedor)
+        if botao is not None:
+            botao.SetFocus()
+
+    def _depois_de_aplicar_ia(self):
+        """Aplicado: as chaves digitadas ja estao guardadas; os botoes leem a
+        situacao de novo."""
+        self._atualizar_botoes_ia()
+
+    def _ia_ordem_mudou(self, tarefa):
+        lista, chaves = self._ia_listas[tarefa]
+        self.modelo.ia_definir_ordem(tarefa, [
+            c for k, c in enumerate(chaves) if lista.IsChecked(k)])
+
+    def _ia_mover(self, tarefa, passo):
+        lista, chaves = self._ia_listas[tarefa]
+        i = lista.GetSelection()
+        j = i + passo
+        if i < 0 or not 0 <= j < len(chaves):
+            if self.fala is not None:
+                self.fala.falar("Não dá para mover mais nessa direção.",
+                                interromper=True)
+            return
+        marcas = [lista.IsChecked(k) for k in range(len(chaves))]
+        nomes = [lista.GetString(k) for k in range(len(chaves))]
+        chaves[i], chaves[j] = chaves[j], chaves[i]
+        marcas[i], marcas[j] = marcas[j], marcas[i]
+        nomes[i], nomes[j] = nomes[j], nomes[i]
+        for k in range(len(chaves)):
+            lista.SetString(k, nomes[k])
+            lista.Check(k, marcas[k])
+        lista.SetSelection(j)
+        self._ia_ordem_mudou(tarefa)
+        if self.fala is not None:
+            self.fala.falar("%s, posição %d de %d." % (
+                nomes[j], j + 1, len(chaves)), interromper=True)
 
     # ------------------------------------ privacidade das contas
     def _criar_privacidade_conta(self):
@@ -373,8 +561,139 @@ class DialogoConfiguracoes(wx.Dialog):
                 alvo[1].SetFocus()
             return False
         self.modelo.aplicar(self.aplicador)
+        self._depois_de_aplicar_ia()
         return True
 
     def _ao_ok(self, evento):
         if self._aplicar():
             self.EndModal(wx.ID_OK)
+
+
+class DialogoProvedorIA(wx.Dialog):
+    """Chave e modelo de um provedor de IA, com Obter modelos e Testar. As
+    mudancas so entram nas configuracoes ao apertar OK aqui e, depois, OK ou
+    Aplicar nas configuracoes."""
+
+    AUTOMATICO = "(Automático)"
+
+    def __init__(self, pai, provedor, ia, fala, modelo_atual, apagar_antes):
+        from telezapp.nucleo.ia import catalogo
+        prov = catalogo.PROVEDORES[provedor]
+        super().__init__(pai, title="Configurar " + prov.nome,
+                         style=wx.DEFAULT_DIALOG_STYLE)
+        self.prov, self.ia, self.fala = prov, ia, fala
+        self.chave, self.apagar = "", bool(apagar_antes)
+        self.modelo = ""
+        lay = wx.BoxSizer(wx.VERTICAL)
+        self.situacao = wx.StaticText(self, label="")
+        lay.Add(self.situacao, 0, wx.ALL, 10)
+        lay.Add(wx.StaticText(
+            self, label="Chave (vazio mantém a atual; ela fica cifrada "
+                        "neste computador e não vai no backup):"), 0,
+            wx.LEFT | wx.RIGHT, 10)
+        self.campo = wx.TextCtrl(self, style=wx.TE_PASSWORD, size=(420, -1),
+                                 name="Chave")
+        self.campo.Bind(wx.EVT_TEXT, lambda e: self._atualizar())
+        lay.Add(self.campo, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        lay.Add(wx.StaticText(self, label="Modelo:"), 0,
+                wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.combo = wx.ComboBox(
+            self, choices=[self.AUTOMATICO] + ia.lista_de_modelos(provedor),
+            style=wx.CB_DROPDOWN, size=(420, -1), name="Modelo")
+        self.combo.SetValue(modelo_atual or self.AUTOMATICO)
+        lay.Add(self.combo, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        lay.Add(wx.StaticText(
+            self, label="Automático: " + ", depois ".join(
+                (prov.modelo,) + prov.alternativos)), 0,
+            wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        linha = wx.WrapSizer(wx.HORIZONTAL)
+        for rotulo, funcao in (
+                ("&Obter modelos", self._obter_modelos),
+                ("&Testar", self._testar),
+                ("&Apagar a chave", self._apagar),
+                ("&Onde conseguir a chave", lambda: ia.abrir(prov.url_chave)),
+                ("Política de &privacidade",
+                 lambda: ia.abrir(prov.url_privacidade))):
+            b = wx.Button(self, label=rotulo)
+            b.Bind(wx.EVT_BUTTON, lambda e, f=funcao: f())
+            linha.Add(b, 0, wx.RIGHT | wx.TOP, 6)
+        lay.Add(linha, 0, wx.ALL, 10)
+        lay.Add(self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL), 0,
+                wx.ALL | wx.ALIGN_RIGHT, 10)
+        self.SetSizerAndFit(lay)
+        self.Bind(wx.EVT_BUTTON, self._ok, id=wx.ID_OK)
+        self.CentreOnParent()
+        self._atualizar()
+        self.campo.SetFocus()
+
+    def _atualizar(self):
+        if self.apagar and not self.campo.GetValue().strip():
+            texto = "a chave guardada será apagada ao aplicar"
+        elif self.campo.GetValue().strip():
+            texto = "chave digitada, será guardada ao aplicar"
+            self.apagar = False
+        else:
+            texto = ("chave guardada" if self.ia.tem(self.prov.chave)
+                     else "sem chave")
+        self.situacao.SetLabel("%s: %s" % (self.prov.nome, texto))
+
+    def _modelo_do_combo(self):
+        valor = self.combo.GetValue().strip()
+        return "" if valor == self.AUTOMATICO else valor
+
+    def _ok(self, evt):
+        self.chave = self.campo.GetValue().strip()
+        self.modelo = self._modelo_do_combo()
+        evt.Skip()
+
+    def _apagar(self):
+        self.apagar = True
+        self.campo.ChangeValue("")
+        self._atualizar()
+        if self.fala is not None:
+            self.fala.falar("A chave será apagada quando você aplicar.",
+                            interromper=True)
+
+    def _falar(self, texto):
+        if self.fala is not None:
+            self.fala.falar(texto, interromper=True)
+
+    def _testar(self):
+        self._falar("Testando a conexão...")
+        chave, modelo = self.campo.GetValue(), self._modelo_do_combo()
+
+        def trabalho():
+            ok, texto = self.ia.testar(self.prov.chave, chave, modelo)
+            wx.CallAfter(self._mostrar, "Testar", ok, texto)
+        threading.Thread(target=trabalho, daemon=True,
+                         name="testar-ia").start()
+
+    def _obter_modelos(self):
+        self._falar("Obtendo a lista de modelos...")
+        chave = self.campo.GetValue()
+
+        def trabalho():
+            ok, resultado = self.ia.obter_modelos(self.prov.chave, chave)
+            wx.CallAfter(self._modelos_obtidos, ok, resultado)
+        threading.Thread(target=trabalho, daemon=True,
+                         name="obter-modelos").start()
+
+    def _modelos_obtidos(self, ok, resultado):
+        if not self:
+            return
+        if not ok:
+            self._mostrar("Obter modelos", False, resultado)
+            return
+        atual = self.combo.GetValue()
+        self.combo.Set([self.AUTOMATICO] + resultado)
+        self.combo.SetValue(atual)
+        self._falar("%d modelos encontrados. Abra a caixa e escolha um, ou "
+                    "deixe em automático." % len(resultado))
+        self.combo.SetFocus()
+
+    def _mostrar(self, titulo, ok, texto):
+        if not self:
+            return
+        self._falar(texto)
+        wx.MessageBox(texto, titulo, wx.OK | (
+            wx.ICON_INFORMATION if ok else wx.ICON_WARNING), self)

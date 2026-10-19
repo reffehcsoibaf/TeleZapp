@@ -11,9 +11,7 @@ import wx
 from telezapp.nucleo import limpeza
 from telezapp.nucleo import modelos as m
 
-TIPOS = (("", ()), ("mensagens de texto", (m.TEXTO,)), ("fotos", (m.FOTO,)), ("vídeos", (m.VIDEO,)),
-         ("mensagens de voz e áudios", (m.VOZ, m.AUDIO)),
-         ("documentos", (m.DOCUMENTO,)), ("figurinhas", (m.FIGURINHA,)))
+TIPOS = (("", ()),) + limpeza.GRUPOS_TIPOS
 TODOS = "Todos"
 
 
