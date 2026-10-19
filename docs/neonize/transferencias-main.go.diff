@@ -1,0 +1,184 @@
+--- main.go.antes_transferencias	2026-10-17 22:08:53.494845300 -0300
++++ main.go	2026-10-19 19:05:42.436975300 -0300
+@@ -16,8 +16,11 @@
+ 	// "crypto/sha256"
+ 	// "encoding/hex"
+ 	"fmt"
++	"io"
+ 	"os"
+ 	"strings"
++	"sync"
++	"sync/atomic"
+ 	"time"
+ 	"unsafe"
+ 
+@@ -2753,3 +2756,169 @@
+ 		C.free(unsafe.Pointer(str))
+ 	}
+ }
++
++
++// ---- Transferencias de midia com progresso e cancelamento (TeleZapp) ------
++// O download grava direto no arquivo (DownloadToFile, sem carregar a midia
++// inteira na memoria) e o upload le de um arquivo (UploadReader). Cada
++// transferencia tem uma chave dada por quem chama: TransferProgress devolve
++// 0..100 (no upload; no download quem chama olha o tamanho do arquivo) e
++// TransferCancel interrompe.
++
++type transferencia struct {
++	cancel    context.CancelFunc
++	progresso atomic.Int32
++}
++
++var transferencias sync.Map // chave -> *transferencia
++
++func novaTransferencia(chave string) (context.Context, *transferencia) {
++	ctx, cancel := context.WithCancel(context.Background())
++	t := &transferencia{cancel: cancel}
++	transferencias.Store(chave, t)
++	return ctx, t
++}
++
++//export TransferProgress
++func TransferProgress(key *C.char) C.int {
++	if t, ok := transferencias.Load(C.GoString(key)); ok {
++		return C.int(t.(*transferencia).progresso.Load())
++	}
++	return -1
++}
++
++//export TransferCancel
++func TransferCancel(key *C.char) {
++	if t, ok := transferencias.Load(C.GoString(key)); ok {
++		t.(*transferencia).cancel()
++	}
++}
++
++//export DownloadAnyToFile
++func DownloadAnyToFile(id *C.char, messageProto *C.uchar, size C.int, path *C.char, key *C.char) *C.char {
++	var message waE2E.Message
++	if err := proto.Unmarshal(getByteByAddr(messageProto, size), &message); err != nil {
++		return C.CString(err.Error())
++	}
++	var baixavel whatsmeow.DownloadableMessage
++	switch {
++	case message.ImageMessage != nil:
++		baixavel = message.ImageMessage
++	case message.VideoMessage != nil:
++		baixavel = message.VideoMessage
++	case message.AudioMessage != nil:
++		baixavel = message.AudioMessage
++	case message.DocumentMessage != nil:
++		baixavel = message.DocumentMessage
++	case message.StickerMessage != nil:
++		baixavel = message.StickerMessage
++	default:
++		return C.CString(whatsmeow.ErrNothingDownloadableFound.Error())
++	}
++	chave := C.GoString(key)
++	ctx, t := novaTransferencia(chave)
++	defer func() {
++		t.cancel()
++		transferencias.Delete(chave)
++	}()
++	arquivo, err := os.OpenFile(C.GoString(path), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
++	if err != nil {
++		return C.CString(err.Error())
++	}
++	err = clients[C.GoString(id)].DownloadToFile(ctx, baixavel, arquivo)
++	if cerr := arquivo.Close(); err == nil {
++		err = cerr
++	}
++	if err != nil {
++		return C.CString(err.Error())
++	}
++	return C.CString("")
++}
++
++// arquivoContador e o arquivo temporario do upload: conta o que se escreve
++// (cifrando, fase 1: de 0 a 10%) e o que se le (enviando, fase 2: de 10 a
++// 100%).
++type arquivoContador struct {
++	*os.File
++	t       *transferencia
++	total   int64
++	escrito atomic.Int64
++	lido    atomic.Int64
++	enviar  atomic.Bool
++}
++
++func (c *arquivoContador) Write(p []byte) (int, error) {
++	n, err := c.File.Write(p)
++	e := c.escrito.Add(int64(n))
++	if c.total > 0 {
++		v := e * 10 / c.total
++		if v > 10 {
++			v = 10
++		}
++		c.t.progresso.Store(int32(v))
++	}
++	return n, err
++}
++
++func (c *arquivoContador) Seek(off int64, whence int) (int64, error) {
++	if off == 0 && whence == io.SeekStart && c.escrito.Load() > 0 {
++		c.lido.Store(0)
++		c.enviar.Store(true)
++	}
++	return c.File.Seek(off, whence)
++}
++
++func (c *arquivoContador) Read(p []byte) (int, error) {
++	n, err := c.File.Read(p)
++	if c.enviar.Load() {
++		l := c.lido.Add(int64(n))
++		if e := c.escrito.Load(); e > 0 {
++			v := 10 + l*90/e
++			if v > 99 {
++				v = 99
++			}
++			c.t.progresso.Store(int32(v))
++		}
++	}
++	return n, err
++}
++
++//export UploadFile
++func UploadFile(id *C.char, path *C.char, mediatype C.int, key *C.char) *C.struct_BytesReturn {
++	return_ := defproto.UploadReturnFunction{}
++	origem, err := os.Open(C.GoString(path))
++	if err != nil {
++		return_.Error = proto.String(err.Error())
++		return ProtoReturnV3(&return_)
++	}
++	defer origem.Close()
++	info, err := origem.Stat()
++	if err != nil {
++		return_.Error = proto.String(err.Error())
++		return ProtoReturnV3(&return_)
++	}
++	temp, err := os.CreateTemp("", "telezapp-upload-*")
++	if err != nil {
++		return_.Error = proto.String(err.Error())
++		return ProtoReturnV3(&return_)
++	}
++	defer func() {
++		temp.Close()
++		os.Remove(temp.Name())
++	}()
++	chave := C.GoString(key)
++	ctx, t := novaTransferencia(chave)
++	defer func() {
++		t.cancel()
++		transferencias.Delete(chave)
++	}()
++	contador := &arquivoContador{File: temp, t: t, total: info.Size()}
++	resposta, err := clients[C.GoString(id)].UploadReader(ctx, origem, contador, utils.MediaType[int(mediatype)])
++	if err != nil {
++		return_.Error = proto.String(err.Error())
++	} else {
++		t.progresso.Store(100)
++	}
++	return_.UploadResponse = utils.EncodeUploadResponse(resposta)
++	return ProtoReturnV3(&return_)
++}
