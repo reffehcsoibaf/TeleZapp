@@ -18,8 +18,24 @@ _ASSUNTO = {"imagem": "a photo", "figurinha": "a sticker",
             "video": "a video"}
 
 
-def instrucoes(genero, perfil="medio", idioma=IDIOMA):
-    """Instrucao de sistema para o genero de midia."""
+def instrucoes(genero, perfil="medio", idioma=IDIOMA, quadros=0):
+    """Instrucao de sistema para o genero de midia. `quadros` > 0: a imagem
+    e uma grade com quadros de um video."""
+    if quadros:
+        return (
+            "You describe a video for a blind reader from a contact sheet: "
+            "one image holding %d frames sampled evenly from the video, in "
+            "chronological order (left to right, top to bottom), each one "
+            "labelled with its time in minutes:seconds. Answer in %s. %s. "
+            "Tell what the video is about and what happens over time, "
+            "mentioning the times of important changes, plus readable "
+            "on-screen text. You only see sampled frames: say so when "
+            "something between them may be missing, and never claim to know "
+            "what is said or heard. State uncertainty clearly. Do not invent "
+            "identities, ethnicity, medical conditions or other sensitive "
+            "attributes. " % (quadros, idioma,
+                              _TAMANHO.get(perfil, "A concise description"))
+            + _NAO_CONFIE)
     if genero == "audio":
         return (
             "You transcribe a voice message for a deaf or hard-of-hearing "
@@ -52,8 +68,10 @@ def instrucoes(genero, perfil="medio", idioma=IDIOMA):
                                      comprimento, video) + _NAO_CONFIE)
 
 
-def primeira_pergunta(genero):
+def primeira_pergunta(genero, quadros=0):
     """O pedido do proprio aplicativo (nunca mostrado como pergunta)."""
+    if quadros:
+        return "Describe the video shown in these %d frames." % quadros
     return {"audio": "Transcribe this voice message.",
             "pdf": "Convert this PDF into accessible text."}.get(
                 genero, "Describe this.")

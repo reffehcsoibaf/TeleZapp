@@ -278,16 +278,16 @@ def test_detalhes_mostram_nome_ou_telefone_nunca_o_codigo_do_recibo():
 
 def test_codigo_secreto_das_trancadas():
     from telezapp.nucleo import codigo_secreto as cs
-    dados = cs.criar("2468")
-    assert "2468" not in str(dados)                  # so o resumo
-    assert cs.confere("2468", dados)
+    dados = cs.criar("246813579024")
+    assert "246813579024" not in str(dados)                  # so o resumo
+    assert cs.confere("246813579024", dados)
     assert not cs.confere("2469", dados)
     assert not cs.confere("246", dados) and not cs.confere("abcd", dados)
-    assert not cs.confere("2468", None) and not cs.confere("2468", {})
+    assert not cs.confere("246813579024", None) and not cs.confere("246813579024", {})
     assert cs.valido("1234") and cs.valido("123456789012")
     assert not cs.valido("123") and not cs.valido("1234567890123")
     assert not cs.valido("12a4") and not cs.valido("١٢٣٤")
-    assert cs.criar("2468")["sal"] != dados["sal"]   # sal novo a cada vez
+    assert cs.criar("246813579024")["sal"] != dados["sal"]   # sal novo a cada vez
     import pytest
     with pytest.raises(ValueError):
         cs.criar("12")
@@ -514,3 +514,181 @@ def test_encaminhar_destinos_so_de_contas_conectadas_sem_repetir():
     assert [x[2] for x in enc.filtrar(d, "bi")] == ["Bia"]
     assert len(enc.destinos(conversas, [], lambda c: True,
                             trancadas=True)) == 4
+
+
+def test_texto_do_status_da_pessoa():
+    agora = time.mktime((2026, 10, 19, 15, 0, 0, 0, 0, -1))
+    hoje = time.mktime((2026, 10, 19, 14, 32, 0, 0, 0, -1))
+    ontem = time.mktime((2026, 10, 18, 9, 5, 0, 0, 0, -1))
+    antes = time.mktime((2026, 10, 12, 9, 5, 0, 0, 0, -1))
+    ano_passado = time.mktime((2025, 3, 1, 9, 5, 0, 0, 0, -1))
+    assert m.texto_presenca("online") == "online"
+    assert m.texto_presenca("offline", hoje, agora=agora) == \
+        "visto por último hoje às 14:32"
+    assert m.texto_presenca("offline", ontem, agora=agora) == \
+        "visto por último ontem às 09:05"
+    assert m.texto_presenca("offline", antes, agora=agora) == \
+        "visto por último em 12/10 às 09:05"
+    assert m.texto_presenca("offline", ano_passado, agora=agora) == \
+        "visto por último em 01/03/2025"
+    assert m.texto_presenca("offline", aprox="recentemente") == \
+        "visto por último recentemente"
+    assert m.texto_presenca("offline") == ""          # escondido
+    assert m.texto_presenca("digitando") == "digitando"
+    assert m.texto_presenca("gravando") == "gravando áudio"
+    assert m.texto_presenca("digitando", quem="Ana") == "Ana está digitando"
+    assert m.texto_presenca("parou") == ""
+
+
+def test_busca_de_emoji_por_nome_em_portugues():
+    from telezapp.nucleo import emojis
+    assert emojis.buscar("joinha")[0].simbolo == "👍"
+    assert emojis.buscar("coração vermelho")[0].simbolo == "❤️"
+    assert emojis.buscar("CORACAO verm")[0].simbolo == "❤️"      # sem acento
+    assert emojis.buscar("rindo")[0].simbolo == "😂" or any(
+        e.simbolo == "😂" for e in emojis.buscar("rindo"))
+    nomes = [e.nome for e in emojis.buscar("bolo")]
+    assert "bolo de aniversário" in nomes
+    assert not any("símbolo" in n for n in nomes)       # so inicio de palavra
+    assert emojis.buscar("zzzzzz") == []
+    assert len(emojis.buscar("", 50)) == 50
+    assert not any(any("\U0001F3FB" <= c <= "\U0001F3FF" for c in e.simbolo)
+                   for e in emojis.todos())              # sem tons de pele
+    assert emojis.nome_de("👍") == "polegar para cima"
+    assert emojis.nome_de("❤") == emojis.nome_de("❤️")   # com ou sem variacao
+    assert emojis.nome_de("xyz") == "xyz"
+    assert all(e in [x.simbolo for x in emojis.todos()]
+               for e in emojis.RAPIDOS)
+
+
+def test_textos_das_chamadas_do_whatsapp():
+    from telezapp.nucleo import chamadas as ch
+    assert ch.texto_na_conversa(False, "tocando") == \
+        "Chamada de voz recebida, tocando"
+    assert ch.texto_na_conversa(True, "perdida") == "Chamada de vídeo perdida"
+    assert ch.texto_na_conversa(False, "recusada") == \
+        "Chamada de voz recusada"
+    assert ch.texto_na_conversa(False, "atendida", 65) == \
+        "Chamada de voz atendida em outro aparelho, durou 1 minuto e 5 segundos"
+    assert ch.texto_na_conversa(False, "atendida") == \
+        "Chamada de voz atendida em outro aparelho"
+    aviso = ch.texto_do_aviso("Ana", True)
+    assert aviso.startswith("Ana está te chamando por vídeo.")
+    assert "atenda em outro dispositivo ou abra uma conversa" in aviso
+    assert "por voz" in ch.texto_do_aviso("", False) and \
+        ch.texto_do_aviso("", False).startswith("Alguém")
+    assert ch.texto_do_fim("Ana", False, "perdida") == \
+        "A chamada de voz de Ana terminou sem ser atendida."
+
+
+def test_quem_ja_falava_mensagens_novas_continua_ouvindo_tudo(tmp_path):
+    import json
+    from telezapp import config
+    caminho = tmp_path / "config.json"
+    caminho.write_text(json.dumps({"falar_novas": True}), encoding="utf-8")
+    cfg = config.Config(str(caminho))
+    assert cfg.get("falar_novas_outras_conversas") is True
+    assert cfg.get("falar_novas_fora_do_telezapp") is True
+    caminho.write_text(json.dumps({"falar_novas": True,
+                                   "falar_novas_outras_conversas": False}),
+                       encoding="utf-8")
+    assert config.Config(str(caminho)).get(
+        "falar_novas_outras_conversas") is False        # escolha respeitada
+    caminho.write_text("{}", encoding="utf-8")
+    novo = config.Config(str(caminho))
+    assert novo.get("falar_novas_fora_do_telezapp") is False
+
+
+def test_tamanho_do_texto_da_ia_na_linha_da_mensagem():
+    longa = "palavra " * 400                     # ~3200 letras
+    foto = m.Mensagem("c", "v", "1", tipo=m.FOTO)
+    voz = m.Mensagem("c", "v", "2", tipo=m.VOZ)
+    m.atualizar_extras(foto, ia={"genero": "imagem", "texto": longa})
+    m.atualizar_extras(voz, ia={"genero": "audio", "texto": longa})
+    try:
+        m.definir_limites_ia(0, 1000)                       # padrao
+        assert "mostra tudo" not in m.trecho_da_ia(foto)    # descricao inteira
+        assert longa.strip() in m.trecho_da_ia(foto)
+        assert "mostra tudo" in m.trecho_da_ia(voz)
+        assert len(m.trecho_da_ia(voz)) < 1100
+        m.definir_limites_ia(300, 0)
+        assert "mostra tudo" in m.trecho_da_ia(foto)
+        assert len(m.trecho_da_ia(foto)) < 400
+        assert longa.strip() in m.trecho_da_ia(voz)
+    finally:
+        m.definir_limites_ia(0, 1000)
+
+
+def test_filtro_status_mostra_so_as_conversas_de_status():
+    pessoa = m.Conversa("c", "5551@s.whatsapp.net", "Ana", "whatsapp")
+    status = m.Conversa("c", "status:5551@s.whatsapp.net", "Status de Ana",
+                        "whatsapp", "status", nao_lidas=2)
+    assert any(t == "status" for t, _ in m.FILTROS_TIPO)
+    assert m.passa_filtro(status, "status") and not m.passa_filtro(
+        pessoa, "status")
+    for tipo in ("todas", "nao_lidas", "pessoais", "grupos", "canais",
+                 "fixadas", "silenciadas"):
+        assert not m.passa_filtro(status, tipo), tipo      # fora das outras
+    assert m.rotulo_conversa(status) == \
+        "Status de Ana, WhatsApp, 2 não vistos"
+    status.nao_lidas = 1
+    assert m.rotulo_conversa(status).endswith("1 não visto")
+
+
+def test_previa_de_link_na_linha_e_nos_detalhes():
+    x = m.Mensagem("c", "v", "1", autor="Ana", data=1760000000,
+                   texto="olha https://a.com/x")
+    assert m.trecho_da_previa(x) == ""
+    m.guardar_extras(x, previa=m.previa_de_link(
+        "https://a.com/x", "  Título   legal ", "Uma descrição\nem duas linhas.",
+        "A.com"))
+    try:
+        m.definir_modo_previa("completa")
+        assert m.trecho_da_previa(x) == \
+            "prévia do link: Título legal. Uma descrição em duas linhas"
+        assert "prévia do link: Título legal" in m.formatar(
+            x, m.ESTILO_AUTOR_PRIMEIRO)
+        m.definir_modo_previa("titulo")
+        assert m.trecho_da_previa(x) == "prévia do link: Título legal"
+        m.definir_modo_previa("nenhuma")
+        assert m.trecho_da_previa(x) == ""
+        assert "prévia" not in m.formatar(x, m.ESTILO_AUTOR_PRIMEIRO)
+        det = m.detalhes(x, "Ana")                 # nos detalhes sempre
+        assert "Prévia do link: Título legal - A.com" in det
+        assert "Descrição da prévia: Uma descrição em duas linhas." in det
+        assert "Endereço da prévia: https://a.com/x" in det
+        m.definir_modo_previa("invalido")
+        assert m.MODO_PREVIA[0] == "completa"
+        # a previa sobrevive a regravar os outros extras, e sem titulo nem
+        # descricao nao ha previa
+        m.guardar_extras(x, links=[("https://a.com/x", "https://a.com/x")])
+        assert m.extras_de(x)["previa"]["titulo"] == "Título legal"
+        assert m.previa_de_link("https://a.com", "", "  ") == {}
+        longa = m.Mensagem("c", "v", "2", texto="x")
+        m.guardar_extras(longa, previa=m.previa_de_link(
+            "u", "T", "palavra " * 200))
+        assert len(m.trecho_da_previa(longa)) < 440
+    finally:
+        m.definir_modo_previa("completa")
+
+
+def test_conferir_o_que_vai_ser_publicado_como_status(tmp_path):
+    from telezapp.nucleo import publicar_status as ps
+    foto = tmp_path / "f.jpg"
+    foto.write_bytes(b"\xff\xd8\xff" + b"0" * 50)
+    doc = tmp_path / "a.pdf"
+    doc.write_bytes(b"%PDF-1")
+    # WhatsApp: so texto, ou foto, ou os dois
+    anexo, texto, erro = ps.validar("whatsapp", "  oi  ", "")
+    assert (anexo, texto, erro) == (None, "oi", "")
+    anexo, texto, erro = ps.validar("whatsapp", "", str(foto))
+    assert anexo.tipo == "foto" and not erro
+    assert "Escreva o texto" in ps.validar("whatsapp", "  ", "")[2]
+    assert "foto ou vídeo" in ps.validar("whatsapp", "x", str(doc))[2]
+    assert "não foi encontrado" in ps.validar("whatsapp", "x",
+                                              str(tmp_path / "nao"))[2]
+    assert "passa de 700" in ps.validar("whatsapp", "a" * 701, "")[2]
+    # Telegram: exige foto ou video, com legenda curta
+    assert "precisa de uma foto" in ps.validar("telegram", "so texto", "")[2]
+    assert not ps.validar("telegram", "legenda", str(foto))[2]
+    assert "passa de 200" in ps.validar("telegram", "a" * 201, str(foto))[2]

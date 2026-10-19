@@ -699,3 +699,94 @@ class ControleDetalhes:
             return
         if self.dlg is not None:
             self._atualizar()
+
+
+class ControleRecibos(object):
+    """Quem recebeu, abriu e reproduziu uma mensagem enviada a um grupo: um
+    botao por assunto na janela de detalhes da mensagem, cada um abrindo a
+    lista de membros com a data e a hora, e o menu de contexto dos membros."""
+
+    def __init__(self, jan, conv, recibos, nomes):
+        self.jan, self.conv = jan, conv
+        self.por_tipo = m.pessoas_por_recibo(recibos)
+        self.nomes = nomes or {}
+        self.abrir_conversa = None
+        # as acoes de um membro sao as mesmas da lista de membros do grupo
+        self._membros = _MembrosDeRecibo(jan, conv, self)
+
+    def botoes(self):
+        """[(rotulo, funcao(janela))] dos assuntos que tem alguem."""
+        saida = []
+        for tipo, rotulo, _ in m.ROTULOS_RECIBO:
+            n = len(self.por_tipo[tipo])
+            if n:
+                saida.append(("%s por %s" % (rotulo, m.texto_pessoas(n)),
+                              lambda dlg, t=tipo: self.lista(t, dlg)))
+        return saida
+
+    def pessoa(self, quem):
+        nome = self.nomes.get(quem) or m._quem_legivel(quem)
+        return {"id": quem, "nome": nome}
+
+    def rotulo(self, quem, data):
+        p = self.pessoa(quem)
+        partes = [p["nome"]]
+        if quem.endswith("@s.whatsapp.net") and \
+                p["nome"] != "+" + quem.split("@")[0]:
+            partes.append("+" + quem.split("@")[0])
+        partes.append(time.strftime("%d/%m/%Y %H:%M:%S",
+                                    time.localtime(data)) if data else "-")
+        return ", ".join(partes)
+
+    def lista(self, tipo, dlg):
+        rotulo = next(r for t, r, _ in m.ROTULOS_RECIBO if t == tipo)
+        verbo = next(v for t, _, v in m.ROTULOS_RECIBO if t == tipo)
+        pessoas = self.por_tipo[tipo]
+
+        def itens(_):
+            return [(self.rotulo(q, d), self.pessoa(q)) for q, d in pessoas]
+        lista = DialogoLista(
+            dlg, "%s por %s" % (rotulo, m.texto_pessoas(len(pessoas))),
+            "Quem %s a mensagem (Menu abre as ações)" % verbo, (), itens,
+            self._membros._menu_membro)
+        self._membros.pai = dlg
+        self._membros._sub(lista)
+
+
+class _MembrosDeRecibo(object):
+    """O menu de um membro, o mesmo da lista de membros do grupo."""
+
+    def __init__(self, jan, conv, dono):
+        self.jan, self.conv, self.dono = jan, conv, dono
+        self.dados = None
+        self.abrir_conversa = None
+        self.ver = None
+        self.dlg = None
+        self.pai = None
+        self.prov = jan.contas.provedor(conv.conta_id) if jan.contas \
+            else None
+
+    _menu_membro = ControleDetalhes._menu_membro
+    _opcoes_de_conversa = ControleDetalhes._opcoes_de_conversa
+
+    def _iniciar(self, c):
+        self.abrir_conversa = c
+        wx.CallAfter(self._fechar_tudo)
+
+    def _fechar_tudo(self):
+        for w in wx.GetTopLevelWindows():
+            if isinstance(w, DialogoLista) and w.IsModal():
+                w.EndModal(wx.ID_OK)
+
+    def _sub(self, dlg):
+        try:
+            dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+        if self.abrir_conversa is not None:
+            self.dono.abrir_conversa = self.abrir_conversa
+            if self.pai is not None:
+                self.pai.EndModal(wx.ID_OK)       # fecha os detalhes tambem
+
+    def administrar(self, *a, **k):
+        pass

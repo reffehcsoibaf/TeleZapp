@@ -128,7 +128,7 @@ def test_extras_na_mensagem_e_migracao_do_banco(tmp_path):
     assert m.extras_de(x) == {"links": [], "botoes": [], "mencoes": [],
                               "acoes": [], "original": "", "editada": False,
                               "apagada": False, "ouvida": False,
-                              "favorita": False, "reacoes": [], "ia": {}}
+                              "favorita": False, "reacoes": [], "citou_voce": False, "previa": {}, "ia": {}}
     m.guardar_extras(x, links=[("https://a.com", "clique aqui")],
                      botoes=[("Abrir", "https://b.com")],
                      mencoes=[{"nome": "Ana", "id": "5"}])
@@ -194,3 +194,27 @@ def test_texto_de_depuracao_de_mensagem_e_de_conversa():
     c = d.texto_conversa(conv, [x], {"numero": "1@s"}, "9.9")
     assert "DEPURAÇÃO DE CONVERSA" in c and "Sem suporte ainda: 1" in c
     assert "1@s" in c and "| oi" in c
+
+
+def test_detalhes_de_mensagem_de_grupo_mostram_so_o_resumo():
+    x = m.Mensagem("c", "g@g.us", "1", minha=True, data=1760000000,
+                   texto="oi", tipo=m.VOZ)
+    recibos = [("a@s.whatsapp.net", "entregue", 110),
+               ("b@s.whatsapp.net", "entregue", 111),
+               ("a@s.whatsapp.net", "lida", 120),
+               ("a@s.whatsapp.net", "lida", 125)]     # repetido: conta uma
+    txt = m.detalhes(x, "Grupo", recibos=recibos, grupo=True)
+    assert "Enviada em: " in txt
+    assert "Recebida por 2 pessoas" in txt and "Aberta por 1 pessoa" in txt
+    assert "Reproduzida por 0 pessoas" in txt          # voz: aparece sempre
+    assert "Entregue a" not in txt                      # nada de lista longa
+    texto = m.Mensagem("c", "g@g.us", "2", minha=True, data=1, texto="x")
+    assert "Reproduzida" not in m.detalhes(texto, "G", recibos=[], grupo=True)
+    # sem recibos de membros no servico (Telegram): so o envio
+    sem = m.detalhes(x, "G", recibos=[], grupo=True, contagens=False)
+    assert "Enviada em: " in sem and "Recebida por" not in sem
+    por = m.pessoas_por_recibo(recibos)
+    assert [q for q, _ in por["entregue"]] == ["a@s.whatsapp.net",
+                                               "b@s.whatsapp.net"]
+    assert m.texto_pessoas(1) == "1 pessoa" and m.texto_pessoas(3) == \
+        "3 pessoas"

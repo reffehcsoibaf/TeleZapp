@@ -5,6 +5,7 @@ sistema): categorias, busca e valores ainda nao aplicados."""
 from telezapp import config
 from telezapp.midia import velocidade as vel
 from telezapp.nucleo import codigo_secreto as cs
+from telezapp.nucleo.pacotes_de_som import EstadoDeSons
 from telezapp.nucleo import privacidade_conta as pw
 
 CATEGORIA_BUSCA = "Resultados da busca"
@@ -16,6 +17,8 @@ def categorias():
     for o in config.OPCOES:
         if o.categoria not in vistas:
             vistas.append(o.categoria)
+    if "Sons" not in vistas:
+        vistas.append("Sons")       # tela propria: pacotes e eventos
     # "Avancado" quase ninguem precisa, e "Privacidade" (que consulta a
     # conta) fica na ultima posicao por enquanto
     fim = {"Avançado": 1, "Privacidade": 2}
@@ -40,6 +43,7 @@ class ModeloConfiguracoes:
         self.ia_chaves = {}
         self.ia_modelos = {}
         self.ia_ordens = {}       # tarefa -> provedores ligados, em ordem
+        self.sons = EstadoDeSons(cfg)    # pacote, eventos e arquivos de som
 
     # ------------------------------------------------------------ consulta
     def lista_de_categorias(self):
@@ -207,6 +211,7 @@ class ModeloConfiguracoes:
         self.ia_chaves, self.ia_modelos, self.ia_ordens = {}, {}, {}
         acao = self.acao_codigo() if not self.erro_codigo() else None
         priv = self.priv_mudancas()
+        sons = self.sons.aplicar() if self.sons.mudou() else None
         self.priv_escolhido = {}
         self.pendentes = {}
         self.codigo = {"atual": "", "novo": "", "repita": ""}
@@ -221,4 +226,7 @@ class ModeloConfiguracoes:
         if ia:
             aplicador("ia_credenciais", ia)
             feitas.append(("ia_credenciais", ia))
+        if sons is not None:
+            aplicador("sons_pacotes", sons)
+            feitas.append(("sons_pacotes", sons))
         return [c for c, _ in feitas]

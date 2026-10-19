@@ -141,8 +141,37 @@ class Opcao:
 OPCOES = (
     Opcao("som", "Som ao receber mensagem", "Avisos", True,
           "Toca um som curto quando chega uma mensagem nova."),
-    Opcao("falar_novas", "Falar mensagens novas", "Avisos", False,
-          "O leitor de tela fala o autor e o conteúdo de cada mensagem nova."),
+    Opcao("status_no_titulo", "Mostrar o status no título da janela",
+          "Avisos", True,
+          "Com uma conversa aberta, o título da janela mostra, depois do "
+          "nome, se a pessoa está online, quando foi vista por último ou se "
+          "está digitando. No WhatsApp isso exige que a sua conta fique "
+          "disponível enquanto a conversa está aberta (o celular pode "
+          "deixar de tocar nesse tempo) e, como no próprio WhatsApp, quem "
+          "esconde o seu status também não vê o dos outros."),
+    Opcao("avisar_chamadas_whatsapp", "Avisar chamadas do WhatsApp",
+          "Avisos", True,
+          "Quando alguém liga pelo WhatsApp, abre uma janela dizendo quem "
+          "está chamando e se é por voz ou por vídeo, com os botões OK e "
+          "Conversar. O TeleZapp ainda não atende essas chamadas: atenda em "
+          "outro dispositivo. Desmarcada, a chamada só fica registrada na "
+          "lista de mensagens da conversa."),
+    Opcao("falar_novas", "Falar mensagens novas na conversa aberta", "Avisos",
+          False,
+          "O leitor de tela fala o autor e o conteúdo de cada mensagem nova "
+          "da conversa que está aberta, com o TeleZapp em uso. Não depende "
+          "do som ao receber mensagem."),
+    Opcao("falar_novas_outras_conversas",
+          "Falar mensagens novas de outras conversas", "Avisos", False,
+          "Com o TeleZapp em uso, fala o nome da conversa, o autor e o "
+          "conteúdo das mensagens que chegam em outra conversa que não é a "
+          "aberta (ou quando nenhuma está aberta). Não depende do som ao "
+          "receber mensagem."),
+    Opcao("falar_novas_fora_do_telezapp",
+          "Falar mensagens novas fora do TeleZapp", "Avisos", False,
+          "Fala as mensagens novas também quando você está em outro "
+          "programa ou com a janela do TeleZapp minimizada, de qualquer "
+          "conversa. Não depende do som ao receber mensagem."),
     Opcao("confirmar_envio", "Falar mensagem enviada", "Avisos", False,
           "Fala Enviada depois que uma mensagem sai."),
     Opcao("falar_quem_toca", "Falar de quem é o áudio que toca", "Avisos",
@@ -185,6 +214,37 @@ OPCOES = (
           "(sem o texto das mensagens, que vai criptografado). Serve para "
           "investigar erros de envio; deixa o log grande. Vale na próxima "
           "abertura do TeleZapp."),
+    Opcao("previa_links", "Prévia dos links nas mensagens", "Leitura",
+          "completa",
+          "Quando quem enviou mandou junto a prévia de um link (título e "
+          "descrição), ela é lida na linha da mensagem. O TeleZapp não abre "
+          "o link para montar uma prévia. Nos detalhes da mensagem (Alt "
+          "Enter) a prévia aparece sempre.",
+          (("completa", "Título e descrição"), ("titulo", "Só o título"),
+           ("nenhuma", "Não ler a prévia"))),
+    Opcao("previa_receber", "Buscar a prévia dos links recebidos",
+          "Leitura", False,
+          "Quando chega uma mensagem com um link sem prévia, o TeleZapp abre "
+          "a página para ler o título e a descrição. O site fica sabendo do "
+          "IP deste computador e de que o link foi aberto. Só vale para "
+          "mensagens que chegam com o programa aberto; endereços da rede "
+          "local nunca são abertos."),
+    Opcao("previa_enviar", "Gerar a prévia dos links que eu envio",
+          "Leitura", False,
+          "No WhatsApp, o TeleZapp abre o primeiro link da mensagem que você "
+          "envia e manda junto o título e a descrição, para quem recebe ver a "
+          "prévia (o envio espera até 5 segundos). No Telegram, desmarcada, "
+          "a mensagem sai sem a prévia de link. O site fica sabendo do IP "
+          "deste computador.", ),
+    Opcao("enter_chega_ao_leitor", "Enter na caixa fecha a palavra digitada",
+          "Leitura", False,
+          "Com a fala das palavras digitadas ligada (no NVDA e em programas "
+          "parecidos), a última palavra de uma mensagem enviada com Enter, "
+          "sem espaço depois, ficava guardada e saía junto da primeira "
+          "palavra da próxima. Marcada, o Enter da caixa de digitar é "
+          "entregue ao controle antes de enviar, e a palavra se fecha na "
+          "hora. Pode fazer o programa falar \"em branco\" a cada envio. "
+          "Experimental; desmarcada, o comportamento é o de sempre."),
     Opcao("estilo", "Como cada mensagem é lida", "Leitura", 1,
           "A ordem em que autor, hora e conteúdo aparecem na lista de "
           "mensagens.",
@@ -301,6 +361,16 @@ OPCOES = (
           20, "Mídias maiores que isto (em MB) não baixam sozinhas.",
           ((5, "5 MB"), (10, "10 MB"), (20, "20 MB"), (50, "50 MB"),
            (100, "100 MB"))),
+    Opcao("midias_passo_progresso", "Porcentagem falada no download",
+          "Mídias", 25,
+          "De quanto em quanto o avanço de um download pedido por você, ou "
+          "de um arquivo que você envia, é falado (por exemplo, 10 por "
+          "cento, 20 por cento). No WhatsApp o avanço só existe com a DLL do "
+          "neonize que o TeleZapp usa; com a oficial, a mídia vai e vem "
+          "inteira de uma vez, sem porcentagens no meio. A barra de situação "
+          "e o título da janela mostram o avanço mesmo com a fala desligada.",
+          ((25, "A cada 25%"), (20, "A cada 20%"), (10, "A cada 10%"),
+           (5, "A cada 5%"), (1, "A cada 1%"), (0, "Não falar o avanço"))),
     Opcao("midias_confirmar_mb", "Confirmar downloads grandes", "Mídias", 100,
           "Pergunta antes de baixar, a seu pedido, uma mídia maior que isto "
           "(em MB).",
@@ -357,6 +427,17 @@ EVENTOS_SOM = (
      "Tocado quando terminam tarefas longas, como fazer o backup, restaurar "
      "ou salvar o conteúdo de uma conversa. Com o som padrão, toca o mesmo "
      "som de mensagem enviada."),
+    ("mencao_ou_resposta", "menção ou resposta a você num grupo",
+     "Tocado quando chega, num grupo, uma mensagem que cita você com @ ou "
+     "que responde a uma mensagem sua. Substitui o som de mensagem recebida "
+     "num grupo para essa mensagem e não depende da opção Som ao receber "
+     "mensagem (desative o evento se não quiser). Não toca em grupo "
+     "arquivado, trancado ou silenciado que não esteja aberto."),
+    ("reacao_recebida", "reação a uma mensagem sua",
+     "Tocado quando alguém reage com um emoji a uma mensagem sua (não toca "
+     "em conversa arquivada, trancada ou silenciada, nem para a sua própria "
+     "reação). A fala da reação continua sendo a opção Falar reações às "
+     "minhas mensagens, em Avisos."),
 )
 def _opcoes_de_ia():
     from telezapp.nucleo.ia import catalogo
@@ -365,18 +446,35 @@ def _opcoes_de_ia():
               "artificial", "medio", "Quanto o provedor escreve ao descrever "
               "imagens, figurinhas e vídeos. Transcrições e PDFs sempre "
               "saem completos.", tuple(catalogo.PERFIS)),
+        Opcao("ia_linha_descricao", "Tamanho da descrição na lista de "
+              "mensagens", "Inteligência artificial", 0, "Quantas letras da "
+              "descrição de uma foto, figurinha ou vídeo a linha da mensagem "
+              "traz, e portanto o que é falado ao passar por ela. "
+              "Cortada, termina com a indicação de que o menu mostra tudo.",
+              ((300, "300 letras"), (1000, "1000 letras"),
+               (3000, "3000 letras"), (0, "Descrição inteira"))),
+        Opcao("ia_linha_transcricao", "Tamanho da transcrição na lista de "
+              "mensagens", "Inteligência artificial", 1000, "Quantas letras "
+              "da transcrição de uma voz ou áudio, ou do texto de um PDF, a "
+              "linha da mensagem traz. Textos longos deixam a lista pesada de "
+              "ler.", ((300, "300 letras"), (1000, "1000 letras"),
+                       (3000, "3000 letras"), (10000, "10000 letras"),
+                       (0, "Texto inteiro"))),
+        Opcao("ia_auto_audio", "Transcrever sozinho voz e áudio", "Inteligência "
+              "artificial", True, "Nas conversas em que você ligou a "
+              "transcrição e descrição automáticas (menu de contexto da "
+              "conversa), transcreve as mensagens de voz e os áudios que "
+              "chegam, usando os provedores da transcrição. A mídia é baixada "
+              "sozinha. Os arquivos vão para o provedor, que pode cobrar da "
+              "sua chave."),
+        Opcao("ia_auto_imagem", "Descrever sozinho fotos e figurinhas",
+              "Inteligência artificial", True, "Nas conversas em que você "
+              "ligou a transcrição e descrição automáticas, descreve as "
+              "fotos e figurinhas que chegam. A mídia é baixada sozinha."),
     )
 
 
 OPCOES = OPCOES + _opcoes_de_ia()
-OPCOES = OPCOES + tuple(
-    Opcao("som_" + nome, "Som de " + rotulo, "Sons", "",
-          descricao + " Escolha o som padrão do TeleZapp, nenhum som ou um "
-          "arquivo de som seu; Ouvir toca o que estiver escolhido.",
-          som=nome)
-    for nome, rotulo, descricao in EVENTOS_SOM)
-
-
 def _sem_acento(texto):
     return "".join(c for c in unicodedata.normalize("NFD", texto.lower())
                    if unicodedata.category(c) != "Mn")
@@ -399,6 +497,9 @@ PADROES.update({
     "ia_ordem": {},          # tarefa -> provedores ligados, na ordem de tentativa
     "ia_lista_modelos": {},  # provedor -> modelos que ele ofereceu
     "ia_modelos": {},        # provedor -> modelo escolhido ("" = o padrao)
+    "pacote_de_sons": "padrao",   # padrao, telezapp ou p:<nome>
+    "sons_desativados": {},      # pacote -> eventos sem som
+    "ia_automatica_conversas": [],  # [conta, conversa] com a IA automatica
     "ia_consentimento": [],  # provedores que a pessoa autorizou a receber midia
     "contas": [],            # [{"id", "servico", "telefone", "nome"}]
     "chamada_microfone": "",     # nome do microfone usado nas chamadas
@@ -426,6 +527,12 @@ class Config:
                 lido = json.load(f)
             if isinstance(lido, dict):
                 self.dados.update(lido)
+                if lido.get("falar_novas") and \
+                        "falar_novas_outras_conversas" not in lido:
+                    # antes uma opcao so falava tudo: mantem o que a pessoa
+                    # ouvia ao separar em tres
+                    self.dados["falar_novas_outras_conversas"] = True
+                    self.dados["falar_novas_fora_do_telezapp"] = True
         except FileNotFoundError:
             pass
         except (OSError, ValueError) as e:

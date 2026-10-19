@@ -18,8 +18,10 @@ def pedido(provedor, midia, modelo="m", perfil="medio"):
                               "pergunta", perfil)
 
 
-def test_cada_tarefa_tem_provedores_e_so_o_gemini_ve_video():
-    assert [c for c, _ in cat.provedores_da_tarefa("video")] == ["gemini"]
+def test_cada_tarefa_tem_provedores_e_so_o_gemini_recebe_o_video_inteiro():
+    assert {c for c, _ in cat.provedores_da_tarefa("video")} == {
+        "gemini", "openai", "claude", "groq", "openrouter"}
+    assert [c for c in cat.PROVEDORES if cat.video_nativo(c)] == ["gemini"]
     assert {c for c, _ in cat.provedores_da_tarefa("audio")} == {
         "gemini", "openai", "groq"}
     assert {c for c, _ in cat.provedores_da_tarefa("pdf")} == {
@@ -395,3 +397,68 @@ def test_imagem_de_teste_e_um_png_valido_e_maior_que_1_pixel():
     assert png[:8] == bytes([137, 80, 78, 71, 13, 10, 26, 10])
     largura, altura = struct.unpack(">II", png[16:24])
     assert (largura, altura) == (64, 64) and len(png) < 400
+
+
+def _video_de_teste(caminho, quadros=40):
+    cv2 = pytest.importorskip("cv2")
+    import numpy as np
+    w = cv2.VideoWriter(str(caminho), cv2.VideoWriter_fourcc(*"mp4v"), 10.0,
+                        (160, 120))
+    if not w.isOpened():
+        pytest.skip("este OpenCV nao grava mp4")
+    for i in range(quadros):
+        w.write(np.full((120, 160, 3), i * 6, dtype=np.uint8))
+    w.release()
+
+
+def test_grade_de_quadros_do_video(tmp_path):
+    from telezapp.nucleo.ia import video
+    arq = tmp_path / "v.mp4"
+    _video_de_teste(arq)
+    jpeg, tempos = video.grade_de_quadros(str(arq), "medio")
+    assert jpeg[:2] == b"\xff\xd8" and len(tempos) == 9
+    assert tempos == sorted(tempos) and 0 <= tempos[0] < tempos[-1] < 4
+    assert len(video.grade_de_quadros(str(arq), "curto")[1]) == 4
+    (tmp_path / "ruim.mp4").write_bytes(b"nao e video")
+    with pytest.raises(ErroIA) as e:
+        video.grade_de_quadros(str(tmp_path / "ruim.mp4"))
+    assert e.value.codigo == "arquivo"
+
+
+def test_video_por_quadros_e_fala_a_parte(tmp_path):
+    arq = tmp_path / "v.mp4"
+    _video_de_teste(arq)
+    pedidos = []
+
+    def enviar(p):
+        pedidos.append(p)
+        if "audio/transcriptions" in p.url:
+            return {"text": "ola pessoal"}
+        return {"output": [{"type": "message", "content": [
+            {"type": "output_text", "text": "Um quadro cinza."}]}]}
+    chaves = {"openai": "A", "groq": "B"}
+    # OpenAI nao recebe o video: ve a grade (uma imagem) e transcreve a fala
+    r = servico.executar_em_ordem(
+        "video", str(arq), ["openai"], chaves.get, {}, "medio", enviar,
+        ordem_audio=["groq"])
+    assert r.via_quadros and r.texto.startswith("Um quadro cinza.")
+    assert "Fala no vídeo (Groq): ola pessoal" in r.texto
+    img = pedidos[0].json["input"][0]["content"][0]
+    assert img["image_url"].startswith("data:image/jpeg;base64,")
+    assert "groq.com" in pedidos[1].url and b"video/mp4" in pedidos[1].corpo
+    # sem fala: a descricao fica e o aviso tambem
+    pedidos.clear()
+    r = servico.executar_em_ordem(
+        "video", str(arq), ["openai"], chaves.get, {}, "curto",
+        lambda p: ErroIA and (_ for _ in ()).throw(ErroIA("vazia", "x"))
+        if "transcriptions" in p.url else enviar(p), ordem_audio=["groq"])
+    assert "não encontrei fala" in r.texto
+    # o Gemini recebe o video inteiro, sem passo extra
+    pedidos.clear()
+    r = servico.executar_em_ordem(
+        "video", str(arq), ["gemini"], {"gemini": "G"}.get, {}, "medio",
+        lambda p: pedidos.append(p) or {"candidates": [{"content": {
+            "parts": [{"text": "tudo"}]}}]}, ordem_audio=["groq"])
+    assert not r.via_quadros and len(pedidos) == 1
+    assert pedidos[0].json["contents"][0]["parts"][0]["inline_data"][
+        "mime_type"] == "video/mp4"

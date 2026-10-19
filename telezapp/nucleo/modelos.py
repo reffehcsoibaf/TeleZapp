@@ -125,15 +125,25 @@ def extras_de(msg):
             "ouvida": bool(dados.get("ouvida")),
             "favorita": bool(dados.get("favorita")),
             "reacoes": list(dados.get("reacoes") or []),
+            "citou_voce": bool(dados.get("citou_voce")),
+            "previa": dados.get("previa")
+            if isinstance(dados.get("previa"), dict) else {},
             "ia": dados.get("ia") if isinstance(dados.get("ia"), dict)
             else {}}
 
 
 def guardar_extras(msg, links=(), botoes=(), mencoes=(), acoes=(),
-                   original=""):
+                   original="", previa=None):
     """Poe links, botoes, mencoes e acoes (botoes de resposta e opcoes de
-    lista que podem ser tocados) na mensagem (nada, se tudo vazio)."""
+    lista que podem ser tocados) na mensagem (nada, se tudo vazio). A
+    previa de link ({url, titulo, descricao, site}) que a mensagem ja tinha
+    fica, a menos que venha outra."""
     dados = {}
+    previa = previa or extras_de(msg)["previa"]
+    if previa:
+        dados["previa"] = dict(previa)
+    if extras_de(msg)["citou_voce"]:
+        dados["citou_voce"] = True
     if links:
         dados["links"] = [list(x) for x in links]
     if botoes:
@@ -164,6 +174,14 @@ def atualizar_extras(msg, **campos):
             dados[chave] = valor
     msg.extras = json.dumps(dados, ensure_ascii=False) if dados else ""
     return msg
+
+
+def minha_reacao(msg):
+    """O emoji com que eu reagi a esta mensagem ("" se nao reagi)."""
+    for r in extras_de(msg)["reacoes"]:
+        if r.get("minha") or r.get("quem") == "Você":
+            return r.get("emoji", "")
+    return ""
 
 
 def resumo_reacoes(msg, maximo=3):
@@ -213,6 +231,40 @@ def hora_legivel(ts, agora=None):
     if t.tm_year == a.tm_year:
         return time.strftime("%d/%m ", t) + hm
     return time.strftime("%d/%m/%Y", t)
+
+
+def texto_visto_por_ultimo(quando, aprox="", agora=None):
+    """"visto por último hoje às 08:10", "ontem às ...", "em 12/10 às ...";
+    com so uma ideia aproximada ("recentemente"), ela entra no lugar. ""
+    se o servico nao informa (a pessoa escondeu)."""
+    if quando:
+        h = hora_legivel(quando, agora)
+        if h.startswith("ontem "):
+            h = "ontem às " + h[6:]
+        elif len(h) == 5:
+            h = "hoje às " + h
+        elif len(h) > 5 and h[2] == "/" and " " in h:
+            dia, hm = h.split(" ", 1)
+            h = "em %s às %s" % (dia, hm)
+        else:
+            h = "em " + h
+        return "visto por último " + h
+    if aprox:
+        return "visto por último " + aprox
+    return ""
+
+
+def texto_presenca(estado, quando=0.0, aprox="", quem="", agora=None):
+    """O status da pessoa para o titulo da janela; "" se nao ha o que dizer."""
+    if estado == "online":
+        return "online"
+    if estado == "offline":
+        return texto_visto_por_ultimo(quando, aprox, agora)
+    acao = {"digitando": "digitando", "gravando": "gravando áudio",
+            "enviando": "enviando arquivo"}.get(estado)
+    if acao is None:
+        return ""
+    return "%s está %s" % (quem, acao) if quem else acao
 
 
 def _partes(*itens):
@@ -359,7 +411,51 @@ def quem_enviou(msg, conv=None, nome_do_remetente=None):
     return _telefone_do_endereco(msg.remetente) or "Desconhecido"
 
 
-LIMITE_IA_NA_LINHA = 300
+# Quantas letras do texto da IA a linha da mensagem traz (0 = tudo): uma para
+# as descricoes de foto, figurinha e video, outra para transcricoes e PDFs
+# Como a previa de um link (titulo e descricao que o servico manda junto)
+# entra na linha da mensagem: "completa", "titulo" ou "nenhuma"
+MODO_PREVIA = ["completa"]
+LIMITE_PREVIA = 400
+
+
+def definir_modo_previa(modo):
+    MODO_PREVIA[0] = modo if modo in ("completa", "titulo", "nenhuma") \
+        else "completa"
+
+
+def previa_de_link(url="", titulo="", descricao="", site=""):
+    """Dicionario da previa, ou {} se nao ha titulo nem descricao."""
+    titulo, descricao = " ".join((titulo or "").split()), \
+        " ".join((descricao or "").split())
+    if not titulo and not descricao:
+        return {}
+    return {"url": url or "", "titulo": titulo, "descricao": descricao,
+            "site": " ".join((site or "").split())}
+
+
+def trecho_da_previa(msg):
+    """"prévia do link: Título. Descrição" para a linha da mensagem."""
+    previa = extras_de(msg)["previa"]
+    modo = MODO_PREVIA[0]
+    if not previa or modo == "nenhuma":
+        return ""
+    titulo, descricao = previa.get("titulo", ""), previa.get("descricao", "")
+    partes = [titulo]
+    if modo == "completa" and descricao and descricao != titulo:
+        partes.append(descricao)
+    texto = ". ".join(p.rstrip(".") for p in partes if p)
+    if len(texto) > LIMITE_PREVIA:
+        texto = texto[:LIMITE_PREVIA].rstrip() + "…"
+    return "prévia do link: " + texto if texto else ""
+
+
+LIMITE_IA_NA_LINHA = {"descricao": 0, "transcricao": 1000}
+
+
+def definir_limites_ia(descricao, transcricao):
+    LIMITE_IA_NA_LINHA["descricao"] = max(0, int(descricao or 0))
+    LIMITE_IA_NA_LINHA["transcricao"] = max(0, int(transcricao or 0))
 
 
 def rotulo_da_ia(msg):
@@ -376,9 +472,12 @@ def trecho_da_ia(msg):
     rotulo = rotulo_da_ia(msg)
     if not rotulo:
         return ""
-    texto = " ".join(extras_de(msg)["ia"]["texto"].split())
-    if len(texto) > LIMITE_IA_NA_LINHA:
-        texto = texto[:LIMITE_IA_NA_LINHA].rstrip() + "… (o menu mostra tudo)"
+    ia = extras_de(msg)["ia"]
+    texto = " ".join(ia["texto"].split())
+    limite = LIMITE_IA_NA_LINHA["descricao" if ia.get("genero") in (
+        "imagem", "figurinha", "video") else "transcricao"]
+    if limite and len(texto) > limite:
+        texto = texto[:limite].rstrip() + "… (o menu mostra tudo)"
     return "%s: %s" % (rotulo, texto)
 
 
@@ -405,6 +504,7 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None,
         cont = _juntar(cont, "com %d %s (Tab)" % (
             len(acoes), ("opção" if len(acoes) == 1 else "opções")
             if so_opcoes else ("botão" if len(acoes) == 1 else "botões")))
+    cont = _juntar(cont, trecho_da_previa(m))
     cont = _juntar(cont, trecho_da_ia(m))
     reacoes = resumo_reacoes(m)
     if reacoes:
@@ -441,6 +541,7 @@ FILTROS_TIPO = (("todas", "Todas as conversas"),
                 ("fixadas", "Fixadas"),
                 ("silenciadas", "Silenciadas"),
                 ("arquivadas", "Arquivadas"),
+                ("status", "Status e histórias"),
                 ("trancadas", "Trancadas no celular"))
 CONTA_TODAS = "todas"
 
@@ -474,6 +575,10 @@ def passa_filtro(c, tipo="todas", conta=CONTA_TODAS, busca=""):
         return False
     if conta.startswith("conta:") and c.conta_id != conta[6:]:
         return False
+    if tipo == "status":
+        return c.tipo == "status"        # um por pessoa, como uma conversa
+    if c.tipo == "status":
+        return False                     # so aparece no filtro Status
     if tipo == "trancadas":
         return bool(c.trancada)
     if c.trancada:
@@ -519,6 +624,12 @@ def rotulo_conversa(c):
         base += ", fixada"
     if c.silenciada():
         base += ", silenciada"
+    if c.tipo == "status":
+        if c.nao_lidas == 1:
+            return base + ", 1 não visto"
+        if c.nao_lidas > 1:
+            return base + ", %d não vistos" % c.nao_lidas
+        return base
     if c.nao_lidas == 1:
         return base + ", 1 não lida"
     if c.nao_lidas > 1:
@@ -613,8 +724,30 @@ def _quem_legivel(quem):
     return quem
 
 
+# O que cada recibo quer dizer para quem enviou: recebeu, abriu, reproduziu
+ROTULOS_RECIBO = (("entregue", "Recebida", "recebeu"),
+                  ("lida", "Aberta", "abriu"),
+                  ("ouvida", "Reproduzida", "reproduziu"))
+
+
+def pessoas_por_recibo(recibos):
+    """{tipo: [(participante, data)]}, uma vez por pessoa, na ordem do
+    evento; `recibos` e a lista (participante, tipo, data) do banco."""
+    saida = {tipo: [] for tipo, _, _ in ROTULOS_RECIBO}
+    vistos = set()
+    for quem, tipo, data in recibos or []:
+        if tipo in saida and (quem, tipo) not in vistos:
+            vistos.add((quem, tipo))
+            saida[tipo].append((quem, data))
+    return saida
+
+
+def texto_pessoas(n):
+    return "1 pessoa" if n == 1 else "%d pessoas" % n
+
+
 def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
-             midia=None):
+             midia=None, grupo=False, contagens=True):
     linhas = [
         "Conversa: %s" % nome_conversa,
         "De: %s" % ("Você" if m.minha else (m.autor or "Desconhecido")),
@@ -630,6 +763,14 @@ def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
     for r in extras_m["reacoes"]:
         linhas.append("Reação: %s de %s" % (r.get("emoji", ""),
                                             r.get("quem", "")))
+    previa = extras_m["previa"]
+    if previa:
+        linhas.append("Prévia do link: %s" % " - ".join(
+            p for p in (previa.get("titulo"), previa.get("site")) if p))
+        if previa.get("descricao"):
+            linhas.append("Descrição da prévia: %s" % previa["descricao"])
+        if previa.get("url"):
+            linhas.append("Endereço da prévia: %s" % previa["url"])
     if m.nome_arquivo:
         linhas.append("Arquivo: %s" % m.nome_arquivo)
     if m.tamanho:
@@ -640,7 +781,17 @@ def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
         linhas.append("Estado: %s" % m.estado)
     if midia:
         linhas.append("Mídia: %s" % midia)
-    if m.minha and recibos:
+    if m.minha and grupo:
+        # grupo: so o resumo; quem e quando fica nas listas dos botoes
+        linhas.append("Enviada em: %s" % (time.strftime(
+            "%d/%m/%Y %H:%M:%S", time.localtime(m.data)) if m.data else "-"))
+        por_tipo = pessoas_por_recibo(recibos)
+        for tipo, rotulo, _ in ROTULOS_RECIBO:
+            n = len(por_tipo[tipo])
+            if contagens and (n or tipo != "ouvida" or
+                              m.tipo in (VOZ, AUDIO, VIDEO)):
+                linhas.append("%s por %s" % (rotulo, texto_pessoas(n)))
+    elif m.minha and recibos:
         nomes = nomes or {}
         rotulos = {"entregue": "Entregue", "lida": "Lida",
                    "ouvida": "Ouvida"}

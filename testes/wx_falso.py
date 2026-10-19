@@ -25,6 +25,8 @@ WXK_ESCAPE, WXK_RETURN, WXK_NUMPAD_ENTER = 27, 13, 370
 WXK_DELETE, WXK_SPACE = 127, 32
 WXK_UP, WXK_DOWN, WXK_HOME, WXK_END, WXK_PAGEUP, WXK_PAGEDOWN = range(
     315, 321)
+LC_REPORT = LC_SINGLE_SEL = LC_NO_HEADER = 0
+EVT_LIST_ITEM_ACTIVATED = object()
 EVT_CLOSE = EVT_CHAR_HOOK = EVT_MENU = EVT_LISTBOX_DCLICK = object()
 EVT_CONTEXT_MENU = EVT_KEY_DOWN = EVT_BUTTON = EVT_LISTBOX = object()
 EVT_CHOICE = EVT_TEXT = object()
@@ -61,6 +63,12 @@ class Janela:
         self.visivel = v
 
     def Layout(self):
+        pass
+
+    def Close(self, *a):
+        self.vivo = False
+
+    def RequestUserAttention(self, *a):
         pass
 
     def SetFocus(self):
@@ -294,6 +302,61 @@ class ListBox(Janela):
         return self.itens[self.sel] if self.sel >= 0 else None
 
 
+class ListCtrl(Janela):
+    """Lista de uma coluna (so o que a janela usa), com os itens em
+    `itens` como no ListBox falso."""
+
+    def __init__(self, *a, **k):
+        super().__init__()
+        self.itens, self.sel = [], -1
+
+    def InsertColumn(self, *a, **k):
+        pass
+
+    def SetColumnWidth(self, *a, **k):
+        pass
+
+    def GetClientSize(self):
+        return types.SimpleNamespace(width=300, height=300)
+
+    def InsertItem(self, i, texto):
+        self.itens.insert(i, texto)
+
+    def DeleteAllItems(self):
+        self.itens, self.sel = [], -1
+
+    def DeleteItem(self, i):
+        del self.itens[i]
+
+    def GetItemCount(self):
+        return len(self.itens)
+
+    def GetItemText(self, i):
+        return self.itens[i]
+
+    def SetItemText(self, i, texto):
+        self.itens[i] = texto
+
+    def GetFirstSelected(self):
+        return self.sel
+
+    def Select(self, i, ligar=True):
+        assert 0 <= i < len(self.itens), (i, len(self.itens))
+        if ligar:
+            self.sel = i
+        elif self.sel == i:
+            self.sel = -1
+
+    def Focus(self, i):
+        pass
+
+    def EnsureVisible(self, i):
+        pass
+
+    def selecionado(self):
+        return self.itens[self.sel] if self.sel >= 0 else None
+
+
 class TextCtrl(Janela):
     def __init__(self, *a, value="", **k):
         super().__init__()
@@ -307,6 +370,9 @@ class TextCtrl(Janela):
 
     def Clear(self):
         self.valor = ""
+
+    def WriteText(self, texto):
+        self.valor += texto
 
     def SetInsertionPoint(self, i):
         pass
@@ -326,6 +392,9 @@ class Button(Janela):
         super().__init__()
         self.label = label or (a[1] if len(a) > 1 else "")
         self.visivel = True
+
+    def SetDefault(self):
+        pass
 
     def SetLabel(self, t):
         self.label = t

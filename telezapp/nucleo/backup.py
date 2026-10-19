@@ -44,6 +44,7 @@ OPCOES_FORA = {"trancadas_exigir_codigo", "depuracao"}
 # O que a parte "contas" leva do config.json
 CHAVES_CONTAS = ("contas", "telegram_api_id", "telegram_api_hash",
                  "codigo_trancadas", "trancadas_locais",
+                 "ia_automatica_conversas",
                  "trancadas_exigir_codigo")
 
 MANIFESTO = "manifesto.json"
@@ -66,7 +67,7 @@ class Manifesto:
 # ------------------------------------------------------------- opcoes
 # Preferencias fora de config.OPCOES que tambem vao (a ordem dos provedores
 # de IA e os modelos; as chaves nunca)
-EXTRAS = ("ia_ordem", "ia_modelos")
+EXTRAS = ("ia_ordem", "ia_modelos", "pacote_de_sons", "sons_desativados")
 
 
 def opcoes_do_backup(dados):
@@ -111,6 +112,17 @@ def opcoes_validas(lidas):
         boas["ia_modelos"] = {p: v for p, v in modelos.items()
                               if p in catalogo.PROVEDORES
                               and isinstance(v, str)}
+    pacote = lidas.get("pacote_de_sons")
+    if isinstance(pacote, str) and (pacote in ("padrao", "telezapp") or
+                                    pacote.startswith("p:")):
+        boas["pacote_de_sons"] = pacote
+    desativados = lidas.get("sons_desativados")
+    if isinstance(desativados, dict):
+        boas["sons_desativados"] = {
+            p: [e for e in v if isinstance(e, str)]
+            for p, v in desativados.items()
+            if isinstance(p, str) and isinstance(v, list)}
+
     return boas
 
 

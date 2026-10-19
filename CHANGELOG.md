@@ -3,6 +3,249 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.19.0
+
+Leitura dupla do NVDA na lista de conversas, busca das configurações, vídeo
+por quadros e IA automática.
+
+- `nome_de_participante` (listas de quem recebeu, abriu ou reproduziu) usa
+  `_dados_mencao(.., rede=False)`: agenda, apelido por qualquer endereço e
+  mensagens guardadas, sem consultar a rede (a lista pode ser grande).
+- Opção `enter_chega_ao_leitor` (desligada): no Enter da caixa o `_char_hook`
+  faz `evt.Skip()` (o controle recebe o `WM_CHAR` que o NVDA usa para fechar
+  a palavra digitada) e `wx.CallLater(40, _enviar_depois_do_enter)` envia o
+  texto (o `strip()` tira a quebra de linha) e limpa a caixa. Padrão: Enter
+  tratado no hook, que engole o `WM_CHAR`.
+- Evento de som `mencao_ou_resposta` (18º). `extras["citou_voce"]`: o WhatsApp
+  marca em `_ao_receber` (`_cita_voce`: `mentionedJID` com o telefone ou o LID
+  de `get_me()`), o Telegram usa `message.mentioned`; `guardar_extras` mantém
+  a marca. `Janela._cita_voce` soma a resposta a mensagem minha (cache ou
+  banco). Em `_ev_nova` o som substitui `nova_grupo`/`nova_aberta` e não
+  depende de `som`; passa pelo filtro de conversa muda. Som do TeleZapp:
+  `E6`+`C6` descendo, 0,79 s; bips: 1047, 1319 e 1047 Hz.
+- Tom padrão de "chamando": `fala.DURACAO_TOM_DE_CHAMADA_MS` = 1500 ms
+  (antes 400); a janela repete a cada 3 s (`_repetir_toque`).
+- Evento de som `reacao_recebida` (17º): `EVENTOS_SOM`, bip em `fala._tocar`
+  (1319 e 1568 Hz), `ferramentas/gerar_sons.py` (`E6` e `G6`, 0,45 s) e
+  `telezapp/sons/reacao_recebida.ogg`; `Janela._ev_atualizada` toca quando
+  `motivo == "reacao"` numa mensagem minha, com emoji e de outra pessoa,
+  depois do filtro de conversa muda.
+- Menções só com telefone: `_lembrar_apelido(.., alternativo)` guarda o nome
+  de perfil sob `Sender` e `SenderAlt` e `_aprender_par` registra o par
+  LID/telefone de cada mensagem; `_formas_do_endereco` junta o endereço, o
+  telefone, os LIDs do mapa e `get_lid_from_pn`, e `_dados_mencao` procura o
+  apelido e `banco.nome_do_remetente` por todos eles. `_reavaliar_mencoes`
+  (chamada em `carregar_mensagens` de grupos, até 300 por vez) refaz as
+  menções que ficaram com o telefone e regrava o texto e os extras.
+- Progresso de download e envio. `ev.ProgressoEnvio`; `Janela._ev_progresso_envio`
+  (título "enviando mídia N%", barra de situação, fala no passo de
+  `midias_passo_progresso`; some em `MensagemNova(enviada_daqui)`, falha ou
+  100%). Telegram: `send_file(progress_callback=)`. WhatsApp: a DLL de teste
+  ganhou `DownloadAnyToFile` (whatsmeow `DownloadToFile`, direto no disco),
+  `UploadFile` (`UploadReader` com um arquivo temporário que conta o que
+  escreve, 0 a 10 %, e o que lê ao enviar, 10 a 100 %), `TransferProgress` e
+  `TransferCancel` (patch em `docs/neonize/transferencias-main.go.diff`;
+  `_binder.py`/`client.py` do venv ganharam `download_any_to_file`,
+  `upload_file`, `transfer_progress`, `transfer_cancel`, `tem_transferencias`).
+  `baixar_arquivo` usa isso quando `tem_transferencias()` (progresso pelo
+  tamanho do `.parte`, Esc cancela na DLL); `_enviar_arquivo` usa para
+  arquivos ≥ `LIMITE_ENVIO_POR_ARQUIVO` (8 MiB), montando a mensagem de foto,
+  vídeo, áudio ou documento com `_mensagem_de_midia(up=)`. Sem a DLL de teste
+  tudo cai nos caminhos antigos. Não testado com uma conta real.
+- Publicar status e histórias: `Provedor.PODE_PUBLICAR_STATUS` e
+  `publicar_status(texto, anexo, publico)`. WhatsApp: envia para
+  `status@broadcast` (texto com `ExtendedTextMessage` e fundo verde, foto com
+  `send_image`, vídeo com `_mensagem_de_midia`) numa thread e guarda o status
+  em "Meu status" (`_guardar_meu_status`); quem vê é a privacidade de status
+  da conta. Telegram: `stories.SendStoryRequest` com `InputPeerSelf`,
+  mídia enviada por `upload_file` e regra `AllowContacts`/`AllowAll`.
+  `nucleo/publicar_status.validar` confere (WhatsApp: texto ≤ 700 ou foto ou
+  vídeo; Telegram: foto ou vídeo, legenda ≤ 200) e
+  `interface/publicar_status.DialogoPublicarStatus` é a janela; atalho
+  Ctrl+Shift+U. Resultado por `ev.Aviso`. Não testado com contas reais: o
+  envio ao `status@broadcast` pelo neonize e a história sem Premium são as
+  dúvidas.
+- Histórias do Telegram nas conversas de status (mesmo desenho do WhatsApp):
+  `GetAllStoriesRequest` (até 5 páginas) em `_buscar_historias`, chamada ao
+  fim de `_atualizar_conversas` e por `UpdateStory` (`_ao_historia`, no máximo
+  a cada 10 s). Cada pessoa vira `Conversa(id="status:<peer>", tipo="status")`
+  e cada `StoryItem` uma `Mensagem` (id = id da história, `tipo_de_historia`,
+  `dados_da_midia_de_historia`); `nao_lidas` = histórias acima de
+  `max_read_id`; o que sumiu do servidor sai do banco. `_carregar` lê do
+  banco; `_baixar` usa `GetStoriesByIDRequest` (`_midia_da_historia`);
+  `_marcar_lida` manda `ReadStoriesRequest`; `_reagir` usa
+  `stories.SendReactionRequest`; `responder_status` envia `SendMessageRequest`
+  com `InputReplyToStory`. Não testado com histórias reais.
+- Prévia de link buscada pelo TeleZapp (`nucleo/previa_links.py`), opções
+  `previa_receber` e `previa_enviar` (desligadas; `LIGADAS`/`definir`).
+  `buscar(url, baixar)` só abre http/https cujo nome resolva a endereços
+  globais (`endereco_publico`, também em cada redirecionamento por
+  `_SoPublico`), com 5 s e 400 KB, lê `og:*`, `twitter:*`, `description` e
+  `<title>` (`ler_previa`) e nunca levanta. Recebida: `Janela._previa_da_recebida`
+  (só ao vivo, texto, não minha, sem prévia) busca numa thread e grava com
+  `_previa_pronta`. Enviada no WhatsApp: `_previa_ao_enviar` põe `matchedText`,
+  `title` e `description` no `ExtendedTextMessage` e guarda a prévia na
+  mensagem. No Telegram `send_message(link_preview=LIGADAS["enviar"])`: com a
+  opção desligada a mensagem sai sem a prévia que o servidor montaria.
+- Prévia de link: `extras["previa"]` ({url, titulo, descricao, site}), vinda do
+  `ExtendedTextMessage` (`matchedText`, `title`, `description`) no WhatsApp
+  (`previa_do_whatsapp`) e do `web_preview` no Telegram (`previa_do_telegram`);
+  `guardar_extras(.., previa=)` a mantém quando outros extras são regravados.
+  `modelos.trecho_da_previa` entra em `formatar` conforme a opção
+  `previa_links` (`MODO_PREVIA`: completa, titulo, nenhuma) e `detalhes` a
+  mostra sempre. Sem buscar a página na rede. Para mensagens enviadas daqui o
+  WhatsApp não ganha prévia (isso exigiria abrir o link).
+- Status do WhatsApp como conversas: `PREFIXO_STATUS` (`status:<jid>`), uma
+  `Conversa(tipo="status")` por autor e os status como `Mensagem`s dela
+  (`_guardar_status` agora grava a ficha, para baixar a mídia; publica
+  `MensagemNova(silenciosa=True)`; `nao_lidas` = não vistos).
+  `_limpar_status_antigos` apaga o que passou de 25 h (na conexão e a cada
+  status). `marcar_como_lida` manda o recibo ao chat `status@broadcast`
+  (`_enviar_leitura`). `responder_status` envia à conversa do autor um
+  `ExtendedTextMessage` com `contextInfo(remoteJID="status@broadcast")`
+  (`RESPOSTA_A_STATUS` no `resposta_a`, que não vai para o banco); curtir usa
+  `reactionMessage` com `MessageKey(remoteJID="status@broadcast")` enviada ao
+  autor. Janela: filtro `status` em `FILTROS_TIPO` (`passa_filtro` deixa os
+  status só nele; `rotulo_conversa` diz "não vistos"), menu da conversa só
+  com Abrir e Apagar status, `_enviar_texto` responde ao status selecionado
+  e anexos/gravação são recusados. A tabela `status` antiga ficou sem uso.
+  Não testado com status reais; Telegram (histórias) é a próxima etapa.
+- Pacotes de sons e tela própria de Sons. `nucleo/pacotes_de_som.py`: pacotes
+  `padrao` (bips do sistema, valor `fala.BIP`), `telezapp` (arquivos de
+  `telezapp/sons`, gerados por `ferramentas/gerar_sons.py`: Ogg estéreo ≤ 2 s,
+  sem silêncio no início, termina em zero, pico ≈ 0,45) e `p:<nome>`
+  (pastas em `sons/pacotes/<nome>` com `<evento>.<ext>`). `mapa(pacote,
+  desativados)` vira o `{evento: valor}` de `fala.definir_sons` (o pacote
+  Padrão usa `BIP` explícito, então um evento desativado não silencia os que
+  herdam o tom dele). `EstadoDeSons` guarda o que a tela mudou (pacote,
+  eventos ativados/desativados, arquivos, pacotes a criar/excluir) e só grava
+  em `aplicar()`, que importa os arquivos (`importar_arquivo`, nome do evento
+  + extensão) e entrega `aplicador("sons_pacotes", {ativo, desativados,
+  erros})`; `Janela._aplicar_opcao` grava `pacote_de_sons` e
+  `sons_desativados`. As opções `som_*` saíram de `config.OPCOES`;
+  `migrar_antigos` cria o pacote "Personalizado" a partir delas.
+  `DialogoConfiguracoes._criar_sons`: Choice do pacote, ListBox dos eventos
+  (Enter/Espaço alternam, tratados em `_ao_tecla`), Ouvir som e, só em
+  personalizados, Procurar som; Novo e Excluir pacote. O backup leva
+  `pacote_de_sons` e `sons_desativados` (EXTRAS) e a pasta `sons`. O spec do
+  PyInstaller precisa de `datas` com `telezapp/sons`.
+- `modelos.LIMITE_IA_NA_LINHA` virou um dicionário (`descricao`: foto,
+  figurinha e vídeo, padrão 0 = inteira; `transcricao`: voz, áudio e PDF,
+  padrão 1000), definido por `definir_limites_ia` a partir das opções
+  `ia_linha_descricao` e `ia_linha_transcricao` (`Janela._carregar_limites_ia`).
+- `_ia_pronto` fala o texto da IA inteiro (sem o corte de 1500 letras); no modo
+  automático fala sempre, menos em conversa muda (`_conversa_muda`), sem
+  depender de `falar_novas`.
+- `midias_passo_progresso` (25, 20, 10, 5, 1 ou 0 = não falar): o passo da fala
+  do avanço do download em `_ev_progresso_midia`. O WhatsApp só informa 0 e
+  100 (`download_any` baixa tudo na memória), então só o Telegram usa.
+- Fala das mensagens novas por lugar: `falar_novas` (conversa aberta),
+  `falar_novas_outras_conversas` e `falar_novas_fora_do_telezapp` (janela
+  sem foco, `IsActive()` falso, qualquer conversa); `Janela._deve_falar_nova`
+  decide em `_ev_nova` e no resumo da sincronia. Independentes de `som`.
+  `Config._carregar` liga as duas novas uma vez para quem já tinha
+  `falar_novas` e não tinha as chaves novas no arquivo.
+- Avisos de chamada do WhatsApp (o TeleZapp ainda não atende): o provedor
+  registra `CallOfferEv`/`CallAcceptEv`/`CallTerminateEv` (`_ao_chamada`,
+  `_ao_chamada_atendida`, `_ao_chamada_encerrada`; vídeo se a árvore do pacote
+  tem a tag `video`; chamadas minhas em outro aparelho e em grupo ficam de
+  fora). A linha na conversa é uma `Mensagem` de tipo `OUTRO` com id
+  `chamada-<callID>` e `nao_lidas += 1`, publicada silenciosa; ao fim vira
+  perdida, recusada ou atendida (com duração) via `MensagemAtualizada(
+  "chamada")`. `ev.ChamadaWhatsApp` leva a janela `DialogoAvisoDeChamada`
+  (OK e Conversar, sem bloqueio; opção `avisar_chamadas_whatsapp`); textos
+  em `nucleo/chamadas.py` (`texto_na_conversa`, `texto_do_aviso`,
+  `texto_do_fim`). Não testado com chamada real.
+- Detalhes de mensagem de grupo: `modelos.detalhes(.., grupo, contagens)` troca
+  a lista por "Enviada em" e "Recebida/Aberta/Reproduzida por N pessoas"
+  (`pessoas_por_recibo`, `ROTULOS_RECIBO`, `texto_pessoas`).
+  `dialogos.mostrar_texto(.., botoes_extra=[(rotulo, funcao(janela))])` põe
+  os botões depois do texto. `detalhes.ControleRecibos` monta um botão por
+  assunto com gente e abre `DialogoLista` (membro, telefone, data e hora);
+  `_MembrosDeRecibo` reaproveita `ControleDetalhes._menu_membro`, então o
+  menu é o dos membros do grupo; "Iniciar conversa" fecha os detalhes e abre
+  a conversa (`abrir_conversa`). Só WhatsApp (o Telegram não guarda recibos
+  por membro).
+- `Janela._opcoes_midia`: o menu de contexto da mensagem com mídia ganha
+  "Reproduzir/Abrir ..." (`ROTULOS_ABRIR`) e "Salvar cópia" ou "Baixar sem
+  abrir", logo depois dos itens da IA, para o Enter configurado como IA ou
+  só baixar não tirar o acesso a abrir.
+- Reações e emojis: `nucleo/emojis.py` (pacote `emoji`, nomes em português
+  pelo `demojize(language="pt")`, sem tons de pele; busca por início de
+  palavra, sem acento, com `SINONIMOS`; `RAPIDOS`). `interface/emojis.py`:
+  `DialogoEmoji` (busca + lista, seta para baixo na busca vai à lista) e
+  `escolher_reacao` (rápidas + "Outro emoji..." + "Tirar"). Janela:
+  `_reagir` (Ctrl+Shift+G e menu de contexto) e `_inserir_emoji` (Ctrl+.).
+  `Provedor.PODE_REAGIR`/`reagir(msg, emoji)`: WhatsApp monta com
+  `build_reaction` (autor = eu se a mensagem é minha, senão o remetente) e
+  envia; Telegram usa `SendReactionRequest` (`ReactionInvalidError` avisa).
+  As duas guardam a reação em `extras["reacoes"]` com `"minha": True` e
+  publicam `MensagemAtualizada(motivo="reacao", quem="Você")` (a janela não
+  fala as minhas). Telegram recebe `UpdateMessageReactions` (`_ao_reacoes`:
+  `recent_reactions`, ou só a contagem em grupos grandes). `emoji>=2.14` em
+  `requirements.txt`.
+- Status no título: `ev.Presenca(conta_id, conversa_id, estado, quando, aprox,
+  quem)`; `Provedor.observar_presenca` / `parar_presenca` (chamados ao abrir e
+  ao fechar a conversa, só com a opção `status_no_titulo`). WhatsApp: abrir
+  envia `send_presence(AVAILABLE)` (uma vez) e `subscribe_presence` (privadas);
+  fechar volta a `UNAVAILABLE`; `PresenceEv` (online/`LastSeen`) e
+  `ChatPresenceEv` (digitando/gravando/parou, com o nome nos grupos) viram
+  `Presenca`. Telegram: `_ler_status` lê `user.status` ao abrir e
+  `events.UserUpdate` (registrado por último em `_conectar`) traz online,
+  visto por último (ou "recentemente", "na última semana", "no último mês"),
+  digitando, gravando e enviando. `Janela._status_da_conversa` monta o
+  sufixo do título com `modelos.texto_presenca`; "digitando" expira em 10 s
+  se o "parou" não vier.
+- Pareamento que falhava sem aviso: o registro mostrava
+  `Failed to handle code pair notification` (código) e `Failed to pair device:
+  invalid device identity HMAC` (QR, a chave ADV do QR já não era a do
+  cliente depois de o servidor girá-la ou de um código ter sido pedido).
+  `ProvedorWhatsApp._ouvir_falhas_do_pareamento` liga um `logging.Handler` em
+  `whatsmeow.Client` (só enquanto `_pareando`) que publica
+  `ev.PareamentoFalhou(conta_id, "codigo"|"qr")`; a janela avisa e chama
+  `Contas.reiniciar_pareamento` (para, apaga a sessão se puder e liga de novo
+  num fio), no máximo 3 vezes por janela. Escolher o QR depois de gerar um
+  código também reinicia (`DialogoPareamento.codigo_gerado`).
+  `DialogoPareamento.reiniciou()` limpa QR, código e a tela cheia.
+- `DialogoPareamento`: o `RadioBox` virou uma página inicial com dois botões
+  (`botao_telefone`, `botao_qr`); `_ir_para("inicio"|"codigo"|"qr")` troca de
+  página (Voltar em cada uma). A página do telefone pede formato internacional
+  (o campo e a mensagem de número inválido dizem isso). Ir para "qr" abre
+  `JanelaQrCheia` na hora (`_tela_cheia(esperar=True)`), com "Aguardando o QR
+  Code" até o QR chegar; o QR que chega com a página inicial aberta só fica
+  guardado.
+- Vídeo por quadros: `catalogo.video_nativo` (só o Gemini) e `aceita(.., "video")`
+  agora vale para quem lê imagens; `provedores_da_tarefa("video")` lista os cinco.
+  `nucleo/ia/video.grade_de_quadros` (OpenCV, import tardio; `opencv-python-headless`
+  entrou em `requirements.txt` e em `docs/licencas-de-terceiros.md`) monta um
+  JPEG com 4/9/12 quadros (perfil curto/médio/detalhado) com a hora desenhada em
+  cada um. `servico.executar` usa a grade quando o provedor não é nativo ou o
+  vídeo passa de 14 MB (`Resultado.via_quadros`, `prompts.instrucoes(.., quadros=n)`).
+  `executar_em_ordem(.., ordem_audio=)` soma "Fala no vídeo" transcrevendo o
+  próprio mp4 (`mime="video/mp4"`) pelos provedores de áudio. `montar_pedido`
+  recusa vídeo inteiro para quem não é nativo.
+- IA automática: opção por conversa em `ia_automatica_conversas` (lista de
+  `[conta, conversa]`, vai na parte "contas" do backup), alternada no menu de
+  contexto da conversa (`_alternar_ia_auto`). `_ev_nova` chama `_ia_automatica`
+  para mensagens recebidas (não minhas, não da sincronia). Opções `ia_auto_audio`
+  e `ia_auto_imagem`. `_ia_processar(x, auto=True)`: sem janelas nem perguntas
+  (sem provedor, chave ou consentimento, só retorna), baixa com
+  `midias.baixar(x, automatica=True)` (`_ia_pendentes` guarda `(x, auto)`) e no
+  máximo 2 pedidos ao mesmo tempo (`_ia_vagas`). `_ia_pronto(.., auto)`: erro só
+  na barra de situação; resultado na barra e falado (sem interromper) se
+  "Falar mensagens novas" estiver ligado e a conversa não estiver muda.
+
+- `janela.ListaDeTextos`: `wx.ListCtrl` de uma coluna com a interface do
+  `wx.ListBox` (`Set`, `Append`, `Delete`, `SetString`, `GetSelection`,
+  `SetSelection`, `HitTest` que devolve só o índice). `lista_conv` passou do
+  ListBox para ela, pelo mesmo motivo da lista de categorias das
+  configurações: o ListBox faz o NVDA falar o item em foco duas vezes. O duplo
+  clique virou `EVT_LIST_ITEM_ACTIVATED`; `testes/wx_falso.py` ganhou um
+  `ListCtrl` falso.
+- `DialogoConfiguracoes._ao_tecla`: seta para baixo no campo de busca foca o
+  primeiro controle dos resultados (ou a lista de categorias, sem busca ou sem
+  resultado).
+
 ## 2026.10.18.0
 
 Copiar por tipo de conteúdo e colar mídia na caixa.

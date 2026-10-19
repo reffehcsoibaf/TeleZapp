@@ -113,6 +113,9 @@ def montar_pedido(provedor, modelo, chave, midia, instrucoes, pergunta,
             provedor, midia.genero):
         raise ErroIA("nao_aceita", "Este provedor não faz isso com este tipo "
                                    "de arquivo.")
+    if midia.genero == "video" and not cat.video_nativo(provedor):
+        raise ErroIA("nao_aceita", "Este provedor só vê os quadros do vídeo, "
+                                   "não o arquivo.")
     if e_transcricao(provedor, midia):
         return _transcricao(provedor, chave, midia)
     tokens = cat.MAX_TOKENS[midia.genero]

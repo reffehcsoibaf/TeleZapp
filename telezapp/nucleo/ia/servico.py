@@ -17,6 +17,7 @@ from telezapp import VERSAO
 from telezapp.nucleo.ia import catalogo as cat
 from telezapp.nucleo.ia import prompts
 from telezapp.nucleo.ia import provedores as prov
+from telezapp.nucleo.ia import video as quadros_de_video
 from telezapp.nucleo.ia.provedores import ErroIA, Midia
 
 log = logging.getLogger("telezapp.ia")
@@ -47,6 +48,7 @@ class Resultado:
     texto: str
     provedor: str          # nome legivel
     modelo: str
+    via_quadros: bool = False   # video visto por quadros (sem a fala)
 
 
 def _mime(caminho, dados, genero):
@@ -75,7 +77,7 @@ def _mime(caminho, dados, genero):
             "pdf": "application/pdf"}[genero]
 
 
-def carregar_midia(caminho, genero):
+def carregar_midia(caminho, genero, mime=None):
     """Midia pronta para enviar. ErroIA se o arquivo nao serve."""
     if genero not in cat.GENEROS:
         raise ErroIA("genero", "Tipo de arquivo desconhecido.")
@@ -93,7 +95,7 @@ def carregar_midia(caminho, genero):
                                    cat.LIMITE_BYTES[genero] // 1048576))
     with open(caminho, "rb") as f:
         dados = f.read()
-    return Midia(genero, _mime(caminho, dados, genero), dados,
+    return Midia(genero, mime or _mime(caminho, dados, genero), dados,
                  os.path.basename(caminho))
 
 
@@ -180,7 +182,7 @@ def _erro_http(codigo, detalhe=""):
 
 
 def executar(genero, caminho, provedor, chave, modelo, perfil="medio",
-             enviar=enviar_pela_rede):
+             enviar=enviar_pela_rede, mime=None):
     """Transcreve ou descreve o arquivo. `modelo` e um nome ou uma lista, em
     ordem: se um nao existe mais ou o limite de uso dele acabou, tenta o
     proximo. Devolve o Resultado."""
@@ -194,12 +196,22 @@ def executar(genero, caminho, provedor, chave, modelo, perfil="medio",
     if not cat.aceita(provedor, genero):
         raise ErroIA("nao_aceita", "%s não faz isso com este tipo de "
                                    "arquivo." % cat.PROVEDORES[provedor].nome)
-    midia = carregar_midia(caminho, genero)
+    quadros, instrucoes, pergunta = 0, None, None
+    if genero == "video" and not _video_inteiro(provedor, caminho):
+        # sem o video inteiro: os quadros espalhados, numa imagem so
+        jpeg, tempos = quadros_de_video.grade_de_quadros(caminho, perfil)
+        quadros = len(tempos)
+        midia = Midia("imagem", "image/jpeg", jpeg, "quadros.jpg")
+        instrucoes = prompts.instrucoes("video", perfil, quadros=quadros)
+        pergunta = prompts.primeira_pergunta("video", quadros)
+    else:
+        midia = carregar_midia(caminho, genero, mime)
+        instrucoes = prompts.instrucoes(genero, perfil)
+        pergunta = prompts.primeira_pergunta(genero)
     modelos = [modelo] if isinstance(modelo, str) else list(modelo)
     for i, atual in enumerate(modelos):
-        pedido = prov.montar_pedido(
-            provedor, atual, chave, midia, prompts.instrucoes(genero, perfil),
-            prompts.primeira_pergunta(genero), perfil)
+        pedido = prov.montar_pedido(provedor, atual, chave, midia,
+                                    instrucoes, pergunta, perfil)
         try:
             texto = prov.ler_resposta(provedor, enviar(pedido), genero)
         except ErroIA as e:
@@ -208,7 +220,8 @@ def executar(genero, caminho, provedor, chave, modelo, perfil="medio",
                          e.codigo)
                 continue
             raise
-        return Resultado(texto, cat.PROVEDORES[provedor].nome, atual)
+        return Resultado(texto, cat.PROVEDORES[provedor].nome, atual,
+                         bool(quadros))
 
 
 # O que vale tentar com o proximo provedor da ordem: a falha e deste
@@ -218,12 +231,45 @@ PROXIMO_PROVEDOR = {"chave", "saldo", "limite", "pedido", "grande", "recusa",
                     "vazia"}
 
 
+def _video_inteiro(provedor, caminho):
+    """O video vai inteiro so ao provedor que o recebe e se couber."""
+    try:
+        tamanho = os.path.getsize(caminho)
+    except OSError:
+        return True      # o erro do arquivo sai em carregar_midia
+    return cat.video_nativo(provedor) and         tamanho <= cat.LIMITE_BYTES["video"]
+
+
 def executar_em_ordem(genero, caminho, ordem, chave_de, modelos, perfil,
-                      enviar=enviar_pela_rede, ao_tentar=None):
+                      enviar=enviar_pela_rede, ao_tentar=None,
+                      ordem_audio=()):
     """Tenta os provedores na ordem em que a pessoa os organizou, ate um
     funcionar. `chave_de(provedor)` devolve a chave ("" = sem chave, pula).
     `modelos` e o dicionario ia_modelos. Devolve o Resultado; se nenhum
     funcionou, levanta o erro do ultimo que foi tentado."""
+    r = _executar_em_ordem(genero, caminho, ordem, chave_de, modelos, perfil,
+                           enviar, ao_tentar)
+    if genero == "video" and r.via_quadros and ordem_audio:
+        r.texto += "\n\n" + _fala_do_video(
+            caminho, ordem_audio, chave_de, modelos, perfil, enviar)
+    return r
+
+
+def _fala_do_video(caminho, ordem_audio, chave_de, modelos, perfil, enviar):
+    """A fala do video, transcrita a parte: os quadros nao trazem o som.
+    Texto pronto para somar a descricao."""
+    try:
+        t = _executar_em_ordem("audio", caminho, ordem_audio, chave_de,
+                               modelos, perfil, enviar, None, "video/mp4")
+    except ErroIA as e:
+        if e.codigo == "vazia":
+            return "Fala no vídeo: não encontrei fala."
+        return "Fala no vídeo: não consegui transcrever. %s" % e.texto
+    return "Fala no vídeo (%s): %s" % (t.provedor, t.texto)
+
+
+def _executar_em_ordem(genero, caminho, ordem, chave_de, modelos, perfil,
+                       enviar, ao_tentar, mime=None):
     ultimo = None
     tentados = 0
     for provedor in ordem:
@@ -238,7 +284,7 @@ def executar_em_ordem(genero, caminho, ordem, chave_de, modelos, perfil,
         try:
             return executar(genero, caminho, provedor, chave,
                             cat.cadeia_de_modelos(provedor, modelos), perfil,
-                            enviar)
+                            enviar, mime)
         except ErroIA as e:
             if e.codigo not in PROXIMO_PROVEDOR:
                 raise

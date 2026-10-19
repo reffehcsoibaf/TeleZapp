@@ -82,6 +82,10 @@ HERDA = {"nova_aberta": "nova", "nova_grupo": "nova",
          "tarefa_pronta": "enviada"}
 
 
+# O tom de "chamando" (eu liguei e espero atender), em milissegundos
+DURACAO_TOM_DE_CHAMADA_MS = 1500
+
+
 def tom_padrao(tipo):
     """O tipo cujo som sintetico o evento usa quando nao ha escolha."""
     while tipo in HERDA:
@@ -93,6 +97,11 @@ def definir_sons(mapa):
     """Troca as escolhas de som: {evento: valor}."""
     _sons.clear()
     _sons.update(mapa)
+
+
+# Valor de "usar o bip do sistema" neste evento (o pacote Padrao, ou um
+# evento sem arquivo num pacote personalizado); nao e nome de arquivo
+BIP = "<bip>"
 
 
 def caminho_do_som(valor):
@@ -112,6 +121,8 @@ def acao_do_som(tipo, valor=None):
     valor = _sons.get(tipo, "") if valor is None else valor
     if valor == "desligado":
         return "nenhum", ""
+    if valor == BIP:
+        return "padrao", ""
     caminho = caminho_do_som(valor)
     if caminho and os.path.isfile(caminho):
         return "arquivo", caminho
@@ -178,8 +189,9 @@ def _tocar(tipo):
             for f in (784, 988, 784, 988):
                 winsound.Beep(f, 120)
         elif tipo == "chamando":
-            # chamada que eu fiz: um tom grave e longo, como o de espera
-            winsound.Beep(425, 400)
+            # chamada que eu fiz: um tom grave e longo, como o de espera de
+            # um telefone (1,5 s; a janela repete a cada 3 s)
+            winsound.Beep(425, DURACAO_TOM_DE_CHAMADA_MS)
         elif tipo == "desconectada":
             # conta que caiu: dois tons descendo, mais graves que o de chamada
             for f in (440, 330):
@@ -187,6 +199,12 @@ def _tocar(tipo):
         elif tipo == "download_pronto":
             for f in (740, 988):
                 winsound.Beep(f, 70)
+        elif tipo == "mencao_ou_resposta":
+            for f in (1047, 1319, 1047):       # tres toques: chamou voce
+                winsound.Beep(f, 70)
+        elif tipo == "reacao_recebida":
+            for f in (1319, 1568):          # dois toques curtos e agudos
+                winsound.Beep(f, 55)
         elif tipo == "desligada":
             for f in (494, 392, 330):
                 winsound.Beep(f, 120)

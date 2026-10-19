@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Provedor do WhatsApp com mensagens protobuf de verdade do neonize e um
 cliente simulado (sem rede)."""
+import logging
 import os
 import queue
 import threading
@@ -141,6 +142,12 @@ class ClienteFalso:
     def connect(self):
         self.parar.wait(10)
 
+    def send_presence(self, presenca):
+        self.presencas = getattr(self, "presencas", []) + [presenca.name]
+
+    def subscribe_presence(self, j):
+        self.assinadas = getattr(self, "assinadas", []) + [j.User]
+
     def stop(self):
         self.parar.set()
 
@@ -149,6 +156,12 @@ class ClienteFalso:
 
     def get_pn_from_lid(self, j):
         return jid("5551977776666") if j.User == "lid1" else N.JID()
+
+    lids = {"5551955550001": "lidana"}      # telefone -> LID que o armazem tem
+
+    def get_lid_from_pn(self, j):
+        return jid(self.lids[j.User], "lid") if j.User in self.lids \
+            else N.JID()
 
     empresas = {}    # usuario -> nome verificado devolvido por get_user_info
 
@@ -182,6 +195,12 @@ class ClienteFalso:
         if len(self.pareamentos) == 1:
             raise RuntimeError("ainda conectando")
         return "ABCD-EFGH"
+
+    def build_reaction(self, chat, autor, id_, emoji):
+        self.reacoes = getattr(self, "reacoes", []) + [
+            (wa.jid_texto(chat), wa.jid_texto(autor), id_, emoji)]
+        return E.Message(reactionMessage=E.ReactionMessage(
+            key=_chave(id_), text=emoji))
 
     def send_message(self, para, mensagem, **kw):
         if mensagem.conversation == "falhar":
@@ -591,20 +610,21 @@ def test_recibos_por_participante_e_status_guardado(amb):
                                            ("lida", TS + 9)]
     assert rec[0][0] == "5551988887777@s.whatsapp.net"
 
-    # status: nao vira conversa, vai para a tabela de status
+    # status: vira uma conversa de tipo status, uma por pessoa
     origem_st = N.MessageSource(Chat=jid("status", "broadcast"),
                                 Sender=jid("5551988887777"))
     amb.f["Message"](amb.c, N.Message(
         Info=N.MessageInfo(MessageSource=origem_st, ID="S1", Pushname="Ana",
-                           Timestamp=TS),
+                           Timestamp=int(__import__("time").time())),
         Message=E.Message(conversation="meu status")))
-    for _ in range(100):
-        if amb.banco.status("w1"):
-            break
-        threading.Event().wait(0.02)
-    st = amb.banco.status("w1")
-    assert [(s["id"], s["texto"]) for s in st] == [("S1", "meu status")]
-    assert all("status" not in c.id for c in amb.banco.conversas("w1"))
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.silenciosa and nova.mensagem.texto == "meu status"
+    sid = "status:5551988887777@s.whatsapp.net"
+    assert nova.mensagem.conversa_id == sid and nova.conversa.tipo == "status"
+    assert [(x.id, x.texto) for x in amb.banco.mensagens("w1", sid, 10)] == [
+        ("S1", "meu status")]
+    assert [c.id for c in amb.banco.conversas("w1")
+            if c.tipo == "status"] == [sid]
 
 
 def msg_foto(id, legenda="olha"):
@@ -1983,3 +2003,544 @@ def test_entrar_no_grupo_pelo_convite_ou_pelo_link(tmp_path):
     assert not ok and "convite" in texto
     assert "erro" in p.previa_do_convite(msg, por_link)
     banco.fechar()
+
+
+def test_falha_de_pareamento_no_registro_do_whatsmeow_vira_evento(amb):
+    registro = logging.getLogger("whatsmeow.Client")
+    # outros testes podem deixar lixo na lista de ouvintes
+    registro.handlers = [h for h in registro.handlers if h is not None]
+    registro.error("Failed to handle code pair notification: x")   # fora
+    assert not any(isinstance(x, ev.PareamentoFalhou)
+                   for x in list(amb.fila.queue))
+    amb.c.event.funcao_qr(amb.c, b"2@abc,def")        # pareando
+    esperar(amb.fila, ev.QrPareamento)
+    registro.error("Failed to handle code pair notification: x")
+    assert esperar(amb.fila, ev.PareamentoFalhou).metodo == "codigo"
+    registro.error("Failed to pair device: invalid device identity HMAC")
+    assert esperar(amb.fila, ev.PareamentoFalhou).metodo == "qr"
+    registro.error("outro erro qualquer")
+    amb.f["Connected"](amb.c, N.Connected())          # pareou: ouvinte quieto
+    esperar(amb.fila, ev.ContaPronta)
+    registro.error("Failed to pair device: tarde")
+    assert amb.fila.empty() or not any(
+        isinstance(x, ev.PareamentoFalhou) for x in list(amb.fila.queue))
+
+
+def test_presenca_online_visto_e_digitando(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    p = amb.p
+    # abrir a conversa deixa a conta disponivel e assina a pessoa
+    p.observar_presenca("5551988887777@s.whatsapp.net")
+    for _ in range(100):
+        if getattr(amb.c, "assinadas", None):
+            break
+        threading.Event().wait(0.02)
+    assert amb.c.presencas == ["AVAILABLE"] and amb.c.assinadas == [
+        "5551988887777"]
+    alvo = jid("5551988887777")
+    p._ao_presenca(amb.c, types.SimpleNamespace(
+        From=alvo, Unavailable=False, LastSeen=0))
+    assert esperar(amb.fila, ev.Presenca).estado == "online"
+    p._ao_presenca(amb.c, types.SimpleNamespace(
+        From=alvo, Unavailable=True, LastSeen=1760000000))
+    visto = esperar(amb.fila, ev.Presenca)
+    assert (visto.estado, visto.quando, visto.conversa_id) == (
+        "offline", 1760000000.0, "5551988887777@s.whatsapp.net")
+    origem = types.SimpleNamespace(Chat=alvo, Sender=alvo)
+    p._ao_digitando(amb.c, types.SimpleNamespace(
+        MessageSource=origem, State=1, Media=1))
+    assert esperar(amb.fila, ev.Presenca).estado == "digitando"
+    p._ao_digitando(amb.c, types.SimpleNamespace(
+        MessageSource=origem, State=1, Media=2))
+    assert esperar(amb.fila, ev.Presenca).estado == "gravando"
+    p._ao_digitando(amb.c, types.SimpleNamespace(
+        MessageSource=origem, State=2, Media=1))
+    assert esperar(amb.fila, ev.Presenca).estado == "parou"
+    # fechar a conversa volta ao normal; fechar outra, nao
+    p.parar_presenca("outra@s.whatsapp.net")
+    p.parar_presenca("5551988887777@s.whatsapp.net")
+    for _ in range(100):
+        if len(amb.c.presencas) == 2:
+            break
+        threading.Event().wait(0.02)
+    assert amb.c.presencas == ["AVAILABLE", "UNAVAILABLE"]
+
+
+def test_reagir_envia_a_reacao_e_guarda_a_minha(amb):
+    original = _chegou(amb)
+    amb.p.reagir(original, "👍")
+    a = esperar(amb.fila, ev.MensagemAtualizada)
+    assert (a.motivo, a.emoji, a.quem) == ("reacao", "👍", "Você")
+    chat, autor, id_, emoji = amb.c.reacoes[-1]
+    assert (id_, emoji) == ("M1", "👍") and autor.startswith("5551")
+    assert amb.c.enviadas[-1][1].reactionMessage.text == "👍"
+    assert m.minha_reacao(a.mensagem) == "👍"
+    # trocar mantem uma so; tirar manda texto vazio
+    amb.p.reagir(a.mensagem, "❤️")
+    b = esperar(amb.fila, ev.MensagemAtualizada)
+    assert [r["emoji"] for r in m.extras_de(b.mensagem)["reacoes"]] == ["❤️"]
+    amb.p.reagir(b.mensagem, "")
+    c = esperar(amb.fila, ev.MensagemAtualizada)
+    assert m.extras_de(c.mensagem)["reacoes"] == [] and not m.minha_reacao(
+        c.mensagem)
+    assert amb.c.reacoes[-1][3] == ""
+
+
+def test_reagir_sem_conexao_avisa(amb):
+    x = m.Mensagem("w1", "5551988887777@s.whatsapp.net", "M9", texto="oi")
+    amb.p.reagir(x, "👍")
+    aviso = esperar(amb.fila, ev.Aviso)
+    assert "reação" in aviso.texto
+
+
+def _chamada(evento, id_, quem="5551988887777", **campos):
+    meta = N.BasicCallMeta(callCreator=jid(quem), callID=id_,
+                           timestamp=campos.pop("ts", TS))
+    if evento == "oferta":
+        no = N.Node(Tag="offer", Nodes=[N.Node(Tag="video")
+                                        ] if campos.pop("video", False)
+                    else [N.Node(Tag="audio")])
+        return N.CallOffer(basicCallMeta=meta, data=no)
+    if evento == "atendida":
+        return N.CallAccept(basicCallMeta=meta)
+    return N.CallTerminate(basicCallMeta=meta,
+                           reason=campos.pop("reason", "timeout"))
+
+
+def test_chamada_recebida_vira_aviso_e_linha_na_conversa(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "C1", video=True))
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.silenciosa and nova.mensagem.id == "chamada-C1"
+    assert nova.mensagem.texto == "Chamada de vídeo recebida, tocando"
+    assert nova.conversa.nao_lidas == 1
+    aviso = esperar(amb.fila, ev.ChamadaWhatsApp)
+    assert (aviso.fase, aviso.video, aviso.chamada_id) == (
+        "tocando", True, "C1")
+    assert aviso.conversa_id == "5551988887777@s.whatsapp.net"
+    # a mesma chamada de novo nao duplica
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "C1", video=True))
+    # ninguem atendeu: perdida, e a linha da conversa muda
+    amb.f["CallTerminate"](amb.c, _chamada("fim", "C1", ts=TS + 30))
+    atual = esperar(amb.fila, ev.MensagemAtualizada)
+    assert atual.mensagem.texto == "Chamada de vídeo perdida"
+    assert esperar(amb.fila, ev.ChamadaWhatsApp).fase == "perdida"
+    guardada = amb.banco.mensagem("w1", aviso.conversa_id, "chamada-C1")
+    assert guardada.texto == "Chamada de vídeo perdida"
+
+
+def test_chamada_atendida_em_outro_aparelho_e_recusada(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "C2"))
+    esperar(amb.fila, ev.ChamadaWhatsApp)
+    amb.f["CallAccept"](amb.c, _chamada("atendida", "C2", ts=TS + 5))
+    amb.f["CallTerminate"](amb.c, _chamada("fim", "C2", ts=TS + 70))
+    assert esperar(amb.fila, ev.MensagemAtualizada).mensagem.texto == \
+        "Chamada de voz atendida em outro aparelho, durou 1 minuto e 5 segundos"
+    fim = esperar(amb.fila, ev.ChamadaWhatsApp)
+    assert (fim.fase, fim.segundos) == ("atendida", 65)
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "C3"))
+    esperar(amb.fila, ev.ChamadaWhatsApp)
+    amb.f["CallTerminate"](amb.c, _chamada("fim", "C3", reason="rejected"))
+    assert esperar(amb.fila, ev.ChamadaWhatsApp).fase == "recusada"
+    # chamada que eu mesmo fiz em outro aparelho: nada
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "C4", quem="5551999998888"))
+    amb.f["CallTerminate"](amb.c, _chamada("fim", "C9"))      # desconhecida
+    assert not any(isinstance(x, ev.ChamadaWhatsApp)
+                   for x in list(amb.fila.queue))
+
+
+def _status(amb, id_, texto, quem="5551988887777", ts=None, minha=False):
+    origem = N.MessageSource(Chat=jid("status", "broadcast"),
+                             Sender=jid(quem), IsFromMe=minha)
+    amb.f["Message"](amb.c, N.Message(
+        Info=N.MessageInfo(MessageSource=origem, ID=id_, Pushname="Ana",
+                           Timestamp=ts or int(__import__("time").time())),
+        Message=E.Message(conversation=texto)))
+    return esperar(amb.fila, ev.MensagemNova)
+
+
+def test_status_responder_curtir_e_marcar_como_visto(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    nova = _status(amb, "S1", "viajando")
+    sid = nova.mensagem.conversa_id
+    assert nova.conversa.nao_lidas == 1
+    x = nova.mensagem
+    assert x.remetente == "5551988887777@s.whatsapp.net" and not x.minha
+    # responder em particular: vai para a conversa da pessoa, citando o status
+    amb.p.responder_status(x, "que lindo")
+    enviada = esperar(amb.fila, ev.MensagemNova)
+    assert enviada.enviada_daqui and enviada.mensagem.conversa_id == \
+        "5551988887777@s.whatsapp.net"
+    assert enviada.mensagem.resposta_a == ""            # sem o marcador interno
+    para, corpo = amb.c.enviadas[-1]
+    ctx = corpo.extendedTextMessage.contextInfo
+    assert para == "5551988887777@s.whatsapp.net"
+    assert (ctx.stanzaID, ctx.remoteJID, ctx.participant) == (
+        "S1", "status@broadcast", "5551988887777@s.whatsapp.net")
+    assert ctx.quotedMessage.conversation == "viajando"
+    # curtir: reacao citando o status, enviada a conversa da pessoa
+    amb.p.reagir(x, "❤️")
+    a = esperar(amb.fila, ev.MensagemAtualizada)
+    assert a.motivo == "reacao" and a.mensagem.conversa_id == sid
+    para, corpo = amb.c.enviadas[-1]
+    chave = corpo.reactionMessage.key
+    assert para == "5551988887777@s.whatsapp.net"
+    assert (chave.remoteJID, chave.ID, chave.fromMe) == (
+        "status@broadcast", "S1", False)
+    assert corpo.reactionMessage.text == "❤️"
+    # visto: o recibo vai para o chat de status
+    amb.c.lidas = []
+    amb.p.marcar_como_lida(sid)
+    for _ in range(100):
+        if amb.c.lidas:
+            break
+        threading.Event().wait(0.02)
+    assert amb.c.lidas and amb.c.lidas[-1][1] == "status@broadcast"
+    assert amb.banco.conversas("w1")[0].nao_lidas == 0 or all(
+        c.nao_lidas == 0 for c in amb.banco.conversas("w1")
+        if c.tipo == "status")
+
+
+def test_status_com_mais_de_um_dia_some_e_a_conversa_vazia_tambem(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    velho = _status(amb, "S0", "ontem", ts=TS - 3 * 86400)
+    sid = velho.mensagem.conversa_id
+    import time as _t
+    novo = _status(amb, "S9", "agora", quem="5551977776666",
+                   ts=int(_t.time()))
+    amb.p._limpar_status_antigos()
+    assert amb.banco.mensagens("w1", sid, 10) == []
+    assert sid not in [c.id for c in amb.banco.conversas("w1")]
+    assert novo.mensagem.conversa_id in [c.id
+                                         for c in amb.banco.conversas("w1")]
+
+
+def test_previa_de_link_que_veio_na_mensagem_do_whatsapp(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento("L1", E.Message(
+        extendedTextMessage=E.ExtendedTextMessage(
+            text="veja https://exemplo.com/a", matchedText="https://exemplo.com/a",
+            title="Exemplo", description="Uma página de exemplo"))))
+    x = esperar(amb.fila, ev.MensagemNova).mensagem
+    previa = m.extras_de(x)["previa"]
+    assert (previa["titulo"], previa["descricao"], previa["url"]) == (
+        "Exemplo", "Uma página de exemplo", "https://exemplo.com/a")
+    amb.f["Message"](amb.c, evento("L2", E.Message(
+        extendedTextMessage=E.ExtendedTextMessage(text="https://sem.previa"))))
+    y = esperar(amb.fila, ev.MensagemNova).mensagem
+    assert m.extras_de(y)["previa"] == {}
+
+
+def test_envio_com_previa_ligada_leva_titulo_e_descricao(amb, monkeypatch):
+    from telezapp.nucleo import previa_links as pl
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    buscados = []
+    monkeypatch.setattr(pl, "buscar", lambda url: buscados.append(url) or {
+        "url": url, "titulo": "Exemplo", "descricao": "Uma página",
+        "site": "ex.com"})
+    cid = "5551988887777@s.whatsapp.net"
+    try:
+        pl.definir(False, False)
+        amb.p.enviar_texto(cid, "veja https://ex.com/a")
+        x = esperar(amb.fila, ev.MensagemNova).mensagem
+        assert buscados == [] and amb.c.enviadas[-1][1].conversation
+        pl.definir(False, True)
+        amb.p.enviar_texto(cid, "veja https://ex.com/a")
+        x = esperar(amb.fila, ev.MensagemNova).mensagem
+        corpo = amb.c.enviadas[-1][1].extendedTextMessage
+        assert buscados == ["https://ex.com/a"]
+        assert (corpo.matchedText, corpo.title, corpo.description) == (
+            "https://ex.com/a", "Exemplo", "Uma página")
+        assert m.extras_de(x)["previa"]["titulo"] == "Exemplo"
+        # sem link, nada a buscar
+        amb.p.enviar_texto(cid, "oi")
+        esperar(amb.fila, ev.MensagemNova)
+        assert buscados == ["https://ex.com/a"]
+    finally:
+        pl.definir(False, False)
+
+
+def test_publicar_status_de_texto_e_de_foto(amb, tmp_path):
+    from telezapp.midia import envio
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    assert wa.ProvedorWhatsApp.PODE_PUBLICAR_STATUS
+    amb.p.publicar_status("bom dia", None)
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.enviada_daqui and nova.conversa.tipo == "status"
+    assert nova.mensagem.conversa_id == "status:5551999998888@s.whatsapp.net"
+    assert nova.mensagem.minha and nova.mensagem.texto == "bom dia"
+    assert esperar(amb.fila, ev.Aviso).texto == "Status publicado."
+    para, corpo = amb.c.enviadas[-1]
+    assert para == "status@broadcast"
+    assert corpo.extendedTextMessage.text == "bom dia"
+    assert corpo.extendedTextMessage.backgroundArgb
+    # foto com legenda
+    foto = tmp_path / "f.jpg"
+    foto.write_bytes(b"\xff\xd8\xff" + b"0" * 50)
+    amb.p.publicar_status("praia", envio.preparar(str(foto)))
+    esperar(amb.fila, ev.MensagemNova)
+    assert esperar(amb.fila, ev.Aviso).texto == "Status publicado."
+    para, corpo = amb.c.enviadas[-1]
+    assert para == "status@broadcast" and corpo[0] == "imagem"
+    assert corpo[2] == "praia"
+    # o status proprio fica guardado em "Meu status"
+    assert [x.texto for x in amb.banco.mensagens(
+        "w1", "status:5551999998888@s.whatsapp.net", 10)] == [
+        "bom dia", "praia"]
+
+
+def test_publicar_status_sem_conexao_avisa(amb):
+    amb.p.publicar_status("oi", None)
+    assert "Não consegui publicar o status" in esperar(
+        amb.fila, ev.Aviso).texto
+
+
+class _ComTransferencias:
+    """Adiciona ao cliente falso o download e o envio por arquivo (com a DLL
+    de teste do TeleZapp)."""
+
+    def instalar(c):
+        c.tem_transferencias = lambda: True
+        c.cancelados = []
+        c.progresso_do_upload = [10, 55, 90]
+        c.transfer_cancel = c.cancelados.append
+
+        def baixar(mensagem, caminho, chave):
+            c.chave_do_download = chave
+            with open(caminho, "wb") as f:
+                f.write(b"x" * 50)                 # metade do tamanho
+            threading.Event().wait(0.8)            # o vigia olha o arquivo
+            with open(caminho, "ab") as f:
+                f.write(b"x" * 50)
+        c.download_any_to_file = baixar
+
+        def subir(caminho, tipo, chave):
+            c.subidas = getattr(c, "subidas", []) + [(caminho, tipo.name)]
+            threading.Event().wait(0.9)
+            return types.SimpleNamespace(
+                url="https://mmg/y", DirectPath="/d", FileEncSHA256=b"e",
+                FileLength=99, FileSHA256=b"s", MediaKey=b"k")
+        c.upload_file = subir
+
+        def progresso(chave):
+            return c.progresso_do_upload.pop(0) if c.progresso_do_upload \
+                else 90
+        c.transfer_progress = progresso
+
+
+def test_download_por_arquivo_mostra_o_avanco_pelo_tamanho_do_arquivo(
+        amb, dados_midia):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento("F9", msg_foto("F9")))
+    nova = esperar(amb.fila, ev.MensagemNova).mensagem
+    nova.tamanho = 100
+    _ComTransferencias.instalar(amb.c)
+    progressos = []
+    caminho = amb.p.baixar_arquivo(nova, base_de(nova), progressos.append,
+                                   lambda: False)
+    assert amb.c.chave_do_download.startswith("dl-")
+    assert os.path.getsize(caminho) == 100
+    assert progressos[0] == 0 and progressos[-1] == 100
+    assert any(40 <= p <= 60 for p in progressos)       # metade vista
+    assert not os.path.exists(caminho + ".parte")
+    assert not getattr(amb.c, "baixadas", [])           # nao usou o antigo
+
+
+def test_download_por_arquivo_cancela_na_dll(amb, dados_midia):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento("F8", msg_foto("F8")))
+    nova = esperar(amb.fila, ev.MensagemNova).mensagem
+    _ComTransferencias.instalar(amb.c)
+
+    def baixar(mensagem, caminho, chave):
+        threading.Event().wait(0.8)                     # o vigia ve o pedido
+        if amb.c.cancelados:
+            raise RuntimeError("context canceled")
+    amb.c.download_any_to_file = baixar
+    chamadas = []
+
+    def cancelado():
+        chamadas.append(1)
+        return len(chamadas) > 1        # a primeira e a checagem inicial
+
+    with pytest.raises(base.DownloadCancelado):
+        amb.p.baixar_arquivo(nova, base_de(nova), lambda p: None, cancelado)
+    assert amb.c.cancelados and amb.c.cancelados[0].startswith("dl-")
+
+
+def test_envio_grande_sobe_do_disco_e_publica_o_avanco(amb, tmp_path):
+    from telezapp.midia import envio
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    _ComTransferencias.instalar(amb.c)
+    video = tmp_path / "grande.mp4"
+    video.write_bytes(b"0" * 100)
+    anexo = envio.Anexo(str(video), m.VIDEO, "grande.mp4", "video/mp4",
+                        9 * 1024 * 1024, segundos=12, largura=640, altura=360)
+    cid = "5551988887777@s.whatsapp.net"
+    amb.p.enviar_arquivo(cid, anexo, "olha")
+    vistos = []
+    while True:
+        x = amb.fila.get(timeout=5)
+        vistos.append(x)
+        if isinstance(x, ev.MensagemNova):
+            break
+    nova = vistos[-1]
+    assert nova.enviada_daqui and nova.mensagem.tipo == m.VIDEO
+    assert amb.c.subidas == [(str(video), "MediaVideo")]
+    corpo = amb.c.enviadas[-1][1].videoMessage
+    assert (corpo.caption, corpo.seconds, corpo.URL) == (
+        "olha", 12, "https://mmg/y")
+    avancos = [x.percentual for x in vistos
+               if isinstance(x, ev.ProgressoEnvio)]
+    assert avancos[-1] == 100 and set(avancos) & {10, 55, 90}
+    # um documento grande tambem: monta DocumentMessage com o nome
+    doc = tmp_path / "relatorio.pdf"
+    doc.write_bytes(b"%PDF")
+    amb.p.enviar_arquivo(cid, envio.Anexo(
+        str(doc), m.DOCUMENTO, "relatorio.pdf", "application/pdf",
+        9 * 1024 * 1024), "")
+    esperar(amb.fila, ev.MensagemNova)
+    d = amb.c.enviadas[-1][1].documentMessage
+    assert (d.fileName, d.mimetype) == ("relatorio.pdf", "application/pdf")
+
+
+def test_envio_pequeno_continua_pelo_caminho_antigo(amb, tmp_path):
+    from telezapp.midia import envio
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    _ComTransferencias.instalar(amb.c)
+    foto = tmp_path / "f.jpg"
+    foto.write_bytes(b"\xff\xd8\xff" + b"0" * 50)
+    amb.p.enviar_arquivo("5551988887777@s.whatsapp.net",
+                         envio.preparar(str(foto)), "praia")
+    esperar(amb.fila, ev.MensagemNova)
+    assert not getattr(amb.c, "subidas", [])
+    assert amb.c.enviadas[-1][1][0] == "imagem"
+
+
+def _fala_no_grupo(amb, id_, quem, alternativo=None, pushname="Ana Souza",
+                   servidor="s.whatsapp.net", texto="oi"):
+    """Alguem fala no grupo 1203; `alternativo` e o outro endereco dela."""
+    origem = N.MessageSource(
+        Chat=jid("1203", "g.us"), IsGroup=True,
+        Sender=jid(quem, servidor),
+        SenderAlt=jid(*alternativo) if alternativo else N.JID())
+    amb.f["Message"](amb.c, N.Message(
+        Info=N.MessageInfo(MessageSource=origem, ID=id_, Pushname=pushname,
+                           Timestamp=TS),
+        Message=E.Message(conversation=texto)))
+    return esperar(amb.fila, ev.MensagemNova).mensagem
+
+
+def _menciona(amb, id_, telefone):
+    amb.f["Message"](amb.c, evento(
+        id_, _com_mencoes("oi @" + telefone, telefone + "@s.whatsapp.net"),
+        grupo=True, chat="1203", remetente="5551988887777"))
+    return esperar(amb.fila, ev.MensagemNova).mensagem
+
+
+def test_mencao_acha_o_nome_de_quem_falou_pelo_outro_endereco(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    # ela fala como LID, e a mensagem informa o telefone dela
+    _fala_no_grupo(amb, "G1", "lidana", ("5551955550001", "s.whatsapp.net"),
+                   servidor="lid")
+    nova = _menciona(amb, "G2", "5551955550001")
+    assert nova.texto == "oi @Ana Souza"
+    men = m.extras_de(nova)["mencoes"][0]
+    assert men["nome"] == "Ana Souza" and men["telefone"] == "+5551955550001"
+
+
+def test_mencao_acha_o_nome_nas_mensagens_guardadas_pelo_lid(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    _fala_no_grupo(amb, "G3", "lidana", servidor="lid")      # so o LID
+    # o app reiniciou: nada na memoria, so o banco e o armazem de LIDs
+    amb.p._apelidos.clear()
+    amb.p._lid_para_numero.clear()
+    amb.p._cache_mencoes.clear()
+    nova = _menciona(amb, "G4", "5551955550001")
+    assert nova.texto == "oi @Ana Souza"
+
+
+def test_mencao_antiga_so_com_telefone_e_corrigida_ao_abrir_a_conversa(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    antiga = _menciona(amb, "G5", "5551955550002")
+    assert antiga.texto == "oi @+5551955550002"       # ninguem conhecido
+    _fala_no_grupo(amb, "G6", "5551955550002", pushname="Bia Lima")
+    amb.p.carregar_mensagens("1203@g.us")
+    carregadas = esperar(amb.fila, ev.MensagensCarregadas).mensagens
+    x = [y for y in carregadas if y.id == "G5"][0]
+    assert x.texto == "oi @Bia Lima"
+    assert m.extras_de(x)["mencoes"][0]["nome"] == "Bia Lima"
+    assert amb.banco.mensagem("w1", "1203@g.us", "G5").texto == \
+        "oi @Bia Lima"
+    # sem novidade nenhuma, nada muda nem e regravado
+    assert amb.p._reavaliar_mencoes(carregadas) == 0
+
+
+def test_nome_de_quem_recebeu_ou_abriu_vem_do_perfil_visto_no_grupo(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    _fala_no_grupo(amb, "R1", "lidana", ("5551955550001", "s.whatsapp.net"),
+                   servidor="lid", pushname="Ana Souza")
+    # pelos dois enderecos da pessoa
+    assert amb.p.nome_de_participante("5551955550001@s.whatsapp.net") == \
+        "Ana Souza"
+    assert amb.p.nome_de_participante("lidana@lid") == "Ana Souza"
+    # depois de reiniciar, o banco ainda sabe quem e
+    amb.p._apelidos.clear()
+    amb.p._lid_para_numero.clear()
+    amb.p._cache_mencoes.clear()
+    assert amb.p.nome_de_participante("5551955550001@s.whatsapp.net") == \
+        "Ana Souza"
+    assert amb.p.nome_de_participante("lidana@lid") == "Ana Souza"
+    # quem nunca apareceu: telefone, ou nada se so ha o codigo interno
+    assert amb.p.nome_de_participante("5551900000099@s.whatsapp.net") == \
+        "+5551900000099"
+    assert amb.p.nome_de_participante("lidsemnome@lid") == ""
+
+
+def test_mensagem_de_grupo_que_menciona_esta_conta_fica_marcada(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    # pelo telefone da conta
+    amb.f["Message"](amb.c, evento("MC1", _com_mencoes(
+        "oi @5551999998888", "5551999998888@s.whatsapp.net"),
+        grupo=True, chat="1203", remetente="5551988887777"))
+    assert m.extras_de(esperar(amb.fila, ev.MensagemNova).mensagem)[
+        "citou_voce"]
+    # so outra pessoa mencionada: nao
+    amb.f["Message"](amb.c, evento("MC2", _com_mencoes(
+        "oi @5551977770001", "5551977770001@s.whatsapp.net"),
+        grupo=True, chat="1203", remetente="5551988887777"))
+    assert not m.extras_de(esperar(amb.fila, ev.MensagemNova).mensagem)[
+        "citou_voce"]
+    # pelo LID da conta (o WhatsApp novo menciona por ele)
+    amb.c.get_me = lambda: N.Device(JID=jid("5551999998888"),
+                                    LID=jid("lidminha", "lid"),
+                                    PushName="Fábio")
+    amb.f["Message"](amb.c, evento("MC3", _com_mencoes(
+        "oi @lidminha", "lidminha@lid"),
+        grupo=True, chat="1203", remetente="5551988887777"))
+    assert m.extras_de(esperar(amb.fila, ev.MensagemNova).mensagem)[
+        "citou_voce"]
+    # sem mencao: nada
+    amb.f["Message"](amb.c, evento("MC4", E.Message(conversation="oi"),
+                                   grupo=True, chat="1203",
+                                   remetente="5551988887777"))
+    assert not m.extras_de(esperar(amb.fila, ev.MensagemNova).mensagem)[
+        "citou_voce"]

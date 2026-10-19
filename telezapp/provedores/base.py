@@ -222,6 +222,31 @@ class Provedor(ABC):
         """A pessoa abriu a conversa: o servico pode conferir (sem travar) se
         ela ainda pode escrever nela, marcando `somente_leitura`."""
 
+    # True nos servicos que sabem reagir a uma mensagem
+    PODE_REAGIR = False
+
+    def reagir(self, mensagem, emoji):
+        """Reage a mensagem com o emoji (vazio: tira a minha reacao). Volta
+        na hora; o resultado chega como ev.MensagemAtualizada (motivo
+        "reacao") ou ev.Aviso."""
+
+    # True nos servicos em que da para publicar status (historia)
+    PODE_PUBLICAR_STATUS = False
+
+    def publicar_status(self, texto, anexo=None, publico="contatos"):
+        """Publica um status: `texto` (no Telegram, a legenda) e, se houver,
+        `anexo` (foto ou video). O resultado chega como ev.Aviso."""
+
+    def responder_status(self, mensagem, texto):
+        """Responde em particular a um status (ou historia) de alguem."""
+
+    def observar_presenca(self, conversa_id):
+        """A conversa foi aberta: passa a avisar (ev.Presenca) se a pessoa
+        esta online, quando foi vista por ultimo e quando digita."""
+
+    def parar_presenca(self, conversa_id):
+        """A conversa foi fechada: nao precisa mais dos avisos."""
+
     def depurar_conversa(self, conversa_id):
         """Dados do servico sobre a conversa, para o menu Depurar (como o
         nome foi achado, identificadores). Dicionario; vazio se nao houver."""

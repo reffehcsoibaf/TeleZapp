@@ -16,6 +16,7 @@ import wx
 from telezapp import config
 from telezapp.acessibilidade.fala import bipe
 
+from telezapp.nucleo import pacotes_de_som
 from telezapp.nucleo.configuracoes import (CATEGORIA_BUSCA,
                                            ModeloConfiguracoes)
 
@@ -32,6 +33,7 @@ class DialogoConfiguracoes(wx.Dialog):
         # contas do WhatsApp e leitura da privacidade delas (ver janela)
         self.privacidade = privacidade
         self.ia = ia                 # chaves e testes dos provedores de IA
+        self.lista_sons = None       # lista de eventos de som, se aberta
         self._espera = None          # fala da descricao agendada
         self._opcao_em_foco = None
         self.Bind(wx.EVT_CHAR_HOOK, self._ao_tecla)
@@ -128,6 +130,12 @@ class DialogoConfiguracoes(wx.Dialog):
     def _mostrar_opcoes(self, categoria):
         self.lay_painel.Clear(delete_windows=True)
         self.controles = {}
+        self.lista_sons = None
+        if categoria == "Sons" and not self.modelo.busca.strip():
+            self._criar_sons()          # tela propria, sem opcoes comuns
+            self.painel.Layout()
+            self.painel.FitInside()
+            return
         opcoes = self.modelo.opcoes(categoria)
         if not opcoes:
             self.lay_painel.Add(
@@ -145,63 +153,153 @@ class DialogoConfiguracoes(wx.Dialog):
         self.painel.Layout()
         self.painel.FitInside()
 
-    def _criar_som(self, o):
-        """Som de um evento: uma caixa com o som padrao, sem som, o arquivo
-        escolhido e "Escolher um arquivo...", e o botao Ouvir."""
-        p = self.painel
-        self.lay_painel.Add(wx.StaticText(p, label=o.rotulo + ":"), 0,
-                            wx.LEFT | wx.RIGHT | wx.TOP, 8)
-        c = wx.Choice(p, name=o.rotulo)
-        botao = wx.Button(p, label="Ouvir o " + o.rotulo.lower())
+    # ----------------------------------------------- pacotes de sons
+    def _criar_sons(self):
+        """Caixa de pacotes, lista de eventos (Enter ou Espaco ativa e
+        desativa) e, no evento, Ouvir som e, nos pacotes personalizados,
+        Procurar som. Os pacotes Padrao e TeleZapp nao se editam."""
+        p, lay = self.painel, self.lay_painel
+        lay.Add(wx.StaticText(p, label="Pacote de sons:"), 0,
+                wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        self.cx_pacote = wx.Choice(p, name="Pacote de sons")
+        lay.Add(self.cx_pacote, 0, wx.EXPAND | wx.ALL, 8)
         linha = wx.BoxSizer(wx.HORIZONTAL)
-        linha.Add(c, 0, wx.RIGHT, 8)
-        linha.Add(botao, 0)
+        self.btn_novo_pacote = wx.Button(p, label="Novo pacote personalizado...")
+        self.btn_excluir_pacote = wx.Button(p, label="Excluir este pacote")
+        linha.Add(self.btn_novo_pacote, 0, wx.RIGHT, 8)
+        linha.Add(self.btn_excluir_pacote, 0)
+        lay.Add(linha, 0, wx.LEFT | wx.RIGHT, 8)
+        lay.Add(wx.StaticText(p, label="Eventos (Enter ou Espaço ativa e "
+                                       "desativa):"), 0,
+                wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        self.lista_sons = wx.ListBox(p, name="Eventos", size=(-1, 230))
+        lay.Add(self.lista_sons, 1, wx.EXPAND | wx.ALL, 8)
+        linha2 = wx.BoxSizer(wx.HORIZONTAL)
+        self.btn_ouvir_som = wx.Button(p, label="Ouvir som")
+        self.btn_procurar_som = wx.Button(p, label="Procurar som...")
+        linha2.Add(self.btn_ouvir_som, 0, wx.RIGHT, 8)
+        linha2.Add(self.btn_procurar_som, 0)
+        lay.Add(linha2, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
+        self.cx_pacote.Bind(wx.EVT_CHOICE, lambda e: self._sons_escolher_pacote())
+        self.btn_novo_pacote.Bind(wx.EVT_BUTTON, lambda e: self._sons_novo())
+        self.btn_excluir_pacote.Bind(wx.EVT_BUTTON,
+                                     lambda e: self._sons_excluir())
+        self.btn_ouvir_som.Bind(wx.EVT_BUTTON, lambda e: self._sons_ouvir())
+        self.btn_procurar_som.Bind(wx.EVT_BUTTON,
+                                   lambda e: self._sons_procurar())
+        self._sons_preencher_pacotes()
+        self._sons_preencher_eventos()
 
-        def montar(valor):
-            itens = [("", "Som padrão do TeleZapp"), ("desligado", "Sem som")]
-            if valor not in ("", "desligado"):
-                itens.append((valor, "Arquivo: " + os.path.basename(valor)))
-            itens.append((None, "Escolher um arquivo de som..."))
-            c.Set([r for _, r in itens])
-            c.SetSelection([v for v, _ in itens].index(valor))
-            c.itens = itens
+    def _sons_preencher_pacotes(self):
+        est = self.modelo.sons
+        self._ids_pacotes = [i for i, _ in est.pacotes()]
+        self.cx_pacote.Set([n for _, n in est.pacotes()])
+        if est.ativo in self._ids_pacotes:
+            self.cx_pacote.SetSelection(self._ids_pacotes.index(est.ativo))
 
-        def escolheu(evt):
-            valor = c.itens[c.GetSelection()][0]
-            if valor is None:
-                atual = self.modelo.valor(o.chave)
-                dlg = wx.FileDialog(
-                    p, "Escolha o arquivo de som",
-                    defaultDir=config.pasta_sons(),
-                    wildcard="Sons|*.wav;*.ogg;*.opus;*.mp3;*.flac|"
-                             "Todos os arquivos|*.*",
-                    style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST)
-                try:
-                    if dlg.ShowModal() == wx.ID_OK:
-                        try:
-                            # fica na pasta de sons do TeleZapp
-                            valor = config.importar_som(dlg.GetPath())
-                        except OSError:
-                            valor = dlg.GetPath()
-                    else:
-                        valor = atual
-                finally:
-                    dlg.Destroy()
-                montar(valor)
-            self.modelo.definir(o.chave, valor)
-        c.Bind(wx.EVT_CHOICE, escolheu)
-        botao.Bind(wx.EVT_BUTTON, lambda e: bipe(
-            o.som, self.modelo.valor(o.chave)))
-        montar(self.modelo.valor(o.chave))
-        c.Bind(wx.EVT_SET_FOCUS, lambda e, o=o: self._ao_focar(e, o))
-        self.lay_painel.Add(linha, 0, wx.ALL, 8)
-        self.controles[o.chave] = c
+    def _sons_preencher_eventos(self, manter=0):
+        est = self.modelo.sons
+        itens = [est.texto_do_evento(est.ativo, e, r)
+                 for e, r in pacotes_de_som.eventos()]
+        self.lista_sons.Set(itens)
+        self.lista_sons.SetSelection(min(max(manter, 0), len(itens) - 1))
+        custom = pacotes_de_som.editavel(est.ativo)
+        self.btn_procurar_som.Show(custom)       # so nos personalizados
+        self.btn_excluir_pacote.Enable(custom)
+        self.painel.Layout()
+
+    def _sons_evento(self):
+        i = self.lista_sons.GetSelection()
+        todos = pacotes_de_som.eventos()
+        return (todos[i][0], i) if 0 <= i < len(todos) else (None, -1)
+
+    def _sons_atualizar_item(self, evento, i):
+        est = self.modelo.sons
+        rotulo = dict(pacotes_de_som.eventos())[evento]
+        self.lista_sons.SetString(i, est.texto_do_evento(est.ativo, evento,
+                                                         rotulo))
+
+    def _sons_escolher_pacote(self):
+        i = self.cx_pacote.GetSelection()
+        if 0 <= i < len(self._ids_pacotes):
+            self.modelo.sons.selecionar(self._ids_pacotes[i])
+            self._sons_preencher_eventos()
+
+    def _sons_alternar(self):
+        evento, i = self._sons_evento()
+        if evento is None:
+            return
+        ativado = self.modelo.sons.alternar(self.modelo.sons.ativo, evento)
+        self._sons_atualizar_item(evento, i)
+        if self.fala is not None:
+            self.fala.falar("ativado" if ativado else "desativado",
+                            interromper=True)
+
+    def _sons_ouvir(self):
+        evento, _ = self._sons_evento()
+        if evento is not None:
+            est = self.modelo.sons
+            bipe(evento, est.valor_para_ouvir(est.ativo, evento))
+
+    def _sons_procurar(self):
+        evento, i = self._sons_evento()
+        est = self.modelo.sons
+        if evento is None or not pacotes_de_som.editavel(est.ativo):
+            return
+        dlg = wx.FileDialog(
+            self, "Escolha o som para este evento",
+            wildcard="Sons|*.wav;*.ogg;*.opus;*.mp3;*.flac|"
+                     "Todos os arquivos|*.*",
+            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST)
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            origem = dlg.GetPath()
+        finally:
+            dlg.Destroy()
+        est.escolher(est.ativo, evento, origem)
+        self._sons_atualizar_item(evento, i)
+        if self.fala is not None:
+            self.fala.falar("Som escolhido: %s. Aplique para importar para "
+                            "o pacote." % os.path.basename(origem),
+                            interromper=True)
+
+    def _sons_novo(self):
+        est = self.modelo.sons
+        dlg = wx.TextEntryDialog(self, "Nome do novo pacote de sons:",
+                                 "Novo pacote personalizado")
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            nome = dlg.GetValue()
+        finally:
+            dlg.Destroy()
+        pacote_id, erro = est.criar(nome)
+        if erro:
+            wx.MessageBox(erro, "Novo pacote", wx.OK | wx.ICON_WARNING, self)
+            return
+        est.selecionar(pacote_id)
+        self._sons_preencher_pacotes()
+        self._sons_preencher_eventos()
+        self.cx_pacote.SetFocus()
+
+    def _sons_excluir(self):
+        est = self.modelo.sons
+        if not pacotes_de_som.editavel(est.ativo):
+            return
+        nome = pacotes_de_som.nome_do_pacote(est.ativo)
+        r = wx.MessageBox("Excluir o pacote %s e os sons dele? Isso vale "
+                          "quando você aplicar." % nome, "Excluir pacote",
+                          wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
+        if r != wx.YES:
+            return
+        est.excluir(est.ativo)
+        self._sons_preencher_pacotes()
+        self._sons_preencher_eventos()
+        self.cx_pacote.SetFocus()
 
     def _criar_opcao(self, o):
         p = self.painel
-        if o.som:
-            self._criar_som(o)
-            return
         if o.numero:
             self.lay_painel.Add(wx.StaticText(p, label=o.rotulo + ":"), 0,
                                 wx.LEFT | wx.RIGHT | wx.TOP, 8)
@@ -531,6 +629,21 @@ class DialogoConfiguracoes(wx.Dialog):
                 and self._opcao_em_foco is not None
                 and self.FindFocus() in self.controles.values()):
             self.fala.falar(self._opcao_em_foco.descricao, interromper=True)
+            return
+        if evento.GetKeyCode() in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER,
+                                   wx.WXK_SPACE) and \
+                not evento.HasModifiers() and \
+                getattr(self, "lista_sons", None) is not None and \
+                self.FindFocus() is self.lista_sons:
+            self._sons_alternar()          # Enter ativa e desativa o evento
+            return
+        if (evento.GetKeyCode() == wx.WXK_DOWN and not evento.HasModifiers()
+                and self.FindFocus() is self.busca):
+            # Seta para baixo na busca leva ao primeiro resultado; sem
+            # resultado, as categorias.
+            alvo = next(iter(self.controles.values()), None) \
+                if self.modelo.busca.strip() else None
+            (alvo or self.lista).SetFocus()
             return
         evento.Skip()
 

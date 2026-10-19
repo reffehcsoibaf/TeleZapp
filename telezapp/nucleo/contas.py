@@ -178,6 +178,20 @@ class Contas:
                  historico)
         return self._ligar(conta)
 
+    def reiniciar_pareamento(self, conta_id):
+        """O pareamento do WhatsApp falhou: religa a conta do zero, para o
+        WhatsApp mandar um QR Code novo e o codigo poder ser pedido de novo.
+        Nao mexe nas conversas guardadas nem na escolha do historico."""
+        conta = self.contas.get(conta_id)
+        if conta is None:
+            return False
+        p = self.provedores.pop(conta_id, None)
+        if p is not None:
+            p.parar()
+        apagar_sessao(conta_id)
+        log.info("recomeçando o pareamento da conta %s", conta_id)
+        return self._ligar(conta)
+
     def remover(self, conta_id):
         """Tira a conta do app: desliga, apaga a sessao, as conversas e as
         mensagens guardadas e a tira da configuracao."""

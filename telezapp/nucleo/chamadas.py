@@ -190,3 +190,44 @@ def motivo_da_excecao(erro):
         return FALHA, ("O Telegram pediu para esperar antes de ligar de "
                        "novo.")
     return FALHA, "Não foi possível completar a chamada (%s)." % nome
+
+
+# ------------------------------------------- chamadas do WhatsApp (so aviso)
+def _tipo(video):
+    return "vídeo" if video else "voz"
+
+
+def texto_na_conversa(video, fase, segundos=0):
+    """A linha que a chamada deixa na lista de mensagens da conversa."""
+    base = "Chamada de %s" % _tipo(video)
+    if fase == "tocando":
+        return base + " recebida, tocando"
+    if fase == "perdida":
+        return base + " perdida"
+    if fase == "recusada":
+        return base + " recusada"
+    if fase == "atendida":
+        return base + " atendida em outro aparelho" + (
+            ", durou " + falar_duracao(segundos) if segundos > 0 else "")
+    return base + " encerrada"
+
+
+def texto_do_aviso(nome, video):
+    """O que a janela de aviso diz quando alguem liga."""
+    return ("%s está te chamando por %s. O TeleZapp ainda não dá suporte "
+            "para chamadas do WhatsApp: atenda em outro dispositivo ou abra "
+            "uma conversa." % (nome or "Alguém", _tipo(video)))
+
+
+def texto_do_fim(nome, video, fase, segundos=0):
+    """O aviso atualizado quando a chamada acaba antes de a pessoa fechar a
+    janela."""
+    quem = nome or "Alguém"
+    coisa = "A chamada de %s de %s" % (_tipo(video), quem)
+    if fase == "perdida":
+        return coisa + " terminou sem ser atendida."
+    if fase == "recusada":
+        return coisa + " foi recusada."
+    if fase == "atendida":
+        return coisa + " foi atendida em outro aparelho."
+    return coisa + " terminou."

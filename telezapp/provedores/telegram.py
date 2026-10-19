@@ -16,6 +16,7 @@ from telezapp import NOME, VERSAO, config
 from telezapp.midia import armazem
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import modelos as m
+from telezapp.nucleo import previa_links
 from telezapp.provedores.base import (PEDIR_CODIGO, PEDIR_SENHA,
                                       PEDIR_TELEFONE, DownloadCancelado,
                                       ErroMidia, ErroPrivacidade, Provedor)
@@ -173,6 +174,74 @@ def entradas_do_telegram(links):
     return entradas
 
 
+# Cada pessoa (ou canal) com historias vira uma "conversa" de tipo status,
+# `status:<id>`, com as historias como mensagens (id = id da historia)
+PREFIXO_STATUS = "status:"
+ATUALIZAR_HISTORIAS_A_CADA = 10      # segundos, entre duas buscas
+
+
+def tipo_de_historia(media):
+    """foto, video, audio ou documento de uma historia (ou outro)."""
+    nome = type(media).__name__
+    if nome == "MessageMediaPhoto":
+        return m.FOTO
+    doc = getattr(media, "document", None)
+    if nome == "MessageMediaDocument" and doc is not None:
+        for a in getattr(doc, "attributes", None) or []:
+            ntipo = type(a).__name__
+            if ntipo == "DocumentAttributeVideo":
+                return m.VIDEO
+            if ntipo == "DocumentAttributeAudio":
+                return m.AUDIO
+        return m.DOCUMENTO
+    return m.OUTRO
+
+
+def dados_da_midia_de_historia(media):
+    """(segundos, nome do arquivo, tamanho, mime) da midia da historia."""
+    segundos, nome, tamanho, mime = 0, "", 0, ""
+    doc = getattr(media, "document", None)
+    if doc is not None:
+        tamanho = int(getattr(doc, "size", 0) or 0)
+        mime = getattr(doc, "mime_type", "") or ""
+        for a in getattr(doc, "attributes", None) or []:
+            segundos = int(getattr(a, "duration", 0) or segundos)
+            nome = getattr(a, "file_name", "") or nome
+    foto = getattr(media, "photo", None)
+    if foto is not None:
+        mime = "image/jpeg"
+        tamanhos = [getattr(t, "size", 0) or 0
+                    for t in getattr(foto, "sizes", None) or []]
+        tamanho = int(max(tamanhos)) if tamanhos else 0
+    return segundos, nome, tamanho, mime
+
+
+def mensagem_de_historia(conta_id, sid, item, nome, pid):
+    """Mensagem para uma historia (StoryItem)."""
+    media = getattr(item, "media", None)
+    segundos, arquivo, tamanho, _ = dados_da_midia_de_historia(media)
+    data = getattr(item, "date", None)
+    return m.Mensagem(
+        conta_id=conta_id, conversa_id=sid, id=str(item.id), autor=nome,
+        minha=bool(getattr(item, "out", False)),
+        data=data.timestamp() if data is not None else time.time(),
+        tipo=tipo_de_historia(media), texto=getattr(item, "caption", "") or "",
+        segundos=segundos, nome_arquivo=arquivo, tamanho=tamanho,
+        remetente=str(pid))
+
+
+def previa_do_telegram(msg):
+    """A previa de link que o Telegram montou para a mensagem (titulo,
+    descricao e nome do site); {} se nao ha."""
+    pagina = getattr(msg, "web_preview", None)
+    if pagina is None:
+        return {}
+    return m.previa_de_link(getattr(pagina, "url", "") or "",
+                            getattr(pagina, "title", "") or "",
+                            getattr(pagina, "description", "") or "",
+                            getattr(pagina, "site_name", "") or "")
+
+
 def extras_do_telegram(msg):
     """(links, botoes, mencoes) de uma mensagem do Telethon.
 
@@ -261,7 +330,11 @@ def converter(msg, conta_id, conversa_id, lidas_ate=0, nome_padrao=""):
         resposta_a=str(resposta_a) if resposta_a else "")
     links, botoes, mencoes = extras_do_telegram(msg)
     m.guardar_extras(nova, links, botoes, mencoes,
-                     acoes=entradas_do_telegram(links))
+                     acoes=entradas_do_telegram(links),
+                     previa=previa_do_telegram(msg))
+    # o Telegram marca as mensagens que citam esta conta (@ ou nome)
+    if not minha and getattr(msg, "mentioned", False) is True:
+        m.atualizar_extras(nova, citou_voce=True)
     # voz ou audio que o Telegram diz ja ter sido tocado (em outro aparelho)
     if not minha and tipo in (m.VOZ, m.AUDIO) and \
             getattr(msg, "media_unread", None) is False:
@@ -341,6 +414,8 @@ class ProvedorTelegram(Provedor):
         self._loop = None
         self._thread = None
         self._entidades = {}                    # conversa_id -> InputPeer
+        self._observada = None                  # conversa com a presenca aberta
+        self._historias_em = 0.0                # ultima busca de historias
         self._conversas = {}                    # conversa_id -> Conversa
         self._usuarios = {}                     # @usuario -> dados ou None
         self._pronto = threading.Event()
@@ -556,6 +631,11 @@ class ProvedorTelegram(Provedor):
             self._ao_conteudo_lido,
             events.Raw((tipos.UpdateReadMessagesContents,
                         tipos.UpdateChannelReadMessagesContents)))
+        self.cliente.add_event_handler(self._ao_usuario, events.UserUpdate())
+        self.cliente.add_event_handler(
+            self._ao_reacoes, events.Raw(tipos.UpdateMessageReactions))
+        self.cliente.add_event_handler(
+            self._ao_historia, events.Raw(tipos.UpdateStory))
         self._estado(ev.CONECTADA)
         self._pronto.set()
         await self._atualizar_conversas()
@@ -652,7 +732,9 @@ class ProvedorTelegram(Provedor):
         self.banco.salvar_conversas(lista)
         log.info("conversas: %d em %.2fs", len(lista),
                  time.perf_counter() - inicio)
+        lista += [c for c in self._conversas.values() if c.tipo == "status"]
         self.barramento.publicar(ev.ConversasAtualizadas(self.conta.id, lista))
+        await self._atualizar_historias()
 
     def fixar_conversa(self, conversa_id, fixar):
         """Fixa a conversa no topo (ou tira a fixacao) na conta."""
@@ -934,6 +1016,284 @@ class ProvedorTelegram(Provedor):
         self.barramento.publicar(ev.MensagemAtualizada(
             self.conta.id, msg.conversa_id, x, "editada"))
 
+    # ----------------------------------------------------------- historias
+    async def _atualizar_historias(self):
+        """Busca as historias de quem voce segue e as guarda como mensagens
+        da "conversa" de cada pessoa; as que sumiram saem. Nunca levanta."""
+        try:
+            await self._buscar_historias()
+        except Exception as e:
+            log.info("historias do Telegram indisponiveis (%s)",
+                     type(e).__name__)
+
+    async def _buscar_historias(self):
+        from telethon import utils
+        from telethon.tl import functions, types as tipos
+        pares, proximo, estado = [], None, None
+        for _ in range(5):
+            r = await self.cliente(functions.stories.GetAllStoriesRequest(
+                next=proximo, state=estado))
+            if not hasattr(r, "peer_stories"):
+                return                      # nada novo, ou sem suporte
+            usuarios = {u.id: u for u in getattr(r, "users", [])}
+            canais = {c.id: c for c in getattr(r, "chats", [])}
+            pares += [(ps, usuarios, canais) for ps in r.peer_stories]
+            if not getattr(r, "has_more", False):
+                break
+            proximo, estado = True, r.state
+        eu = None
+        atuais, novas = {}, []
+        for ps, usuarios, canais in pares:
+            pid = utils.get_peer_id(ps.peer)
+            ent = usuarios.get(getattr(ps.peer, "user_id", None)) or \
+                canais.get(getattr(ps.peer, "channel_id", None))
+            meu = bool(getattr(ent, "is_self", False) or
+                       getattr(ent, "self", False))
+            nome = "Você" if meu else (nome_de(ent) or str(pid))
+            itens = [s for s in ps.stories if isinstance(s, tipos.StoryItem)]
+            if not itens:
+                continue
+            sid = PREFIXO_STATUS + str(pid)
+            lidas = getattr(ps, "max_read_id", 0) or 0
+            msgs = [mensagem_de_historia(self.conta.id, sid, s, nome, pid)
+                    for s in itens]
+            for x in msgs:
+                x.minha = x.minha or meu
+            conv = m.Conversa(
+                conta_id=self.conta.id, id=sid,
+                nome="Meu status" if meu else "Histórias de " + nome,
+                servico=self.servico, tipo="status",
+                nao_lidas=0 if meu else len(
+                    [s for s in itens if s.id > lidas]),
+                data=max(x.data for x in msgs))
+            try:
+                self._entidades[str(pid)] = await \
+                    self.cliente.get_input_entity(ps.peer)
+            except Exception:
+                pass
+            self.banco.salvar_conversas([conv])
+            self.banco.salvar_mensagens(msgs)
+            atuais[sid] = {x.id for x in msgs}
+            novas.append(conv)
+            self._conversas[sid] = conv
+        # o que sumiu (expirou ou foi apagado) sai do computador tambem
+        mudou = bool(novas)
+        for sid in [c.id for c in list(self._conversas.values())
+                    if c.tipo == "status"]:
+            if sid not in atuais:
+                self.banco.apagar_conversa(self.conta.id, sid, 0)
+                self._conversas.pop(sid, None)
+                mudou = True
+                continue
+            velhas = [(self.conta.id, sid, x.id) for x in
+                      self.banco.mensagens(self.conta.id, sid, 10 ** 4)
+                      if x.id not in atuais[sid]]
+            if velhas:
+                self.banco.apagar_mensagens(velhas)
+        self._historias_em = time.time()
+        if mudou:
+            self.barramento.publicar(ev.ConversasAtualizadas(
+                self.conta.id, sorted(self._conversas.values(),
+                                      key=lambda c: -c.data)))
+
+    PODE_PUBLICAR_STATUS = True
+
+    def publicar_status(self, texto, anexo=None, publico="contatos"):
+        """Publica uma historia (foto ou video, com a legenda). `publico`:
+        "contatos" ou "todos"."""
+        if anexo is None:
+            self._avisar("No Telegram a história precisa de foto ou vídeo.",
+                         False)
+            return
+        self._agendar(self._publicar_historia(texto, anexo, publico))
+
+    async def _publicar_historia(self, texto, anexo, publico):
+        from telethon.tl import functions, types as tipos
+        try:
+            arquivo = await self.cliente.upload_file(anexo.caminho)
+            if anexo.tipo == m.FOTO:
+                media = tipos.InputMediaUploadedPhoto(file=arquivo)
+            else:
+                media = tipos.InputMediaUploadedDocument(
+                    file=arquivo, mime_type=anexo.mime or "video/mp4",
+                    attributes=[tipos.DocumentAttributeVideo(
+                        duration=anexo.segundos, w=anexo.largura or 720,
+                        h=anexo.altura or 1280, supports_streaming=True)])
+            regra = tipos.InputPrivacyValueAllowAll() if publico == "todos" \
+                else tipos.InputPrivacyValueAllowContacts()
+            await self.cliente(functions.stories.SendStoryRequest(
+                peer=tipos.InputPeerSelf(), media=media,
+                privacy_rules=[regra], caption=texto or None,
+                random_id=int.from_bytes(os.urandom(8), "big", signed=True),
+                period=86400))
+        except Exception as e:
+            nome = type(e).__name__
+            log.warning("publicar historia falhou: %s", nome)
+            premium = "premium" in str(e).lower()
+            self._avisar("Não consegui publicar a história: %s." % (
+                "o Telegram pede uma conta Premium para isso" if premium
+                else _motivo(e)), False)
+            return
+        log.info("historia publicada")
+        self._avisar("História publicada.", False)
+        await self._atualizar_historias()
+
+    async def _ao_historia(self, evento):
+        """Uma historia nova (ou mudou): atualiza, no maximo a cada poucos
+        segundos."""
+        if time.time() - self._historias_em >= ATUALIZAR_HISTORIAS_A_CADA:
+            await self._atualizar_historias()
+
+    async def _midia_da_historia(self, msg):
+        """A midia da historia, no formato que o download espera."""
+        import types as tipos_py
+        from telethon.tl import functions
+        ent = await self._entidade(msg.conversa_id[len(PREFIXO_STATUS):])
+        r = await self.cliente(functions.stories.GetStoriesByIDRequest(
+            peer=ent, id=[int(msg.id)]))
+        itens = [s for s in getattr(r, "stories", []) if hasattr(s, "media")]
+        if not itens:
+            return None
+        _, _, tamanho, mime = dados_da_midia_de_historia(itens[0].media)
+        return tipos_py.SimpleNamespace(
+            media=itens[0].media,
+            file=tipos_py.SimpleNamespace(mime_type=mime, size=tamanho))
+
+    async def _ver_historias(self, sid):
+        """Marca as historias da pessoa como vistas (ela fica sabendo)."""
+        from telethon.tl import functions
+        ent = await self._entidade(sid[len(PREFIXO_STATUS):])
+        ids = [int(x.id) for x in self.banco.mensagens(
+            self.conta.id, sid, 10 ** 4) if not x.minha]
+        if ids:
+            await self.cliente(functions.stories.ReadStoriesRequest(
+                peer=ent, max_id=max(ids)))
+        conv = self._conversas.get(sid)
+        if conv is not None:
+            conv.nao_lidas = 0
+        self.banco.atualizar_conversa(self.conta.id, sid, nao_lidas=0)
+
+    def responder_status(self, mensagem, texto):
+        """Resposta em particular a uma historia: vai para a conversa com
+        quem a publicou, citando a historia."""
+        if mensagem.minha:
+            return
+        self._agendar(self._responder_historia(mensagem, texto))
+
+    async def _responder_historia(self, msg, texto):
+        from telethon.tl import functions, types as tipos
+        try:
+            ent = await self._entidade(msg.conversa_id[len(PREFIXO_STATUS):])
+            await self.cliente(functions.messages.SendMessageRequest(
+                peer=ent, message=texto,
+                random_id=int.from_bytes(os.urandom(8), "big", signed=True),
+                reply_to=tipos.InputReplyToStory(peer=ent,
+                                                 story_id=int(msg.id))))
+        except Exception as e:
+            log.warning("resposta a historia falhou: %s", type(e).__name__)
+            self.barramento.publicar(ev.EnvioFalhou(
+                self.conta.id, msg.conversa_id, texto, _motivo(e),
+                devolver_texto=True))
+
+    PODE_REAGIR = True
+
+    def reagir(self, mensagem, emoji):
+        self._agendar(self._reagir(mensagem, emoji))
+
+    async def _reagir(self, msg, emoji):
+        from telethon import errors
+        from telethon.tl import functions, types as tipos
+        try:
+            if msg.conversa_id.startswith(PREFIXO_STATUS):
+                ent = await self._entidade(
+                    msg.conversa_id[len(PREFIXO_STATUS):])
+                await self.cliente(functions.stories.SendReactionRequest(
+                    peer=ent, story_id=int(msg.id),
+                    reaction=tipos.ReactionEmoji(emoticon=emoji)
+                    if emoji else tipos.ReactionEmpty()))
+            else:
+                ent = await self._entidade(msg.conversa_id)
+                await self.cliente(functions.messages.SendReactionRequest(
+                    peer=ent, msg_id=int(msg.id),
+                    reaction=[tipos.ReactionEmoji(emoticon=emoji)]
+                    if emoji else []))
+        except errors.ReactionInvalidError:
+            self._avisar("O Telegram não aceita este emoji como reação "
+                         "nesta conversa.", False)
+            return
+        except Exception as e:
+            log.warning("reação falhou: %s", type(e).__name__)
+            self._avisar("Não consegui enviar a reação (%s)." %
+                         type(e).__name__, False)
+            return
+        x = self.banco.mensagem(self.conta.id, msg.conversa_id, msg.id)
+        if x is None:
+            return
+        reacoes = [y for y in m.extras_de(x)["reacoes"]
+                   if not y.get("minha")]
+        if emoji:
+            reacoes.append({"id": "eu", "quem": "Você", "emoji": emoji,
+                            "minha": True})
+        m.atualizar_extras(x, reacoes=reacoes)
+        self.banco.salvar_mensagens([x])
+        self.barramento.publicar(ev.MensagemAtualizada(
+            self.conta.id, msg.conversa_id, x, "reacao", "Você", emoji))
+
+    async def _ao_reacoes(self, evento):
+        """Reacoes de outras pessoas (e a minha, feita em outro aparelho)."""
+        try:
+            cid = self._id_do_peer(evento.peer)
+            x = self.banco.mensagem(self.conta.id, cid, str(evento.msg_id))
+            if x is None:
+                return
+            antigas = {(r.get("id"), r.get("emoji"))
+                       for r in m.extras_de(x)["reacoes"]}
+            reacoes = []
+            recentes = getattr(evento.reactions, "recent_reactions", None) \
+                or []
+            for r in recentes:
+                emoji = getattr(r.reaction, "emoticon", "")
+                if not emoji:
+                    continue
+                if r.my:
+                    reacoes.append({"id": "eu", "quem": "Você",
+                                    "emoji": emoji, "minha": True})
+                    continue
+                pid = getattr(r.peer_id, "user_id", 0)
+                try:
+                    quem = nome_de(await self.cliente.get_entity(r.peer_id))
+                except Exception:
+                    quem = ""
+                reacoes.append({"id": str(pid), "quem": quem or "alguém",
+                                "emoji": emoji})
+            if not recentes:
+                # grupos grandes: o Telegram so manda a contagem
+                for r in getattr(evento.reactions, "results", []):
+                    emoji = getattr(r.reaction, "emoticon", "")
+                    if emoji:
+                        reacoes.append({"id": "n" + emoji, "emoji": emoji,
+                                        "quem": "%d pessoa%s" % (
+                                            r.count,
+                                            "" if r.count == 1 else "s")})
+            novas = {(r.get("id"), r.get("emoji")) for r in reacoes}
+            if novas == antigas:
+                return
+            m.atualizar_extras(x, reacoes=reacoes)
+            self.banco.salvar_mensagens([x])
+            nova = [r for r in reacoes
+                    if (r.get("id"), r.get("emoji")) not in antigas]
+            self.barramento.publicar(ev.MensagemAtualizada(
+                self.conta.id, cid, x, "reacao",
+                nova[0]["quem"] if nova else "",
+                nova[0]["emoji"] if nova else ""))
+        except Exception:
+            log.exception("erro ao tratar reações")
+
+    @staticmethod
+    def _id_do_peer(peer):
+        from telethon import utils
+        return str(utils.get_peer_id(peer))
+
     SAI_DE_GRUPO = True
 
     def sair_do_grupo(self, conversa_id):
@@ -994,6 +1354,11 @@ class ProvedorTelegram(Provedor):
         self._agendar(self._carregar(conversa_id, limite))
 
     async def _carregar(self, conversa_id, limite):
+        if conversa_id.startswith(PREFIXO_STATUS):
+            self.barramento.publicar(ev.MensagensCarregadas(
+                self.conta.id, conversa_id,
+                self.banco.mensagens(self.conta.id, conversa_id, 10 ** 4)))
+            return
         ent = await self._entidade(conversa_id)
         conv = self._conversas.get(conversa_id)
         lidas_ate = conv.lidas_ate if conv else 0
@@ -1019,8 +1384,11 @@ class ProvedorTelegram(Provedor):
         return futuro.result()
 
     async def _baixar(self, msg, base, progresso, cancelado):
-        ent = await self._entidade(msg.conversa_id)
-        original = await self.cliente.get_messages(ent, ids=int(msg.id))
+        if msg.conversa_id.startswith(PREFIXO_STATUS):
+            original = await self._midia_da_historia(msg)
+        else:
+            ent = await self._entidade(msg.conversa_id)
+            original = await self.cliente.get_messages(ent, ids=int(msg.id))
         if original is None or not getattr(original, "media", None):
             raise ErroMidia("O Telegram não tem mais a mídia desta mensagem.")
         arquivo = getattr(original, "file", None)
@@ -1106,7 +1474,8 @@ class ProvedorTelegram(Provedor):
         try:
             ent = await self._entidade(conversa_id)
             enviada = await self.cliente.send_message(
-                ent, texto, reply_to=int(resposta_a) if resposta_a else None)
+                ent, texto, reply_to=int(resposta_a) if resposta_a else None,
+                link_preview=previa_links.LIGADAS["enviar"])
         except Exception as e:
             log.warning("envio falhou: %s", type(e).__name__)
             self.barramento.publicar(ev.EnvioFalhou(
@@ -1135,9 +1504,20 @@ class ProvedorTelegram(Provedor):
                 extra = dict(attributes=[types.DocumentAttributeVideo(
                     duration=anexo.segundos, w=anexo.largura,
                     h=anexo.altura, supports_streaming=True)])
+            ultimo = [-1]
+
+            def andamento(feito, total):
+                pct = int(feito * 100 / total) if total else 0
+                if pct != ultimo[0] and pct < 100:
+                    ultimo[0] = pct
+                    self.barramento.publicar(ev.ProgressoEnvio(
+                        self.conta.id, conversa_id, pct))
             enviada = await self.cliente.send_file(
                 ent, anexo.caminho, caption=legenda or None,
-                force_document=anexo.tipo == m.DOCUMENTO, **extra)
+                force_document=anexo.tipo == m.DOCUMENTO,
+                progress_callback=andamento, **extra)
+            self.barramento.publicar(ev.ProgressoEnvio(
+                self.conta.id, conversa_id, 100))
         except Exception as e:
             log.warning("envio de %s falhou: %s", anexo.tipo,
                         type(e).__name__)
@@ -1186,6 +1566,9 @@ class ProvedorTelegram(Provedor):
         self._agendar(self._marcar_lida(conversa_id))
 
     async def _marcar_lida(self, conversa_id):
+        if conversa_id.startswith(PREFIXO_STATUS):
+            await self._ver_historias(conversa_id)
+            return
         ent = await self._entidade(conversa_id)
         await self.cliente.send_read_acknowledge(ent)
         conv = self._conversas.get(conversa_id)
@@ -1284,6 +1667,99 @@ class ProvedorTelegram(Provedor):
             self.barramento.publicar(ev.MensagemNova(nova, conv))
         except Exception:
             log.exception("erro ao tratar mensagem recebida")
+
+    # ------------------------------------------------------------ presenca
+    def observar_presenca(self, conversa_id):
+        """Le o status atual da pessoa; as mudancas e o "digitando" chegam
+        pelos avisos do Telegram, que valem para todas as conversas."""
+        if conversa_id.startswith(PREFIXO_STATUS):
+            return
+        self._observada = conversa_id
+        self._agendar(self._ler_status(conversa_id))
+
+    def parar_presenca(self, conversa_id):
+        if self._observada == conversa_id:
+            self._observada = None
+
+    async def _ler_status(self, conversa_id):
+        from telethon.tl import types as tipos
+        try:
+            ent = await self.cliente.get_entity(int(conversa_id))
+        except Exception:
+            return
+        estado = getattr(ent, "status", None)
+        if isinstance(estado, tipos.UserStatusOnline):
+            p = ev.Presenca(self.conta.id, conversa_id, "online")
+        elif isinstance(estado, tipos.UserStatusOffline):
+            p = ev.Presenca(self.conta.id, conversa_id, "offline",
+                            quando=estado.was_online.timestamp())
+        elif isinstance(estado, tipos.UserStatusRecently):
+            p = ev.Presenca(self.conta.id, conversa_id, "offline",
+                            aprox="recentemente")
+        elif isinstance(estado, tipos.UserStatusLastWeek):
+            p = ev.Presenca(self.conta.id, conversa_id, "offline",
+                            aprox="na última semana")
+        elif isinstance(estado, tipos.UserStatusLastMonth):
+            p = ev.Presenca(self.conta.id, conversa_id, "offline",
+                            aprox="no último mês")
+        else:
+            return
+        self.barramento.publicar(p)
+
+    async def _ao_usuario(self, evento):
+        """Online, visto por ultimo e "digitando" de quem a conversa
+        observada e (ou de quem digita no grupo observado)."""
+        try:
+            observada = self._observada
+            if observada is None:
+                return
+            em_grupo = getattr(evento, "chat_id", None)
+            cid = str(em_grupo) if em_grupo else str(evento.user_id)
+            if cid != observada:
+                return
+            quem = ""
+            if em_grupo:
+                try:
+                    quem = nome_de(await self.cliente.get_entity(
+                        evento.user_id))
+                except Exception:
+                    quem = ""
+            if evento.typing:
+                estado = "digitando"
+            elif evento.recording:
+                estado = "gravando"
+            elif evento.uploading:
+                estado = "enviando"
+            elif evento.cancel:
+                estado = "parou"
+            elif em_grupo:
+                return
+            elif evento.online:
+                estado = "online"
+            elif evento.last_seen:
+                self.barramento.publicar(ev.Presenca(
+                    self.conta.id, cid, "offline",
+                    quando=evento.last_seen.timestamp()))
+                return
+            elif evento.recently:
+                self.barramento.publicar(ev.Presenca(
+                    self.conta.id, cid, "offline", aprox="recentemente"))
+                return
+            elif evento.within_weeks:
+                self.barramento.publicar(ev.Presenca(
+                    self.conta.id, cid, "offline",
+                    aprox="na última semana"))
+                return
+            elif evento.within_months:
+                self.barramento.publicar(ev.Presenca(
+                    self.conta.id, cid, "offline", aprox="no último mês"))
+                return
+            else:
+                return
+            self.barramento.publicar(ev.Presenca(
+                self.conta.id, cid, estado, quem=quem))
+        except Exception:
+            log.exception("erro ao tratar a presença")
 
     async def _ao_acao_no_chat(self, evento):
         """Mudanca no grupo ou canal; aqui so a troca de nome interessa."""

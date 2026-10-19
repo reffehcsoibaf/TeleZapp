@@ -81,16 +81,29 @@ def capacidade(genero):
     return "imagem" if genero == "figurinha" else genero
 
 
-def aceita(provedor, genero):
-    return provedor in PROVEDORES and capacidade(genero) in \
+def video_nativo(provedor):
+    """O provedor recebe o video inteiro (so o Gemini); os outros veem os
+    quadros do video, como uma imagem."""
+    return provedor in PROVEDORES and "video" in \
         PROVEDORES[provedor].capacidades
+
+
+def aceita(provedor, genero):
+    if provedor not in PROVEDORES:
+        return False
+    if genero == "video":
+        # quem le imagens descreve o video por quadros
+        return video_nativo(provedor) or "imagem" in \
+            PROVEDORES[provedor].capacidades
+    return capacidade(genero) in PROVEDORES[provedor].capacidades
 
 
 def provedores_da_tarefa(tarefa):
     """[(chave, nome)] dos provedores que fazem a tarefa."""
-    cap = {AUDIO: "audio", IMAGEM: "imagem", VIDEO: "video", PDF: "pdf"}[tarefa]
+    genero = {AUDIO: "audio", IMAGEM: "imagem", VIDEO: "video",
+              PDF: "pdf"}[tarefa]
     return [(p.chave, p.nome) for p in PROVEDORES.values()
-            if cap in p.capacidades]
+            if aceita(p.chave, genero)]
 
 
 def cadeia_de_modelos(provedor, modelos):

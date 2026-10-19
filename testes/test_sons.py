@@ -5,6 +5,8 @@ import sys
 import types
 import wave
 
+import pytest
+
 from telezapp import config
 from telezapp.acessibilidade import fala
 from telezapp.nucleo import backup
@@ -19,17 +21,19 @@ def wav(caminho, segundos=1, taxa=8000):
     return str(caminho)
 
 
-def test_cada_evento_tem_uma_opcao_de_som_e_o_padrao_e_o_som_de_hoje():
+def test_todo_evento_tem_um_som_nos_pacotes_da_casa():
+    from telezapp.nucleo import pacotes_de_som as pk
     eventos = {nome for nome, _, _ in config.EVENTOS_SOM}
     assert eventos == {"nova", "enviada", "erro", "conectado", "pronto",
                        "atualizado", "toque", "chamando", "desligada",
                        "nova_aberta", "nova_grupo", "desconectada",
                        "reconectada", "falha_envio", "download_pronto",
-                       "tarefa_pronta"}
-    por_som = {o.som: o for o in config.OPCOES if o.som}
-    assert set(por_som) == eventos
-    assert all(o.categoria == "Sons" and o.padrao == "" for o in
-               por_som.values())
+                       "tarefa_pronta", "reacao_recebida",
+                       "mencao_ou_resposta"}
+    assert {e for e, _ in pk.eventos()} == eventos
+    assert not [o for o in config.OPCOES if getattr(o, "som", "")]
+    for e in eventos:                            # o pacote TeleZapp e completo
+        assert pk.arquivo_do_evento(pk.TELEZAPP, e), e
 
 
 def test_acao_do_som(tmp_path):
@@ -76,14 +80,17 @@ def test_bipe_desligado_nao_toca_nada(monkeypatch):
     fala.definir_sons({})
 
 
-def test_backup_leva_e_valida_as_escolhas_de_som():
-    dados = backup.opcoes_do_backup({"som_nova": "desligado",
-                                     "som_erro": "C:/sons/erro.wav"})
-    assert dados["som_nova"] == "desligado"
+def test_backup_leva_e_valida_o_pacote_e_os_eventos_desativados():
+    dados = backup.opcoes_do_backup({"pacote_de_sons": "p:Meu",
+                                     "sons_desativados": {"p:Meu": ["nova"]}})
+    assert dados["pacote_de_sons"] == "p:Meu"
     boas = backup.opcoes_validas(dados)
-    assert boas["som_erro"] == "C:/sons/erro.wav"
-    assert "som_nova" in boas and backup.opcoes_validas(
-        {"som_nova": 5}) == {}
+    assert boas["pacote_de_sons"] == "p:Meu"
+    assert boas["sons_desativados"] == {"p:Meu": ["nova"]}
+    ruins = backup.opcoes_validas({"pacote_de_sons": 5,
+                                   "sons_desativados": {"x": "nova"}})
+    assert "pacote_de_sons" not in ruins
+    assert ruins.get("sons_desativados") == {}
 
 
 def test_importar_som_copia_para_a_pasta_de_sons(tmp_path, monkeypatch):
@@ -118,13 +125,13 @@ def test_backup_das_configuracoes_leva_a_pasta_de_sons(tmp_path):
     (origem / "sons").mkdir(parents=True)
     wav(origem / "sons" / "meu.wav")
     arquivo = str(tmp_path / "b.zip")
-    resumo = backup.criar(arquivo, str(origem), {"som_nova": "meu.wav"},
+    resumo = backup.criar(arquivo, str(origem), {"pacote_de_sons": "p:Meu"},
                           ["configuracoes"])
     assert resumo["configuracoes"] == 2
     destino = tmp_path / "b"
     opcoes, espera = backup.restaurar(arquivo, "", ["configuracoes"],
                                       str(destino))
-    assert opcoes["som_nova"] == "meu.wav" and espera == []
+    assert opcoes["pacote_de_sons"] == "p:Meu" and espera == []
     assert (destino / "sons" / "meu.wav").exists()          # na hora
 
 
@@ -154,3 +161,37 @@ def test_evento_novo_sem_herdar_toca_o_proprio_tom(monkeypatch):
     fala._tocar("desconectada")
     fala._tocar("download_pronto")
     assert tons == [440, 330, 740, 988]
+
+
+def test_gerador_cria_sons_curtos_estereo_que_comecam_logo(tmp_path):
+    import importlib.util
+    import os
+    import numpy as np
+    import soundfile as sf
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    spec = importlib.util.spec_from_file_location(
+        "gerar_sons", os.path.join(raiz, "ferramentas", "gerar_sons.py"))
+    gerador = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gerador)
+    from telezapp import config
+    caminhos = gerador.gerar(str(tmp_path))
+    assert {os.path.basename(c)[:-4] for c in caminhos} == \
+        {nome for nome, _, _ in config.EVENTOS_SOM}      # um por evento
+    for c in caminhos:
+        dados, taxa = sf.read(c)
+        assert dados.ndim == 2 and dados.shape[1] == 2, c        # estereo
+        assert len(dados) / taxa <= 2.0, c                       # curto
+        assert np.abs(dados[:int(taxa * 0.02)]).max() > 0.2, c   # sem silencio
+        assert np.abs(dados).max() < 0.6, c                      # sem estourar
+        assert np.abs(dados[-40:]).max() < 0.01, c               # termina mudo
+
+
+def test_tom_de_chamando_do_pacote_padrao_dura_um_segundo_e_meio(monkeypatch):
+    tons = []
+    monkeypatch.setattr(fala, "winsound", types.SimpleNamespace(
+        Beep=lambda freq, ms: tons.append((freq, ms))))
+    fala._tocar("chamando")
+    assert tons == [(425, 1500)]
+    tons.clear()
+    fala._tocar("toque")                      # o toque de quem recebe segue
+    assert len(tons) == 4 and all(ms == 120 for _, ms in tons)
