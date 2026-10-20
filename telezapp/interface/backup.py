@@ -23,6 +23,12 @@ class DialogoBackup(wx.Dialog):
             c.SetValue(parte == "configuracoes")
             lay.Add(c, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
             self.caixas[parte] = c
+        lay.Add(wx.StaticText(
+            self, label="Com senha, o arquivo é cifrado (AES-256) e as "
+                        "chaves dos provedores de IA vão junto, se a parte "
+                        "de configurações estiver marcada. Sem senha, as "
+                        "chaves ficam de fora."), 0, wx.LEFT | wx.RIGHT |
+            wx.TOP, 10)
         lay.Add(wx.StaticText(self, label="Senha do backup (deixe em branco "
                                           "para não usar senha)"),
                 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)

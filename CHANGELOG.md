@@ -3,6 +3,16 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.20.0
+
+- Backup com senha leva as chaves dos provedores de IA: `backup.criar` grava
+  `ia_chaves.json` (`CHAVES_IA`, só com `senha` e a parte configurações) com as
+  chaves lidas do `Cofre`; `restaurar(.., resultado)` as devolve ao cofre
+  (`_restaurar_chaves`, só provedores conhecidos, DPAPI de novo) quando a
+  parte configurações é restaurada com senha, e preenche
+  `resultado["ia_chaves"]`. A janela diz quantas voltaram; o diálogo do
+  backup explica a regra.
+
 ## 2026.10.19.1
 
 Instalar a partir de uma cópia portátil e criar cópia portátil.

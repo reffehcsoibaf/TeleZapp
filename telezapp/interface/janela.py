@@ -5564,22 +5564,25 @@ class Janela(wx.Frame):
 
         def trabalho():
             try:
+                extra = {}
                 opcoes, espera = backup.restaurar(
-                    arquivo, senha, partes, config.pasta_dados())
+                    arquivo, senha, partes, config.pasta_dados(), extra)
                 erro = ""
             except backup.ErroBackup as e:
-                opcoes, espera, erro = {}, [], str(e)
+                opcoes, espera, erro, extra = {}, [], str(e), {}
             except Exception as e:
                 log.error("erro ao restaurar:\n%s", traceback.format_exc())
-                opcoes, espera, erro = {}, [], "Erro ao restaurar: %s" % e
-            wx.CallAfter(self._fim_da_restauracao, opcoes, espera, erro)
+                opcoes, espera, erro, extra = {}, [], \
+                    "Erro ao restaurar: %s" % e, {}
+            wx.CallAfter(self._fim_da_restauracao, opcoes, espera, erro,
+                         extra.get("ia_chaves", 0))
         self.fala.falar("Restaurando o backup. Aviso quando terminar.",
                         interromper=True)
         threading.Thread(target=trabalho, daemon=True,
                          name="restaurar").start()
 
     @seguro
-    def _fim_da_restauracao(self, opcoes, espera, erro):
+    def _fim_da_restauracao(self, opcoes, espera, erro, chaves_ia=0):
         if erro:
             bipe("erro")
             self.fala.falar(erro, interromper=True)
@@ -5594,6 +5597,9 @@ class Janela(wx.Frame):
         texto = "Backup restaurado."
         if opcoes:
             texto += " %d configurações mudaram." % mudadas
+        if chaves_ia:
+            texto += (" %d chave(s) de provedores de IA voltaram." %
+                      chaves_ia)
         if espera:
             texto += (" O resto (%s) troca quando o %s abrir de novo." % (
                 ", ".join(backup.NOMES_PARTES[p].split(" (")[0].split(",")[0]

@@ -304,7 +304,11 @@ automáticos): a lista do que falta testar fica na memória do projeto.
   partes escolhidas; configurações valem na hora e o resto troca na próxima
   abertura, guardando o anterior em `antes-da-restauracao`. Depuração e
   exigência do código secreto nunca são restauradas por arquivo. As chaves de
-  IA nunca entram.
+  IA só entram em backup **com senha** (zip cifrado em AES-256; sem senha
+  ficariam legíveis): vão em `ia_chaves.json` dentro do zip, decifradas do
+  DPAPI na hora de gravar, e na restauração da parte de configurações voltam
+  ao cofre cifradas de novo pelo DPAPI do usuário e do computador de destino
+  (20/10/2026, a pedido do responsável).
 - **Distribuição**: `ferramentas/publicar.py` monta zip, hash e notas;
   Ajuda, Verificar atualizações só avisa. Instalar, portátil e atualizador
   ficam para perto do lançamento (decisão do responsável). Aviso de software
@@ -315,7 +319,7 @@ automáticos): a lista do que falta testar fica na memória do projeto.
   OpenRouter (`nucleo/ia`), desenho dos adaptadores como no WinZapp
   (GPL-3). Por tarefa (voz/áudio, imagem e figurinha, vídeo, PDF) o
   responsável organiza a ordem de tentativa; se um falha, vai ao próximo.
-  Chaves cifradas pelo DPAPI do Windows, fora de backup e log; consentimento
+  Chaves cifradas pelo DPAPI do Windows, fora do log e só no backup com senha; consentimento
   por provedor antes do primeiro envio. Modelos padrão vieram do catálogo do
   WinZapp (Gemini 3.8 Flash entra no gratuito; Gemini tem modo automático com
   alternativos). Aprendizados: a Groq (Cloudflare) devolve 403, erro 1010, ao
