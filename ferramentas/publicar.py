@@ -5,8 +5,10 @@
 Parte do executavel ja gerado (pasta dist\\TeleZapp, do PyInstaller --onedir)
 e monta, em lancamento\\:
 
-    TeleZapp-<versao>.zip          a pasta do programa, pronta para extrair
-    TeleZapp-<versao>.zip.sha256   o hash para conferir o download
+    TeleZapp.zip          a pasta do programa, pronta para extrair (o nome
+                          e fixo: .../releases/latest/download/TeleZapp.zip
+                          sempre leva a versao mais nova)
+    TeleZapp.zip.sha256   o hash para conferir o download
     notas.md                       o texto da Release (aviso de software
                                    experimental + novidades da versao)
 
@@ -108,7 +110,7 @@ def main():
 
     versao = versao_atual()
     os.makedirs(args.saida, exist_ok=True)
-    nome_zip = "TeleZapp-%s.zip" % versao
+    nome_zip = "TeleZapp.zip"
     zip_ = os.path.join(args.saida, nome_zip)
     print("Montando %s..." % zip_)
     hash_zip = montar_zip(args.pasta, zip_)

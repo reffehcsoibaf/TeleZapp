@@ -63,6 +63,15 @@ def test_release_com_zip_e_hash_vira_lancamento_atualizavel():
     lanc = at.mais_nova(dados)
     assert (lanc.nome_zip, lanc.url_zip, lanc.url_hash, lanc.tamanho) == (
         nome, "https://github.com/z", "https://github.com/h", 7)
+    # nome fixo, o que o publicar.py passou a usar
+    dados[0]["assets"] = [
+        {"name": "TeleZapp.zip", "browser_download_url": "https://github.com/z2"},
+        {"name": "TeleZapp.zip.sha256", "browser_download_url": "https://github.com/h2"}]
+    assert at.mais_nova(dados).nome_zip == "TeleZapp.zip"
+    dados[0]["assets"] = [
+        {"name": nome, "browser_download_url": "https://github.com/z",
+         "size": 7},
+        {"name": nome + ".sha256", "browser_download_url": "https://github.com/h"}]
     # sem o .sha256, nao atualiza sozinho
     del dados[0]["assets"][1]
     assert at.mais_nova(dados).url_zip == ""

@@ -11,6 +11,10 @@ Instalar a partir de uma cópia portátil e criar cópia portátil.
   (Sim/Não/Cancelar, depois `DialogoBackup`, onde salvar e `backup.criar`;
   falha ou desistência cancelam a desinstalação). Vale no menu (com
   `banco.copiar_para`) e em `--desinstalar` (cópia do arquivo pelo SQLite).
+- O zip da Release passou a se chamar sempre `TeleZapp.zip` (e
+  `TeleZapp.zip.sha256`): `/releases/latest/download/TeleZapp.zip` aponta para
+  a versão mais nova (só vale para Release que não seja pré-lançamento).
+  `atualizacao._arquivos` ainda aceita o nome antigo com a versão.
 - Tela de boas-vindas (`interface/instalacao.mostrar_boas_vindas`): no
   executável que não é instalado, sem pasta `dados` e sem
   `sem-boas-vindas.txt`, antes de tudo (depois do `wx.App`): Instalar, Criar

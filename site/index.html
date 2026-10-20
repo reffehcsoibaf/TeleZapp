@@ -155,7 +155,7 @@ footer { border-top: 1px solid var(--linha); margin-top: 3rem; padding: 1.5rem 0
       });
       if (!melhor) { return; }
       var zip = (melhor.r.assets || []).filter(function (a) {
-        return a.name === "TeleZapp-" + melhor.v + ".zip";
+        return a.name === "TeleZapp.zip" || a.name === "TeleZapp-" + melhor.v + ".zip";
       })[0];
       botao.textContent = "Baixar o TeleZapp " + melhor.v;
       botao.href = zip ? zip.browser_download_url : melhor.r.html_url;

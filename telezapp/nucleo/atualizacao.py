@@ -40,13 +40,16 @@ def como_tupla(versao):
 def _arquivos(r, versao):
     """(nome, url do zip, url do hash, tamanho) dos arquivos da Release, se
     ela tem o zip e o .sha256 que o publicar.py monta."""
-    nome = "TeleZapp-%s.zip" % versao
     achados = {}
     for a in r.get("assets") or []:
         if isinstance(a, dict):
             achados[str(a.get("name"))] = a
-    zip_, hash_ = achados.get(nome), achados.get(nome + ".sha256")
-    if not zip_ or not hash_:
+    # nome fixo; as primeiras Releases traziam a versao no nome
+    for nome in ("TeleZapp.zip", "TeleZapp-%s.zip" % versao):
+        zip_, hash_ = achados.get(nome), achados.get(nome + ".sha256")
+        if zip_ and hash_:
+            break
+    else:
         return "", "", "", 0
     return (nome, str(zip_.get("browser_download_url") or ""),
             str(hash_.get("browser_download_url") or ""),
