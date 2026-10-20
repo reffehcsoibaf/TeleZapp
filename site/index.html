@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TeleZapp: WhatsApp e Telegram para leitores de tela</title>
+<meta name="description" content="Aplicativo gratuito e de código aberto para conversar pelo WhatsApp e pelo Telegram na mesma janela, feito para quem usa leitor de tela no Windows.">
+<style>
+:root {
+  --fundo: #ffffff;
+  --texto: #1b1f24;
+  --suave: #4a5460;
+  --linha: #d3d9e0;
+  --destaque: #0b5cad;
+  --destaque-texto: #ffffff;
+  --aviso-fundo: #fff4d6;
+  --aviso-borda: #b57d00;
+  --card: #f4f6f9;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fundo: #12161b;
+    --texto: #e8ecf1;
+    --suave: #aab4bf;
+    --linha: #2c353f;
+    --destaque: #6cb2ff;
+    --destaque-texto: #0a1420;
+    --aviso-fundo: #2d2610;
+    --aviso-borda: #d9a400;
+    --card: #1a2027;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--fundo);
+  color: var(--texto);
+  font: 1.0625rem/1.6 system-ui, "Segoe UI", sans-serif;
+}
+a { color: var(--destaque); }
+a:focus-visible, button:focus-visible { outline: 3px solid var(--destaque); outline-offset: 3px; }
+.pular { position: absolute; left: -999px; top: 0; background: var(--destaque); color: var(--destaque-texto); padding: .5rem 1rem; z-index: 10; }
+.pular:focus { left: 0; }
+.conteudo { max-width: 46rem; margin: 0 auto; padding: 0 1rem; }
+header { padding: 2.5rem 0 1rem; }
+h1 { font-size: 2.2rem; line-height: 1.2; margin: 0 0 .5rem; }
+h2 { font-size: 1.4rem; margin: 2.2rem 0 .6rem; }
+.lema { font-size: 1.2rem; color: var(--suave); margin: 0; }
+.baixar { margin: 1.6rem 0 .4rem; display: flex; flex-wrap: wrap; gap: .8rem; align-items: center; }
+.botao {
+  display: inline-block;
+  background: var(--destaque);
+  color: var(--destaque-texto);
+  font-weight: 700;
+  text-decoration: none;
+  padding: .85rem 1.4rem;
+  border-radius: .5rem;
+}
+.botao:hover { filter: brightness(1.1); }
+.secundario { background: transparent; color: var(--destaque); border: 2px solid var(--destaque); }
+.nota { color: var(--suave); font-size: .95rem; margin: .3rem 0 0; }
+.aviso {
+  background: var(--aviso-fundo);
+  border-left: 5px solid var(--aviso-borda);
+  padding: .8rem 1rem;
+  border-radius: .3rem;
+  margin: 1.4rem 0;
+}
+ul, ol { padding-left: 1.4rem; }
+li { margin: .35rem 0; }
+.cartoes { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); list-style: none; padding: 0; }
+.cartoes li { background: var(--card); border: 1px solid var(--linha); border-radius: .5rem; padding: .8rem 1rem; margin: 0; }
+.cartoes strong { display: block; }
+code { background: var(--card); padding: .1rem .35rem; border-radius: .25rem; word-break: break-all; }
+footer { border-top: 1px solid var(--linha); margin-top: 3rem; padding: 1.5rem 0 3rem; color: var(--suave); font-size: .95rem; }
+</style>
+</head>
+<body>
+<a class="pular" href="#baixar">Ir para o download</a>
+<header>
+  <div class="conteudo">
+    <h1>TeleZapp</h1>
+    <p class="lema">Aplicativo para conversar pelo WhatsApp e pelo Telegram na mesma janela, feito para quem usa leitor de tela no Windows.</p>
+  </div>
+</header>
+<main class="conteudo">
+  <section aria-labelledby="baixar">
+    <h2 id="baixar">Baixar</h2>
+    <div class="baixar">
+      <a class="botao" id="botao-baixar" href="https://github.com/reffehcsoibaf/TeleZapp/releases">Baixar a última versão</a>
+      <a class="botao secundario" href="https://github.com/reffehcsoibaf/TeleZapp/releases">Todas as versões</a>
+    </div>
+    <p class="nota" id="versao" role="status">Para Windows 10 ou 11. Gratuito, sem anúncios.</p>
+    <div class="aviso" role="note">
+      <strong>Software experimental.</strong> O TeleZapp está em desenvolvimento e pode ter erros, inclusive em mensagens e conversas. Use por sua conta e risco. Não é um produto oficial do WhatsApp nem do Telegram.
+    </div>
+  </section>
+
+  <section aria-labelledby="como">
+    <h2 id="como">Como instalar</h2>
+    <ol>
+      <li>Baixe o arquivo zip e extraia a pasta <code>TeleZapp</code> onde quiser.</li>
+      <li>Abra <code>TeleZapp.exe</code>. A tela de boas-vindas oferece <strong>Instalar</strong> (sem precisar de administrador), <strong>Criar cópia portátil</strong> (para levar num pendrive), <strong>Guia de uso</strong>, <strong>Usar sem instalar</strong> e <strong>Fechar</strong>.</li>
+      <li>Para atualizar, use <em>Ajuda, Verificar atualizações</em> dentro do programa: ele baixa a versão nova, confere o arquivo e se reabre atualizado, mantendo os seus dados.</li>
+    </ol>
+    <p>Cada versão traz o código de conferência SHA-256 do zip na página de download.</p>
+  </section>
+
+  <section aria-labelledby="recursos">
+    <h2 id="recursos">O que ele faz</h2>
+    <ul class="cartoes">
+      <li><strong>Duas contas, uma lista</strong>WhatsApp e Telegram juntos, com várias contas e filtros.</li>
+      <li><strong>Mensagens completas</strong>Texto, fotos, vídeos, áudios, figurinhas, documentos, reações e emojis.</li>
+      <li><strong>Status e histórias</strong>Ver, responder, curtir e postar.</li>
+      <li><strong>Feito para leitores de tela</strong>Controles nativos do Windows, avisos falados e sons para cada evento.</li>
+      <li><strong>Inteligência artificial opcional</strong>Transcreve áudios e descreve imagens e vídeos, com a sua chave.</li>
+      <li><strong>Backup e portátil</strong>Faça backup dos seus dados e leve o programa numa pasta.</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="mais">
+    <h2 id="mais">Mais informações</h2>
+    <ul>
+      <li><a href="https://github.com/reffehcsoibaf/TeleZapp#readme">Leia o README</a>, com o que já foi comprovado e como rodar pelo código-fonte.</li>
+      <li><a href="https://github.com/reffehcsoibaf/TeleZapp/issues">Relatar um problema ou sugerir algo</a>.</li>
+      <li><a href="https://github.com/reffehcsoibaf/TeleZapp">Código-fonte no GitHub</a>.</li>
+    </ul>
+  </section>
+</main>
+<footer>
+  <div class="conteudo">
+    Software livre sob a licença GPL versão 3 ou posterior. WhatsApp e Telegram são marcas dos seus donos; o TeleZapp não é afiliado a eles.
+  </div>
+</footer>
+<script>
+// Aponta o botão para o zip da versão mais nova, inclusive pré-lançamentos
+// (o endereço /releases/latest ignora pré-lançamentos). Sem JavaScript ou sem
+// resposta do GitHub, o botão leva à lista de versões.
+(function () {
+  var botao = document.getElementById("botao-baixar");
+  var aviso = document.getElementById("versao");
+  fetch("https://api.github.com/repos/reffehcsoibaf/TeleZapp/releases?per_page=15",
+        { headers: { Accept: "application/vnd.github+json" } })
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+    .then(function (lista) {
+      var melhor = null, chave = null;
+      lista.forEach(function (r) {
+        var v = String(r.tag_name || "").replace(/^[vV]/, "");
+        if (r.draft || !/^\d{4}\.\d{1,2}\.\d{1,2}\.\d+$/.test(v)) { return; }
+        var k = v.split(".").map(Number), maior = !chave;
+        for (var i = 0; chave && i < 4; i++) {
+          if (k[i] !== chave[i]) { maior = k[i] > chave[i]; break; }
+        }
+        if (maior) { melhor = { v: v, r: r }; chave = k; }
+      });
+      if (!melhor) { return; }
+      var zip = (melhor.r.assets || []).filter(function (a) {
+        return a.name === "TeleZapp-" + melhor.v + ".zip";
+      })[0];
+      botao.textContent = "Baixar o TeleZapp " + melhor.v;
+      botao.href = zip ? zip.browser_download_url : melhor.r.html_url;
+      aviso.textContent = "Versão mais recente: " + melhor.v +
+        (melhor.r.prerelease ? " (pré-lançamento)" : "") +
+        (zip ? ", " + Math.round(zip.size / 1048576) + " MB" : "") +
+        ". Para Windows 10 ou 11. Gratuito, sem anúncios.";
+    })
+    .catch(function () {});
+})();
+</script>
+</body>
+</html>
