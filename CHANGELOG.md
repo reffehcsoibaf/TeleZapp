@@ -3,6 +3,25 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.15.6
+
+Mensagens de grupo que o TeleZapp não mostrava.
+
+- Causa: quando alguém fala num grupo depois de trocar a chave de envio (o
+  que acontece a cada tanto tempo, ao entrar gente ou trocar de aparelho), o
+  pacote traz duas partes cifradas, a chave (`pkmsg` ou `msg`) e o conteúdo
+  (`skmsg`), e o whatsmeow entrega **dois eventos com o mesmo ID**: primeiro
+  só a chave, depois o texto. `_ao_receber` marcava o ID como visto antes de
+  saber se havia conteúdo, e descartava o segundo evento, o do texto.
+- Nos logs de 14/10: das 292 mensagens que chegaram, os pacotes com uma só
+  parte (`skmsg`) foram todos guardados (285 de 285) e os de duas partes
+  nenhum (0 de 27). No grupo WinZapp havia 92 respostas a mensagens que o
+  TeleZapp nunca guardou.
+- Agora o ID só entra em `_vistas` depois que `converter` devolve uma
+  mensagem. O evento repetido com conteúdo continua sendo ignorado.
+- Mensagens perdidas antes desta versão não voltam sozinhas (o WhatsApp não
+  as reenvia). Reações, votos e edições continuam sem aparecer.
+
 ## 2026.10.15.5
 
 Chamadas de voz 1 a 1 no Telegram (interface acessível).
