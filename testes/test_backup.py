@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 
+import pyzipper
 import pytest
 
 from telezapp import config
@@ -143,3 +144,56 @@ def test_backup_leva_a_ordem_dos_provedores_de_ia_mas_nunca_as_chaves():
         "ia_modelos": {"gemini": "m", "inexistente": "x", "claude": 5}})
     assert boas["ia_ordem"] == {"audio": ["groq"]}
     assert boas["ia_modelos"] == {"gemini": "m"}
+
+
+def _cofre(pasta):
+    from telezapp.nucleo.ia.cofre import Cofre
+    os.makedirs(str(pasta), exist_ok=True)
+    return Cofre(os.path.join(str(pasta), "ia_chaves.json"))
+
+
+def test_chaves_de_ia_so_vao_em_backup_com_senha(tmp_path):
+    origem = tmp_path / "a"
+    cfg = preparar(origem)
+    _cofre(origem).guardar("groq", "chave-secreta-groq")
+    _cofre(origem).guardar("gemini", "chave-gemini")
+    # sem senha: ficam de fora (o zip seria legivel)
+    sem = str(tmp_path / "sem.zip")
+    resumo = bk.criar(sem, str(origem), cfg, ["configuracoes"])
+    assert "ia_chaves" not in resumo
+    with pyzipper.AESZipFile(sem) as z:
+        assert bk.CHAVES_IA not in z.namelist()
+    # com senha: vao, cifradas no zip
+    com = str(tmp_path / "com.zip")
+    resumo = bk.criar(com, str(origem), cfg, ["configuracoes"], "segredo")
+    assert resumo["ia_chaves"] == 2
+    with pyzipper.AESZipFile(com) as z:
+        with pytest.raises(RuntimeError):
+            z.read(bk.CHAVES_IA)                       # sem a senha
+    assert b"chave-secreta-groq" not in open(com, "rb").read()
+    # restaurar em outra pasta: as chaves voltam ao cofre
+    destino = tmp_path / "b"
+    extra = {}
+    bk.restaurar(com, "segredo", ["configuracoes"], str(destino), extra)
+    assert extra == {"ia_chaves": 2}
+    cofre = _cofre(destino)
+    assert cofre.obter("groq") == "chave-secreta-groq"
+    assert cofre.obter("gemini") == "chave-gemini"
+    # sem escolher configuracoes, as chaves nao voltam
+    outro = tmp_path / "c"
+    extra = {}
+    bk.restaurar(com, "segredo", ["conversas"], str(outro), extra)
+    assert extra == {} and not _cofre(outro).provedores_com_chave()
+    # chave de provedor desconhecido ou vazia no arquivo e ignorada
+    ruim = str(tmp_path / "ruim.zip")
+    with pyzipper.AESZipFile(ruim, "w") as z:
+        z.setpassword(b"s")
+        z.setencryption(pyzipper.WZ_AES, nbits=256)
+        z.writestr(bk.MANIFESTO, json.dumps(
+            {"versao": "x", "data": 1, "partes": ["configuracoes"]}))
+        z.writestr("configuracoes.json", json.dumps({"opcoes": {}}))
+        z.writestr(bk.CHAVES_IA, json.dumps(
+            {"groq": "ok", "inventado": "x", "gemini": " "}))
+    extra = {}
+    bk.restaurar(ruim, "s", ["configuracoes"], str(tmp_path / "d"), extra)
+    assert extra == {"ia_chaves": 1}

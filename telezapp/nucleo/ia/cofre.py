@@ -3,8 +3,8 @@
 """Onde ficam as chaves dos provedores de IA.
 
 No Windows as chaves sao cifradas com o DPAPI do usuario: so o mesmo usuario
-do Windows, neste computador, consegue le-las, e elas nunca vao no backup nem
-no log. Fora do Windows (so nos testes) ficam apenas ofuscadas.
+do Windows, neste computador, consegue le-las, e elas nunca vao no log. So
+vao no backup se ele tiver senha (nucleo/backup.py). Fora do Windows (so nos testes) ficam apenas ofuscadas.
 """
 import base64
 import ctypes

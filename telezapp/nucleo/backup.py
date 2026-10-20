@@ -47,6 +47,7 @@ CHAVES_CONTAS = ("contas", "telegram_api_id", "telegram_api_hash",
                  "ia_automatica_conversas",
                  "trancadas_exigir_codigo")
 
+CHAVES_IA = "ia_chaves.json"     # so em backup com senha (zip cifrado)
 MANIFESTO = "manifesto.json"
 ESPERA = "restauracao"          # dentro da pasta de dados
 ANTES = "antes-da-restauracao"
@@ -66,7 +67,7 @@ class Manifesto:
 
 # ------------------------------------------------------------- opcoes
 # Preferencias fora de config.OPCOES que tambem vao (a ordem dos provedores
-# de IA e os modelos; as chaves nunca)
+# de IA e os modelos; as chaves so em backup com senha, ver CHAVES_IA)
 EXTRAS = ("ia_ordem", "ia_modelos", "pacote_de_sons", "sons_desativados")
 
 
@@ -127,6 +128,14 @@ def opcoes_validas(lidas):
 
 
 # --------------------------------------------------------------- criar
+def _chaves_de_ia(pasta_dados):
+    """{provedor: chave} lidas do cofre (decifradas pelo DPAPI)."""
+    from telezapp.nucleo.ia.cofre import Cofre
+    cofre = Cofre(os.path.join(pasta_dados, "ia_chaves.json"))
+    return {p: cofre.obter(p) for p in cofre.provedores_com_chave()
+            if cofre.obter(p)}
+
+
 def _copia_consistente(origem, destino):
     """Copia um arquivo SQLite pelo mecanismo de backup dele (seguro mesmo
     com o arquivo em uso); qualquer outro arquivo, copia comum."""
@@ -174,6 +183,12 @@ def criar(destino, pasta_dados, cfg_dados, partes, senha="",
                     {"opcoes": opcoes_do_backup(cfg_dados)},
                     ensure_ascii=False, indent=1))
                 resumo["configuracoes"] = 1
+                # as chaves de IA so vao dentro de um zip cifrado: sem senha
+                # ficariam legiveis para quem pegasse o arquivo
+                chaves = _chaves_de_ia(pasta_dados) if senha else {}
+                if chaves:
+                    z.writestr(CHAVES_IA, json.dumps(chaves))
+                    resumo["ia_chaves"] = len(chaves)
                 sons = os.path.join(pasta_dados, "sons")
                 for atual, _, arquivos in os.walk(sons):
                     for a in arquivos:
@@ -288,11 +303,34 @@ def _extrair(z, nome, destino):
         shutil.copyfileobj(de, para, 1 << 20)
 
 
-def restaurar(arquivo, senha, partes, pasta_dados):
+def _restaurar_chaves(z, pasta_dados):
+    """Guarda no cofre (cifradas de novo pelo DPAPI deste usuario) as chaves
+    de IA do backup. Devolve quantas."""
+    from telezapp.nucleo.ia import catalogo
+    from telezapp.nucleo.ia.cofre import Cofre
+    try:
+        lidas = json.loads(z.read(CHAVES_IA).decode("utf-8"))
+    except KeyError:
+        return 0
+    if not isinstance(lidas, dict):
+        return 0
+    os.makedirs(pasta_dados, exist_ok=True)
+    cofre = Cofre(os.path.join(pasta_dados, "ia_chaves.json"))
+    n = 0
+    for provedor, chave in lidas.items():
+        if provedor in catalogo.PROVEDORES and isinstance(chave, str) \
+                and chave.strip():
+            cofre.guardar(provedor, chave)
+            n += 1
+    return n
+
+
+def restaurar(arquivo, senha, partes, pasta_dados, resultado=None):
     """Das `partes` escolhidas: devolve as opcoes validas (para aplicar na
     hora, ou {} se "configuracoes" nao foi escolhida) e deixa as demais na
     pasta de espera, para `aplicar_pendente` na proxima abertura. Devolve
-    (opcoes, partes_em_espera)."""
+    (opcoes, partes_em_espera). `resultado`, se dado, recebe
+    {"ia_chaves": quantas chaves de IA voltaram}."""
     manifesto = ler_manifesto(arquivo, senha)
     escolhidas = [p for p in partes if p in manifesto.partes]
     espera = os.path.join(pasta_dados, ESPERA)
@@ -305,6 +343,10 @@ def restaurar(arquivo, senha, partes, pasta_dados):
                 lidas = json.loads(z.read("configuracoes.json").decode(
                     "utf-8"))
                 opcoes = opcoes_validas(lidas.get("opcoes"))
+                if senha:
+                    voltaram = _restaurar_chaves(z, pasta_dados)
+                    if resultado is not None:
+                        resultado["ia_chaves"] = voltaram
                 # os sons escolhidos voltam na hora, para a pasta de sons
                 for nome in z.namelist():
                     if nome.startswith("sons/") and not nome.endswith("/"):
