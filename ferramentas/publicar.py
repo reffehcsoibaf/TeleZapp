@@ -2,9 +2,11 @@
 # Copyright (C) 2026 Contribuidores do TeleZapp
 """Prepara a Release do TeleZapp para o GitHub.
 
-Parte do executavel ja gerado (pasta dist\\TeleZapp, do PyInstaller --onedir)
-e monta, em lancamento\\:
+Reaproveita o que ferramentas/empacotar.py gerou em lancamento/ (se o zip
+ainda nao existe, monta a partir da pasta do programa) e deixa la:
 
+    TeleZapp.exe          o instalador de um arquivo so (gerado pelo
+                          empacotar.py); e o que as pessoas baixam
     TeleZapp.zip          a pasta do programa, pronta para extrair (o nome
                           e fixo: .../releases/latest/download/TeleZapp.zip
                           sempre leva a versao mais nova)
@@ -67,14 +69,13 @@ def montar_notas(versao, hash_zip, nome_zip):
         "(Sem texto de novidades para esta versão.)"]
     linhas += [
         "", "## Como usar", "",
-        "1. Baixe `%s` e extraia a pasta `TeleZapp` onde quiser." % nome_zip,
-        "2. Abra `TeleZapp.exe` dentro dela. A tela de boas-vindas deixa "
-        "instalar o programa, criar uma cópia portátil, ler o guia de uso "
-        "ou usar sem instalar.",
-        "3. Para atualizar, use Ajuda, Verificar atualizações, Baixar e "
-        "instalar a atualização (ele baixa este mesmo zip, confere o "
-        "SHA-256 e troca a pasta). Os seus dados não são afetados. "
-        "Também dá para trocar a pasta à mão.",
+        "1. Baixe `TeleZapp.exe` e abra. A tela de boas-vindas tem os "
+        "botões Instalar, Criar cópia portátil, Guia de uso e Fechar.",
+        "2. Para atualizar, use Ajuda, Verificar atualizações dentro do "
+        "programa: ele baixa `%s` (o mesmo programa em zip), confere o "
+        "SHA-256 e troca a pasta. Os seus dados não são afetados." % nome_zip,
+        "3. O zip também serve para extrair a pasta `TeleZapp` à mão e "
+        "usar sem instalar.",
         "", "SHA-256 do zip: `%s`" % hash_zip, ""]
     return "\n".join(linhas)
 
@@ -100,7 +101,9 @@ def montar_zip(pasta, destino):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--pasta", default=os.path.join(RAIZ, "dist", "TeleZapp"))
+    ap.add_argument("--pasta", default=os.path.join(
+        RAIZ, "build-pyinstaller", "programa", "TeleZapp"),
+        help="pasta do programa, so se o zip ainda nao existe em --saida")
     ap.add_argument("--saida", default=os.path.join(RAIZ, "lancamento"))
     ap.add_argument("--publicar", action="store_true",
                     help="cria a Release no GitHub com o gh")
@@ -112,8 +115,20 @@ def main():
     os.makedirs(args.saida, exist_ok=True)
     nome_zip = "TeleZapp.zip"
     zip_ = os.path.join(args.saida, nome_zip)
-    print("Montando %s..." % zip_)
-    hash_zip = montar_zip(args.pasta, zip_)
+    if os.path.isfile(zip_):          # o empacotar.py ja montou
+        print("Usando %s." % zip_)
+        h = hashlib.sha256()
+        with open(zip_, "rb") as f:
+            for bloco in iter(lambda: f.read(1 << 20), b""):
+                h.update(bloco)
+        hash_zip = h.hexdigest()
+    else:
+        print("Montando %s..." % zip_)
+        hash_zip = montar_zip(args.pasta, zip_)
+    instalador = os.path.join(args.saida, "TeleZapp.exe")
+    if not os.path.isfile(instalador):
+        sys.exit("Não achei %s. Rode ferramentas/empacotar.py antes." %
+                 instalador)
     arquivo_hash = zip_ + ".sha256"
     with open(arquivo_hash, "w", encoding="utf-8") as f:
         f.write("%s *%s\n" % (hash_zip, nome_zip))
@@ -124,7 +139,7 @@ def main():
                                             hash_zip))
     print("Confira as notas em %s antes de publicar." % notas)
 
-    comando = ["gh", "release", "create", versao, zip_, arquivo_hash,
+    comando = ["gh", "release", "create", versao, instalador, zip_, arquivo_hash,
                "--title", "TeleZapp %s" % versao, "--notes-file", notas]
     if not args.final:
         comando.append("--prerelease")

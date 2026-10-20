@@ -2,6 +2,7 @@
 # Copyright (C) 2026 Contribuidores do TeleZapp
 """Janela para instalar o TeleZapp ou criar uma copia portatil. Quem faz o
 trabalho e `nucleo.instalacao`."""
+import contextlib
 import os
 import threading
 import traceback
@@ -143,9 +144,17 @@ def com_espera(pai, titulo, trabalho):
     return saida.get("r"), saida.get("e")
 
 
-def fluxo_instalar(pai):
-    """Pergunta, instala e conta o resultado. Devolve (exe, abrir) ou None."""
-    portatil = ins.dados_portateis()
+def _fonte_padrao():
+    """A pasta do proprio programa em execucao."""
+    return contextlib.nullcontext(ins.pasta_do_programa())
+
+
+def fluxo_instalar(pai, fonte=None):
+    """Pergunta, instala e conta o resultado. Devolve (exe, abrir) ou None.
+    `fonte()`: gerenciador de contexto que entrega a pasta do programa a
+    instalar (o instalador de um arquivo so extrai o zip embutido)."""
+    portatil = ins.dados_portateis() if fonte is None else None
+    fonte = fonte or _fonte_padrao
     dlg = DialogoInstalacao(
         pai, True, ins.pasta_de_instalacao_padrao(),
         "Levar os dados desta cópia (contas, conversas e mídias) para o "
@@ -156,10 +165,12 @@ def fluxo_instalar(pai):
         r = dlg.resultado()
     finally:
         dlg.Destroy()
-    programa = ins.pasta_do_programa()
-    res, erro = com_espera(pai, "Instalando o %s" % NOME, lambda: ins.instalar(
-        programa, r["pasta"], r["atalho_menu"], r["atalho_area"],
-        portatil if r["dados"] else None))
+    def trabalho():
+        with fonte() as programa:
+            return ins.instalar(
+                programa, r["pasta"], r["atalho_menu"], r["atalho_area"],
+                portatil if r["dados"] else None)
+    res, erro = com_espera(pai, "Instalando o %s" % NOME, trabalho)
     if erro:
         wx.MessageBox("Não consegui instalar: %s" % erro, NOME,
                       wx.OK | wx.ICON_WARNING, pai)
@@ -172,22 +183,27 @@ def fluxo_instalar(pai):
     return exe, r["abrir"]
 
 
-def fluxo_criar_portatil(pai, pasta_inicial):
+def fluxo_criar_portatil(pai, pasta_inicial, fonte=None):
     """Pergunta, cria a copia portatil e conta o resultado. Devolve a pasta
-    criada ou None."""
+    criada ou None. `fonte`: como em fluxo_instalar."""
     dlg = DialogoInstalacao(
         pai, False, pasta_inicial,
-        "Levar os meus dados (contas, conversas e mídias) para a cópia")
+        "Levar os meus dados (contas, conversas e mídias) para a cópia"
+        if fonte is None else None)
     try:
         if dlg.ShowModal() != wx.ID_OK:
             return None
         r = dlg.resultado()
     finally:
         dlg.Destroy()
-    programa, dados = ins.pasta_do_programa(), config.pasta_dados()
-    alvo, erro = com_espera(
-        pai, "Criando a cópia portátil", lambda: ins.criar_portatil(
-            programa, r["pasta"], dados if r["dados"] else None))
+    dados = config.pasta_dados()
+    fonte = fonte or _fonte_padrao
+
+    def trabalho():
+        with fonte() as programa:
+            return ins.criar_portatil(programa, r["pasta"],
+                                      dados if r["dados"] else None)
+    alvo, erro = com_espera(pai, "Criando a cópia portátil", trabalho)
     if erro:
         wx.MessageBox("Não consegui criar a cópia: %s" % erro, NOME,
                       wx.OK | wx.ICON_WARNING, pai)
@@ -212,14 +228,21 @@ TEXTO_DE_BOAS_VINDAS = (
 class DialogoBoasVindas(wx.Dialog):
     """Primeira tela de uma copia que ainda nao foi instalada."""
 
-    def __init__(self):
+    def __init__(self, fonte=None, pasta_guia=None):
+        """`fonte`: so no instalador de um arquivo (ver fluxo_instalar); nele
+        nao ha "usar sem instalar"."""
         super().__init__(None, title="Bem-vindo ao %s" % NOME,
                          style=wx.DEFAULT_DIALOG_STYLE)
+        self.fonte = fonte
+        self.pasta_guia = pasta_guia
         self.escolha = "fechar"
         self.exe_instalado = None
         self.abrir = False
         lay = wx.BoxSizer(wx.VERTICAL)
-        texto = wx.StaticText(self, label=TEXTO_DE_BOAS_VINDAS)
+        texto = wx.StaticText(self, label=(
+            TEXTO_DE_BOAS_VINDAS if fonte is None else
+            TEXTO_DE_BOAS_VINDAS.replace(" Você também pode usar sem "
+                                         "instalar.", "")))
         texto.Wrap(460)
         lay.Add(texto, 0, wx.ALL, 12)
         self.botoes = {}
@@ -229,13 +252,18 @@ class DialogoBoasVindas(wx.Dialog):
                 ("guia", "&Guia de uso"),
                 ("usar", "&Usar sem instalar"),
                 ("fechar", "&Fechar")):
+            if chave == "usar" and fonte is not None:
+                continue
             b = wx.Button(self, label=rotulo)
             lay.Add(b, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
             self.botoes[chave] = b
             self.Bind(wx.EVT_BUTTON, lambda e, c=chave: self._clicou(c), b)
         self.lembrar = wx.CheckBox(
             self, label="Não mostrar esta tela de novo nesta pasta")
-        lay.Add(self.lembrar, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
+        if fonte is None:
+            lay.Add(self.lembrar, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
+        else:
+            self.lembrar.Hide()
         self.SetSizerAndFit(lay)
         self.botoes["instalar"].SetDefault()
         self.botoes["instalar"].SetFocus()
@@ -244,16 +272,17 @@ class DialogoBoasVindas(wx.Dialog):
 
     def _clicou(self, chave):
         if chave == "instalar":
-            r = fluxo_instalar(self)
+            r = fluxo_instalar(self, self.fonte)
             if r:
                 self.exe_instalado, self.abrir = r
                 self.escolha = "instalado"
                 self.EndModal(wx.ID_OK)
         elif chave == "portatil":
-            fluxo_criar_portatil(self, os.path.expanduser("~"))
+            fluxo_criar_portatil(self, os.path.expanduser("~"), self.fonte)
         elif chave == "guia":
             from telezapp.nucleo import paginas
-            caminho = paginas.gerar("guia.html", config.pasta_temporaria())
+            caminho = paginas.gerar(
+                "guia.html", self.pasta_guia or config.pasta_temporaria())
             if caminho and os.name == "nt":
                 os.startfile(caminho)
         else:
@@ -261,16 +290,18 @@ class DialogoBoasVindas(wx.Dialog):
             self.EndModal(wx.ID_OK)
 
 
-def mostrar_boas_vindas():
+def mostrar_boas_vindas(fonte=None, pasta_guia=None):
     """Quando mostrar: executavel que nao e instalado, sem pasta `dados` ao
-    lado e sem a marca `sem-boas-vindas.txt`. Devolve "continuar" (abrir o
-    programa), "sair" ou "aberto" (a versao instalada foi aberta)."""
+    lado e sem a marca `sem-boas-vindas.txt`; ou sempre, no instalador de um
+    arquivo (`fonte`). Devolve "continuar" (abrir o programa), "sair" ou
+    "aberto" (a versao instalada foi aberta)."""
     programa = ins.pasta_do_programa()
-    if not programa or ins.modo(programa) != "portatil" or \
+    if fonte is None and (
+            not programa or ins.modo(programa) != "portatil" or
             ins.dados_portateis(programa) or os.path.isfile(
-                os.path.join(programa, "sem-boas-vindas.txt")):
+                os.path.join(programa, "sem-boas-vindas.txt"))):
         return "continuar"
-    dlg = DialogoBoasVindas()
+    dlg = DialogoBoasVindas(fonte, pasta_guia)
     try:
         dlg.ShowModal()
         escolha = dlg.escolha

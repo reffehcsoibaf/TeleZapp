@@ -14,6 +14,7 @@ Tres modos, so no executavel (PyInstaller):
 Instalar copia a pasta do programa, cria os atalhos e a entrada em
 "Aplicativos instalados" (HKCU), que chama `TeleZapp.exe --desinstalar`.
 """
+import contextlib
 import logging
 import os
 import shutil
@@ -149,13 +150,49 @@ def _atalho(caminho_lnk, alvo, pasta_de_trabalho):
                              os.path.basename(caminho_lnk))
 
 
+FOLDERID_DESKTOP = "{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}"
+FOLDERID_PROGRAMS = "{A77F5D77-2E2B-44C3-A6A2-ABA601054A51}"
+
+
+def _pasta_conhecida(guid):
+    """Pasta especial do Windows (a area de trabalho pode estar no OneDrive
+    ou em outro lugar, entao nao da para montar o caminho na mao). None se o
+    Windows nao responder."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class GUID(ctypes.Structure):
+            _fields_ = [("a", wintypes.DWORD), ("b", wintypes.WORD),
+                        ("c", wintypes.WORD), ("d", ctypes.c_ubyte * 8)]
+        import uuid
+        u = uuid.UUID(guid)
+        g = GUID(u.time_low, u.time_mid, u.time_hi_version,
+                 (ctypes.c_ubyte * 8)(*u.bytes[8:]))
+        saida = ctypes.c_wchar_p()
+        r = ctypes.windll.shell32.SHGetKnownFolderPath(
+            ctypes.byref(g), 0, None, ctypes.byref(saida))
+        if r != 0 or not saida.value:
+            return None
+        caminho = saida.value
+        ctypes.windll.ole32.CoTaskMemFree(saida)
+        return caminho
+    except Exception:
+        log.warning("não consegui perguntar ao Windows a pasta %s", guid)
+        return None
+
+
 def _caminhos_dos_atalhos():
+    """(atalho do menu Iniciar, atalho da area de trabalho)."""
     appdata = os.environ.get("APPDATA") or os.path.expanduser("~")
-    menu = os.path.join(appdata, "Microsoft", "Windows", "Start Menu",
-                        "Programs", NOME + ".lnk")
-    area = os.path.join(os.environ.get("USERPROFILE") or
-                        os.path.expanduser("~"), "Desktop", NOME + ".lnk")
-    return menu, area
+    programas = _pasta_conhecida(FOLDERID_PROGRAMS) or os.path.join(
+        appdata, "Microsoft", "Windows", "Start Menu", "Programs")
+    area = _pasta_conhecida(FOLDERID_DESKTOP) or os.path.join(
+        os.environ.get("USERPROFILE") or os.path.expanduser("~"), "Desktop")
+    return (os.path.join(programas, NOME + ".lnk"),
+            os.path.join(area, NOME + ".lnk"))
 
 
 def _registrar(destino):
@@ -181,6 +218,28 @@ def _desregistrar():
         winreg.DeleteKey(winreg.HKEY_CURRENT_USER, CHAVE_DESINSTALAR)
     except FileNotFoundError:
         pass
+
+
+# ------------------------------------------------- pacote do instalador
+@contextlib.contextmanager
+def extrair_pacote(arquivo_zip):
+    """Para o instalador de um arquivo so: extrai o zip do programa numa
+    pasta de trabalho, entrega a pasta TeleZapp de dentro e a apaga depois."""
+    from telezapp.nucleo import atualizador
+    base = os.path.join(os.environ.get("LOCALAPPDATA") or
+                        os.path.expanduser("~"), "TeleZapp-instalador")
+    pasta = os.path.join(base, str(os.getpid()))
+    try:
+        try:
+            yield atualizador.extrair(arquivo_zip, pasta)
+        except atualizador.ErroAtualizacao as e:
+            raise ErroInstalacao(str(e))
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
+        try:
+            os.rmdir(base)
+        except OSError:
+            pass
 
 
 # ----------------------------------------------------------------- instalar

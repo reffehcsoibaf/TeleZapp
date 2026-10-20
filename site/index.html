@@ -87,7 +87,7 @@ footer { border-top: 1px solid var(--linha); margin-top: 3rem; padding: 1.5rem 0
   <section aria-labelledby="baixar">
     <h2 id="baixar">Baixar</h2>
     <div class="baixar">
-      <a class="botao" id="botao-baixar" href="https://github.com/reffehcsoibaf/TeleZapp/releases">Baixar a última versão</a>
+      <a class="botao" id="botao-baixar" href="https://github.com/reffehcsoibaf/TeleZapp/releases">Baixar o instalador</a>
       <a class="botao secundario" href="https://github.com/reffehcsoibaf/TeleZapp/releases">Todas as versões</a>
     </div>
     <p class="nota" id="versao" role="status">Para Windows 10 ou 11. Gratuito, sem anúncios.</p>
@@ -99,11 +99,11 @@ footer { border-top: 1px solid var(--linha); margin-top: 3rem; padding: 1.5rem 0
   <section aria-labelledby="como">
     <h2 id="como">Como instalar</h2>
     <ol>
-      <li>Baixe o arquivo zip e extraia a pasta <code>TeleZapp</code> onde quiser.</li>
-      <li>Abra <code>TeleZapp.exe</code>. A tela de boas-vindas oferece <strong>Instalar</strong> (sem precisar de administrador), <strong>Criar cópia portátil</strong> (para levar num pendrive), <strong>Guia de uso</strong>, <strong>Usar sem instalar</strong> e <strong>Fechar</strong>.</li>
+      <li>Baixe o <code>TeleZapp.exe</code> e abra.</li>
+      <li>A tela de boas-vindas tem os botões <strong>Instalar</strong> (sem precisar de administrador), <strong>Criar cópia portátil</strong> (para levar num pendrive), <strong>Guia de uso</strong> e <strong>Fechar</strong>.</li>
       <li>Para atualizar, use <em>Ajuda, Verificar atualizações</em> dentro do programa: ele baixa a versão nova, confere o arquivo e se reabre atualizado, mantendo os seus dados.</li>
     </ol>
-    <p>Cada versão traz o código de conferência SHA-256 do zip na página de download.</p>
+    <p>Na página de cada versão há também o <code>TeleZapp.zip</code>, a pasta do programa pronta para extrair, que o próprio TeleZapp usa para se atualizar, e o código de conferência SHA-256 dele.</p>
   </section>
 
   <section aria-labelledby="recursos">
@@ -155,9 +155,9 @@ footer { border-top: 1px solid var(--linha); margin-top: 3rem; padding: 1.5rem 0
       });
       if (!melhor) { return; }
       var zip = (melhor.r.assets || []).filter(function (a) {
-        return a.name === "TeleZapp.zip" || a.name === "TeleZapp-" + melhor.v + ".zip";
+        return a.name === "TeleZapp.exe";
       })[0];
-      botao.textContent = "Baixar o TeleZapp " + melhor.v;
+      botao.textContent = "Baixar o instalador do TeleZapp " + melhor.v;
       botao.href = zip ? zip.browser_download_url : melhor.r.html_url;
       aviso.textContent = "Versão mais recente: " + melhor.v +
         (melhor.r.prerelease ? " (pré-lançamento)" : "") +

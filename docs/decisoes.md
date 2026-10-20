@@ -351,6 +351,14 @@ automáticos): a lista do que falta testar fica na memória do projeto.
   `%APPDATA%`. Criar a cópia portátil pode levar os dados (inclui as
   sessões, com aviso); instalar a partir de uma portátil com `dados` pode
   levá-los para o computador, guardando os de antes.
+- **Download em um arquivo só**: o que as pessoas baixam é o `TeleZapp.exe`
+  das Releases (instalador de um arquivo, com o programa embutido): abre
+  direto nos botões Instalar, Criar cópia portátil, Guia de uso e Fechar,
+  sem "usar sem instalar" (a portátil cobre esse caso). O `TeleZapp.zip`
+  (nome fixo) continua nas Releases para o atualizador e para quem quiser
+  extrair à mão. Sem assinatura, o SmartScreen e alguns antivírus podem
+  avisar; UPX desligado para não piorar. MSI descartado: não comporta a tela
+  de botões. Pendente: assinar os dois executáveis.
 - **Janela da atualização e o GitHub**: a janela abre com o texto (versão
   oferecida e novidades de todas as versões desde a que está em uso)
   focado; Tab leva a Sim e Não. Para uma versão instalada hoje receber o

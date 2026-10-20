@@ -22,11 +22,14 @@ garantia.
 
 ## Baixar
 
-As versões ficam em [Releases](https://github.com/reffehcsoibaf/TeleZapp/releases):
-baixe o zip, extraia a pasta e abra `TeleZapp.exe`. Para atualizar, feche o
-programa e troque a pasta; os dados ficam em `%APPDATA%\TeleZapp`. Em
-Ajuda, Verificar atualizações, o programa diz se há versão nova. Quem
-mantém o projeto monta a Release com `python ferramentas\publicar.py`.
+As versões ficam em [Releases](https://github.com/reffehcsoibaf/TeleZapp/releases).
+Baixe o `TeleZapp.exe` e abra: a tela de boas-vindas tem os botões
+Instalar, Criar cópia portátil, Guia de uso e Fechar. Os dados ficam em
+`%APPDATA%\TeleZapp` (na portátil, na pasta `dados` ao lado do programa).
+Em Ajuda, Verificar atualizações, o programa diz se há versão nova e se
+atualiza sozinho; para isso cada Release traz também o `TeleZapp.zip`.
+Quem mantém o projeto gera tudo com `python ferramentas\empacotar.py` e
+cria a Release com `python ferramentas\publicar.py`.
 
 ## Objetivos
 

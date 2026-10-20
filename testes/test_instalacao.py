@@ -18,6 +18,7 @@ def mundo(tmp_path, monkeypatch):
         pasta.mkdir()
         monkeypatch.setenv(nome, str(pasta))
     monkeypatch.delenv("TELEZAPP_DADOS", raising=False)
+    monkeypatch.setattr(ins, "_pasta_conhecida", lambda guid: None)
     prog = tmp_path / "portatil" / "TeleZapp"
     (prog / "telezapp" / "sons").mkdir(parents=True)
     (prog / "TeleZapp.exe").write_bytes(b"exe")
@@ -86,6 +87,21 @@ def test_instalar_copia_marca_e_atalhos(mundo):
     assert ("registro", destino) in feitos
     # a copia de origem continua portatil e intacta
     assert ins.modo(prog) == "portatil"
+
+
+def test_atalho_vai_para_a_area_de_trabalho_do_windows(mundo, monkeypatch):
+    # a area de trabalho pode estar no OneDrive, fora de USERPROFILE\Desktop
+    tmp, prog = mundo
+    pastas = {ins.FOLDERID_DESKTOP: str(tmp / "OneDrive" / "Área de Trabalho"),
+              ins.FOLDERID_PROGRAMS: str(tmp / "Programas")}
+    monkeypatch.setattr(ins, "_pasta_conhecida", lambda guid: pastas[guid])
+    feitos, atalho, registro = _sem_atalhos()
+    ins.instalar(prog, atalho_menu=True, atalho_area=True,
+                 fazer_atalho=atalho, registrar=registro)
+    lnks = sorted(f[0] for f in feitos if f[0].endswith(".lnk"))
+    assert lnks == [str(tmp / "OneDrive" / "Área de Trabalho" /
+                        "TeleZapp.lnk"), str(tmp / "Programas" /
+                                              "TeleZapp.lnk")]
 
 
 def test_reinstalar_troca_sem_deixar_sobras(mundo):

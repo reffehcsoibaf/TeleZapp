@@ -11,6 +11,20 @@ Instalar a partir de uma cópia portátil e criar cópia portátil.
   (Sim/Não/Cancelar, depois `DialogoBackup`, onde salvar e `backup.criar`;
   falha ou desistência cancelam a desinstalação). Vale no menu (com
   `banco.copiar_para`) e em `--desinstalar` (cópia do arquivo pelo SQLite).
+- Atalhos: as pastas do menu Iniciar e da área de trabalho vêm de
+  `SHGetKnownFolderPath` (`instalacao._pasta_conhecida`), não de
+  `%USERPROFILE%\Desktop`: com a área de trabalho no OneDrive o atalho
+  ia para uma pasta que ninguém vê. A desinstalação apaga dos mesmos lugares.
+- Instalador de um arquivo só: `telezapp/instalador.py` (entrada
+  `ferramentas/empacotar/instalar.py`) abre `mostrar_boas_vindas(fonte, ..)`
+  sem "usar sem instalar"; Instalar e Criar cópia portátil extraem o
+  `TeleZapp.zip` embutido (`instalacao.extrair_pacote`, em
+  `%LOCALAPPDATA%\TeleZapp-instalador`, apagado no fim) e usam a lógica de
+  sempre. `ferramentas/empacotar.py` gera programa (spec `TeleZapp.spec`,
+  agora com `upx=False`, `cv2` e `emoji`), `TeleZapp.zip` (+ `.sha256`) e o
+  `TeleZapp.exe` instalador (spec `Instalador.spec`, um arquivo só);
+  `publicar.py` anexa os três e as notas mandam baixar o `TeleZapp.exe`. A
+  página do GitHub Pages aponta o botão para ele.
 - Janela da atualização (`interface/atualizacao.DialogoAtualizacao`): texto
   somente leitura e focado com a versão oferecida, o tamanho e as novidades de
   cada versão publicada desde a em uso (`Lancamento.historico`, montado em
