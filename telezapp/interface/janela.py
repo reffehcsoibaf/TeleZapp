@@ -18,11 +18,13 @@ import wx
 from telezapp import NOME, VERSAO, config
 from telezapp.acessibilidade.fala import Fala, bipe
 from telezapp.interface import dialogos, visualizadores
+from telezapp.interface.chamada import DialogoChamada
 from telezapp.midia import armazem
 from telezapp.midia import envio
 from telezapp.midia import velocidade as vel
 from telezapp.midia.gravador import MICROFONE, SOM_INTERNO, Gravador
 from telezapp.midia.reprodutor import FormatoNaoSuportado, Reprodutor
+from telezapp.nucleo import chamadas as ch
 from telezapp.nucleo import depuracao
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import modelos as m
@@ -72,6 +74,10 @@ Control Shift S: gravar o som do computador e enviar como nota de voz
 Control Shift Seta para cima e para baixo: áudio mais rápido e mais lento
 (0,25x a 3x); Control Shift 0: velocidade normal
 Control vírgula: abrir as configurações (busca, categorias e opções)
+Control Shift L: ligar para a conversa (Telegram, conversa com uma pessoa)
+Control Shift J: voltar à janela da chamada
+Control Shift K: silenciar ou ativar o microfone na chamada
+Control Shift H: desligar a chamada
 Tecla Aplicativos ou Shift F10: menu da mensagem selecionada
 
 NA LISTA DE CONVERSAS
@@ -161,6 +167,8 @@ class Janela(wx.Frame):
         self.pareamentos = {}         # conta_id -> DialogoPareamento
         self.pareamento_recusado = set()
         self.estilo = cfg.get("estilo")
+        self.chamada = None           # nucleo.chamadas.Chamada em curso
+        self.dlg_chamada = None       # DialogoChamada aberto
         self._criar_menus()
         self._criar_controles()
         self.CreateStatusBar()
@@ -217,6 +225,15 @@ class Janela(wx.Frame):
         item(m_msg, "baixar_midia", "&Baixar mídia sem abrir\tCtrl+B")
         item(m_msg, "salvar_midia", "Salvar c&ópia da mídia...")
 
+        m_cham = wx.Menu()
+        item(m_cham, "ligar", "&Ligar para esta conversa\tCtrl+Shift+L")
+        item(m_cham, "chamada_janela",
+             "Mostrar a &janela da chamada\tCtrl+Shift+J")
+        item(m_cham, "chamada_mudo",
+             "&Silenciar ou ativar o microfone\tCtrl+Shift+K")
+        item(m_cham, "chamada_tempo", "&Tempo de chamada")
+        item(m_cham, "chamada_desligar", "&Desligar\tCtrl+Shift+H")
+
         m_mid = wx.Menu()
         for valor, nome in next(o for o in config.OPCOES
                                 if o.chave == "midias_baixar").escolhas:
@@ -268,7 +285,8 @@ class Janela(wx.Frame):
         item(m_aj, "sobre", "&Sobre o %s" % NOME)
 
         for submenu, rotulo in ((m_contas, "&Contas"), (m_conv, "C&onversa"),
-                                (m_msg, "&Mensagem"), (m_mid, "Mí&dias"),
+                                (m_msg, "&Mensagem"),
+                                (m_cham, "C&hamada"), (m_mid, "Mí&dias"),
                                 (m_exib, "&Exibição"),
                                 (m_dep, "&Depurar"),
                                 (m_aj, "A&juda")):
@@ -305,6 +323,11 @@ class Janela(wx.Frame):
             "anexar": lambda e: self._anexar_arquivo(),
             "gravar_mic": lambda e: self._gravar(MICROFONE),
             "gravar_som": lambda e: self._gravar(SOM_INTERNO),
+            "ligar": lambda e: self._ligar(),
+            "chamada_janela": lambda e: self._mostrar_chamada(),
+            "chamada_mudo": lambda e: self._alternar_mudo(),
+            "chamada_tempo": lambda e: self._falar_tempo_da_chamada(),
+            "chamada_desligar": lambda e: self._desligar_chamada(),
             "abrir_midia": lambda e: self._abrir_midia(),
             "baixar_midia": lambda e: self._abrir_midia(abrir=False),
             "salvar_midia": lambda e: self._salvar_midia(),
@@ -732,6 +755,7 @@ class Janela(wx.Frame):
             ev.ProgressoSincronia: self._ev_progresso_sincronia,
             ev.ProgressoMidia: self._ev_progresso_midia,
             ev.MidiaBaixada: self._ev_midia_baixada,
+            ev.EstadoChamada: self._ev_chamada,
         }.get(type(e))
         if tratador is not None and self:
             tratador(e)
@@ -962,6 +986,193 @@ class Janela(wx.Frame):
                 mudou = True
         if mudou and chave == self.atual:
             self._preencher_mensagens()
+
+    # ========================================================== chamadas
+    def _provedor_de_chamada(self, conta_id):
+        p = self.contas.provedor(conta_id) if self.contas else None
+        if p is not None and getattr(p, "suporta_chamadas", False):
+            return p
+        return None
+
+    def _dispositivos_da_chamada(self):
+        return (self.cfg.get("chamada_microfone") or "",
+                self.cfg.get("chamada_saida") or "")
+
+    @seguro
+    def _ligar(self):
+        if self.chamada is not None and self.chamada.ativa:
+            self.fala.falar("Já há uma chamada em andamento.",
+                            interromper=True)
+            self._mostrar_chamada()
+            return
+        conv = self.indice.get(self.atual) if self.atual is not None \
+            else self._conversa_selecionada()
+        if conv is None:
+            bipe("erro")
+            self.fala.falar("Abra ou selecione uma conversa para ligar.",
+                            interromper=True)
+            return
+        if conv.tipo != "privada":
+            bipe("erro")
+            self.fala.falar("Só dá para ligar para uma conversa com uma "
+                            "pessoa, não para grupos nem canais.",
+                            interromper=True)
+            return
+        p = self._provedor_de_chamada(conv.conta_id)
+        if p is None:
+            bipe("erro")
+            self.fala.falar("Esta conta ainda não faz chamadas de voz.",
+                            interromper=True)
+            return
+        if self.estados.get(conv.conta_id) != ev.CONECTADA:
+            bipe("erro")
+            self.fala.falar("A conta não está conectada. Nada foi ligado.",
+                            interromper=True)
+            return
+        mic, saida = self._dispositivos_da_chamada()
+        log.info("ligando (%s)", conv.conta_id)
+        p.ligar(conv.id, mic, saida)
+
+    def _ev_chamada(self, e):
+        c = self.chamada
+        mesma = c is not None and c.ativa and \
+            (c.conta_id, c.conversa_id) == (e.conta_id, e.conversa_id)
+        if not mesma:
+            if e.estado == ch.ENCERRADA:
+                return          # fim de uma chamada que nao conhecemos
+            if self.dlg_chamada is not None:
+                self.dlg_chamada.fechar()
+            c = self.chamada = ch.Chamada(
+                e.conta_id, e.conversa_id, e.nome, e.entrante, e.estado)
+            mudou = True
+        else:
+            if e.nome and not c.nome:
+                c.nome = e.nome
+            mudou = c.aplicar(e.estado, e.motivo, e.erro)
+        if not mudou:
+            return
+        log.info("chamada: %s %s", c.estado, c.motivo)
+        a = ch.apresentar(c)
+        self.SetStatusText(a.situacao)
+        self.fala.falar(a.fala, interromper=True)
+        toque = a.som in ("toque", "chamando")
+        if a.som and (not toque or self.cfg.get("toque_chamada")):
+            bipe(a.som)
+            if toque:
+                self._repetir_toque(c, c.estado, a.som)
+        self._atualizar_dialogo_chamada(c)
+        if c.estado == ch.ENCERRADA:
+            self.chamada = None
+
+    def _repetir_toque(self, c, estado, som):
+        """Repete o som enquanto a chamada continua no mesmo estado."""
+        def de_novo():
+            if self.chamada is c and c.estado == estado and \
+                    self.cfg.get("toque_chamada"):
+                bipe(som)
+                self._repetir_toque(c, estado, som)
+        wx.CallLater(3000, de_novo)
+
+    def _atualizar_dialogo_chamada(self, c):
+        if self.dlg_chamada is not None and self.dlg_chamada.chamada is c:
+            self.dlg_chamada.mostrar()
+            return
+        p = self._provedor_de_chamada(c.conta_id)
+        mics, saidas = p.dispositivos_de_audio() if p is not None \
+            else ([], [])
+        mic, saida = self._dispositivos_da_chamada()
+        acoes = {
+            "atender": self._atender_chamada,
+            "recusar": self._desligar_chamada,
+            "desligar": self._desligar_chamada,
+            "silenciar": self._silenciar_chamada,
+            "tempo": self._falar_tempo_da_chamada,
+            "trocar": self._trocar_dispositivos,
+        }
+        self.dlg_chamada = DialogoChamada(
+            self, c, acoes, lambda t: self.fala.falar(t, interromper=True),
+            mics, saidas, mic, saida, ao_fechar=self._chamada_fechada)
+        self.dlg_chamada.Show()
+        if hasattr(self.dlg_chamada, "Raise"):
+            self.dlg_chamada.Raise()
+
+    def _chamada_fechada(self):
+        self.dlg_chamada = None
+
+    def _chamada_em_curso(self):
+        if self.chamada is None or not self.chamada.ativa:
+            self.fala.falar("Nenhuma chamada em andamento.",
+                            interromper=True)
+            return None
+        return self.chamada
+
+    @seguro
+    def _mostrar_chamada(self):
+        c = self._chamada_em_curso()
+        if c is not None:
+            self._atualizar_dialogo_chamada(c)
+
+    @seguro
+    def _atender_chamada(self):
+        c = self.chamada
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if c is None or p is None:
+            return
+        mic, saida = self._dispositivos_da_chamada()
+        p.atender_chamada(c.conversa_id, mic, saida)
+
+    @seguro
+    def _desligar_chamada(self):
+        c = self._chamada_em_curso()
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if p is not None:
+            p.encerrar_chamada(c.conversa_id)
+
+    @seguro
+    def _silenciar_chamada(self, silenciar):
+        c = self.chamada
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if c is None or p is None or c.estado != ch.EM_CHAMADA:
+            return
+        p.silenciar_chamada(c.conversa_id, silenciar)
+        c.mudo = bool(silenciar)
+        self.fala.falar(ch.fala_mudo(c.mudo), interromper=True)
+        self._atualizar_dialogo_chamada(c)
+
+    @seguro
+    def _alternar_mudo(self):
+        c = self._chamada_em_curso()
+        if c is None:
+            return
+        if c.estado != ch.EM_CHAMADA:
+            self.fala.falar("O microfone só pode ser silenciado durante "
+                            "a conversa.", interromper=True)
+            return
+        self._silenciar_chamada(not c.mudo)
+
+    @seguro
+    def _falar_tempo_da_chamada(self):
+        c = self._chamada_em_curso()
+        if c is None:
+            return
+        if c.estado != ch.EM_CHAMADA:
+            self.fala.falar("A chamada ainda não começou.",
+                            interromper=True)
+            return
+        self.fala.falar("Em chamada há %s." % ch.falar_duracao(c.segundos()),
+                        interromper=True)
+
+    @seguro
+    def _trocar_dispositivos(self, microfone, saida):
+        if microfone:
+            self.cfg.set("chamada_microfone", microfone)
+        if saida:
+            self.cfg.set("chamada_saida", saida)
+        c = self.chamada
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if p is not None and c.estado == ch.EM_CHAMADA:
+            p.trocar_dispositivos(c.conversa_id, microfone, saida)
+            self.fala.falar("Dispositivo trocado.", interromper=True)
 
     def _ev_aviso(self, e):
         self.SetStatusText(e.texto)
@@ -2085,6 +2296,15 @@ class Janela(wx.Frame):
 
     # ================================================================ saida
     def _ao_fechar(self, evt):
+        if self.chamada is not None and self.chamada.ativa:
+            r = wx.MessageBox(
+                "Há uma chamada em andamento. Fechar o TeleZapp encerra a "
+                "chamada. Fechar mesmo?", NOME,
+                wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
+            if r != wx.YES:
+                if hasattr(evt, "Veto"):
+                    evt.Veto()
+                return
         log.info("fechando a janela")
         self.Hide()
         self._guardar_posicao()

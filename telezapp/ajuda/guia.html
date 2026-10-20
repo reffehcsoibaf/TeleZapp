@@ -23,6 +23,7 @@
 <li><a href="#mensagens">Ler e enviar mensagens</a></li>
 <li><a href="#midias">Fotos, vídeos, áudios e documentos</a></li>
 <li><a href="#enviar-midias">Enviar arquivos e gravar voz</a></li>
+<li><a href="#chamadas">Chamadas de voz</a></li>
 <li><a href="#configuracoes">Configurações</a></li>
 <li><a href="#detalhes">Dados de uma mensagem</a></li>
 <li><a href="#depurar">Depurar: ver o que o WhatsApp mandou</a></li>
@@ -93,6 +94,17 @@
 <p>Anexar arquivo abre a janela de arquivos do Windows. Fotos JPG, PNG e WEBP vão como foto; vídeos MP4, MOV, M4V e 3GP vão como vídeo; MP3, WAV, M4A e semelhantes vão como áudio; todo o resto, e os formatos que os serviços não tocam como mídia (MKV, AVI, BMP, HEIC, GIF), vão como documento. O limite é 2 GB. Se a caixa de digitação tem texto, ele vai como legenda de foto, vídeo e documento. Vídeos em HEVC (H.265) são enviados, mas o TeleZapp avisa que podem não tocar em todos os celulares.</p>
 <p>Gravar do microfone usa o microfone padrão do Windows; Gravar som do computador captura tudo o que a saída de som padrão está tocando (um vídeo, uma chamada, e também a fala do leitor de tela). A gravação começa assim que a janela abre, depois de um bipe. Enter para de gravar; então os botões são Enviar, Ouvir, Gravar de novo e Descartar. Esc descarta. Se a gravação sair quase em silêncio, o TeleZapp avisa antes de você enviar. Ela vai como mensagem de voz, em Ogg/Opus.</p>
 <p>Enquanto envia, a mensagem aparece como "enviando" na lista; ao terminar, o TeleZapp toca o som de enviada, e se falhar fala o motivo. A mídia enviada fica guardada no programa e abre sem baixar. Por enquanto, mídia enviada não cita a mensagem respondida.</p>
+
+<h2 id="chamadas">Chamadas de voz</h2>
+<p>Por enquanto, só no Telegram e só em conversas com uma pessoa (não em grupos nem canais). O áudio usa o microfone e a saída de som padrão do Windows. Use fones de ouvido, para a voz da outra pessoa não voltar pelo microfone.</p>
+<h3>Ligar</h3>
+<p>Abra ou selecione uma conversa e use Menu, Chamada, Ligar para esta conversa (Control Shift L). O TeleZapp fala "Chamando" e o nome, toca um som grave de espera e abre a janela da chamada, com o foco em Desligar. Quando a pessoa atende, ouve-se um som de conectado e a fala diz "Conectado com" o nome. Se ela não atender, recusar ou estiver ocupada, o TeleZapp diz o que aconteceu e a janela fica com o botão Fechar.</p>
+<h3>Receber</h3>
+<p>Quando alguém liga, o TeleZapp fala "Chamada de" e o nome, toca um som repetido e abre uma janela com o foco no botão Atender. Enter atende e Esc recusa; Tab vai para Recusar. Se você estiver em outra chamada, a nova é recusada sozinha.</p>
+<h3>Durante a chamada</h3>
+<p>A janela tem os botões Silenciar o microfone (vira Ativar o microfone), Tempo de chamada (fala há quanto tempo vocês falam) e Desligar, e duas listas: Microfone e Saída de som, que valem na hora. Esc não desliga uma chamada que já começou, para não encerrar sem querer: ele só lembra do botão Desligar.</p>
+<p>Com a janela principal em foco, os mesmos comandos estão em Menu, Chamada: Mostrar a janela da chamada (Control Shift J), Silenciar ou ativar o microfone (Control Shift K), Tempo de chamada e Desligar (Control Shift H). Fechar o TeleZapp com uma chamada aberta pede confirmação.</p>
+<p>O som de chamada (toque e espera) pode ser desligado em Configurações, categoria Avisos: a fala continua avisando.</p>
 
 <h2 id="configuracoes">Configurações</h2>
 <p>Menu, Configurações (Control vírgula) abre uma janela com todas as opções do TeleZapp num só lugar. O primeiro campo é a busca: digite uma palavra (por exemplo, velocidade) e aparece, no alto da lista de categorias, Resultados da busca, com as opções que combinam. Tab vai da busca para a lista de categorias, depois para as opções da categoria escolhida e, por fim, para os botões OK, Cancelar e Aplicar.</p>

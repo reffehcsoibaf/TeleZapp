@@ -90,8 +90,19 @@ partir dos experimentos, ainda a confirmar.
    avisar quando a gravação saturar (aconteceu no teste) e listar microfones
    pela WASAPI; microfones Bluetooth limitam a voz a 8 kHz.
 6. **Vídeo sem miniatura** e arquivos acima de 20 MB: ainda não avaliados.
-7. **Chamadas**: fora do escopo. O neonize só avisa e recusa; uma biblioteca
-   separada (meowcaller) existe, mas é jovem e não está exposta ao Python.
+7. **Chamadas**: fora do escopo no WhatsApp. O neonize só avisa e recusa; uma
+   biblioteca separada (meowcaller) existe, mas é jovem e não está exposta
+   ao Python. **No Telegram, em investigação (15/10/2026)**: o `py-tgcalls`
+   3.0.0 (LGPL-3.0, sobre a NTgCalls, a mesma família de motor de chamada que
+   os clientes oficiais usam) tem chamada 1 a 1 com Telethon e rodas prontas
+   para Windows; instala em ~63 MB e lista microfone e alto-falante do
+   Windows sem FFmpeg. **Teste real (15/10/2026, `9-teste-chamada-telegram.bat`)**:
+   chamada de voz de 45 s, ligando do computador para um celular; atendida
+   após 16,8 s de toque e **voz boa nos dois lados**, sem FFmpeg, só com o
+   microfone e a saída padrão do Windows. Ambiente de ~59 MB (a NTgCalls
+   sozinha tem 26 MB). **Não medido**: uso de CPU (veio vazio), latência,
+   chamada recebida, vídeo, queda de rede, microfone Bluetooth. Sem janela
+   nem tecla de atender/recusar/mudo: só existe o experimento.
 
 ## Plano do projeto (lista de ideias do responsável, 13/10/2026)
 
@@ -208,14 +219,67 @@ o som interno do computador, se fosse possível.
   WhatsApp. Nada disto foi verificado nos serviços reais, só com clientes
   simulados.
 
+## Feito depois da etapa 3b (14 e 15/10/2026)
+
+Detalhes técnicos de cada item em `CHANGELOG.md`. Nada abaixo foi verificado
+com leitor de tela nem com os serviços reais, salvo onde indicado.
+
+- [x] **Botões de resposta e listas do WhatsApp** (2026.10.14.10 a .15):
+  tocar nos botões como `wx.Button` na ordem de Tab. Modelo
+  (`templateButtonReplyMessage`) aceito e entendido no teste real;
+  `buttonsResponseMessage` recusado com 479 (variantes em teste).
+- [x] **Menu Depurar** (2026.10.14.11): estrutura bruta das mensagens,
+  registro técnico detalhado do WhatsApp, padrão desligado.
+- [x] **Links e botões de endereço pelo Tab; Enter abre mídia ou texto**
+  (2026.10.15.0).
+- [x] **Velocidade do áudio de 0,25x a 3x**, passo ajustável (2026.10.15.1):
+  era pendência da etapa 3b. Só medido com senoides e amostra de voz.
+- [x] **Janela de configurações com busca** (2026.10.15.2): parte da etapa 4,
+  cobre só as opções que já existem em `config.OPCOES`.
+- [x] **Nome de grupo renomeado atualizado** (2026.10.15.3 e .4): no
+  Telegram e no WhatsApp, inclusive ao reconectar. Falta verificar
+  `get_joined_groups` com um WhatsApp real.
+
+## Chamadas de voz no Telegram (15/10/2026, versão 2026.10.15.5)
+
+Decisão do responsável: seguir com as chamadas depois do experimento 9.
+
+- **Motor**: `py-tgcalls` 3.x (NTgCalls), opcional. Sem ele, o app roda igual
+  e o menu Chamada avisa que a conta não faz chamadas. Entra no
+  `requirements.txt` (`py-tgcalls>=3.0,<4`).
+- **Escopo**: só áudio, só Telegram, só conversas com uma pessoa. Vídeo,
+  grupos e o WhatsApp ficam de fora.
+- **Janela única que muda de estado** (`interface/chamada.py`), com o foco
+  sempre no botão mais provável: Atender ao tocar; Desligar ao chamar,
+  conectar e em chamada. Ao tocar, a fala diz "Enter atende, Escape
+  recusa". O título da janela e a fala trazem o nome de quem liga.
+- **Esc não desliga uma chamada conectada** (fácil de apertar sem querer):
+  recusa ao tocar, cancela ao chamar ou conectar; em chamada só lembra do
+  botão Desligar. Fechar o TeleZapp com chamada aberta pergunta antes.
+- **Microfone e saída**: os do Windows vistos pela NTgCalls; a escolha fica
+  em `chamada_microfone` e `chamada_saida` e troca no meio da chamada.
+- **Sons**: toque repetido a cada 3 s (recebendo), tom de espera (chamando),
+  conectado e desligada; "Som de chamada" desliga os que repetem, a fala
+  continua.
+- **Segunda chamada** enquanto há uma aberta é recusada sem incomodar.
+- **Atalhos** com a janela principal em foco: Ctrl+Shift+L (ligar), J
+  (janela da chamada), K (silenciar) e H (desligar).
+- **Pendências**: chamada recebida e leitura da janela pelo NVDA ainda não
+  testadas no app real; registrar a chamada (perdida, recusada, duração) na
+  conversa; escolher dispositivo nas configurações; aviso de áudio em
+  silêncio; empacotamento com a NTgCalls (PyInstaller) e as dependências
+  Go/C++ para a conferência de licenças; vídeo e grupos.
+
 ## Próximos passos sugeridos
 
 1. ~~Grupo 1 do plano acima~~ (concluído).
 2. ~~Etapa 3b: enviar arquivos e gravar nota de voz~~ (implementada na
    2026.10.14.16; falta testar no WhatsApp e no Telegram reais, e as
-   pendências da seção acima).
+   pendências da seção acima, exceto a velocidade do áudio, já feita).
 3. ~~Adicionar o aviso de licença nos arquivos~~ (SPDX presente em todos os
    `.py` do pacote); conferir ainda as licenças de terceiros pendentes.
-4. Etapa 4 (ver o plano): configurações, sons, instalador, atualização e
-   assinatura.
+4. Etapa 4 (ver o plano). ~~Janela de configurações~~ (2026.10.15.2). Falta:
+   sons de eventos com arquivos e opções, backup e restauração das
+   configurações, ordem das informações da mensagem, instalador, portátil,
+   desinstalação limpa, atualização com janela de novidades e assinatura.
 5. Testes de estabilidade e de arquivos maiores.

@@ -135,6 +135,19 @@ class CodigoPareamento:
 
 
 @dataclass
+class EstadoChamada:
+    """Uma chamada de voz mudou de estado (ver nucleo.chamadas). `entrante`:
+    a chamada veio de fora. `motivo` e `erro` so valem quando encerrada."""
+    conta_id: str
+    conversa_id: str
+    estado: str
+    nome: str = ""
+    entrante: bool = False
+    motivo: str = ""
+    erro: str = ""
+
+
+@dataclass
 class Aviso:
     """Algo que a pessoa precisa saber (erro de rede, limite do servico)."""
     conta_id: str

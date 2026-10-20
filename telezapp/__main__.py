@@ -11,6 +11,9 @@ import sys
 import traceback
 
 
+_ARQUIVO_FALHA = None      # mantido aberto para o faulthandler
+
+
 def caixa_de_erro(texto):
     try:
         import ctypes
@@ -31,6 +34,19 @@ def main():
     log = logging.getLogger("telezapp")
     log.info("%s versão %s iniciado, código em %s", NOME, VERSAO,
              os.path.dirname(os.path.abspath(__file__)))
+    # Queda dentro de uma biblioteca nativa (sem erro do Python): grava em
+    # logs\falha-nativa.log em que ponto do codigo cada thread estava.
+    try:
+        import faulthandler
+        global _ARQUIVO_FALHA
+        _ARQUIVO_FALHA = open(
+            os.path.join(os.path.dirname(arquivo_log), "falha-nativa.log"),
+            "a", encoding="utf-8")
+        _ARQUIVO_FALHA.write("---- %s iniciado ----\n" % VERSAO)
+        _ARQUIVO_FALHA.flush()
+        faulthandler.enable(file=_ARQUIVO_FALHA, all_threads=True)
+    except Exception:
+        log.exception("não foi possível ativar o registro de falhas nativas")
 
     def erro_nao_tratado(tipo, valor, tb):
         log.error("ERRO NÃO TRATADO:\n%s",

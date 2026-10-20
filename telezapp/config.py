@@ -115,6 +115,10 @@ OPCOES = (
           "O leitor de tela fala o autor e o conteúdo de cada mensagem nova."),
     Opcao("confirmar_envio", "Falar mensagem enviada", "Avisos", True,
           "Fala Enviada depois que uma mensagem sai."),
+    Opcao("toque_chamada", "Som de chamada", "Avisos", True,
+          "Toca um som enquanto uma chamada de voz está tocando para você "
+          "ou esperando a outra pessoa atender. Desmarcada, só a fala "
+          "avisa."),
     Opcao("depuracao", "Modo de depuração", "Avançado", False,
           "Guarda, no seu computador, a estrutura original das últimas 500 "
           "mensagens do WhatsApp para o menu Depurar mostrar. Contém o texto "
@@ -197,6 +201,8 @@ def buscar_opcoes(texto):
 PADROES = {o.chave: o.padrao for o in OPCOES}
 PADROES.update({
     "contas": [],            # [{"id", "servico", "telefone", "nome"}]
+    "chamada_microfone": "",     # nome do microfone usado nas chamadas
+    "chamada_saida": "",         # nome da saida de som das chamadas
     "telegram_api_id": 0,
     "telegram_api_hash": "",
 })
