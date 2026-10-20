@@ -19,7 +19,7 @@ def test_categorias_sem_repeticao_e_com_todas_as_opcoes(mod):
     todas = [o for c in cats for o in mod.opcoes(c)]
     assert sorted(todas, key=config.OPCOES.index) ==         sorted(config.OPCOES, key=config.OPCOES.index)
     assert len(todas) == len(config.OPCOES)
-    assert cats[-2:] == ["Avançado", "Privacidade"]
+    assert cats[-3:] == ["Privacidade", "Avançado", "Atualizações"]
 
 
 def test_busca_acrescenta_categoria_de_resultados(mod):

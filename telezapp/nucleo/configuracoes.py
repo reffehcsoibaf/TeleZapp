@@ -19,9 +19,9 @@ def categorias():
             vistas.append(o.categoria)
     if "Sons" not in vistas:
         vistas.append("Sons")       # tela propria: pacotes e eventos
-    # "Avancado" quase ninguem precisa, e "Privacidade" (que consulta a
-    # conta) fica na ultima posicao por enquanto
-    fim = {"Avançado": 1, "Privacidade": 2}
+    # no fim da lista, nesta ordem: "Privacidade" (que consulta a conta),
+    # "Avancado" (quase ninguem precisa) e "Atualizacoes"
+    fim = {"Privacidade": 1, "Avançado": 2, "Atualizações": 3}
     return sorted(vistas, key=lambda c: fim.get(c, 0))
 
 

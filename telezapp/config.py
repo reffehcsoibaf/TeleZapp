@@ -206,11 +206,12 @@ OPCOES = (
     Opcao("verificar_atualizacoes",
           "Avisar quando houver versão nova do TeleZapp", "Atualizações",
           True,
-          "Ao abrir, consulta as versões publicadas no GitHub e avisa se há "
-          "uma mais nova. Só lê a lista de versões; não baixa nem instala "
-          "nada. O GitHub vê o endereço de internet do computador, como em "
-          "qualquer site. Também dá para consultar quando quiser, em Ajuda, "
-          "Verificar atualizações."),
+          "Ao abrir, consulta as versões publicadas no GitHub. Sem versão "
+          "nova, não diz nada. Havendo, abre a janela com as novidades, uma "
+          "vez por versão, e você escolhe se instala. Só lê a lista de "
+          "versões; não baixa nada sem você aceitar. O GitHub vê o endereço "
+          "de internet do computador, como em qualquer site. Desmarcada, só "
+          "consulta quando você pedir, em Ajuda, Verificar atualizações."),
     Opcao("depuracao", "Modo de depuração", "Avançado", False,
           "Guarda, no seu computador, a estrutura original das últimas 500 "
           "mensagens do WhatsApp para o menu Depurar mostrar. Contém o texto "
