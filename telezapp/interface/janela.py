@@ -31,6 +31,7 @@ from telezapp.midia.reprodutor import FormatoNaoSuportado, Reprodutor
 from telezapp.nucleo import chamadas as ch
 from telezapp.provedores.base import ErroPrivacidade
 from telezapp.nucleo import atualizacao
+from telezapp.nucleo import atualizador
 from telezapp.nucleo.ia import catalogo as cat_ia
 from telezapp.nucleo.ia import cofre as cofre_ia
 from telezapp.nucleo.ia import servico as servico_ia
@@ -41,6 +42,7 @@ from telezapp.nucleo import depuracao
 from telezapp.nucleo import encaminhar as enc
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import exportar
+from telezapp.nucleo import instalacao
 from telezapp.nucleo import limpeza
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import pacotes_de_som
@@ -569,6 +571,9 @@ class Janela(wx.Frame):
         raiz.AppendSeparator()
         item(raiz, "backup", "Fazer &backup...")
         item(raiz, "restaurar_backup", "Restaurar bac&kup...")
+        item(raiz, "instalar", "Instalar o %s neste computador..." % NOME)
+        item(raiz, "criar_portatil", "Criar cópia &portátil...")
+        item(raiz, "desinstalar", "&Desinstalar o %s..." % NOME)
         item(raiz, "configuracoes", "C&onfigurações...	Ctrl+,")
         item(raiz, "sair", "&Sair\tCtrl+Q")
         barra.Append(raiz, "&Menu")
@@ -651,6 +656,9 @@ class Janela(wx.Frame):
             "guia": lambda e: self._abrir_pagina("guia.html"),
             "novidades": lambda e: self._abrir_pagina("novidades.html"),
             "atualizacoes": lambda e: self._verificar_atualizacoes(),
+            "instalar": lambda e: self._instalar(),
+            "criar_portatil": lambda e: self._criar_portatil(),
+            "desinstalar": lambda e: self._desinstalar(),
             "sobre": lambda e: self._sobre(),
         }
         for chave, tratador in ligacoes.items():
@@ -5605,6 +5613,77 @@ class Janela(wx.Frame):
         else:
             wx.MessageBox(texto, NOME, wx.OK | wx.ICON_INFORMATION, self)
 
+    def _modo_ou_aviso(self, esperado, aviso):
+        """O modo atual do programa; se nao for o esperado, avisa e devolve
+        None."""
+        modo = instalacao.modo()
+        if modo == esperado:
+            return modo
+        wx.MessageBox(aviso, NOME, wx.OK | wx.ICON_INFORMATION, self)
+        return None
+
+    @seguro
+    def _instalar(self):
+        """Instala esta copia portatil em %LOCALAPPDATA%/Programs."""
+        if not self._modo_ou_aviso(
+                "portatil", "Só uma cópia portátil pode ser instalada. "
+                "Esta aqui %s." % (
+                    "já é a versão instalada" if instalacao.modo() ==
+                    "instalado" else "está rodando pelo código-fonte")):
+            return
+        from telezapp.interface import instalacao as ui_inst
+        r = ui_inst.fluxo_instalar(self)
+        if r and r[1]:
+            self._abrir_depois(r[0])
+
+    def _abrir_depois(self, exe):
+        """Fecha este programa e abre o `exe` (o programa so abre uma vez)."""
+        linha = "timeout /t 4 /nobreak >nul & start \"\" " + \
+            subprocess.list2cmdline([exe])
+        if not self.Close():
+            return
+        try:
+            subprocess.Popen(
+                linha, shell=True, cwd=os.path.dirname(exe), creationflags=(
+                    subprocess.CREATE_NO_WINDOW |
+                    subprocess.DETACHED_PROCESS))
+        except OSError:
+            log.exception("não consegui abrir a versão instalada")
+
+    @seguro
+    def _criar_portatil(self):
+        """Cria uma copia portatil (programa + pasta dados) onde a pessoa
+        escolher."""
+        if instalacao.modo() == "desenvolvimento":
+            wx.MessageBox("A cópia portátil só pode ser criada a partir do "
+                          "executável, não pelo código-fonte.", NOME,
+                          wx.OK | wx.ICON_INFORMATION, self)
+            return
+        from telezapp.interface import instalacao as ui_inst
+        ui_inst.fluxo_criar_portatil(
+            self, self.cfg.get("pasta_backup") or os.path.expanduser("~"))
+
+    @seguro
+    def _desinstalar(self):
+        if not self._modo_ou_aviso(
+                "instalado", "Só a versão instalada pode ser desinstalada. "
+                "Para uma cópia portátil, basta apagar a pasta."):
+            return
+        if wx.MessageBox(
+                "Desinstalar o %s? O programa fecha. As suas contas e "
+                "conversas ficam guardadas em %s (você pode fazer um backup "
+                "antes, na próxima pergunta)." % (
+                    NOME, instalacao.dados_do_computador()), NOME,
+                wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self) != wx.YES:
+            return
+        from telezapp.interface import instalacao as ui_inst
+        if not ui_inst.oferecer_backup(
+                self, dict(self.cfg.dados), self.banco.copiar_para,
+                self.cfg.get("pasta_backup") or ""):
+            return
+        instalacao.desinstalar(apagar_dados=False)
+        self.Close()
+
     def _reiniciar(self):
         """Fecha o TeleZapp e o abre de novo: um processo separado espera o
         atual terminar (o programa so abre uma vez) e inicia outro igual."""
@@ -5664,19 +5743,87 @@ class Janela(wx.Frame):
             self.fala.falar("Há uma versão nova do %s, %s. Veja em Ajuda, "
                             "Verificar atualizações." % (NOME, lanc.versao))
             return
+        pode = bool(getattr(sys, "frozen", False) and lanc.url_zip
+                    and lanc.url_hash)
+        como = (
+            "Use o botão Baixar e instalar a atualização: o %s baixa o "
+            "arquivo, confere o SHA-256, fecha e abre de novo já atualizado. "
+            "Seus dados ficam em %s e não são afetados." % (
+                NOME, config.pasta_dados()) if pode else
+            "Abra a página de download, baixe o arquivo zip, feche o %s e "
+            "troque a pasta do programa pela nova. Seus dados ficam em %s e "
+            "não são afetados." % (NOME, config.pasta_dados()))
         texto = (
-            "A versão %s do %s está disponível. Você usa a %s.%s\n\n"
-            "O %s ainda não se atualiza sozinho: abra a página de download, "
-            "baixe o arquivo zip, feche o %s e troque a pasta do programa "
-            "pela nova. Seus dados ficam em %s e não são afetados.\n\n"
+            "A versão %s do %s está disponível. Você usa a %s.%s\n\n%s\n\n"
             "Novidades desta versão:\n%s" % (
                 lanc.versao, NOME, VERSAO,
                 " Ela é um pré-lançamento (experimental)." if lanc.pre
-                else "", NOME, NOME, config.pasta_dados(),
-                lanc.notas or "(sem texto de novidades)"))
+                else "", como, lanc.notas or "(sem texto de novidades)"))
+
+        def baixar_agora(dlg):
+            dlg.EndModal(wx.ID_OK)
+            wx.CallAfter(self._atualizar, lanc)
         dialogos.mostrar_texto(
             self, "Versão nova do %s" % NOME, texto, "Versão nova",
-            botoes=[("Abrir a página de download", lanc.pagina)])
+            botoes=[("Abrir a página de download", lanc.pagina)],
+            botoes_extra=[("&Baixar e instalar a atualização",
+                           baixar_agora)] if pode else ())
+
+    @seguro
+    def _atualizar(self, lanc):
+        """Baixa a versao nova, confere o hash, extrai e reinicia trocando a
+        pasta do programa."""
+        if getattr(self, "_atualizando", False):
+            return
+        mb = "%.0f MB" % (lanc.tamanho / 1048576) if lanc.tamanho else ""
+        if wx.MessageBox(
+                "Baixar%s e instalar a versão %s? O %s fecha e abre de novo "
+                "sozinho quando terminar." % (
+                    " (%s)" % mb if mb else "", lanc.versao, NOME),
+                NOME, wx.YES_NO | wx.ICON_QUESTION, self) != wx.YES:
+            return
+        programa = instalacao.pasta_do_programa()
+        espera = atualizador.pasta_de_espera(programa)
+        self._atualizando = True
+        ultimo = [-1]
+
+        def progresso(feito, total):
+            if total:
+                pct = feito * 100 // total // 20 * 20
+                if pct != ultimo[0]:
+                    ultimo[0] = pct
+                    wx.CallAfter(self.fala.falar,
+                                 "Baixando a atualização, %d%%" % pct)
+
+        def trabalho():
+            try:
+                arquivo = atualizador.baixar(lanc, espera, progresso)
+                nova = atualizador.extrair(
+                    arquivo, os.path.join(espera, "novo"))
+                erro = ""
+            except atualizador.ErroAtualizacao as e:
+                nova, erro = None, str(e)
+            except Exception as e:
+                log.error("erro ao atualizar:\n%s", traceback.format_exc())
+                nova, erro = None, "Não consegui atualizar: %s" % e
+            wx.CallAfter(self._atualizacao_pronta, nova, erro, programa)
+        self.fala.falar("Baixando a atualização. Aviso quando terminar.",
+                        interromper=True)
+        threading.Thread(target=trabalho, daemon=True,
+                         name="atualizar").start()
+
+    @seguro
+    def _atualizacao_pronta(self, nova, erro, programa):
+        self._atualizando = False
+        if erro:
+            bipe("erro")
+            self.fala.falar(erro, interromper=True)
+            wx.MessageBox(erro, NOME, wx.OK | wx.ICON_WARNING, self)
+            return
+        bipe("tarefa_pronta")
+        if not self.Close():
+            return              # a pessoa desistiu de fechar
+        atualizador.aplicar(programa, nova)
 
     def _sobre(self):
         wx.MessageBox(

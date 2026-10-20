@@ -3,6 +3,47 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.19.1
+
+Instalar a partir de uma cópia portátil e criar cópia portátil.
+
+- Desinstalar oferece o backup: `interface.instalacao.oferecer_backup`
+  (Sim/Não/Cancelar, depois `DialogoBackup`, onde salvar e `backup.criar`;
+  falha ou desistência cancelam a desinstalação). Vale no menu (com
+  `banco.copiar_para`) e em `--desinstalar` (cópia do arquivo pelo SQLite).
+- Tela de boas-vindas (`interface/instalacao.mostrar_boas_vindas`): no
+  executável que não é instalado, sem pasta `dados` e sem
+  `sem-boas-vindas.txt`, antes de tudo (depois do `wx.App`): Instalar, Criar
+  cópia portátil, Guia de uso, Usar sem instalar (com a opção de não mostrar
+  de novo) e Fechar. `fluxo_instalar` e `fluxo_criar_portatil` (também usados
+  pelo menu) rodam o trabalho numa thread com `wx.ProgressDialog`.
+- Atualizador (`nucleo/atualizador.py`): `atualizacao.Lancamento` ganha
+  `url_zip`, `url_hash`, `nome_zip`, `tamanho` (assets
+  `TeleZapp-<v>.zip` e `.sha256` do `publicar.py`). `baixar` (só https de
+  github.com, confere o SHA-256), `extrair` (exige `TeleZapp/TeleZapp.exe`,
+  recusa caminhos fora da pasta) e `aplicar`, que grava `atualizar.bat` ao
+  lado e o roda separado: espera a pasta liberar (até 90 s), renomeia a atual
+  para `.antiga`, põe a nova, devolve `dados`, `instalado.txt` e
+  `sem-boas-vindas.txt` e abre o exe. Sobras (`.atualizacao`, `.antiga`) saem
+  na abertura seguinte (`limpar_restos`). A janela oferece o botão em Ajuda,
+  Verificar atualizações, só no executável e se a Release tem os dois
+  arquivos.
+- `nucleo/instalacao.py`: modos `desenvolvimento`, `portatil` e `instalado`
+  (marca `instalado.txt` na pasta do programa). Instalar copia a pasta para
+  `.nova`, troca a instalação anterior pelo nome (se estiver em uso, desfaz e
+  avisa), cria atalhos (`WScript.Shell` por PowerShell, falha vira aviso) e a
+  entrada em `HKCU\...\Uninstall\TeleZapp` com `TeleZapp.exe --desinstalar`.
+  Sem administrador: `%LOCALAPPDATA%\Programs\TeleZapp`.
+- Dados: `config.pasta_dados()` usa a pasta `dados` ao lado do executável
+  quando existe (só congelado). Ao levar dados de um lugar para o outro,
+  bancos pelo `_copia_consistente`, sem `logs`/`temp`, e
+  `_acertar_caminhos_das_midias`; os dados anteriores de quem instala ficam
+  em `TeleZapp.antes-da-instalacao-<data>`.
+- Menu principal: Instalar, Criar cópia portátil e Desinstalar (explicam
+  quando não se aplicam). `--desinstalar` abre sem janela principal; a pasta do
+  programa é apagada por um `cmd` separado após 4 s.
+- Testes: `testes/test_instalacao.py`.
+
 ## 2026.10.19.0
 
 Leitura dupla do NVDA na lista de conversas, busca das configurações, vídeo

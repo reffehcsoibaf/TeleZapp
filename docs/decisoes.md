@@ -337,6 +337,42 @@ automáticos): a lista do que falta testar fica na memória do projeto.
   memória), opcional e desligado por padrão, sem trocar o acesso atual às
   mensagens pelo WPPConnect. O responsável deixou o assunto de lado.
 
+## Versão 2026.10.19.1 (19/10/2026): instalar e portátil
+
+- **Como o NVDA, sem administrador**: o executável de uma cópia portátil
+  oferece "Instalar o TeleZapp neste computador..." (Menu); a instalada
+  oferece "Criar cópia portátil..." e "Desinstalar". Instala em
+  `%LOCALAPPDATA%\Programs\TeleZapp`, com atalhos (menu Iniciar, área de
+  trabalho opcional) e entrada em Aplicativos instalados. Decidido com o
+  responsável: por usuário (sem UAC), dados portáteis na pasta `dados` ao
+  lado do executável.
+- **Dados**: a instalada usa `%APPDATA%\TeleZapp`. A portátil usa `dados` se
+  essa pasta existir; sem ela (o zip das Releases), continua em
+  `%APPDATA%`. Criar a cópia portátil pode levar os dados (inclui as
+  sessões, com aviso); instalar a partir de uma portátil com `dados` pode
+  levá-los para o computador, guardando os de antes.
+- **Desinstalar e backup**: antes de desinstalar (menu ou Aplicativos
+  instalados) o programa pergunta se quer o backup de sempre; se o backup
+  falhar ou a pessoa desistir de escolher o arquivo, nada é desinstalado.
+- **Tela de boas-vindas**: ao abrir o executável de uma cópia não
+  instalada, sem `dados` e sem `sem-boas-vindas.txt`, aparece um texto
+  curto sobre o programa e os botões Instalar, Criar cópia portátil, Guia de
+  uso, Usar sem instalar (com opção de não mostrar de novo) e Fechar. O
+  botão "Usar sem instalar" foi acrescentado ao pedido, senão o zip das
+  Releases não abriria o programa.
+- **Atualização pelo programa**: Ajuda, Verificar atualizações oferece
+  "Baixar e instalar a atualização" quando a Release tem o zip e o
+  `.sha256`. Baixa só de github.com por https, confere o SHA-256, extrai ao
+  lado da pasta do programa (`.atualizacao`) e, depois de fechar, um `.bat`
+  troca a pasta (a antiga vira `.antiga` até a nova abrir), mantendo `dados`.
+  Vale para instalada e portátil. A verificação automática ao abrir só
+  avisa. Para as versões antigas (sem este código) a troca continua manual.
+- **Não feito**: assinatura do executável, instalar para todos os
+  usuários, restauro automático se a versão nova não abrir. **Não testado
+  no app real**: instalar, desinstalar, criar portátil e atualizar com o
+  executável gerado e uma Release de verdade (o script de troca foi testado
+  com pastas de mentira).
+
 ## Versão 2026.10.19.0 (19/10/2026)
 
 O que entrou neste dia, com as decisões. Texto para o usuário em

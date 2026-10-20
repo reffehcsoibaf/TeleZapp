@@ -14,6 +14,7 @@ import logging
 import logging.handlers
 import os
 import shutil
+import sys
 import threading
 import unicodedata
 from dataclasses import dataclass
@@ -27,6 +28,12 @@ def pasta_dados():
     especial = os.environ.get("TELEZAPP_DADOS")
     if especial:
         return especial
+    if getattr(sys, "frozen", False):
+        # copia portatil: a pasta "dados" ao lado do executavel
+        portatil = os.path.join(os.path.dirname(os.path.abspath(
+            sys.executable)), "dados")
+        if os.path.isdir(portatil):
+            return portatil
     base = os.environ.get("APPDATA") or os.path.expanduser("~")
     return os.path.join(base, NOME)
 

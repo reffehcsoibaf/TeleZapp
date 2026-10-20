@@ -29,6 +29,9 @@ def main():
         sys.stdout = open(os.devnull, "w", encoding="utf-8")
     if sys.stderr is None:
         sys.stderr = open(os.devnull, "w", encoding="utf-8")
+    if "--desinstalar" in sys.argv[1:]:
+        from telezapp.interface.instalacao import desinstalar_pelo_aplicativo
+        return desinstalar_pelo_aplicativo()
     from telezapp import NOME, VERSAO, config
     arquivo_log = config.configurar_registro()
     log = logging.getLogger("telezapp")
@@ -69,6 +72,13 @@ def main():
         return 1
 
     app = wx.App(False)
+    from telezapp.nucleo import atualizador, instalacao
+    programa = instalacao.pasta_do_programa()
+    if programa:
+        atualizador.limpar_restos(programa)     # sobras de uma atualizacao
+        from telezapp.interface.instalacao import mostrar_boas_vindas
+        if mostrar_boas_vindas() != "continuar":
+            return 0
     unico = wx.SingleInstanceChecker("TeleZapp-" + os.environ.get(
         "USERNAME", ""), config.pasta())
     if unico.IsAnotherRunning():

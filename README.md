@@ -6,8 +6,9 @@ só janela, pensado desde o início para ser usado com **leitores de tela**.
 > **Estado:** em desenvolvimento ativo (versões no formato `ano.mês.dia.dígito`,
 > a atual está em `telezapp/__init__.py`). Telegram e WhatsApp já funcionam
 > na mesma janela, com mídias, várias contas, configurações, backup e
-> inteligência artificial opcional. Ainda não é um produto pronto: faltam o
-> instalador, a versão portátil, o atualizador e a assinatura do executável
+> inteligência artificial opcional. Ainda não é um produto pronto: o
+> executável já se instala, vira cópia portátil e se atualiza pelo próprio
+> programa; falta a assinatura do executável
 > (veja [`docs/decisoes.md`](docs/decisoes.md)). O que mudou em cada versão
 > está em [`CHANGELOG.md`](CHANGELOG.md) (técnico) e em Ajuda, Novidades
 > (para quem usa).

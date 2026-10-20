@@ -66,9 +66,13 @@ def montar_notas(versao, hash_zip, nome_zip):
     linhas += [
         "", "## Como usar", "",
         "1. Baixe `%s` e extraia a pasta `TeleZapp` onde quiser." % nome_zip,
-        "2. Abra `TeleZapp.exe` dentro dela.",
-        "3. Para atualizar, feche o TeleZapp e troque a pasta pela nova. Os "
-        "seus dados ficam em `%APPDATA%\\TeleZapp` e não são afetados.",
+        "2. Abra `TeleZapp.exe` dentro dela. A tela de boas-vindas deixa "
+        "instalar o programa, criar uma cópia portátil, ler o guia de uso "
+        "ou usar sem instalar.",
+        "3. Para atualizar, use Ajuda, Verificar atualizações, Baixar e "
+        "instalar a atualização (ele baixa este mesmo zip, confere o "
+        "SHA-256 e troca a pasta). Os seus dados não são afetados. "
+        "Também dá para trocar a pasta à mão.",
         "", "SHA-256 do zip: `%s`" % hash_zip, ""]
     return "\n".join(linhas)
 
