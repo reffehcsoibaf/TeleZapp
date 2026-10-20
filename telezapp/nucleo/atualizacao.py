@@ -3,9 +3,10 @@
 """Consulta as Releases do GitHub para saber se ha versao nova. So le: nao
 baixa nem instala nada. Sem dependencia de wxPython."""
 import json
+import re
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from telezapp import SITE, VERSAO, versao_valida
 
@@ -28,6 +29,9 @@ class Lancamento:
     url_zip: str = ""
     url_hash: str = ""
     tamanho: int = 0
+    # [(versao, texto das novidades)] de cada versao publicada depois da que
+    # esta em uso, ate esta, da mais nova para a mais velha
+    historico: list = field(default_factory=list)
 
 
 def como_tupla(versao):
@@ -56,7 +60,17 @@ def _arquivos(r, versao):
             int(zip_.get("size") or 0))
 
 
-def mais_nova(dados):
+def novidades_do_corpo(corpo, versao):
+    """O texto de `## Novidades da versao X` das notas da Release (sem o
+    aviso, o como usar e o hash). Sem essa secao, as notas inteiras."""
+    corpo = str(corpo or "").replace("\r\n", "\n").strip()
+    achou = re.search(r"^##\s+Novidades da vers[ãa]o[^\n]*\n(.*?)(?=^##\s|\Z)",
+                      corpo, re.S | re.M | re.I)
+    texto = achou.group(1).strip() if achou else corpo
+    return texto or "(sem texto de novidades)"
+
+
+def mais_nova(dados, atual=VERSAO):
     """O lancamento de maior versao entre os da lista da API (rascunhos e
     tags que nao seguem ano.mes.dia.digito ficam de fora), ou None."""
     melhor = None
@@ -72,7 +86,21 @@ def mais_nova(dados):
                 versao, str(r.get("body") or "").strip(),
                 str(r.get("html_url") or URL_PAGINA),
                 bool(r.get("prerelease")), *_arquivos(r, versao)))
-    return melhor[1] if melhor else None
+    if not melhor:
+        return None
+    lanc = melhor[1]
+    velha = como_tupla(atual)
+    vistos = {}
+    for r in dados:
+        if not isinstance(r, dict) or r.get("draft"):
+            continue
+        versao = str(r.get("tag_name") or "").lstrip("vV")
+        chave = como_tupla(versao)
+        if chave and velha and velha < chave <= melhor[0]:
+            vistos[chave] = (versao, novidades_do_corpo(r.get("body"),
+                                                         versao))
+    lanc.historico = [vistos[k] for k in sorted(vistos, reverse=True)]
+    return lanc
 
 
 def e_mais_nova(lancamento, atual=VERSAO):

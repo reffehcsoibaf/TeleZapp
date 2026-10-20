@@ -5740,47 +5740,27 @@ class Janela(wx.Frame):
             if self.cfg.get("atualizacao_avisada") == lanc.versao:
                 return
             self.cfg.set("atualizacao_avisada", lanc.versao)
-            self.fala.falar("Há uma versão nova do %s, %s. Veja em Ajuda, "
-                            "Verificar atualizações." % (NOME, lanc.versao))
-            return
+        bipe("tarefa_pronta")
+        from telezapp.interface.atualizacao import DialogoAtualizacao
         pode = bool(getattr(sys, "frozen", False) and lanc.url_zip
                     and lanc.url_hash)
-        como = (
-            "Use o botão Baixar e instalar a atualização: o %s baixa o "
-            "arquivo, confere o SHA-256, fecha e abre de novo já atualizado. "
-            "Seus dados ficam em %s e não são afetados." % (
-                NOME, config.pasta_dados()) if pode else
-            "Abra a página de download, baixe o arquivo zip, feche o %s e "
-            "troque a pasta do programa pela nova. Seus dados ficam em %s e "
-            "não são afetados." % (NOME, config.pasta_dados()))
-        texto = (
-            "A versão %s do %s está disponível. Você usa a %s.%s\n\n%s\n\n"
-            "Novidades desta versão:\n%s" % (
-                lanc.versao, NOME, VERSAO,
-                " Ela é um pré-lançamento (experimental)." if lanc.pre
-                else "", como, lanc.notas or "(sem texto de novidades)"))
-
-        def baixar_agora(dlg):
-            dlg.EndModal(wx.ID_OK)
+        dlg = DialogoAtualizacao(self, lanc, VERSAO, pode,
+                                 config.pasta_dados())
+        try:
+            dlg.ShowModal()
+            escolha = dlg.escolha
+        finally:
+            dlg.Destroy()
+        if escolha == "instalar":
             wx.CallAfter(self._atualizar, lanc)
-        dialogos.mostrar_texto(
-            self, "Versão nova do %s" % NOME, texto, "Versão nova",
-            botoes=[("Abrir a página de download", lanc.pagina)],
-            botoes_extra=[("&Baixar e instalar a atualização",
-                           baixar_agora)] if pode else ())
+        elif escolha == "pagina":
+            dialogos.abrir_link(lanc.pagina)
 
     @seguro
     def _atualizar(self, lanc):
         """Baixa a versao nova, confere o hash, extrai e reinicia trocando a
         pasta do programa."""
         if getattr(self, "_atualizando", False):
-            return
-        mb = "%.0f MB" % (lanc.tamanho / 1048576) if lanc.tamanho else ""
-        if wx.MessageBox(
-                "Baixar%s e instalar a versão %s? O %s fecha e abre de novo "
-                "sozinho quando terminar." % (
-                    " (%s)" % mb if mb else "", lanc.versao, NOME),
-                NOME, wx.YES_NO | wx.ICON_QUESTION, self) != wx.YES:
             return
         programa = instalacao.pasta_do_programa()
         espera = atualizador.pasta_de_espera(programa)

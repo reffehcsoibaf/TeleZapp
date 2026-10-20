@@ -11,6 +11,15 @@ Instalar a partir de uma cópia portátil e criar cópia portátil.
   (Sim/Não/Cancelar, depois `DialogoBackup`, onde salvar e `backup.criar`;
   falha ou desistência cancelam a desinstalação). Vale no menu (com
   `banco.copiar_para`) e em `--desinstalar` (cópia do arquivo pelo SQLite).
+- Janela da atualização (`interface/atualizacao.DialogoAtualizacao`): texto
+  somente leitura e focado com a versão oferecida, o tamanho e as novidades de
+  cada versão publicada desde a em uso (`Lancamento.historico`, montado em
+  `atualizacao.mais_nova` a partir de `## Novidades da versão X` das notas,
+  `novidades_do_corpo`), depois Tab para Sim (baixa e instala) e Não; sem o
+  zip ou fora do executável, "Abrir a página de download" e Fechar. A
+  verificação ao abrir (opção `verificar_atualizacoes`) agora abre essa janela,
+  uma vez por versão (`atualizacao_avisada`); antes só falava. Sai a
+  pergunta extra de `_atualizar`.
 - O zip da Release passou a se chamar sempre `TeleZapp.zip` (e
   `TeleZapp.zip.sha256`): `/releases/latest/download/TeleZapp.zip` aponta para
   a versão mais nova (só vale para Release que não seja pré-lançamento).

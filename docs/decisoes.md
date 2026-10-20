@@ -351,6 +351,14 @@ automáticos): a lista do que falta testar fica na memória do projeto.
   `%APPDATA%`. Criar a cópia portátil pode levar os dados (inclui as
   sessões, com aviso); instalar a partir de uma portátil com `dados` pode
   levá-los para o computador, guardando os de antes.
+- **Janela da atualização e o GitHub**: a janela abre com o texto (versão
+  oferecida e novidades de todas as versões desde a que está em uso)
+  focado; Tab leva a Sim e Não. Para uma versão instalada hoje receber o
+  aviso basta publicar uma Release com `ferramentas/publicar.py`: tag
+  `ano.mes.dia.digito` maior que a em uso, `TeleZapp.zip` e
+  `TeleZapp.zip.sha256` anexados e as notas com `## Novidades da versão X`
+  (o `publicar.py` já faz tudo isso, a partir de `novidades.html`). Sem o
+  texto de novidades no `novidades.html` a Release sai vazia.
 - **Desinstalar e backup**: antes de desinstalar (menu ou Aplicativos
   instalados) o programa pergunta se quer o backup de sempre; se o backup
   falhar ou a pessoa desistir de escolher o arquivo, nada é desinstalado.
