@@ -7,6 +7,7 @@ a 'interface' e o que fica gravado no banco.
 import datetime
 import os
 import queue
+import time
 import types
 
 import pytest
@@ -92,6 +93,8 @@ class ClienteFalso:
         self.senha = senha
         self.enviadas = []
         self.lidas = []
+        self.requisicoes = []
+        self.apagadas = []
         self.pedidos_codigo = []
         self.handlers = []
         self.desconectou = False
@@ -130,7 +133,13 @@ class ClienteFalso:
     def add_event_handler(self, f, evento):
         self.handlers.append(f)
 
-    async def iter_dialogs(self, limit=None, archived=None):
+    async def iter_dialogs(self, limit=None, folder=None, archived=None):
+        if folder == 1:
+            yield types.SimpleNamespace(
+                id=77, name="Velha", unread_count=0, date=DATA,
+                input_entity="peer77", is_group=False, is_channel=False,
+                dialog=types.SimpleNamespace(read_outbox_max_id=0))
+            return
         for d in (
             types.SimpleNamespace(
                 id=10, name="Ana", unread_count=2, date=DATA,
@@ -158,7 +167,7 @@ class ClienteFalso:
         return types.SimpleNamespace(id=777, first_name="Bia", last_name="",
                                      username=usuario, title=None)
 
-    async def send_message(self, ent, texto, reply_to=None):
+    async def send_message(self, ent, texto, reply_to=None, link_preview=True):
         if texto == "falhar":
             raise errors.ChatWriteForbiddenError(None)
         self.enviadas.append((ent, texto, reply_to))
@@ -213,6 +222,12 @@ class ClienteFalso:
     async def send_read_acknowledge(self, ent):
         self.lidas.append(ent)
 
+    async def delete_messages(self, ent, ids, revoke=True):
+        self.apagadas.append((ent, list(ids), revoke))
+
+    async def __call__(self, requisicao):
+        self.requisicoes.append(requisicao)
+
 
 class Provedor(tg.ProvedorTelegram):
     def __init__(self, cliente, *a, **k):
@@ -260,10 +275,13 @@ def test_sessao_salva_conecta_e_lista_conversas(ambiente):
         pronta = esperar(ambiente.fila, ev.ContaPronta)
         assert pronta.telefone == "+5551999998888" and pronta.nome == "Fábio"
         convs = esperar(ambiente.fila, ev.ConversasAtualizadas).conversas
-        assert [(c.nome, c.tipo, c.nao_lidas) for c in convs] == [
-            ("Ana", "privada", 2), ("Família", "grupo", 0)]
-        assert len(ambiente.banco.conversas("t1")) == 2
-        assert len(cliente.handlers) == 3
+        assert [(c.nome, c.tipo, c.nao_lidas, c.arquivada) for c in convs] == [
+            ("Ana", "privada", 2, False), ("Família", "grupo", 0, False),
+            ("Velha", "privada", 0, True)]       # a da pasta de arquivadas
+        assert len(ambiente.banco.conversas("t1")) == 3
+        assert [c.arquivada for c in ambiente.banco.conversas("t1")
+                if c.nome == "Velha"] == [True]
+        assert len(cliente.handlers) == 8
 
         p.carregar_mensagens("10")
         msgs = esperar(ambiente.fila, ev.MensagensCarregadas).mensagens
@@ -340,16 +358,16 @@ def test_mensagem_recebida_e_leitura(ambiente):
     p.iniciar()
     try:
         esperar(ambiente.fila, ev.ConversasAtualizadas)
-        receber, ler, _ = cliente.handlers
+        receber, ler, _, _, _, _, _, _ = cliente.handlers
 
         async def chegar():
             async def get_chat():
                 return ANA
 
             async def get_input_chat():
-                return "peer77"
+                return "peer88"
             evento = types.SimpleNamespace(
-                message=mensagem(50, "nova", sender=ANA), chat_id=77,
+                message=mensagem(50, "nova", sender=ANA), chat_id=88,
                 is_group=False, is_channel=False, get_chat=get_chat,
                 get_input_chat=get_input_chat)
             await receber(evento)
@@ -360,6 +378,65 @@ def test_mensagem_recebida_e_leitura(ambiente):
         assert nova.conversa.nao_lidas == 1
         leitura = esperar(ambiente.fila, ev.LeituraConfirmada)
         assert (leitura.conversa_id, leitura.ate_id) == ("10", 4)
+    finally:
+        p.parar()
+
+
+def test_voz_ouvida_aqui_avisa_o_telegram_e_ouvida_la_marca_aqui(ambiente):
+    import asyncio
+    cliente = ClienteFalso()
+    p = ambiente.criar(cliente)
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ConversasAtualizadas)
+        voz = m.Mensagem("t1", "10", "60", tipo=m.VOZ, segundos=5,
+                         data=time.time())
+        ambiente.banco.salvar_mensagens([voz])
+        # tocada aqui: o Telegram recebe a leitura do conteudo
+        p.marcar_ouvida(voz)
+        def leituras():
+            return [r for r in cliente.requisicoes if hasattr(r, "id")]
+        for _ in range(100):
+            if leituras():
+                break
+            time.sleep(0.05)
+        assert leituras()[0].id == [60]
+        # tocada no celular: a mensagem passa a constar ouvida
+        conteudo_lido = cliente.handlers[4]
+        asyncio.run_coroutine_threadsafe(
+            conteudo_lido(types.SimpleNamespace(messages=[60])),
+            p._loop).result(5)
+        e = esperar(ambiente.fila, ev.MensagemAtualizada)
+        assert e.motivo == "ouvida" and m.extras_de(e.mensagem)["ouvida"]
+        assert m.extras_de(
+            ambiente.banco.mensagem("t1", "10", "60"))["ouvida"]
+    finally:
+        p.parar()
+
+
+def test_mensagem_apagada_no_celular_e_apagada_daqui(ambiente):
+    import asyncio
+    cliente = ClienteFalso()
+    p = ambiente.criar(cliente)
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ConversasAtualizadas)
+        ambiente.banco.salvar_mensagens([
+            m.Mensagem("t1", "10", "61", texto="oi", data=time.time())])
+        apagadas = cliente.handlers[3]
+        asyncio.run_coroutine_threadsafe(
+            apagadas(types.SimpleNamespace(deleted_ids=[61], chat_id=None)),
+            p._loop).result(5)
+        e = esperar(ambiente.fila, ev.MensagemApagadaNoCelular)
+        assert (e.conversa_id, e.mensagem_id) == ("10", "61")
+        # apagada aqui: o Telegram recebe o pedido, para todos ou so para mim
+        x = m.Mensagem("t1", "10", "61")
+        assert p.apagar_mensagem(x, para_todos=True)
+        for _ in range(100):
+            if cliente.apagadas:
+                break
+            time.sleep(0.05)
+        assert cliente.apagadas == [("peer10", [61], True)]
     finally:
         p.parar()
 
@@ -559,3 +636,418 @@ def test_grupo_renomeado_no_telegram_atualiza_a_conversa(ambiente):
         assert ambiente.fila.empty()
     finally:
         p.parar()
+
+
+def test_voz_ja_tocada_em_outro_aparelho_chega_como_ouvida():
+    ja_ouvida = tg.converter(mensagem(1, voice=object(), media=object(),
+                                      sender=ANA, media_unread=False),
+                             "t1", 10)
+    nova = tg.converter(mensagem(2, voice=object(), media=object(),
+                                 sender=ANA, media_unread=True), "t1", 10)
+    assert m.extras_de(ja_ouvida)["ouvida"] is True
+    assert m.extras_de(nova)["ouvida"] is False
+    minha = tg.converter(mensagem(3, voice=object(), media=object(),
+                                  out=True, media_unread=False), "t1", 10)
+    assert m.extras_de(minha)["ouvida"] is False
+
+
+def test_contato_do_telegram_mostra_o_telefone_e_vira_pessoa():
+    contato = types.SimpleNamespace(first_name="Ana", last_name="Lima",
+                                    phone_number="5551999998888", user_id=77)
+    x = tg.converter(mensagem(3, contact=contato, media=object()), "t1", 1)
+    assert x.tipo == m.OUTRO
+    assert x.texto == "contato: Ana Lima, +5551999998888"
+    assert m.extras_de(x)["mencoes"] == [{
+        "nome": "Ana Lima", "telefone": "+5551999998888", "id": "77"}]
+
+
+def test_telegram_diz_quando_a_conta_nao_pode_escrever():
+    def ent(nome, **k):
+        cls = type(nome, (), {})
+        o = cls()
+        for a, v in dict(broadcast=False, left=False, creator=False,
+                         admin_rights=None, banned_rights=None,
+                         default_banned_rights=None, deactivated=False).items():
+            setattr(o, a, k.get(a, v))
+        return o
+    sem_envio = types.SimpleNamespace(send_messages=True)
+    assert not tg.somente_leitura_do_telegram(None)
+    assert not tg.somente_leitura_do_telegram(ent("User"))
+    assert tg.somente_leitura_do_telegram(ent("Channel", broadcast=True))
+    assert not tg.somente_leitura_do_telegram(
+        ent("Channel", broadcast=True, creator=True))
+    assert not tg.somente_leitura_do_telegram(ent(
+        "Channel", broadcast=True,
+        admin_rights=types.SimpleNamespace(post_messages=True)))
+    assert tg.somente_leitura_do_telegram(ent("Channel", left=True))
+    assert tg.somente_leitura_do_telegram(ent(
+        "Channel", default_banned_rights=sem_envio))
+    assert not tg.somente_leitura_do_telegram(ent(
+        "Channel", default_banned_rights=sem_envio,
+        admin_rights=types.SimpleNamespace(post_messages=False)))
+    assert tg.somente_leitura_do_telegram(ent("Chat", deactivated=True))
+    assert tg.somente_leitura_do_telegram(ent("ChannelForbidden"))
+
+
+def test_administrar_grupo_do_telegram_monta_os_pedidos_certos():
+    import asyncio
+    from telethon.tl import functions, types as T
+    ent = T.Channel(id=1, title="G", photo=T.ChatPhotoEmpty(), date=DATA,
+                    megagroup=True, access_hash=5,
+                    default_banned_rights=T.ChatBannedRights(
+                        until_date=None, send_media=True))
+    usuario = T.User(id=9, first_name="Bia")
+    pedidos, chamadas = [], []
+
+    class Cliente:
+        async def __call__(self, req):
+            pedidos.append(req)
+            return types.SimpleNamespace(link="https://t.me/+abc")
+
+        async def get_entity(self, quem):
+            return ent if quem == 1 else usuario
+
+        async def get_input_entity(self, e):
+            return T.InputPeerChannel(1, 5)
+
+        async def kick_participant(self, e, u):
+            chamadas.append(("kick", u.id))
+
+        async def edit_admin(self, e, u, is_admin=True, **k):
+            chamadas.append(("admin", u.id, is_admin))
+
+        async def delete_dialog(self, e):
+            chamadas.append(("sair",))
+    p = tg.ProvedorTelegram.__new__(tg.ProvedorTelegram)
+    p.cliente = Cliente()
+
+    def rodar(acao, valor=None):
+        return asyncio.run(p._administrar("1", acao, valor))
+    assert rodar("nome", "Novo") == (True, "Nome do grupo mudado.")
+    assert isinstance(pedidos[-1], functions.channels.EditTitleRequest)
+    assert rodar("descricao", "Sobre")[0]
+    assert isinstance(pedidos[-1], functions.messages.EditChatAboutRequest)
+    ok, texto = rodar("anuncio", True)
+    direitos = pedidos[-1].banned_rights
+    assert ok and direitos.send_messages and direitos.send_media   # manteve
+    assert rodar("trancado", True)[0]
+    assert pedidos[-1].banned_rights.change_info
+    assert rodar("adicionar", "@bia")[0]
+    assert isinstance(pedidos[-1], functions.channels.InviteToChannelRequest)
+    assert rodar("adicionar", "")[0] is False
+    assert rodar("remover", "9")[0] and chamadas[-1] == ("kick", 9)
+    assert rodar("promover", "9")[0] and chamadas[-1] == ("admin", 9, True)
+    assert rodar("rebaixar", "9")[0] and chamadas[-1] == ("admin", 9, False)
+    assert rodar("link") == (True, "https://t.me/+abc")
+    assert rodar("revogar_link")[0]
+    assert pedidos[-1].legacy_revoke_permanent
+    assert rodar("sair")[0] and chamadas[-1] == ("sair",)
+    assert rodar("xyz") == (False, "Ação desconhecida.")
+
+
+def test_links_do_telegram_viram_botao_de_entrar():
+    links = [("https://t.me/+AbCdEfGhIjKlMn", "convite"),
+             ("https://t.me/joinchat/XyZ1234567890", "antigo"),
+             ("https://t.me/turma_do_bairro", "publico"),
+             ("https://t.me/turma_do_bairro?start=1", "repetido"),
+             ("https://t.me/addstickers/Pacote", "figurinhas"),
+             ("https://t.me/c/123/45", "mensagem"),
+             ("https://t.me/canal/123", "mensagem de canal"),
+             ("https://exemplo.com/t.me/x", "outro site")]
+    entradas = tg.entradas_do_telegram(links)
+    assert [(e["modo"], e.get("codigo") or e.get("usuario"))
+            for e in entradas] == [
+        ("convite", "AbCdEfGhIjKlMn"), ("convite", "XyZ1234567890"),
+        ("publico", "turma_do_bairro")]
+    assert entradas[2]["rotulo"] == "Entrar em @turma_do_bairro (grupo ou canal)"
+    class MessageEntityUrl:
+        offset, length = 5, 29
+    texto = "olha https://t.me/+AbCdEfGhIjKlMn"
+    x = tg.converter(mensagem(5, texto, sender=ANA,
+                              entities=[MessageEntityUrl()]), "t1", 1)
+    acoes = m.extras_de(x)["acoes"]
+    assert [a["tipo"] for a in acoes] == ["entrar"]
+    assert acoes[0]["codigo"] == "AbCdEfGhIjKlMn"
+
+
+def test_presenca_do_telegram_online_visto_e_digitando(ambiente):
+    import asyncio
+    cliente = ClienteFalso()
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    p._observada = "10"
+    def ev_usuario(**campos):
+        base = dict(user_id=10, chat_id=None, typing=False, recording=False,
+                    uploading=False, cancel=False, online=False,
+                    last_seen=None, recently=False, within_weeks=False,
+                    within_months=False)
+        base.update(campos)
+        return types.SimpleNamespace(**base)
+    def rodar(e):
+        asyncio.run(p._ao_usuario(e))
+        return esperar(ambiente.fila, ev.Presenca)
+    assert rodar(ev_usuario(online=True)).estado == "online"
+    visto = rodar(ev_usuario(last_seen=DATA))
+    assert (visto.estado, visto.quando) == ("offline", DATA.timestamp())
+    assert rodar(ev_usuario(recently=True)).aprox == "recentemente"
+    assert rodar(ev_usuario(within_weeks=True)).aprox == "na última semana"
+    assert rodar(ev_usuario(typing=True)).estado == "digitando"
+    assert rodar(ev_usuario(recording=True)).estado == "gravando"
+    assert rodar(ev_usuario(cancel=True)).estado == "parou"
+    # outra conversa nao e a observada
+    asyncio.run(p._ao_usuario(ev_usuario(user_id=99, typing=True)))
+    assert ambiente.fila.empty()
+    # grupo: digitando de alguem, com o nome
+    p._observada = "-100"
+    e = rodar(ev_usuario(chat_id=-100, user_id=777, typing=True))
+    assert (e.conversa_id, e.estado, e.quem) == ("-100", "digitando", "Bia")
+    p.parar_presenca("-100")
+    assert p._observada is None
+
+
+def test_reagir_no_telegram_e_ver_a_reacao_dos_outros(ambiente):
+    import asyncio
+    from telethon.tl import types as tipos
+    cliente = ClienteFalso()
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    x = m.Mensagem("t1", "10", "5", texto="oi", data=DATA.timestamp())
+    ambiente.banco.salvar_mensagens([x])
+    asyncio.run(p._reagir(x, "👍"))
+    a = esperar(ambiente.fila, ev.MensagemAtualizada)
+    assert (a.motivo, a.emoji, a.quem) == ("reacao", "👍", "Você")
+    req = cliente.requisicoes[-1]
+    assert req.msg_id == 5 and req.reaction[0].emoticon == "👍"
+    assert m.minha_reacao(a.mensagem) == "👍"
+    # tirar: lista vazia
+    asyncio.run(p._reagir(a.mensagem, ""))
+    b = esperar(ambiente.fila, ev.MensagemAtualizada)
+    assert cliente.requisicoes[-1].reaction == []
+    assert m.extras_de(b.mensagem)["reacoes"] == []
+    # alguem reage
+    nova = types.SimpleNamespace(
+        peer=tipos.PeerUser(10), msg_id=5,
+        reactions=types.SimpleNamespace(recent_reactions=[
+            types.SimpleNamespace(reaction=tipos.ReactionEmoji("❤"), my=False,
+                                  peer_id=tipos.PeerUser(10))], results=[]))
+    asyncio.run(p._ao_reacoes(nova))
+    c = esperar(ambiente.fila, ev.MensagemAtualizada)
+    assert (c.motivo, c.emoji) == ("reacao", "❤") and c.quem == "Bia"
+    assert m.resumo_reacoes(c.mensagem) == "❤ de Bia"
+    # a mesma reacao de novo nao avisa; so a contagem (grupo grande) entra
+    asyncio.run(p._ao_reacoes(nova))
+    assert ambiente.fila.empty()
+    contagem = types.SimpleNamespace(
+        peer=tipos.PeerUser(10), msg_id=5,
+        reactions=types.SimpleNamespace(recent_reactions=None, results=[
+            types.SimpleNamespace(reaction=tipos.ReactionEmoji("👍"),
+                                  count=3)]))
+    asyncio.run(p._ao_reacoes(contagem))
+    d = esperar(ambiente.fila, ev.MensagemAtualizada)
+    assert m.resumo_reacoes(d.mensagem) == "👍 de 3 pessoas"
+
+
+def test_previa_de_link_do_telegram():
+    pagina = types.SimpleNamespace(url="https://exemplo.com/a",
+                                   title="Exemplo", description="Descrição",
+                                   site_name="Exemplo.com")
+    msg = mensagem(5, "olha https://exemplo.com/a",
+                   web_preview=pagina, media=object())
+    x = tg.converter(msg, "t1", 10)
+    previa = m.extras_de(x)["previa"]
+    assert (previa["titulo"], previa["descricao"], previa["site"]) == (
+        "Exemplo", "Descrição", "Exemplo.com")
+    # pagina ainda sem titulo nem descricao: nada
+    vazia = types.SimpleNamespace(url="https://a.com")
+    assert m.extras_de(tg.converter(mensagem(6, "x", web_preview=vazia),
+                                    "t1", 10))["previa"] == {}
+    assert m.extras_de(tg.converter(mensagem(7, "sem link"),
+                                    "t1", 10))["previa"] == {}
+
+
+def _item(id_, legenda="", out=False, video=False):
+    from telethon.tl import types as tipos
+    media = tipos.MessageMediaDocument(document=types.SimpleNamespace(
+        attributes=[tipos.DocumentAttributeVideo(
+            duration=7, w=1, h=1)], size=900, mime_type="video/mp4")) \
+        if video else tipos.MessageMediaPhoto()
+    return tipos.StoryItem(id=id_, date=DATA, expire_date=DATA, media=media,
+                           caption=legenda or None, out=out or None)
+
+
+class ClienteDeHistorias(ClienteFalso):
+    def __init__(self, resposta):
+        super().__init__()
+        self.resposta = resposta
+
+    async def __call__(self, requisicao):
+        self.requisicoes.append(requisicao)
+        if type(requisicao).__name__ == "GetAllStoriesRequest":
+            return self.resposta
+        if type(requisicao).__name__ == "GetStoriesByIDRequest":
+            return types.SimpleNamespace(stories=[_item(2, video=True)])
+        return None
+
+
+def _todas(*pares):
+    from telethon.tl import types as tipos
+    return types.SimpleNamespace(
+        peer_stories=[tipos.PeerStories(peer=tipos.PeerUser(i), stories=its,
+                                        max_read_id=lido)
+                      for i, its, lido, _ in pares],
+        users=[types.SimpleNamespace(id=i, first_name=nome, last_name="",
+                                     username="", is_self=eu)
+               for i, _, _, (nome, eu) in pares],
+        chats=[], has_more=False)
+
+
+def test_historias_do_telegram_viram_conversas_de_status(ambiente):
+    import asyncio
+    cliente = ClienteDeHistorias(_todas(
+        (10, [_item(1, "praia"), _item(2, video=True)], 1, ("Bia", False)),
+        (99, [_item(5)], 0, ("Eu", True))))
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    asyncio.run(p._buscar_historias())
+    atual = esperar(ambiente.fila, ev.ConversasAtualizadas)
+    por_id = {c.id: c for c in atual.conversas}
+    bia, eu = por_id["status:10"], por_id["status:99"]
+    assert (bia.nome, bia.tipo, bia.nao_lidas) == ("Histórias de Bia",
+                                                   "status", 1)   # so a 2
+    assert (eu.nome, eu.nao_lidas) == ("Meu status", 0)
+    msgs = ambiente.banco.mensagens("t1", "status:10", 10)
+    assert [(x.id, x.tipo, x.texto, x.segundos) for x in msgs] == [
+        ("1", m.FOTO, "praia", 0), ("2", m.VIDEO, "", 7)]
+    assert msgs[0].autor == "Bia" and msgs[0].remetente == "10"
+    assert ambiente.banco.mensagens("t1", "status:99", 10)[0].minha
+    # abrir a conversa carrega do banco
+    asyncio.run(p._carregar("status:10", 50))
+    assert [x.id for x in esperar(ambiente.fila, ev.MensagensCarregadas)
+            .mensagens] == ["1", "2"]
+    # a historia 1 expirou e a da Bia segue; a minha sumiu
+    cliente.resposta = _todas((10, [_item(2, video=True)], 1, ("Bia", False)))
+    asyncio.run(p._buscar_historias())
+    esperar(ambiente.fila, ev.ConversasAtualizadas)
+    assert [x.id for x in ambiente.banco.mensagens(
+        "t1", "status:10", 10)] == ["2"]
+    assert "status:99" not in [c.id for c in ambiente.banco.conversas("t1")]
+    # nada novo do servidor: nada muda
+    cliente.resposta = types.SimpleNamespace()
+    asyncio.run(p._buscar_historias())
+    assert [x.id for x in ambiente.banco.mensagens(
+        "t1", "status:10", 10)] == ["2"]
+
+
+def test_ver_curtir_responder_e_baixar_historia(ambiente):
+    import asyncio
+    cliente = ClienteDeHistorias(_todas(
+        (10, [_item(1), _item(2, video=True)], 0, ("Bia", False))))
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    asyncio.run(p._buscar_historias())
+    esperar(ambiente.fila, ev.ConversasAtualizadas)
+    x = ambiente.banco.mensagens("t1", "status:10", 10)[1]
+    # ver: marca como vistas ate a mais nova
+    asyncio.run(p._marcar_lida("status:10"))
+    lida = cliente.requisicoes[-1]
+    assert type(lida).__name__ == "ReadStoriesRequest" and lida.max_id == 2
+    assert ambiente.banco.conversas("t1")[0].nao_lidas == 0 or all(
+        c.nao_lidas == 0 for c in ambiente.banco.conversas("t1")
+        if c.tipo == "status")
+    # curtir
+    asyncio.run(p._reagir(x, "❤"))
+    curtida = [r for r in cliente.requisicoes
+               if type(r).__name__ == "SendReactionRequest"][-1]
+    assert curtida.story_id == 2 and curtida.reaction.emoticon == "❤"
+    a = esperar(ambiente.fila, ev.MensagemAtualizada)
+    assert a.motivo == "reacao" and a.mensagem.conversa_id == "status:10"
+    asyncio.run(p._reagir(x, ""))
+    assert type([r for r in cliente.requisicoes
+                 if type(r).__name__ == "SendReactionRequest"][-1]
+                .reaction).__name__ == "ReactionEmpty"
+    # responder em particular, citando a historia
+    asyncio.run(p._responder_historia(x, "que lindo"))
+    envio = [r for r in cliente.requisicoes
+             if type(r).__name__ == "SendMessageRequest"][-1]
+    assert envio.message == "que lindo"
+    assert envio.reply_to.story_id == 2 and type(
+        envio.reply_to).__name__ == "InputReplyToStory"
+    # baixar: a midia vem da historia, com mime e tamanho
+    original = asyncio.run(p._midia_da_historia(x))
+    assert original.file.mime_type == "video/mp4" and original.file.size == 900
+    # presenca nao se aplica a historias
+    p.observar_presenca("status:10")
+    assert p._observada is None
+
+
+def test_publicar_historia_no_telegram(ambiente, tmp_path):
+    import asyncio
+    from telezapp.midia import envio
+
+    class Cliente(ClienteDeHistorias):
+        async def upload_file(self, caminho):
+            self.enviado = caminho
+            return "arquivo-enviado"
+    cliente = Cliente(types.SimpleNamespace())
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    foto = tmp_path / "f.jpg"
+    foto.write_bytes(b"\xff\xd8\xff" + b"0" * 50)
+    anexo = envio.preparar(str(foto))
+    assert tg.ProvedorTelegram.PODE_PUBLICAR_STATUS
+    asyncio.run(p._publicar_historia("legenda", anexo, "todos"))
+    pedido = [r for r in cliente.requisicoes
+              if type(r).__name__ == "SendStoryRequest"][-1]
+    assert cliente.enviado == str(foto)
+    assert pedido.caption == "legenda"
+    assert type(pedido.privacy_rules[0]).__name__ == \
+        "InputPrivacyValueAllowAll"
+    assert type(pedido.peer).__name__ == "InputPeerSelf"
+    assert esperar(ambiente.fila, ev.Aviso).texto == "História publicada."
+    asyncio.run(p._publicar_historia("", anexo, "contatos"))
+    esperar(ambiente.fila, ev.Aviso)
+    ultimo = [r for r in cliente.requisicoes
+              if type(r).__name__ == "SendStoryRequest"][-1]
+    assert type(ultimo.privacy_rules[0]).__name__ == \
+        "InputPrivacyValueAllowContacts" and ultimo.caption is None
+    # sem foto nem video, nem tenta
+    p.publicar_status("so texto", None)
+    assert "precisa de foto ou vídeo" in esperar(ambiente.fila,
+                                                 ev.Aviso).texto
+
+
+def test_envio_de_arquivo_no_telegram_publica_o_avanco(ambiente, tmp_path):
+    import asyncio
+    from telezapp.midia import envio
+
+    class Cliente(ClienteFalso):
+        async def send_file(self, ent, caminho, caption=None,
+                            force_document=False, voice_note=False,
+                            attributes=None, progress_callback=None, **kw):
+            for feito in (10, 50, 50, 100):
+                progress_callback(feito, 100)
+            return await super().send_file(
+                ent, caminho, caption=caption, force_document=force_document,
+                voice_note=voice_note, attributes=attributes, **kw)
+    cliente = Cliente()
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    foto = tmp_path / "f.jpg"
+    foto.write_bytes(b"\xff\xd8\xff" + b"0" * 50)
+    asyncio.run(p._enviar_arquivo("10", envio.preparar(str(foto)), "oi"))
+    avancos = []
+    while not ambiente.fila.empty():
+        x = ambiente.fila.get()
+        if isinstance(x, ev.ProgressoEnvio):
+            avancos.append(x.percentual)
+    assert avancos == [10, 50, 100]                  # sem repetir
+
+
+def test_mensagem_do_telegram_que_cita_esta_conta_fica_marcada():
+    citou = tg.converter(mensagem(5, "oi @eu", mentioned=True), "t1", 10)
+    assert m.extras_de(citou)["citou_voce"]
+    assert not m.extras_de(tg.converter(mensagem(6, "oi"), "t1", 10))[
+        "citou_voce"]
+    # as minhas nunca contam
+    minha = tg.converter(mensagem(7, "oi", out=True, mentioned=True), "t1", 10)
+    assert not m.extras_de(minha)["citou_voce"]

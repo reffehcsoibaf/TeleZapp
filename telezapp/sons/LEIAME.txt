@@ -1,0 +1,33 @@
+Sons de exemplo do TeleZapp
+===========================
+
+Criados para o TeleZapp, sintetizados por ferramentas/gerar_sons.py (nenhuma
+amostra de terceiros), sob a mesma licença do programa (GPL-3.0-ou-posterior).
+
+São Ogg Vorbis estéreo, de no máximo 2 segundos, que começam no primeiro
+instante do arquivo e terminam em silêncio. O nome do arquivo é o do evento:
+
+  nova              mensagem recebida
+  nova_aberta       mensagem recebida na conversa aberta
+  nova_grupo        mensagem recebida num grupo
+  enviada           mensagem enviada
+  erro              erro
+  falha_envio       mensagem ou arquivo que não saiu
+  conectado         conta conectada
+  reconectada       conta reconectada
+  desconectada      conta desconectada
+  pronto            código ou QR pronto
+  atualizado        QR Code atualizado
+  toque             toque de chamada recebida
+  chamando          tom de chamada feita
+  desligada         chamada encerrada
+  download_pronto   download de mídia concluído
+  tarefa_pronta     backup, restauração ou conversa salva
+  reacao_recebida   reação a uma mensagem sua
+  mencao_ou_resposta   menção ou resposta a você num grupo
+
+Esta pasta é o pacote de sons "TeleZapp" (Configurações, Sons, caixa de pacote de sons).
+Os outros são o Padrão (bips do sistema) e os pacotes personalizados que você cria na mesma tela.
+
+Para gerar de novo (ou mudar o gosto, editando SONS em gerar_sons.py):
+  venv\Scripts\python ferramentas\gerar_sons.py

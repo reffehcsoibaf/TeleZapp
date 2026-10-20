@@ -21,9 +21,13 @@ cabeçalhos dos arquivos. Não é parecer jurídico. O TeleZapp usa a
 | cffi 2.1.1 (da soundcard) | Ligação com as DLLs do Windows | MIT-0 | Sim |
 | libsndfile 1.2.2 (dentro do soundfile) | Decodificar Ogg/Opus, MP3, WAV, FLAC | LGPL-2.1 | Sim, como biblioteca dinâmica separada; manter o aviso e indicar onde obter o código-fonte |
 | numpy | Áudio | BSD-3-Clause (e outras permissivas) | Sim |
+| opencv-python-headless 5.0 | Ler os quadros de um vídeo para descrevê-lo com a IA | Apache-2.0 (o OpenCV); a roda traz o FFmpeg como DLL separada, LGPL-2.1 | Sim, mantendo o aviso do FFmpeg e indicando onde obter o código-fonte (conferir antes do lançamento, como a libsndfile) |
+| emoji 2.16 | Lista de emojis com nomes em português, para reagir e escrever | BSD-3-Clause (os nomes vêm do CLDR, licença Unicode) | Sim |
 | protobuf | Mensagens do WhatsApp | BSD-3-Clause | Sim |
 | accessible-output2 (só a DLL) | Fala pelo NVDA | MIT (pela classificação do pacote; o campo de licença diz UNKNOWN) | Sim, mas a DLL é do NVDA: ver pendências |
 | PyInstaller 6.22.3 (ferramenta) | Gera o executável | GPL-2.0-ou-posterior com exceção que permite distribuir programas de qualquer licença | Sim: o executável gerado não herda a GPL do PyInstaller |
+| pyzipper 0.4.0 | Backup em zip com senha (AES-256) | MIT | Sim |
+| pycryptodomex 3.24.1 (do pyzipper) | AES, derivação de chave | BSD e domínio público | Sim |
 | hachoir 3.4.0 | Duração de vídeo (só nos experimentos) | **GPL-2.0** | **Não**: fica fora do aplicativo (ver abaixo) |
 
 ## Pendências

@@ -8,6 +8,7 @@ grava texto de mensagens, telefones completos, codigos ou senhas.
 import asyncio
 import logging
 import os
+import re
 import threading
 import time
 
@@ -15,9 +16,10 @@ from telezapp import NOME, VERSAO, config
 from telezapp.midia import armazem
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import modelos as m
+from telezapp.nucleo import previa_links
 from telezapp.provedores.base import (PEDIR_CODIGO, PEDIR_SENHA,
                                       PEDIR_TELEFONE, DownloadCancelado,
-                                      ErroMidia, Provedor)
+                                      ErroMidia, ErroPrivacidade, Provedor)
 
 log = logging.getLogger("telezapp.telegram")
 
@@ -63,8 +65,35 @@ def _texto_extra(msg):
     if contato is not None:
         nome = " ".join(p for p in (getattr(contato, "first_name", ""),
                                     getattr(contato, "last_name", "")) if p)
-        return "contato: " + nome if nome else "contato"
+        telefone = getattr(contato, "phone_number", "") or ""
+        if telefone and not telefone.startswith("+"):
+            telefone = "+" + telefone
+        return ", ".join(p for p in (
+            "contato: " + nome if nome else "contato", telefone) if p)
     return ""
+
+
+def somente_leitura_do_telegram(ent):
+    """A conta nao pode escrever neste chat? Canal em que nao posta, grupo
+    que so administradores usam, grupo de que saiu ou que foi desativado."""
+    if ent is None:
+        return False
+    nome = type(ent).__name__
+    if nome in ("ChatForbidden", "ChannelForbidden") or \
+            getattr(ent, "left", False) or getattr(ent, "deactivated", False):
+        return True
+    direitos = getattr(ent, "admin_rights", None)
+    admin = bool(getattr(ent, "creator", False) or direitos)
+    if getattr(ent, "broadcast", False):
+        return not (getattr(ent, "creator", False) or (
+            direitos is not None and getattr(direitos, "post_messages",
+                                             False)))
+    for campo in ("banned_rights", "default_banned_rights"):
+        r = getattr(ent, campo, None)
+        if r is not None and getattr(r, "send_messages", False):
+            return not admin or campo == "banned_rights" and not (
+                getattr(ent, "creator", False))
+    return False
 
 
 def nome_de(entidade):
@@ -110,6 +139,109 @@ def _url_do_botao(botao):
     return ""
 
 
+RE_CONVITE_TELEGRAM = re.compile(
+    r"(?:t(?:elegram)?\.me/(?:\+|joinchat/)|tg://join\?invite=)"
+    r"([A-Za-z0-9_-]{10,})", re.I)
+RE_PUBLICO_TELEGRAM = re.compile(
+    r"(?:^|[/@])(?:https?://)?(?:t|telegram)\.me/([A-Za-z][A-Za-z0-9_]{3,31})"
+    r"/?(?:\?.*)?$", re.I)
+RESERVADOS_TELEGRAM = {"joinchat", "addstickers", "addemoji", "share",
+                       "proxy", "socks", "login", "setlanguage", "addtheme",
+                       "bg", "boost", "iv", "invoice", "contact", "c", "s",
+                       "m", "giftcode", "confirmphone"}
+
+
+def entradas_do_telegram(links):
+    """Botoes "Entrar" para os links de convite (t.me/+codigo, joinchat) e
+    de grupos e canais publicos (t.me/nome). Tipo "entrar" nas acoes."""
+    entradas, vistos = [], set()
+    for url, _texto in links:
+        achou = RE_CONVITE_TELEGRAM.search(url)
+        if achou and achou.group(1) not in vistos:
+            vistos.add(achou.group(1))
+            entradas.append({"tipo": "entrar", "modo": "convite",
+                             "codigo": achou.group(1),
+                             "rotulo": "Entrar no grupo ou canal (convite)"})
+            continue
+        publico = RE_PUBLICO_TELEGRAM.search(url)
+        if publico and publico.group(1).lower() not in RESERVADOS_TELEGRAM \
+                and "usuario:" + publico.group(1).lower() not in vistos:
+            vistos.add("usuario:" + publico.group(1).lower())
+            entradas.append({"tipo": "entrar", "modo": "publico",
+                             "usuario": publico.group(1),
+                             "rotulo": "Entrar em @%s (grupo ou canal)" %
+                             publico.group(1)})
+    return entradas
+
+
+# Cada pessoa (ou canal) com historias vira uma "conversa" de tipo status,
+# `status:<id>`, com as historias como mensagens (id = id da historia)
+PREFIXO_STATUS = "status:"
+ATUALIZAR_HISTORIAS_A_CADA = 10      # segundos, entre duas buscas
+
+
+def tipo_de_historia(media):
+    """foto, video, audio ou documento de uma historia (ou outro)."""
+    nome = type(media).__name__
+    if nome == "MessageMediaPhoto":
+        return m.FOTO
+    doc = getattr(media, "document", None)
+    if nome == "MessageMediaDocument" and doc is not None:
+        for a in getattr(doc, "attributes", None) or []:
+            ntipo = type(a).__name__
+            if ntipo == "DocumentAttributeVideo":
+                return m.VIDEO
+            if ntipo == "DocumentAttributeAudio":
+                return m.AUDIO
+        return m.DOCUMENTO
+    return m.OUTRO
+
+
+def dados_da_midia_de_historia(media):
+    """(segundos, nome do arquivo, tamanho, mime) da midia da historia."""
+    segundos, nome, tamanho, mime = 0, "", 0, ""
+    doc = getattr(media, "document", None)
+    if doc is not None:
+        tamanho = int(getattr(doc, "size", 0) or 0)
+        mime = getattr(doc, "mime_type", "") or ""
+        for a in getattr(doc, "attributes", None) or []:
+            segundos = int(getattr(a, "duration", 0) or segundos)
+            nome = getattr(a, "file_name", "") or nome
+    foto = getattr(media, "photo", None)
+    if foto is not None:
+        mime = "image/jpeg"
+        tamanhos = [getattr(t, "size", 0) or 0
+                    for t in getattr(foto, "sizes", None) or []]
+        tamanho = int(max(tamanhos)) if tamanhos else 0
+    return segundos, nome, tamanho, mime
+
+
+def mensagem_de_historia(conta_id, sid, item, nome, pid):
+    """Mensagem para uma historia (StoryItem)."""
+    media = getattr(item, "media", None)
+    segundos, arquivo, tamanho, _ = dados_da_midia_de_historia(media)
+    data = getattr(item, "date", None)
+    return m.Mensagem(
+        conta_id=conta_id, conversa_id=sid, id=str(item.id), autor=nome,
+        minha=bool(getattr(item, "out", False)),
+        data=data.timestamp() if data is not None else time.time(),
+        tipo=tipo_de_historia(media), texto=getattr(item, "caption", "") or "",
+        segundos=segundos, nome_arquivo=arquivo, tamanho=tamanho,
+        remetente=str(pid))
+
+
+def previa_do_telegram(msg):
+    """A previa de link que o Telegram montou para a mensagem (titulo,
+    descricao e nome do site); {} se nao ha."""
+    pagina = getattr(msg, "web_preview", None)
+    if pagina is None:
+        return {}
+    return m.previa_de_link(getattr(pagina, "url", "") or "",
+                            getattr(pagina, "title", "") or "",
+                            getattr(pagina, "description", "") or "",
+                            getattr(pagina, "site_name", "") or "")
+
+
 def extras_do_telegram(msg):
     """(links, botoes, mencoes) de uma mensagem do Telethon.
 
@@ -141,6 +273,17 @@ def extras_do_telegram(msg):
             nova = {"id": str(ent.user_id), "nome": visivel}
             if nova not in mencoes:
                 mencoes.append(nova)
+    contato = getattr(msg, "contact", None)
+    if contato is not None:
+        nome_c = " ".join(p for p in (getattr(contato, "first_name", ""),
+                                      getattr(contato, "last_name", "")) if p)
+        telefone = getattr(contato, "phone_number", "") or ""
+        if telefone and not telefone.startswith("+"):
+            telefone = "+" + telefone
+        id_c = getattr(contato, "user_id", 0) or 0
+        if nome_c or telefone:
+            mencoes.append({"nome": nome_c, "telefone": telefone,
+                            "id": str(id_c) if id_c else ""})
     botoes = []
     markup = getattr(msg, "reply_markup", None)
     for linha in getattr(markup, "rows", None) or []:
@@ -186,7 +329,65 @@ def converter(msg, conta_id, conversa_id, lidas_ate=0, nome_padrao=""):
         nome_arquivo=nome_arquivo, tamanho=tamanho, estado=estado,
         resposta_a=str(resposta_a) if resposta_a else "")
     links, botoes, mencoes = extras_do_telegram(msg)
-    return m.guardar_extras(nova, links, botoes, mencoes)
+    m.guardar_extras(nova, links, botoes, mencoes,
+                     acoes=entradas_do_telegram(links),
+                     previa=previa_do_telegram(msg))
+    # o Telegram marca as mensagens que citam esta conta (@ ou nome)
+    if not minha and getattr(msg, "mentioned", False) is True:
+        m.atualizar_extras(nova, citou_voce=True)
+    # voz ou audio que o Telegram diz ja ter sido tocado (em outro aparelho)
+    if not minha and tipo in (m.VOZ, m.AUDIO) and \
+            getattr(msg, "media_unread", None) is False:
+        m.atualizar_extras(nova, ouvida=True)
+    return nova
+
+
+# --------------------------------------------------------- privacidade
+_COM_EXCECOES = ("PrivacyValueAllowUsers", "PrivacyValueDisallowUsers",
+                 "PrivacyValueAllowChatParticipants",
+                 "PrivacyValueDisallowChatParticipants",
+                 "PrivacyValueAllowPremium", "PrivacyValueAllowBots",
+                 "PrivacyValueDisallowBots")
+
+
+def valor_das_regras(regras):
+    """all, contacts ou none, conforme as regras de privacidade do Telegram;
+    None quando ha excecoes por pessoa ou grupo (so o aplicativo as edita)
+    ou o valor e desconhecido."""
+    nomes = [type(r).__name__ for r in regras or ()]
+    if any(n in _COM_EXCECOES for n in nomes):
+        return None
+    if "PrivacyValueAllowAll" in nomes:
+        return "all"
+    if "PrivacyValueAllowContacts" in nomes:
+        return "contacts"
+    if "PrivacyValueDisallowAll" in nomes:
+        return "none"
+    return None
+
+
+# campo -> tipo da chave de privacidade do Telegram
+CHAVES_PRIVACIDADE = {"last": "InputPrivacyKeyStatusTimestamp",
+                      "status": "InputPrivacyKeyAbout",
+                      "groupadd": "InputPrivacyKeyChatInvite"}
+_REGRA_DO_VALOR = {"all": "InputPrivacyValueAllowAll",
+                   "contacts": "InputPrivacyValueAllowContacts",
+                   "none": "InputPrivacyValueDisallowAll"}
+
+
+def silencio_do_dialogo(d):
+    """0.0 (com som), -1.0 (para sempre) ou o timestamp do fim do silencio
+    de um dialogo do Telegram."""
+    try:
+        ate = d.dialog.notify_settings.mute_until
+    except AttributeError:
+        return 0.0
+    if not ate:
+        return 0.0
+    ate = ate.timestamp() if hasattr(ate, "timestamp") else float(ate)
+    if ate <= time.time():
+        return 0.0
+    return -1.0 if ate > time.time() + 5 * 365 * 86400 else ate
 
 
 def tipo_da_conversa(dialogo):
@@ -213,6 +414,8 @@ class ProvedorTelegram(Provedor):
         self._loop = None
         self._thread = None
         self._entidades = {}                    # conversa_id -> InputPeer
+        self._observada = None                  # conversa com a presenca aberta
+        self._historias_em = 0.0                # ultima busca de historias
         self._conversas = {}                    # conversa_id -> Conversa
         self._usuarios = {}                     # @usuario -> dados ou None
         self._pronto = threading.Event()
@@ -258,6 +461,104 @@ class ProvedorTelegram(Provedor):
             log.exception("erro no provedor do Telegram")
             self._avisar("Erro no Telegram. Os detalhes estão no log.")
 
+    def contatos_da_conta(self):
+        """[(id, nome, telefone)] dos contatos salvos na conta do Telegram
+        (os mesmos que o aplicativo mostra em Contatos)."""
+        try:
+            return self._executar(self._ler_contatos())
+        except Exception:
+            log.info("não consegui ler os contatos do Telegram")
+            return []
+
+    async def _ler_contatos(self):
+        from telethon.tl import functions
+        r = await self.cliente(functions.contacts.GetContactsRequest(hash=0))
+        achados = []
+        for u in getattr(r, "users", None) or []:
+            if getattr(u, "bot", False) or getattr(u, "deleted", False):
+                continue
+            nome = nome_de(u)
+            if not nome:
+                continue
+            fone = getattr(u, "phone", "") or ""
+            achados.append((str(u.id), nome, "+" + fone if fone else ""))
+        return achados
+
+    def resolver_destinatario(self, texto):
+        """@usuario, telefone de contato ou id: acha a pessoa no Telegram."""
+        try:
+            return self._executar(self._resolver_destinatario(texto))
+        except Exception:
+            log.info("não achei o destinatário no Telegram")
+            return None
+
+    async def _resolver_destinatario(self, texto):
+        from telethon import utils
+        entidade = await self.cliente.get_entity(texto)
+        cid = str(utils.get_peer_id(entidade))
+        self._entidades[cid] = await self.cliente.get_input_entity(entidade)
+        return cid, nome_de(entidade)
+
+    # ------------------------------------------------------ privacidade
+    def _executar(self, corotina, espera=20):
+        """Roda no loop do Telegram e devolve o resultado (ou levanta o
+        erro), sem o aviso generico de _protegido."""
+        if self._loop is None or self._loop.is_closed():
+            corotina.close()
+            raise ErroPrivacidade("A conta do Telegram não está conectada.")
+        return asyncio.run_coroutine_threadsafe(
+            corotina, self._loop).result(timeout=espera)
+
+    def privacidade(self):
+        try:
+            return self._executar(self._ler_privacidade())
+        except Exception:
+            log.exception("não consegui ler a privacidade do Telegram")
+            return None
+
+    async def _ler_privacidade(self):
+        from telethon.tl import functions, types
+        valores = {}
+        for campo, nome in CHAVES_PRIVACIDADE.items():
+            tipo = getattr(types, nome, None)
+            if tipo is None:
+                continue
+            r = await self.cliente(functions.account.GetPrivacyRequest(
+                tipo()))
+            valores[campo] = valor_das_regras(r.rules)
+        g = await self.cliente(
+            functions.account.GetGlobalPrivacySettingsRequest())
+        valores["readreceipts"] = "none" if getattr(
+            g, "hide_read_marks", False) else "all"
+        return valores
+
+    def definir_privacidade(self, campo, valor):
+        try:
+            self._executar(self._gravar_privacidade(campo, valor))
+        except ErroPrivacidade:
+            raise
+        except Exception as e:
+            if "PREMIUM" in str(e).upper():
+                raise ErroPrivacidade(
+                    "Esta opção exige Telegram Premium.") from e
+            raise
+
+    async def _gravar_privacidade(self, campo, valor):
+        from telethon.tl import functions, types
+        if campo == "readreceipts":
+            atual = await self.cliente(
+                functions.account.GetGlobalPrivacySettingsRequest())
+            atual.hide_read_marks = valor == "none"
+            await self.cliente(functions.account.SetGlobalPrivacySettingsRequest(
+                settings=atual))
+            return
+        tipo = getattr(types, CHAVES_PRIVACIDADE.get(campo, ""), None)
+        regra = getattr(types, _REGRA_DO_VALOR.get(valor, ""), None)
+        if tipo is None or regra is None:
+            raise ErroPrivacidade("Esta opção não existe no Telegram.")
+        await self.cliente(functions.account.SetPrivacyRequest(
+            key=tipo(), rules=[regra()]))
+
     def _avisar(self, texto, grave=False):
         self.barramento.publicar(ev.Aviso(self.conta.id, texto, grave))
 
@@ -300,6 +601,7 @@ class ProvedorTelegram(Provedor):
 
     async def _conectar(self):
         from telethon import events
+        from telethon.tl import types as tipos
         self._estado(ev.CONECTANDO)
         inicio = time.perf_counter()
         self.cliente = self._novo_cliente()
@@ -323,6 +625,17 @@ class ProvedorTelegram(Provedor):
             self._ao_ler, events.MessageRead(inbox=False))
         self.cliente.add_event_handler(self._ao_acao_no_chat,
                                        events.ChatAction())
+        self.cliente.add_event_handler(self._ao_mensagens_apagadas,
+                                       events.MessageDeleted())
+        self.cliente.add_event_handler(
+            self._ao_conteudo_lido,
+            events.Raw((tipos.UpdateReadMessagesContents,
+                        tipos.UpdateChannelReadMessagesContents)))
+        self.cliente.add_event_handler(self._ao_usuario, events.UserUpdate())
+        self.cliente.add_event_handler(
+            self._ao_reacoes, events.Raw(tipos.UpdateMessageReactions))
+        self.cliente.add_event_handler(
+            self._ao_historia, events.Raw(tipos.UpdateStory))
         self._estado(ev.CONECTADA)
         self._pronto.set()
         await self._atualizar_conversas()
@@ -395,22 +708,602 @@ class ProvedorTelegram(Provedor):
     async def _atualizar_conversas(self):
         inicio = time.perf_counter()
         lista = []
-        async for d in self.cliente.iter_dialogs(limit=LIMITE_CONVERSAS,
-                                                 archived=False):
-            cid = str(d.id)
-            self._entidades[cid] = d.input_entity
-            c = m.Conversa(
-                conta_id=self.conta.id, id=cid, nome=d.name or "Sem nome",
-                servico=self.servico, tipo=tipo_da_conversa(d),
-                nao_lidas=d.unread_count or 0,
-                data=d.date.timestamp() if d.date else 0.0,
-                lidas_ate=getattr(d.dialog, "read_outbox_max_id", 0) or 0)
-            self._conversas[cid] = c
-            lista.append(c)
+        # O Telegram so devolve a pasta principal (0) se nao se pede a
+        # pasta de arquivadas (1): sao duas buscas.
+        for pasta in (0, 1):
+            async for d in self.cliente.iter_dialogs(
+                    limit=LIMITE_CONVERSAS, folder=pasta):
+                cid = str(d.id)
+                self._entidades[cid] = d.input_entity
+                c = m.Conversa(
+                    conta_id=self.conta.id, id=cid,
+                    nome=d.name or "Sem nome",
+                    servico=self.servico, tipo=tipo_da_conversa(d),
+                    nao_lidas=d.unread_count or 0,
+                    data=d.date.timestamp() if d.date else 0.0,
+                    lidas_ate=getattr(d.dialog, "read_outbox_max_id", 0) or 0,
+                    arquivada=pasta == 1,
+                    fixada=bool(getattr(d, "pinned", False)),
+                    silenciada_ate=silencio_do_dialogo(d),
+                    somente_leitura=somente_leitura_do_telegram(
+                        getattr(d, "entity", None)))
+                self._conversas[cid] = c
+                lista.append(c)
         self.banco.salvar_conversas(lista)
         log.info("conversas: %d em %.2fs", len(lista),
                  time.perf_counter() - inicio)
+        lista += [c for c in self._conversas.values() if c.tipo == "status"]
         self.barramento.publicar(ev.ConversasAtualizadas(self.conta.id, lista))
+        await self._atualizar_historias()
+
+    def fixar_conversa(self, conversa_id, fixar):
+        """Fixa a conversa no topo (ou tira a fixacao) na conta."""
+        entidade = self._entidades.get(conversa_id)
+        if entidade is None:
+            return False
+        from telethon.tl.functions.messages import ToggleDialogPinRequest
+        self._agendar(self.cliente(ToggleDialogPinRequest(
+            peer=entidade, pinned=bool(fixar))))
+        return True
+
+    def silenciar_conversa(self, conversa_id, silenciar, segundos=0):
+        """Silencia a conversa por `segundos` (0 = para sempre) ou reativa."""
+        entidade = self._entidades.get(conversa_id)
+        if entidade is None:
+            return False
+        from telethon.tl.functions.account import UpdateNotifySettingsRequest
+        from telethon.tl.types import InputNotifyPeer, InputPeerNotifySettings
+        ate = 0
+        if silenciar:
+            ate = int(time.time() + segundos) if segundos else 2 ** 31 - 1
+        self._agendar(self.cliente(UpdateNotifySettingsRequest(
+            peer=InputNotifyPeer(peer=entidade),
+            settings=InputPeerNotifySettings(mute_until=ate))))
+        return True
+
+    def arquivar_conversa(self, conversa_id, arquivar):
+        """Move a conversa para a pasta Arquivadas (ou de volta) na conta."""
+        entidade = self._entidades.get(conversa_id)
+        if entidade is None:
+            return False
+        self._agendar(self.cliente.edit_folder(entidade, 1 if arquivar else 0))
+        return True
+
+    # ----------------------------------------- detalhes da conversa
+    def _sincrono(self, corotina, tempo=20):
+        futuro = self._agendar(corotina)
+        if futuro is None:
+            return None
+        try:
+            return futuro.result(tempo)
+        except Exception:
+            log.info("consulta ao Telegram sem resposta")
+            return None
+
+    def dados_do_contato(self, conversa_id):
+        async def ler():
+            ent = await self.cliente.get_entity(int(conversa_id))
+            dados = {}
+            if getattr(ent, "phone", None):
+                dados["telefone"] = "+" + ent.phone.lstrip("+")
+            if getattr(ent, "username", None):
+                dados["usuario"] = "@" + ent.username
+            return dados
+        return self._sincrono(ler()) or {}
+
+    def detalhes_do_grupo(self, conversa_id):
+        async def ler():
+            from telethon.tl import functions, types as T
+            ent = await self.cliente.get_entity(int(conversa_id))
+            gente = []
+            async for u in self.cliente.iter_participants(ent, limit=500):
+                papel = type(getattr(u, "participant", None)).__name__
+                gente.append({
+                    "id": str(u.id), "nome": nome_de(u),
+                    "telefone": ("+" + u.phone) if getattr(u, "phone", None)
+                    else "", "usuario": ("@" + u.username)
+                    if getattr(u, "username", None) else "",
+                    "admin": "Admin" in papel or "Creator" in papel,
+                    "dono": "Creator" in papel, "eu": bool(
+                        getattr(u, "is_self", False))})
+            gente.sort(key=lambda x: (not x["dono"], not x["admin"],
+                                      x["nome"].lower()))
+            sobre = ""
+            try:
+                if isinstance(ent, T.Channel):
+                    cheio = await self.cliente(
+                        functions.channels.GetFullChannelRequest(ent))
+                else:
+                    cheio = await self.cliente(
+                        functions.messages.GetFullChatRequest(ent.id))
+                sobre = cheio.full_chat.about or ""
+            except Exception:
+                pass
+            direitos = getattr(ent, "admin_rights", None)
+            return {
+                "nome": nome_de(ent), "descricao": sobre, "dono": "",
+                "criado_em": ent.date.timestamp() if getattr(
+                    ent, "date", None) else 0.0,
+                "anuncio": bool(getattr(getattr(
+                    ent, "default_banned_rights", None), "send_messages",
+                    False)),
+                "trancado": bool(getattr(getattr(
+                    ent, "default_banned_rights", None), "change_info",
+                    False)), "comunidade": False,
+                "da_comunidade": False,
+                "sou_admin": bool(getattr(ent, "creator", False) or direitos),
+                "participantes": gente}
+        return self._sincrono(ler(), 40)
+
+    def previa_do_convite(self, msg, acao):
+        return self._sincrono(self._previa(acao), 25) or {
+            "erro": "O Telegram não respondeu."}
+
+    async def _previa(self, acao):
+        from telethon.tl import functions, types as T
+        try:
+            if acao.get("modo") == "convite":
+                r = await self.cliente(functions.messages.CheckChatInviteRequest(
+                    acao["codigo"]))
+                if isinstance(r, T.ChatInviteAlready):
+                    return {"nome": nome_de(r.chat), "membros": 0,
+                            "descricao": "", "ja_participa": True}
+                return {"nome": r.title,
+                        "membros": int(r.participants_count or 0),
+                        "descricao": getattr(r, "about", "") or "",
+                        "ja_participa": False}
+            ent = await self.cliente.get_entity(acao["usuario"])
+            if isinstance(ent, T.User):
+                return {"erro": "Este endereço é de uma pessoa ou de um bot, "
+                                "não de um grupo ou canal."}
+            return {"nome": nome_de(ent), "membros": int(
+                getattr(ent, "participants_count", 0) or 0), "descricao": "",
+                "ja_participa": bool(not getattr(ent, "left", True))}
+        except Exception as e:
+            log.info("prévia do convite falhou: %s", type(e).__name__)
+            return {"erro": "O convite não vale mais ou foi cancelado."}
+
+    def entrar_no_grupo(self, msg, acao):
+        return self._sincrono(self._entrar(acao), 30) or (
+            False, "O Telegram não respondeu.")
+
+    async def _entrar(self, acao):
+        from telethon import errors
+        from telethon.tl import functions
+        try:
+            if acao.get("modo") == "convite":
+                await self.cliente(functions.messages.ImportChatInviteRequest(
+                    acao["codigo"]))
+            else:
+                ent = await self.cliente.get_entity(acao["usuario"])
+                await self.cliente(functions.channels.JoinChannelRequest(ent))
+        except errors.InviteRequestSentError:
+            return True, ("O pedido para entrar foi enviado. Um "
+                          "administrador precisa aprovar.")
+        except errors.UserAlreadyParticipantError:
+            return False, "Você já está neste grupo ou canal."
+        except Exception as e:
+            log.warning("entrar falhou: %s", type(e).__name__)
+            return False, ("O Telegram não deixou entrar (%s)." %
+                           type(e).__name__)
+        self._agendar(self._atualizar_conversas())
+        return True, "Você entrou."
+
+    def administrar_grupo(self, conversa_id, acao, valor=None):
+        resposta = self._sincrono(
+            self._administrar(conversa_id, acao, valor), 45)
+        return resposta or (False, "O Telegram não respondeu.")
+
+    async def _administrar(self, cid, acao, valor):
+        from telethon.tl import functions, types as T
+        try:
+            ent = await self.cliente.get_entity(int(cid))
+            peer = await self.cliente.get_input_entity(ent)
+            canal = isinstance(ent, T.Channel)
+            if acao == "nome":
+                if canal:
+                    await self.cliente(functions.channels.EditTitleRequest(
+                        ent, valor))
+                else:
+                    await self.cliente(
+                        functions.messages.EditChatTitleRequest(
+                            ent.id, valor))
+                return True, "Nome do grupo mudado."
+            if acao == "descricao":
+                await self.cliente(functions.messages.EditChatAboutRequest(
+                    peer, valor))
+                return True, "Descrição do grupo mudada."
+            if acao in ("anuncio", "trancado"):
+                atuais = getattr(ent, "default_banned_rights", None)
+                flags = {k: v for k, v in (atuais.to_dict().items()
+                                           if atuais else [])
+                         if isinstance(v, bool)}
+                flags["send_messages" if acao == "anuncio"
+                      else "change_info"] = bool(valor)
+                await self.cliente(
+                    functions.messages.EditChatDefaultBannedRightsRequest(
+                        peer, T.ChatBannedRights(until_date=None, **flags)))
+                if acao == "anuncio":
+                    return True, ("Agora só administradores enviam "
+                                  "mensagens." if valor else
+                                  "Agora todos enviam mensagens.")
+                return True, ("Agora só administradores editam o grupo."
+                              if valor else "Agora todos editam o grupo.")
+            if acao == "adicionar":
+                texto = str(valor).strip()
+                digitos = "".join(c for c in texto if c.isdigit())
+                alvo = texto if texto.startswith("@") else (
+                    "+" + digitos if digitos else "")
+                if not alvo:
+                    return False, "Digite @usuário ou o telefone com país."
+                usuario = await self.cliente.get_entity(alvo)
+                if canal:
+                    await self.cliente(functions.channels.InviteToChannelRequest(
+                        ent, [usuario]))
+                else:
+                    await self.cliente(functions.messages.AddChatUserRequest(
+                        ent.id, usuario, fwd_limit=50))
+                return True, "Participante adicionado."
+            if acao in ("remover", "promover", "rebaixar"):
+                usuario = await self.cliente.get_entity(int(valor))
+                if acao == "remover":
+                    await self.cliente.kick_participant(ent, usuario)
+                    return True, "Participante removido."
+                if acao == "promover":
+                    await self.cliente.edit_admin(
+                        ent, usuario, is_admin=True, change_info=True,
+                        delete_messages=True, ban_users=True,
+                        invite_users=True, pin_messages=True)
+                    return True, "Agora é administrador."
+                await self.cliente.edit_admin(ent, usuario, is_admin=False)
+                return True, "Deixou de ser administrador."
+            if acao in ("link", "revogar_link"):
+                convite = await self.cliente(
+                    functions.messages.ExportChatInviteRequest(
+                        peer, legacy_revoke_permanent=(
+                            True if acao == "revogar_link" else None)))
+                return True, convite.link
+            if acao == "sair":
+                await self.cliente.delete_dialog(ent)
+                return True, "Você saiu do grupo."
+        except Exception as e:
+            log.warning("administrar grupo (%s) falhou: %s", acao,
+                        type(e).__name__)
+            return False, "O Telegram não aceitou (%s)." % type(e).__name__
+        return False, "Ação desconhecida."
+
+    def detalhes_do_canal(self, conversa_id):
+        async def ler():
+            from telethon.tl import functions
+            ent = await self.cliente.get_entity(int(conversa_id))
+            cheio = await self.cliente(
+                functions.channels.GetFullChannelRequest(ent))
+            direitos = getattr(ent, "admin_rights", None)
+            usuario = getattr(ent, "username", None)
+            return {
+                "nome": nome_de(ent), "descricao": cheio.full_chat.about or "",
+                "seguidores": int(cheio.full_chat.participants_count or 0),
+                "verificado": bool(getattr(ent, "verified", False)),
+                "silenciado": False, "papel": (
+                    "dono" if getattr(ent, "creator", False) else
+                    "administrador" if direitos else "seguidor"),
+                "criado_em": ent.date.timestamp() if getattr(
+                    ent, "date", None) else 0.0,
+                "link": ("https://t.me/" + usuario) if usuario else "",
+                "sou_admin": bool(getattr(ent, "creator", False) or direitos)}
+        return self._sincrono(ler(), 30)
+
+    JANELA_EDICAO = 48 * 3600     # o Telegram deixa editar por 48 horas
+
+    def editar_mensagem(self, msg, texto):
+        self._agendar(self._editar(msg, texto))
+
+    async def _editar(self, msg, texto):
+        try:
+            ent = await self._entidade(msg.conversa_id)
+            await self.cliente.edit_message(ent, int(msg.id), texto)
+        except Exception as e:
+            log.warning("edição falhou: %s", type(e).__name__)
+            self._avisar("Não consegui editar a mensagem (%s)." %
+                         type(e).__name__, False)
+            return
+        x = self.banco.mensagem(self.conta.id, msg.conversa_id, msg.id)
+        if x is None:
+            return
+        x.texto = texto
+        m.atualizar_extras(x, editada=True)
+        self.banco.salvar_mensagens([x])
+        self.barramento.publicar(ev.MensagemAtualizada(
+            self.conta.id, msg.conversa_id, x, "editada"))
+
+    # ----------------------------------------------------------- historias
+    async def _atualizar_historias(self):
+        """Busca as historias de quem voce segue e as guarda como mensagens
+        da "conversa" de cada pessoa; as que sumiram saem. Nunca levanta."""
+        try:
+            await self._buscar_historias()
+        except Exception as e:
+            log.info("historias do Telegram indisponiveis (%s)",
+                     type(e).__name__)
+
+    async def _buscar_historias(self):
+        from telethon import utils
+        from telethon.tl import functions, types as tipos
+        pares, proximo, estado = [], None, None
+        for _ in range(5):
+            r = await self.cliente(functions.stories.GetAllStoriesRequest(
+                next=proximo, state=estado))
+            if not hasattr(r, "peer_stories"):
+                return                      # nada novo, ou sem suporte
+            usuarios = {u.id: u for u in getattr(r, "users", [])}
+            canais = {c.id: c for c in getattr(r, "chats", [])}
+            pares += [(ps, usuarios, canais) for ps in r.peer_stories]
+            if not getattr(r, "has_more", False):
+                break
+            proximo, estado = True, r.state
+        eu = None
+        atuais, novas = {}, []
+        for ps, usuarios, canais in pares:
+            pid = utils.get_peer_id(ps.peer)
+            ent = usuarios.get(getattr(ps.peer, "user_id", None)) or \
+                canais.get(getattr(ps.peer, "channel_id", None))
+            meu = bool(getattr(ent, "is_self", False) or
+                       getattr(ent, "self", False))
+            nome = "Você" if meu else (nome_de(ent) or str(pid))
+            itens = [s for s in ps.stories if isinstance(s, tipos.StoryItem)]
+            if not itens:
+                continue
+            sid = PREFIXO_STATUS + str(pid)
+            lidas = getattr(ps, "max_read_id", 0) or 0
+            msgs = [mensagem_de_historia(self.conta.id, sid, s, nome, pid)
+                    for s in itens]
+            for x in msgs:
+                x.minha = x.minha or meu
+            conv = m.Conversa(
+                conta_id=self.conta.id, id=sid,
+                nome="Meu status" if meu else "Histórias de " + nome,
+                servico=self.servico, tipo="status",
+                nao_lidas=0 if meu else len(
+                    [s for s in itens if s.id > lidas]),
+                data=max(x.data for x in msgs))
+            try:
+                self._entidades[str(pid)] = await \
+                    self.cliente.get_input_entity(ps.peer)
+            except Exception:
+                pass
+            self.banco.salvar_conversas([conv])
+            self.banco.salvar_mensagens(msgs)
+            atuais[sid] = {x.id for x in msgs}
+            novas.append(conv)
+            self._conversas[sid] = conv
+        # o que sumiu (expirou ou foi apagado) sai do computador tambem
+        mudou = bool(novas)
+        for sid in [c.id for c in list(self._conversas.values())
+                    if c.tipo == "status"]:
+            if sid not in atuais:
+                self.banco.apagar_conversa(self.conta.id, sid, 0)
+                self._conversas.pop(sid, None)
+                mudou = True
+                continue
+            velhas = [(self.conta.id, sid, x.id) for x in
+                      self.banco.mensagens(self.conta.id, sid, 10 ** 4)
+                      if x.id not in atuais[sid]]
+            if velhas:
+                self.banco.apagar_mensagens(velhas)
+        self._historias_em = time.time()
+        if mudou:
+            self.barramento.publicar(ev.ConversasAtualizadas(
+                self.conta.id, sorted(self._conversas.values(),
+                                      key=lambda c: -c.data)))
+
+    PODE_PUBLICAR_STATUS = True
+
+    def publicar_status(self, texto, anexo=None, publico="contatos"):
+        """Publica uma historia (foto ou video, com a legenda). `publico`:
+        "contatos" ou "todos"."""
+        if anexo is None:
+            self._avisar("No Telegram a história precisa de foto ou vídeo.",
+                         False)
+            return
+        self._agendar(self._publicar_historia(texto, anexo, publico))
+
+    async def _publicar_historia(self, texto, anexo, publico):
+        from telethon.tl import functions, types as tipos
+        try:
+            arquivo = await self.cliente.upload_file(anexo.caminho)
+            if anexo.tipo == m.FOTO:
+                media = tipos.InputMediaUploadedPhoto(file=arquivo)
+            else:
+                media = tipos.InputMediaUploadedDocument(
+                    file=arquivo, mime_type=anexo.mime or "video/mp4",
+                    attributes=[tipos.DocumentAttributeVideo(
+                        duration=anexo.segundos, w=anexo.largura or 720,
+                        h=anexo.altura or 1280, supports_streaming=True)])
+            regra = tipos.InputPrivacyValueAllowAll() if publico == "todos" \
+                else tipos.InputPrivacyValueAllowContacts()
+            await self.cliente(functions.stories.SendStoryRequest(
+                peer=tipos.InputPeerSelf(), media=media,
+                privacy_rules=[regra], caption=texto or None,
+                random_id=int.from_bytes(os.urandom(8), "big", signed=True),
+                period=86400))
+        except Exception as e:
+            nome = type(e).__name__
+            log.warning("publicar historia falhou: %s", nome)
+            premium = "premium" in str(e).lower()
+            self._avisar("Não consegui publicar a história: %s." % (
+                "o Telegram pede uma conta Premium para isso" if premium
+                else _motivo(e)), False)
+            return
+        log.info("historia publicada")
+        self._avisar("História publicada.", False)
+        await self._atualizar_historias()
+
+    async def _ao_historia(self, evento):
+        """Uma historia nova (ou mudou): atualiza, no maximo a cada poucos
+        segundos."""
+        if time.time() - self._historias_em >= ATUALIZAR_HISTORIAS_A_CADA:
+            await self._atualizar_historias()
+
+    async def _midia_da_historia(self, msg):
+        """A midia da historia, no formato que o download espera."""
+        import types as tipos_py
+        from telethon.tl import functions
+        ent = await self._entidade(msg.conversa_id[len(PREFIXO_STATUS):])
+        r = await self.cliente(functions.stories.GetStoriesByIDRequest(
+            peer=ent, id=[int(msg.id)]))
+        itens = [s for s in getattr(r, "stories", []) if hasattr(s, "media")]
+        if not itens:
+            return None
+        _, _, tamanho, mime = dados_da_midia_de_historia(itens[0].media)
+        return tipos_py.SimpleNamespace(
+            media=itens[0].media,
+            file=tipos_py.SimpleNamespace(mime_type=mime, size=tamanho))
+
+    async def _ver_historias(self, sid):
+        """Marca as historias da pessoa como vistas (ela fica sabendo)."""
+        from telethon.tl import functions
+        ent = await self._entidade(sid[len(PREFIXO_STATUS):])
+        ids = [int(x.id) for x in self.banco.mensagens(
+            self.conta.id, sid, 10 ** 4) if not x.minha]
+        if ids:
+            await self.cliente(functions.stories.ReadStoriesRequest(
+                peer=ent, max_id=max(ids)))
+        conv = self._conversas.get(sid)
+        if conv is not None:
+            conv.nao_lidas = 0
+        self.banco.atualizar_conversa(self.conta.id, sid, nao_lidas=0)
+
+    def responder_status(self, mensagem, texto):
+        """Resposta em particular a uma historia: vai para a conversa com
+        quem a publicou, citando a historia."""
+        if mensagem.minha:
+            return
+        self._agendar(self._responder_historia(mensagem, texto))
+
+    async def _responder_historia(self, msg, texto):
+        from telethon.tl import functions, types as tipos
+        try:
+            ent = await self._entidade(msg.conversa_id[len(PREFIXO_STATUS):])
+            await self.cliente(functions.messages.SendMessageRequest(
+                peer=ent, message=texto,
+                random_id=int.from_bytes(os.urandom(8), "big", signed=True),
+                reply_to=tipos.InputReplyToStory(peer=ent,
+                                                 story_id=int(msg.id))))
+        except Exception as e:
+            log.warning("resposta a historia falhou: %s", type(e).__name__)
+            self.barramento.publicar(ev.EnvioFalhou(
+                self.conta.id, msg.conversa_id, texto, _motivo(e),
+                devolver_texto=True))
+
+    PODE_REAGIR = True
+
+    def reagir(self, mensagem, emoji):
+        self._agendar(self._reagir(mensagem, emoji))
+
+    async def _reagir(self, msg, emoji):
+        from telethon import errors
+        from telethon.tl import functions, types as tipos
+        try:
+            if msg.conversa_id.startswith(PREFIXO_STATUS):
+                ent = await self._entidade(
+                    msg.conversa_id[len(PREFIXO_STATUS):])
+                await self.cliente(functions.stories.SendReactionRequest(
+                    peer=ent, story_id=int(msg.id),
+                    reaction=tipos.ReactionEmoji(emoticon=emoji)
+                    if emoji else tipos.ReactionEmpty()))
+            else:
+                ent = await self._entidade(msg.conversa_id)
+                await self.cliente(functions.messages.SendReactionRequest(
+                    peer=ent, msg_id=int(msg.id),
+                    reaction=[tipos.ReactionEmoji(emoticon=emoji)]
+                    if emoji else []))
+        except errors.ReactionInvalidError:
+            self._avisar("O Telegram não aceita este emoji como reação "
+                         "nesta conversa.", False)
+            return
+        except Exception as e:
+            log.warning("reação falhou: %s", type(e).__name__)
+            self._avisar("Não consegui enviar a reação (%s)." %
+                         type(e).__name__, False)
+            return
+        x = self.banco.mensagem(self.conta.id, msg.conversa_id, msg.id)
+        if x is None:
+            return
+        reacoes = [y for y in m.extras_de(x)["reacoes"]
+                   if not y.get("minha")]
+        if emoji:
+            reacoes.append({"id": "eu", "quem": "Você", "emoji": emoji,
+                            "minha": True})
+        m.atualizar_extras(x, reacoes=reacoes)
+        self.banco.salvar_mensagens([x])
+        self.barramento.publicar(ev.MensagemAtualizada(
+            self.conta.id, msg.conversa_id, x, "reacao", "Você", emoji))
+
+    async def _ao_reacoes(self, evento):
+        """Reacoes de outras pessoas (e a minha, feita em outro aparelho)."""
+        try:
+            cid = self._id_do_peer(evento.peer)
+            x = self.banco.mensagem(self.conta.id, cid, str(evento.msg_id))
+            if x is None:
+                return
+            antigas = {(r.get("id"), r.get("emoji"))
+                       for r in m.extras_de(x)["reacoes"]}
+            reacoes = []
+            recentes = getattr(evento.reactions, "recent_reactions", None) \
+                or []
+            for r in recentes:
+                emoji = getattr(r.reaction, "emoticon", "")
+                if not emoji:
+                    continue
+                if r.my:
+                    reacoes.append({"id": "eu", "quem": "Você",
+                                    "emoji": emoji, "minha": True})
+                    continue
+                pid = getattr(r.peer_id, "user_id", 0)
+                try:
+                    quem = nome_de(await self.cliente.get_entity(r.peer_id))
+                except Exception:
+                    quem = ""
+                reacoes.append({"id": str(pid), "quem": quem or "alguém",
+                                "emoji": emoji})
+            if not recentes:
+                # grupos grandes: o Telegram so manda a contagem
+                for r in getattr(evento.reactions, "results", []):
+                    emoji = getattr(r.reaction, "emoticon", "")
+                    if emoji:
+                        reacoes.append({"id": "n" + emoji, "emoji": emoji,
+                                        "quem": "%d pessoa%s" % (
+                                            r.count,
+                                            "" if r.count == 1 else "s")})
+            novas = {(r.get("id"), r.get("emoji")) for r in reacoes}
+            if novas == antigas:
+                return
+            m.atualizar_extras(x, reacoes=reacoes)
+            self.banco.salvar_mensagens([x])
+            nova = [r for r in reacoes
+                    if (r.get("id"), r.get("emoji")) not in antigas]
+            self.barramento.publicar(ev.MensagemAtualizada(
+                self.conta.id, cid, x, "reacao",
+                nova[0]["quem"] if nova else "",
+                nova[0]["emoji"] if nova else ""))
+        except Exception:
+            log.exception("erro ao tratar reações")
+
+    @staticmethod
+    def _id_do_peer(peer):
+        from telethon import utils
+        return str(utils.get_peer_id(peer))
+
+    SAI_DE_GRUPO = True
+
+    def sair_do_grupo(self, conversa_id):
+        """Sai do grupo (no Telegram, sair apaga tambem o historico da
+        conta)."""
+        entidade = self._entidades.get(conversa_id)
+        if entidade is None:
+            return False
+        self._agendar(self.cliente.delete_dialog(entidade))
+        return True
 
     async def _resolver_mencoes(self, mensagens):
         """Acha o id e o nome de quem foi mencionado por @usuario (com cache;
@@ -461,6 +1354,11 @@ class ProvedorTelegram(Provedor):
         self._agendar(self._carregar(conversa_id, limite))
 
     async def _carregar(self, conversa_id, limite):
+        if conversa_id.startswith(PREFIXO_STATUS):
+            self.barramento.publicar(ev.MensagensCarregadas(
+                self.conta.id, conversa_id,
+                self.banco.mensagens(self.conta.id, conversa_id, 10 ** 4)))
+            return
         ent = await self._entidade(conversa_id)
         conv = self._conversas.get(conversa_id)
         lidas_ate = conv.lidas_ate if conv else 0
@@ -486,8 +1384,11 @@ class ProvedorTelegram(Provedor):
         return futuro.result()
 
     async def _baixar(self, msg, base, progresso, cancelado):
-        ent = await self._entidade(msg.conversa_id)
-        original = await self.cliente.get_messages(ent, ids=int(msg.id))
+        if msg.conversa_id.startswith(PREFIXO_STATUS):
+            original = await self._midia_da_historia(msg)
+        else:
+            ent = await self._entidade(msg.conversa_id)
+            original = await self.cliente.get_messages(ent, ids=int(msg.id))
         if original is None or not getattr(original, "media", None):
             raise ErroMidia("O Telegram não tem mais a mídia desta mensagem.")
         arquivo = getattr(original, "file", None)
@@ -573,7 +1474,8 @@ class ProvedorTelegram(Provedor):
         try:
             ent = await self._entidade(conversa_id)
             enviada = await self.cliente.send_message(
-                ent, texto, reply_to=int(resposta_a) if resposta_a else None)
+                ent, texto, reply_to=int(resposta_a) if resposta_a else None,
+                link_preview=previa_links.LIGADAS["enviar"])
         except Exception as e:
             log.warning("envio falhou: %s", type(e).__name__)
             self.barramento.publicar(ev.EnvioFalhou(
@@ -602,9 +1504,20 @@ class ProvedorTelegram(Provedor):
                 extra = dict(attributes=[types.DocumentAttributeVideo(
                     duration=anexo.segundos, w=anexo.largura,
                     h=anexo.altura, supports_streaming=True)])
+            ultimo = [-1]
+
+            def andamento(feito, total):
+                pct = int(feito * 100 / total) if total else 0
+                if pct != ultimo[0] and pct < 100:
+                    ultimo[0] = pct
+                    self.barramento.publicar(ev.ProgressoEnvio(
+                        self.conta.id, conversa_id, pct))
             enviada = await self.cliente.send_file(
                 ent, anexo.caminho, caption=legenda or None,
-                force_document=anexo.tipo == m.DOCUMENTO, **extra)
+                force_document=anexo.tipo == m.DOCUMENTO,
+                progress_callback=andamento, **extra)
+            self.barramento.publicar(ev.ProgressoEnvio(
+                self.conta.id, conversa_id, 100))
         except Exception as e:
             log.warning("envio de %s falhou: %s", anexo.tipo,
                         type(e).__name__)
@@ -653,6 +1566,9 @@ class ProvedorTelegram(Provedor):
         self._agendar(self._marcar_lida(conversa_id))
 
     async def _marcar_lida(self, conversa_id):
+        if conversa_id.startswith(PREFIXO_STATUS):
+            await self._ver_historias(conversa_id)
+            return
         ent = await self._entidade(conversa_id)
         await self.cliente.send_read_acknowledge(ent)
         conv = self._conversas.get(conversa_id)
@@ -733,7 +1649,8 @@ class ProvedorTelegram(Provedor):
                     conta_id=self.conta.id, id=cid,
                     nome=nome_de(chat) or "Sem nome", servico=self.servico,
                     tipo="grupo" if evento.is_group else (
-                        "canal" if evento.is_channel else "privada"))
+                        "canal" if evento.is_channel else "privada"),
+                    somente_leitura=somente_leitura_do_telegram(chat))
                 self._conversas[cid] = conv
             if not getattr(msg, "out", False) and msg.sender is None:
                 await evento.get_sender()
@@ -750,6 +1667,99 @@ class ProvedorTelegram(Provedor):
             self.barramento.publicar(ev.MensagemNova(nova, conv))
         except Exception:
             log.exception("erro ao tratar mensagem recebida")
+
+    # ------------------------------------------------------------ presenca
+    def observar_presenca(self, conversa_id):
+        """Le o status atual da pessoa; as mudancas e o "digitando" chegam
+        pelos avisos do Telegram, que valem para todas as conversas."""
+        if conversa_id.startswith(PREFIXO_STATUS):
+            return
+        self._observada = conversa_id
+        self._agendar(self._ler_status(conversa_id))
+
+    def parar_presenca(self, conversa_id):
+        if self._observada == conversa_id:
+            self._observada = None
+
+    async def _ler_status(self, conversa_id):
+        from telethon.tl import types as tipos
+        try:
+            ent = await self.cliente.get_entity(int(conversa_id))
+        except Exception:
+            return
+        estado = getattr(ent, "status", None)
+        if isinstance(estado, tipos.UserStatusOnline):
+            p = ev.Presenca(self.conta.id, conversa_id, "online")
+        elif isinstance(estado, tipos.UserStatusOffline):
+            p = ev.Presenca(self.conta.id, conversa_id, "offline",
+                            quando=estado.was_online.timestamp())
+        elif isinstance(estado, tipos.UserStatusRecently):
+            p = ev.Presenca(self.conta.id, conversa_id, "offline",
+                            aprox="recentemente")
+        elif isinstance(estado, tipos.UserStatusLastWeek):
+            p = ev.Presenca(self.conta.id, conversa_id, "offline",
+                            aprox="na última semana")
+        elif isinstance(estado, tipos.UserStatusLastMonth):
+            p = ev.Presenca(self.conta.id, conversa_id, "offline",
+                            aprox="no último mês")
+        else:
+            return
+        self.barramento.publicar(p)
+
+    async def _ao_usuario(self, evento):
+        """Online, visto por ultimo e "digitando" de quem a conversa
+        observada e (ou de quem digita no grupo observado)."""
+        try:
+            observada = self._observada
+            if observada is None:
+                return
+            em_grupo = getattr(evento, "chat_id", None)
+            cid = str(em_grupo) if em_grupo else str(evento.user_id)
+            if cid != observada:
+                return
+            quem = ""
+            if em_grupo:
+                try:
+                    quem = nome_de(await self.cliente.get_entity(
+                        evento.user_id))
+                except Exception:
+                    quem = ""
+            if evento.typing:
+                estado = "digitando"
+            elif evento.recording:
+                estado = "gravando"
+            elif evento.uploading:
+                estado = "enviando"
+            elif evento.cancel:
+                estado = "parou"
+            elif em_grupo:
+                return
+            elif evento.online:
+                estado = "online"
+            elif evento.last_seen:
+                self.barramento.publicar(ev.Presenca(
+                    self.conta.id, cid, "offline",
+                    quando=evento.last_seen.timestamp()))
+                return
+            elif evento.recently:
+                self.barramento.publicar(ev.Presenca(
+                    self.conta.id, cid, "offline", aprox="recentemente"))
+                return
+            elif evento.within_weeks:
+                self.barramento.publicar(ev.Presenca(
+                    self.conta.id, cid, "offline",
+                    aprox="na última semana"))
+                return
+            elif evento.within_months:
+                self.barramento.publicar(ev.Presenca(
+                    self.conta.id, cid, "offline", aprox="no último mês"))
+                return
+            else:
+                return
+            self.barramento.publicar(ev.Presenca(
+                self.conta.id, cid, estado, quem=quem))
+        except Exception:
+            log.exception("erro ao tratar a presença")
 
     async def _ao_acao_no_chat(self, evento):
         """Mudanca no grupo ou canal; aqui so a troca de nome interessa."""
@@ -769,6 +1779,65 @@ class ProvedorTelegram(Provedor):
                                       key=lambda c: -c.data)))
         except Exception:
             log.exception("erro ao tratar mudança no chat")
+
+    async def _ao_mensagens_apagadas(self, evento):
+        """Mensagens apagadas em outro aparelho (ou por quem as enviou)."""
+        chat = getattr(evento, "chat_id", None)
+        conversa = str(chat) if chat else None
+        for x in self.banco.mensagens_por_id(
+                self.conta.id, evento.deleted_ids, conversa):
+            self.barramento.publicar(ev.MensagemApagadaNoCelular(
+                self.conta.id, x.conversa_id, x.id))
+
+    def apagar_mensagem(self, mensagem, para_todos=False):
+        """Apaga a mensagem no Telegram (para todos, ou so para mim onde o
+        Telegram deixa)."""
+        try:
+            ident = int(mensagem.id)
+        except ValueError:
+            return False
+        self._agendar(self._apagar_mensagem(mensagem, ident, para_todos))
+        return True
+
+    async def _apagar_mensagem(self, mensagem, ident, para_todos):
+        ent = await self._entidade(mensagem.conversa_id)
+        await self.cliente.delete_messages(ent, [ident], revoke=para_todos)
+
+    async def _ao_conteudo_lido(self, upd):
+        """Voz ou audio tocado em outro aparelho: passa a constar ouvido."""
+        from telethon import utils
+        from telethon.tl import types as T
+        ids = list(getattr(upd, "messages", []) or [])
+        conversa = None
+        if isinstance(upd, T.UpdateChannelReadMessagesContents):
+            conversa = str(utils.get_peer_id(T.PeerChannel(upd.channel_id)))
+        for x in self.banco.mensagens_por_id(self.conta.id, ids, conversa):
+            if x.minha or x.tipo not in (m.VOZ, m.AUDIO) or \
+                    m.extras_de(x)["ouvida"]:
+                continue
+            m.atualizar_extras(x, ouvida=True)
+            self.banco.salvar_mensagens([x])
+            self.barramento.publicar(ev.MensagemAtualizada(
+                self.conta.id, x.conversa_id, x, "ouvida"))
+
+    def marcar_ouvida(self, mensagem):
+        """A pessoa tocou esta voz ou audio recebido: avisa o Telegram."""
+        if not mensagem.minha:
+            self._agendar(self._enviar_ouvida(mensagem))
+
+    async def _enviar_ouvida(self, x):
+        from telethon.tl import functions, types as T
+        try:
+            ident = int(x.id)
+        except ValueError:
+            return
+        ent = await self._entidade(x.conversa_id)
+        if isinstance(ent, T.InputPeerChannel):
+            await self.cliente(functions.channels.ReadMessageContentsRequest(
+                channel=ent, id=[ident]))
+        else:
+            await self.cliente(functions.messages.ReadMessageContentsRequest(
+                id=[ident]))
 
     async def _ao_ler(self, evento):
         try:

@@ -90,7 +90,8 @@ partir dos experimentos, ainda a confirmar.
    avisar quando a gravação saturar (aconteceu no teste) e listar microfones
    pela WASAPI; microfones Bluetooth limitam a voz a 8 kHz.
 6. **Vídeo sem miniatura** e arquivos acima de 20 MB: ainda não avaliados.
-7. **Chamadas**: fora do escopo no WhatsApp. O neonize só avisa e recusa; uma
+7. **Chamadas**: fora do escopo no WhatsApp (desde 19/10 o TeleZapp ao
+   menos avisa e registra a chamada na conversa). O neonize só avisa e recusa; uma
    biblioteca separada (meowcaller) existe, mas é jovem e não está exposta
    ao Python. **No Telegram, em investigação (15/10/2026)**: o `py-tgcalls`
    3.0.0 (LGPL-3.0, sobre a NTgCalls, a mesma família de motor de chamada que
@@ -158,7 +159,7 @@ Todos os itens abaixo estão implementados (conferido no código em
 | Ideia | Viabilidade |
 |---|---|
 | IA multiprovedores (transcrição, descrição de imagem e vídeo, PDF acessível) | Viável |
-| Limpeza de conversas com filtros e total antes de confirmar | Viável depois da etapa 3 |
+| Limpeza de conversas com filtros e total antes de confirmar | Feita (17/10/2026): mídias baixadas ou mensagens, com registro (`limpas`) para não voltarem; só um novo pareamento zera |
 | Privacidade, editar perfil, bloquear e desbloquear | Viável nos dois serviços |
 | Enquetes | Viável nos dois |
 | Status: postar, curtir, responder | Viável no WhatsApp, com cuidado |
@@ -212,8 +213,8 @@ o som interno do computador, se fosse possível.
   O texto da caixa vira legenda.
 - **Mídia enviada** é copiada para o armazém da conversa (gravações
   temporárias são movidas) e registrada em `midias`: abre sem baixar.
-- **Pendências**: citar a mensagem respondida ao enviar mídia; progresso do
-  envio de arquivos grandes (hoje só "enviando"); escolher microfone e saída
+- **Pendências**: citar a mensagem respondida ao enviar mídia; ~~progresso do
+  envio de arquivos grandes~~ (feito em 19/10); escolher microfone e saída
   de som (hoje o padrão do Windows); cancelar um envio em andamento;
   enviar várias mídias de uma vez; miniatura de vídeo e de foto no
   WhatsApp. Nada disto foi verificado nos serviços reais, só com clientes
@@ -270,6 +271,234 @@ Decisão do responsável: seguir com as chamadas depois do experimento 9.
   silêncio; empacotamento com a NTgCalls (PyInstaller) e as dependências
   Go/C++ para a conferência de licenças; vídeo e grupos.
 
+## Versão 2026.10.18.0 (18/10/2026)
+
+O que entrou neste dia, com as decisões que não aparecem só no código. O texto
+para o usuário está em `telezapp/ajuda/novidades.html`; o técnico, em
+`CHANGELOG.md`. **Nada disto foi visto ainda no app real** (só testes
+automáticos): a lista do que falta testar fica na memória do projeto.
+
+- **Mensagens**: copiar por tipo de conteúdo; colar mídia (Control V) como
+  anexo que espera o Enter, com o texto da caixa de legenda (também em Nova
+  mensagem); editar mensagem (F2; 15 min no WhatsApp, 48 h no Telegram);
+  encaminhar por reenvio do conteúdo, sem o rótulo "Encaminhada" (decisão do
+  responsável); responder em particular a mensagem de grupo; contatos
+  recebidos viram botão "Iniciar conversa com" e o aviso "sem suporte" só
+  fica para o que não é reconhecido; botão "Entrar no grupo" para convites de
+  administrador e links (chat.whatsapp.com, t.me).
+- **Conversas**: modo de seleção (Control Espaço) com ações em massa; Delete
+  apaga; apagar grupo pergunta entre limpar, apagar da lista e sair do grupo;
+  salvar conteúdo em .zip; conversas somente leitura escondem a caixa e os
+  botões de envio; janela de detalhes (Control I) com mídias filtradas,
+  membros, grupos em comum e administração de grupo (WhatsApp e Telegram) e
+  de canal (WhatsApp).
+- **Sincronia com o WhatsApp**: aviso de conversa lida no celular
+  (`ChatMarkAsReadEv`). A marca de "ouvida" feita no celular com o TeleZapp
+  fechado **não chega**: o aviso é efêmero e não há outra fonte. Rejeitada a
+  aproximação "conversa lida = áudios ouvidos" (o responsável quer saber o
+  que realmente ouviu).
+- **Sons**: 18 eventos (16 em 18/10; a reação recebida e a menção ou resposta num grupo entraram em 19/10), cada um com som padrão, sem som ou arquivo na pasta
+  `sons` (dentro da pasta de dados, no backup). Eventos novos acompanham o
+  som do evento parecido enquanto não têm escolha própria.
+- **Backup e restauração**: .zip com senha opcional (AES-256 por `pyzipper`);
+  partes escolhidas; configurações valem na hora e o resto troca na próxima
+  abertura, guardando o anterior em `antes-da-restauracao`. Depuração e
+  exigência do código secreto nunca são restauradas por arquivo. As chaves de
+  IA nunca entram.
+- **Distribuição**: `ferramentas/publicar.py` monta zip, hash e notas;
+  Ajuda, Verificar atualizações só avisa. Instalar, portátil e atualizador
+  ficam para perto do lançamento (decisão do responsável). Aviso de software
+  experimental no README, no guia, em Sobre e nas notas da Release. Para
+  quem recebe um zip: apagar a pasta antiga antes de extrair (instrução dada
+  pelo responsável, não automática).
+- **Inteligência artificial**: provedores Gemini, OpenAI, Claude, Groq e
+  OpenRouter (`nucleo/ia`), desenho dos adaptadores como no WinZapp
+  (GPL-3). Por tarefa (voz/áudio, imagem e figurinha, vídeo, PDF) o
+  responsável organiza a ordem de tentativa; se um falha, vai ao próximo.
+  Chaves cifradas pelo DPAPI do Windows, fora de backup e log; consentimento
+  por provedor antes do primeiro envio. Modelos padrão vieram do catálogo do
+  WinZapp (Gemini 3.8 Flash entra no gratuito; Gemini tem modo automático com
+  alternativos). Aprendizados: a Groq (Cloudflare) devolve 403, erro 1010, ao
+  User-Agent do Python, e a OpenAI devolve 429 `insufficient_quota` sem
+  saldo; ambos pareciam "chave recusada". O Enter em mídia é configurável
+  (abrir, baixar ou usar a IA). Fica para depois: arquivos acima de 14 MB
+  (fora vídeo) e perguntas de acompanhamento.
+  2026-10-19: vídeo fora do Gemini vai por quadros (uma grade de 4, 9 ou 12
+  quadros com a hora, em uma imagem só, via OpenCV) e a fala é transcrita a
+  parte; modo automático escolhido conversa por conversa (voz/áudio e
+  fotos/figurinhas; vídeo e PDF nunca automáticos), por ser uma chave paga e
+  haver grupos barulhentos. Ainda não visto no app real nem no exe (conferir
+  se o PyInstaller leva o cv2).
+- **Chamadas do WhatsApp (pesquisa, em espera)**: o neonize só tem a
+  sinalização. O WhatsApp Web ganhou chamadas (jul/2026) e o WA-JS aciona a
+  pilha de VoIP dele; o WinZapp já faz chamadas assim (WPPConnect + Chrome,
+  áudio ligado ao Python). Plano proposto, não iniciado: experimento (Playwright
+  + Edge + WA-JS, pareamento por código como segundo aparelho, medir tempo e
+  memória), opcional e desligado por padrão, sem trocar o acesso atual às
+  mensagens pelo WPPConnect. O responsável deixou o assunto de lado.
+
+## Versão 2026.10.19.1 (19/10/2026): instalar e portátil
+
+- **Como o NVDA, sem administrador**: o executável de uma cópia portátil
+  oferece "Instalar o TeleZapp neste computador..." (Menu); a instalada
+  oferece "Criar cópia portátil..." e "Desinstalar". Instala em
+  `%LOCALAPPDATA%\Programs\TeleZapp`, com atalhos (menu Iniciar, área de
+  trabalho opcional) e entrada em Aplicativos instalados. Decidido com o
+  responsável: por usuário (sem UAC), dados portáteis na pasta `dados` ao
+  lado do executável.
+- **Dados**: a instalada usa `%APPDATA%\TeleZapp`. A portátil usa `dados` se
+  essa pasta existir; sem ela (o zip das Releases), continua em
+  `%APPDATA%`. Criar a cópia portátil pode levar os dados (inclui as
+  sessões, com aviso); instalar a partir de uma portátil com `dados` pode
+  levá-los para o computador, guardando os de antes.
+- **Download em um arquivo só**: o que as pessoas baixam é o `TeleZapp.exe`
+  das Releases (instalador de um arquivo, com o programa embutido): abre
+  direto nos botões Instalar, Criar cópia portátil, Guia de uso e Fechar,
+  sem "usar sem instalar" (a portátil cobre esse caso). O `TeleZapp.zip`
+  (nome fixo) continua nas Releases para o atualizador e para quem quiser
+  extrair à mão. Sem assinatura, o SmartScreen e alguns antivírus podem
+  avisar; UPX desligado para não piorar. MSI descartado: não comporta a tela
+  de botões. Pendente: assinar os dois executáveis.
+- **Janela da atualização e o GitHub**: a janela abre com o texto (versão
+  oferecida e novidades de todas as versões desde a que está em uso)
+  focado; Tab leva a Sim e Não. Para uma versão instalada hoje receber o
+  aviso basta publicar uma Release com `ferramentas/publicar.py`: tag
+  `ano.mes.dia.digito` maior que a em uso, `TeleZapp.zip` e
+  `TeleZapp.zip.sha256` anexados e as notas com `## Novidades da versão X`
+  (o `publicar.py` já faz tudo isso, a partir de `novidades.html`). Sem o
+  texto de novidades no `novidades.html` a Release sai vazia.
+- **Desinstalar e backup**: antes de desinstalar (menu ou Aplicativos
+  instalados) o programa pergunta se quer o backup de sempre; se o backup
+  falhar ou a pessoa desistir de escolher o arquivo, nada é desinstalado.
+- **Tela de boas-vindas**: ao abrir o executável de uma cópia não
+  instalada, sem `dados` e sem `sem-boas-vindas.txt`, aparece um texto
+  curto sobre o programa e os botões Instalar, Criar cópia portátil, Guia de
+  uso, Usar sem instalar (com opção de não mostrar de novo) e Fechar. O
+  botão "Usar sem instalar" foi acrescentado ao pedido, senão o zip das
+  Releases não abriria o programa.
+- **Atualização pelo programa**: Ajuda, Verificar atualizações oferece
+  "Baixar e instalar a atualização" quando a Release tem o zip e o
+  `.sha256`. Baixa só de github.com por https, confere o SHA-256, extrai ao
+  lado da pasta do programa (`.atualizacao`) e, depois de fechar, um `.bat`
+  troca a pasta (a antiga vira `.antiga` até a nova abrir), mantendo `dados`.
+  Vale para instalada e portátil. A verificação automática ao abrir só
+  avisa. Para as versões antigas (sem este código) a troca continua manual.
+- **Não feito**: assinatura do executável, instalar para todos os
+  usuários, restauro automático se a versão nova não abrir. **Não testado
+  no app real**: instalar, desinstalar, criar portátil e atualizar com o
+  executável gerado e uma Release de verdade (o script de troca foi testado
+  com pastas de mentira).
+
+## Versão 2026.10.19.0 (19/10/2026)
+
+O que entrou neste dia, com as decisões. Texto para o usuário em
+`telezapp/ajuda/novidades.html`; técnico em `CHANGELOG.md`. **Visto pelo
+responsável no app real** (19/10): leitura única do nome na lista de
+conversas, busca das configurações (seta para baixo), presença no título,
+transcrição e descrição automáticas e reações. **O resto só passou nos testes
+automáticos** e entra na lista de testes pendentes. O commit do dia é feito
+no fechamento, por assunto.
+
+- **Leitor de tela**: a lista de conversas virou `ListCtrl` de uma coluna
+  (como as categorias das configurações), por causa da leitura dupla do NVDA;
+  a busca das configurações leva ao primeiro resultado com a seta para baixo;
+  a fala das mensagens novas se separou em três opções independentes do som
+  (conversa aberta, outras conversas e fora do TeleZapp; quem tinha a antiga
+  ligada continua ouvindo tudo); o texto da IA é falado inteiro ao ficar
+  pronto e a linha da mensagem traz a descrição inteira (transcrição até 1000
+  letras, ajustável); a porcentagem falada do download é configurável (só o
+  Telegram informa o avanço). A documentação passou a falar em "leitores de
+  tela"; a fala direta continua sendo do NVDA e isso está dito.
+- **IA**: descrição de vídeo por quadros (uma grade de 4, 9 ou 12 quadros com
+  a hora, via OpenCV) para qualquer provedor que veja imagens, com a fala
+  transcrita à parte; o Gemini segue recebendo o vídeo inteiro até 14 MB.
+  Transcrição e descrição automáticas ao receber, **ligadas conversa por
+  conversa** (voz/áudio e fotos/figurinhas; vídeo e PDF nunca), sem janelas e
+  sem pedir consentimento no automático (o consentimento do provedor é dado
+  uma vez, pelo menu da mensagem).
+- **Pareamento do WhatsApp**: janela com dois botões (telefone, com o número
+  em formato internacional, e QR Code já em tela cheia). Os erros "código não
+  aceito" e "HMAC do pareamento" vêm de dentro do whatsmeow (a janela e o
+  provedor não mudaram); um testador com o executável do dia anterior teve o
+  mesmo, então a causa provável é instabilidade do WhatsApp. O TeleZapp agora
+  detecta a falha, avisa e refaz a conexão (até 3 vezes) para vir QR e código
+  novos.
+- **Presença**: status da pessoa no título (online, visto por último,
+  digitando). No WhatsApp isso exige que a conta fique "disponível" enquanto a
+  conversa está aberta (e quem esconde o próprio status não vê o dos outros);
+  ao fechar a conversa volta a "indisponível". O Telegram não recebe nada do
+  TeleZapp. Opção desligável.
+- **Reações e emojis**: reagir (lista curta, "Outro emoji..." e tirar) no
+  WhatsApp e no Telegram, e buscar emoji pelo nome em português para escrever
+  (pacote `emoji`, BSD, sem tons de pele). O Telegram passou a mostrar as
+  reações recebidas.
+- **Detalhes de mensagem de grupo (WhatsApp)**: resumo (enviada em, recebida,
+  aberta e reproduzida por N pessoas) e um botão por item com a lista de
+  membros, data e hora e o menu dos membros do grupo. O Telegram só mostra a
+  hora do envio (não guarda recibo por membro).
+- **Chamadas do WhatsApp**: continuam sem atendimento no TeleZapp. Ele avisa
+  quem liga (janela OK e Conversar, opção desligável) e registra na conversa
+  (recebida, perdida, recusada ou atendida em outro aparelho, com duração).
+- **Status e histórias**: o status do WhatsApp e as histórias do Telegram
+  viram uma "conversa" de tipo status por pessoa, no filtro "Status e
+  histórias" (fora de "Todas"). Ver, tocar, marcar como visto, responder em
+  particular (só texto) e curtir. Somem após 24 h; no WhatsApp só chegam os
+  publicados com o app conectado. **Postar** status (texto, foto ou vídeo) e
+  história (foto ou vídeo, com legenda; no Telegram escolhe-se contatos ou
+  todos). **Decisão do responsável**: quem vê o status do WhatsApp se define
+  pelo celular; o neonize só lê essa privacidade (não há setter), e a tela de
+  Privacidade mostra a escolha em modo leitura.
+- **Prévia de links**: usa a prévia que o remetente manda junto (padrão).
+  Buscar a página no computador é opcional e **desligado por padrão**, para
+  receber e para enviar, porque o site vê o IP; só abre http/https públicos,
+  nunca a rede local (nem por redirecionamento), com 5 s e 400 KB. No
+  Telegram, com a opção de enviar desligada, a mensagem sai sem a prévia que o
+  servidor montaria.
+- **Sons**: tela refeita no estilo do WinZapp (caixa de pacote, lista de
+  eventos ativados ou desativados, Ouvir som e, nos personalizados, Procurar
+  som). Pacotes: Padrão (bips do sistema), TeleZapp (18 sons sintetizados
+  aqui, sem amostras de terceiros, por causa das licenças; estéreo, até 2 s,
+  começam no primeiro instante) e personalizados (arquivos importados para
+  `sons\pacotes\<nome>` ao aplicar). Os dois primeiros não se editam. As
+  opções `som_*` antigas viram o pacote "Personalizado". O exe precisa levar
+  `telezapp/sons` como dado (o spec local já leva; fora do git).
+- **Menu de contexto de mídia**: reproduzir ou abrir, baixar e salvar cópia
+  sempre aparecem, mesmo com o Enter configurado para a IA ou só baixar.
+- **neonize**: o pino segue em 0.5.2. O venv usa uma DLL e arquivos de teste
+  (avisos ao vivo, `send_app_state`, `fetch_app_state`); a cópia fica em
+  `Backup\neonize-0.5.2-teste` (fora do git, com `SHA256SUMS.txt` e
+  `Backup\restaurar_neonize_teste.py`), e `Backup\neonize-0.5.2-original`
+  agora tem os 7 originais. Para atualizar: conferir se a versão nova traz os
+  PRs (#227 a #232), trocar o pino, testar numa conta real e lançar um
+  TeleZapp novo; sem eles, a atualização desfaz os recursos de teste.
+- **Progresso de download e envio**: no Telegram para todo arquivo; no
+  WhatsApp só com a DLL de teste do neonize (que ganhou download direto para o
+  arquivo e upload lendo do disco, com progresso e cancelamento), usada em
+  arquivos a partir de 8 MB. Com o neonize oficial volta ao comportamento
+  antigo (tudo em memória, sem porcentagem). A mudança precisa de PR no
+  neonize, como as outras (patch em `docs/neonize/`).
+- **Menções e nomes de perfil (WhatsApp)**: o nome de perfil passou a ser
+  guardado pelos dois endereços da pessoa (telefone e LID, o segundo vem em
+  `SenderAlt`) e procurado também nas mensagens guardadas por todos eles;
+  as menções antigas só com telefone são refeitas ao abrir o grupo. As
+  listas de quem recebeu, abriu e reproduziu usam a mesma busca, sem rede.
+- **Sons de reação e de menção**: dois eventos novos (reação a uma mensagem
+  sua; menção ou resposta a você num grupo, que substitui o som comum de
+  grupo e não depende da opção "Som ao receber mensagem"). O tom de
+  "chamando" do pacote Padrão passou de 0,4 s para 1,5 s.
+- **Enter e a palavra digitada**: o Enter da caixa é tratado antes do
+  controle, então o NVDA não fecha a última palavra digitada e a junta com a
+  primeira da próxima mensagem. Dica sem código: espaço antes do Enter (é
+  tirado ao enviar). Há uma opção experimental e desligada que entrega o
+  Enter ao controle antes de enviar; falta ver como o NVDA reage.
+- **Ainda não visto no app real**: avisos de chamada, vídeo por quadros,
+  progresso de download e envio no WhatsApp (DLL nova), os dois sons novos
+  (reação e menção), a opção do Enter, nomes de perfil nas menções e nas
+  listas de recibos, detalhes de grupo, busca de emojis (Control Ponto) e menu de mídia, pacotes
+  de sons e a tela nova, status e histórias (ver, responder, curtir e postar),
+  prévia de links, o reinício do pareamento e o executável com OpenCV, emoji e
+  `telezapp/sons` (conferir o PyInstaller).
+
 ## Próximos passos sugeridos
 
 1. ~~Grupo 1 do plano acima~~ (concluído).
@@ -278,8 +507,22 @@ Decisão do responsável: seguir com as chamadas depois do experimento 9.
    pendências da seção acima, exceto a velocidade do áudio, já feita).
 3. ~~Adicionar o aviso de licença nos arquivos~~ (SPDX presente em todos os
    `.py` do pacote); conferir ainda as licenças de terceiros pendentes.
-4. Etapa 4 (ver o plano). ~~Janela de configurações~~ (2026.10.15.2). Falta:
-   sons de eventos com arquivos e opções, backup e restauração das
-   configurações, ordem das informações da mensagem, instalador, portátil,
-   desinstalação limpa, atualização com janela de novidades e assinatura.
-5. Testes de estabilidade e de arquivos maiores.
+4. Etapa 4 (ver o plano). ~~Janela de configurações~~ (2026.10.15.2),
+   ~~sons de eventos~~ e ~~backup e restauração~~ (2026.10.18.0). Falta:
+   ordem das informações da mensagem, instalador, portátil, desinstalação
+   limpa, atualização com janela de novidades e assinatura.
+   Distribuição (2026-10-18): um só zip por versão nas Releases do GitHub,
+   montado por `ferramentas/publicar.py` (pré-lançamento, aviso de software
+   experimental) e checagem de versão nova em Ajuda (feita, só avisa).
+   Falta: instalar e criar cópia portátil dentro do app (como o NVDA),
+   atualizador que troca a pasta com conferência do hash, assinatura.
+5. Testes de estabilidade e de arquivos maiores. Visto pelo responsável em
+   19/10/2026: download de um arquivo de quase 600 MB recebido pelo WhatsApp,
+   com comportamento satisfatório; e envios repetidos, pelo WhatsApp, do zip
+   do TeleZapp (cerca de 70 MB), também sem problemas. Falta testar arquivos
+   maiores (o neonize baixa o arquivo inteiro na memória) e envios na
+   casa de 1 GB.
+6. Testar no app real o que entrou em 19/10 (lista na seção da
+   versão 2026.10.19.0), gerar o executável com as dependências
+   novas e conferir as licenças do OpenCV (FFmpeg, LGPL) e do
+   `emoji`.

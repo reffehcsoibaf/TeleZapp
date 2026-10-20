@@ -132,7 +132,7 @@ def rotulo_mencao(men):
 
 
 def mostrar_texto(pai, titulo, texto, rotulo, links=(), botoes=(),
-                  mencoes=(), acoes=()):
+                  mencoes=(), acoes=(), botoes_extra=()):
     """Texto longo somente leitura, navegavel pelas setas.
 
     Depois do texto vem, so quando existirem, uma lista de Links, uma de
@@ -145,7 +145,10 @@ def mostrar_texto(pai, titulo, texto, rotulo, links=(), botoes=(),
 
     links: [(endereco, texto)]; botoes: [(rotulo, endereco)];
     mencoes: [dict com nome, usuario, telefone, id];
-    acoes: [(rotulo, e_opcao_de_lista)] que podem ser tocados."""
+    acoes: [(rotulo, e_opcao_de_lista)] que podem ser tocados.
+    botoes_extra: [(rotulo, funcao(janela))], botoes logo depois do texto
+    (por exemplo, quem recebeu); a funcao recebe a janela, para abrir uma
+    lista por cima dela ou fecha-la."""
     dlg = wx.Dialog(pai, title=titulo, size=(620, 520),
                     style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
     rot = wx.StaticText(dlg, label=rotulo)
@@ -158,6 +161,13 @@ def mostrar_texto(pai, titulo, texto, rotulo, links=(), botoes=(),
     lay.Add(caixa, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
     escolhida = [None]
     listas = []        # (ListBox, acao(indice))
+    if botoes_extra:
+        linha_extra = wx.WrapSizer(wx.HORIZONTAL)
+        for rotulo_b, funcao in botoes_extra:
+            b = wx.Button(dlg, wx.ID_ANY, rotulo_b)
+            b.Bind(wx.EVT_BUTTON, lambda e, f=funcao: f(dlg))
+            linha_extra.Add(b, 0, wx.RIGHT | wx.TOP, 6)
+        lay.Add(linha_extra, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
 
     def adicionar(rotulo_lista, itens, acao):
         r = wx.StaticText(dlg, label=rotulo_lista)
@@ -409,6 +419,58 @@ def escolher_arquivo(pai, pasta=""):
         dlg.Destroy()
 
 
+def escolher_acao_grupo(pai, nome, pode_sair):
+    """O que fazer com a conversa de um grupo: "limpar" (apaga as mensagens e
+    mantem o grupo na lista), "apagar" (tira da lista), "sair" (sai do grupo
+    e mantem a conversa) ou "sair_apagar". None se cancelar. Sem `pode_sair`
+    (conta desconectada ou servico que nao sai), so as duas primeiras."""
+    dlg = wx.Dialog(pai, title="Apagar conversa do grupo")
+    lay = wx.BoxSizer(wx.VERTICAL)
+    texto = ("O que fazer com a conversa do grupo %s? Limpar conversa apaga "
+             "as mensagens e as mídias daqui, e o grupo continua na lista. "
+             "Apagar da lista de conversas tira o grupo da lista; ele volta "
+             "se chegar mensagem nova. Sair do grupo tira a sua conta do "
+             "grupo." % nome)
+    lay.Add(wx.StaticText(dlg, label=texto), 0, wx.ALL, 10)
+    opcoes = [("&Limpar conversa", "limpar"),
+              ("&Apagar da lista de conversas", "apagar")]
+    if pode_sair:
+        opcoes += [("&Sair do grupo", "sair"),
+                   ("Sair do grupo e apagar da &lista", "sair_apagar")]
+    escolhida = []
+    caixa = wx.BoxSizer(wx.VERTICAL)
+    for rotulo, chave in opcoes:
+        b = wx.Button(dlg, wx.ID_ANY, rotulo)
+        b.Bind(wx.EVT_BUTTON,
+               lambda e, c=chave: (escolhida.append(c),
+                                   dlg.EndModal(wx.ID_OK)))
+        caixa.Add(b, 0, wx.EXPAND | wx.BOTTOM, 6)
+    caixa.Add(wx.Button(dlg, wx.ID_CANCEL, "Cancelar"), 0, wx.EXPAND)
+    lay.Add(caixa, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+    dlg.SetSizerAndFit(lay)
+    dlg.SetEscapeId(wx.ID_CANCEL)
+    dlg.CentreOnParent()
+    try:
+        dlg.ShowModal()
+    finally:
+        dlg.Destroy()
+    return escolhida[0] if escolhida else None
+
+
+def escolher_destino_zip(pai, nome, pasta=""):
+    """Janela do Windows para escolher onde gravar o .zip; None se cancelar."""
+    dlg = wx.FileDialog(pai, "Salvar o conteúdo da conversa", defaultDir=pasta,
+                        defaultFile=nome, wildcard="Arquivo zip|*.zip",
+                        style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT)
+    try:
+        if dlg.ShowModal() != wx.ID_OK:
+            return None
+        caminho = dlg.GetPath()
+        return caminho if caminho.lower().endswith(".zip")             else caminho + ".zip"
+    finally:
+        dlg.Destroy()
+
+
 def mostrar_mensagem(pai, titulo, texto, copiar):
     """O texto de uma mensagem, somente leitura, com os botoes Copiar texto
     e Fechar (Esc tambem fecha). `copiar(texto)` copia e avisa a pessoa."""
@@ -435,14 +497,15 @@ def mostrar_mensagem(pai, titulo, texto, copiar):
     dlg.Destroy()
 
 
-def mostrar_depuracao(pai, titulo, texto, copiar, salvar):
+def mostrar_depuracao(pai, titulo, texto, copiar, salvar,
+                      rotulo="Texto de depuração"):
     """Texto de depuracao somente leitura, com os botoes Copiar tudo e
     Salvar em arquivo. `copiar(texto)` e `salvar(texto)` fazem o trabalho e
     avisam a pessoa; a janela so os chama."""
     dlg = wx.Dialog(pai, title=titulo, size=(700, 560),
                     style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
-    rot = wx.StaticText(dlg, label="Texto de depuração")
-    caixa = wx.TextCtrl(dlg, value=texto, name="Texto de depuração",
+    rot = wx.StaticText(dlg, label=rotulo)
+    caixa = wx.TextCtrl(dlg, value=texto, name=rotulo,
                         style=wx.TE_MULTILINE | wx.TE_READONLY)
     b_copiar = wx.Button(dlg, wx.ID_ANY, "&Copiar tudo")
     b_salvar = wx.Button(dlg, wx.ID_ANY, "&Salvar em arquivo")
@@ -465,15 +528,19 @@ def mostrar_depuracao(pai, titulo, texto, copiar, salvar):
 
 
 # ------------------------------------------------------- pareamento WhatsApp
+INSTRUCOES_INICIO = "Como você quer conectar o WhatsApp?"
 INSTRUCOES_CODIGO = (
     "No celular, abra o WhatsApp, vá em Configurações, Dispositivos "
     "conectados, Conectar dispositivo, e escolha Conectar com número de "
-    "telefone. Depois digite lá o código que o TeleZapp mostrar.")
+    "telefone. Digite abaixo o número do WhatsApp em formato internacional: "
+    "sinal de mais, código do país, DDD e número, por exemplo "
+    "+55 51 99999 8888. Depois digite lá o código que o TeleZapp mostrar.")
 INSTRUCOES_QR = (
     "No celular, abra o WhatsApp, vá em Configurações, Dispositivos "
     "conectados, Conectar dispositivo, e aponte a câmera para o QR Code. "
-    "Para facilitar, use o botão Mostrar o QR em tela cheia. O QR Code é "
-    "trocado sozinho a cada 20 segundos, mais ou menos.")
+    "O QR Code abre em tela cheia; Esc volta para esta janela, e o botão "
+    "Mostrar o QR em tela cheia abre de novo. O QR Code é trocado sozinho a "
+    "cada 20 segundos, mais ou menos.")
 BORDA_QR = 6          # margem branca em modulos (o minimo do padrao e 4)
 ESCALA_JANELA = 7     # pixels por modulo na janela de pareamento
 
@@ -532,6 +599,8 @@ class JanelaQrCheia(wx.Frame):
         self.painel = wx.Panel(self)
         self.painel.SetBackgroundColour(wx.WHITE)
         self.imagem = wx.StaticBitmap(self.painel, name="QR Code")
+        self.aguarde = wx.StaticText(self.painel, label="Aguardando o QR "
+                                     "Code do WhatsApp...")
         self.codigo = ""
         self.Bind(wx.EVT_CHAR_HOOK, self._tecla)
         self.Bind(wx.EVT_CLOSE, self._fechar)
@@ -550,11 +619,19 @@ class JanelaQrCheia(wx.Frame):
         if not codigo or codigo == self.codigo:
             return
         self.codigo = codigo
+        self.aguarde.Show(False)
         self._desenhar()
 
+    def limpar(self):
+        """O QR mostrado deixou de valer: some ate chegar o novo."""
+        self.codigo = ""
+        self.imagem.Show(False)
+        self.aguarde.Show(True)
+
     def _desenhar(self):
-        if not self:
+        if not self or not self.codigo:
             return
+        self.imagem.Show(True)
         codigo = self.codigo
         largura, altura = self.GetClientSize()
         self.painel.SetSize((largura, altura))
@@ -617,7 +694,7 @@ class DialogoPareamento(wx.Dialog):
     `ao_cancelar()` e chamado se a pessoa fechar antes de concluir."""
 
     def __init__(self, pai, falar, gerar_codigo, ao_cancelar, telefone="",
-                 som=None):
+                 som=None, reiniciar=None):
         super().__init__(pai, title="Conectar conta do WhatsApp",
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.falar = falar
@@ -625,16 +702,27 @@ class DialogoPareamento(wx.Dialog):
         self.gerar_codigo = gerar_codigo
         self.ao_cancelar = ao_cancelar
         self.concluido = False
+        self.reiniciar = reiniciar or (lambda: None)
+        self.codigo_gerado = False   # um codigo ja foi pedido nesta conexao
+        self.falhas = 0
         self.qr_atual = ""
         self.tela_cheia = None
         self.janela_codigo = None
         lay = wx.BoxSizer(wx.VERTICAL)
 
-        self.modo = wx.RadioBox(
-            self, label="Como conectar",
-            choices=["Código digitado no celular", "QR Code"],
-            majorDimension=1, style=wx.RA_SPECIFY_COLS)
-        lay.Add(self.modo, 0, wx.EXPAND | wx.ALL, 10)
+        # --- inicio: dois botoes
+        self.painel_inicio = wx.Panel(self)
+        pi = wx.BoxSizer(wx.VERTICAL)
+        pi.Add(wx.StaticText(self.painel_inicio, label=INSTRUCOES_INICIO), 0,
+               wx.BOTTOM, 8)
+        self.botao_telefone = wx.Button(
+            self.painel_inicio, label="Parear com número de &telefone")
+        self.botao_qr = wx.Button(self.painel_inicio,
+                                  label="Parear via &QR Code")
+        pi.Add(self.botao_telefone, 0, wx.EXPAND | wx.BOTTOM, 6)
+        pi.Add(self.botao_qr, 0, wx.EXPAND)
+        self.painel_inicio.SetSizer(pi)
+        lay.Add(self.painel_inicio, 0, wx.EXPAND | wx.ALL, 10)
 
         # --- codigo
         self.painel_codigo = wx.Panel(self)
@@ -643,10 +731,12 @@ class DialogoPareamento(wx.Dialog):
         t.Wrap(460)
         pc.Add(t, 0, wx.BOTTOM, 8)
         pc.Add(wx.StaticText(self.painel_codigo,
-                             label="Número do WhatsApp com DDD"), 0)
+                             label="Número do WhatsApp em formato "
+                                   "internacional"), 0)
         self.telefone = wx.TextCtrl(self.painel_codigo, value=telefone,
                                     style=wx.TE_PROCESS_ENTER,
-                                    name="Número do WhatsApp com DDD")
+                                    name="Número do WhatsApp em formato "
+                                         "internacional")
         pc.Add(self.telefone, 0, wx.EXPAND)
         self.botao_gerar = wx.Button(self.painel_codigo, label="&Gerar código")
         pc.Add(self.botao_gerar, 0, wx.TOP, 6)
@@ -657,6 +747,8 @@ class DialogoPareamento(wx.Dialog):
                                   style=wx.TE_READONLY,
                                   name="Código para digitar no celular")
         pc.Add(self.codigo, 0, wx.EXPAND)
+        self.voltar_codigo = wx.Button(self.painel_codigo, label="&Voltar")
+        pc.Add(self.voltar_codigo, 0, wx.TOP, 8)
         self.painel_codigo.SetSizer(pc)
         lay.Add(self.painel_codigo, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
@@ -675,6 +767,8 @@ class DialogoPareamento(wx.Dialog):
         pq.Add(self.botao_cheia, 0, wx.TOP, 6)
         self.imagem = wx.StaticBitmap(self.painel_qr, name="QR Code")
         pq.Add(self.imagem, 0, wx.TOP | wx.ALIGN_CENTER, 8)
+        self.voltar_qr = wx.Button(self.painel_qr, label="&Voltar")
+        pq.Add(self.voltar_qr, 0, wx.TOP, 8)
         self.painel_qr.SetSizer(pq)
         lay.Add(self.painel_qr, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
@@ -683,36 +777,76 @@ class DialogoPareamento(wx.Dialog):
         self.SetSizer(lay)
         self.SetEscapeId(wx.ID_CANCEL)
 
-        self.modo.Bind(wx.EVT_RADIOBOX, lambda e: self._trocar_modo())
+        self.botao_telefone.Bind(wx.EVT_BUTTON,
+                                 lambda e: self._ir_para("codigo"))
+        self.botao_qr.Bind(wx.EVT_BUTTON, lambda e: self._ir_para("qr"))
+        self.voltar_codigo.Bind(wx.EVT_BUTTON,
+                                lambda e: self._ir_para("inicio"))
+        self.voltar_qr.Bind(wx.EVT_BUTTON, lambda e: self._ir_para("inicio"))
         self.botao_gerar.Bind(wx.EVT_BUTTON, lambda e: self._gerar())
         self.botao_cheia.Bind(wx.EVT_BUTTON, lambda e: self._tela_cheia())
         self.telefone.Bind(wx.EVT_TEXT_ENTER, lambda e: self._gerar())
         self.Bind(wx.EVT_BUTTON, lambda e: self.Close(), id=wx.ID_CANCEL)
         self.Bind(wx.EVT_CLOSE, self._ao_fechar)
-        self._trocar_modo()
+        self._ir_para("inicio")
         self.Fit()
         self.CentreOnParent()
 
-    def _trocar_modo(self):
-        codigo = self.modo.GetSelection() == 0
-        self.painel_codigo.Show(codigo)
-        self.painel_qr.Show(not codigo)
+    def _ir_para(self, pagina):
+        """inicio (os dois botoes), codigo (por telefone) ou qr."""
+        self.pagina = pagina
+        self.painel_inicio.Show(pagina == "inicio")
+        self.painel_codigo.Show(pagina == "codigo")
+        self.painel_qr.Show(pagina == "qr")
         self.Layout()
         self.Fit()
-        if codigo:
+        if pagina == "inicio":
+            self.botao_telefone.SetFocus()
+        elif pagina == "codigo":
             self.telefone.SetFocus()
         else:
-            self.situacao_qr.SetFocus()
+            if self.codigo_gerado:
+                # depois de pedir um codigo o QR antigo pode nao valer mais
+                # (o WhatsApp troca a chave): recomeca a conexao
+                self.falar("Pedindo um QR Code novo ao WhatsApp.")
+                self.reiniciar()
+            # o QR Code ja abre em tela cheia, esperando o QR se preciso
+            self._tela_cheia(esperar=True)
+
+    def avisar(self, texto):
+        """Uma falha do pareamento: fala e mostra sem esperar a pessoa."""
+        self.falar(texto)
+        if self.pagina == "qr":
+            self.situacao_qr.SetValue(texto)
+        else:
+            self.codigo.SetValue("")
+            self.botao_gerar.Enable()
+
+    def reiniciou(self):
+        """A conexao recomecou: o QR e o codigo antigos nao valem mais."""
+        self.codigo_gerado = False
+        self.qr_atual = ""
+        self.codigo.SetValue("")
+        self.botao_gerar.Enable()
+        self.situacao_qr.SetValue("Aguardando o QR Code do WhatsApp...")
+        self.imagem.Show(False)
+        if self.tela_cheia:
+            self.tela_cheia.limpar()
+        if self.janela_codigo:
+            self.janela_codigo.Destroy()
+            self.janela_codigo = None
 
     def _gerar(self):
         from telezapp.nucleo.modelos import normalizar_telefone
         numero = normalizar_telefone(self.telefone.GetValue())
         if numero is None:
-            wx.MessageBox("Número inválido. Use DDD e número, por exemplo "
-                          "51 99999 8888.", self.GetTitle(),
+            wx.MessageBox("Número inválido. Use o formato internacional: "
+                          "sinal de mais, código do país, DDD e número, por "
+                          "exemplo +55 51 99999 8888.", self.GetTitle(),
                           wx.OK | wx.ICON_WARNING, self)
             self.telefone.SetFocus()
             return
+        self.codigo_gerado = True
         self.botao_gerar.Disable()
         self.codigo.SetValue("Gerando o código...")
         self.falar("Gerando o código. Aguarde.")
@@ -741,19 +875,20 @@ class DialogoPareamento(wx.Dialog):
         primeiro = not self.qr_atual
         self.qr_atual = codigo
         self.imagem.SetBitmap(imagem_qr(codigo))
+        self.imagem.Show(True)
         self.situacao_qr.SetValue("QR Code pronto. Atualizado às %s." %
                                   time.strftime("%H:%M:%S"))
         if self.tela_cheia:
             self.tela_cheia.mostrar(codigo)
         self.painel_qr.Layout()
         self.Fit()
-        if self.modo.GetSelection() == 1:
+        if self.pagina == "qr":
             self.som("pronto" if primeiro else "atualizado")
             self.falar("QR Code pronto." if primeiro
                        else "QR Code atualizado.")
 
-    def _tela_cheia(self):
-        if not self.qr_atual:
+    def _tela_cheia(self, esperar=False):
+        if not self.qr_atual and not esperar:
             self.falar("O QR Code ainda não chegou. Aguarde.")
             return
         if self.tela_cheia:
@@ -783,3 +918,39 @@ class DialogoPareamento(wx.Dialog):
         if not self.concluido:
             self.ao_cancelar()
         self.Destroy()
+
+
+class DialogoAvisoDeChamada(wx.Dialog):
+    """Alguem esta ligando pelo WhatsApp e o TeleZapp ainda nao atende:
+    janela sem bloqueio com o aviso e os botoes OK e Conversar. O texto muda
+    se a chamada acabar enquanto a janela esta aberta."""
+
+    def __init__(self, pai, texto, ao_conversar):
+        super().__init__(pai, title="Chamada do WhatsApp")
+        self.ao_conversar = ao_conversar
+        lay = wx.BoxSizer(wx.VERTICAL)
+        self.aviso = wx.StaticText(self, label=texto)
+        self.aviso.Wrap(420)
+        lay.Add(self.aviso, 0, wx.ALL, 12)
+        linha = wx.BoxSizer(wx.HORIZONTAL)
+        self.ok = wx.Button(self, wx.ID_OK, "OK")
+        self.conversar = wx.Button(self, wx.ID_ANY, "&Conversar")
+        self.ok.SetDefault()
+        linha.Add(self.ok, 0, wx.RIGHT, 8)
+        linha.Add(self.conversar, 0)
+        lay.Add(linha, 0, wx.ALL | wx.ALIGN_RIGHT, 12)
+        self.SetSizerAndFit(lay)
+        self.SetEscapeId(wx.ID_OK)
+        self.ok.Bind(wx.EVT_BUTTON, lambda e: self.Close())
+        self.conversar.Bind(wx.EVT_BUTTON, lambda e: self._conversar())
+        self.CentreOnParent()
+        self.ok.SetFocus()
+
+    def atualizar(self, texto):
+        self.aviso.SetLabel(texto)
+        self.aviso.Wrap(420)
+        self.Fit()
+
+    def _conversar(self):
+        self.Close()
+        self.ao_conversar()

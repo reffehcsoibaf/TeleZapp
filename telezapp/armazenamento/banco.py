@@ -16,7 +16,7 @@ from telezapp.nucleo.modelos import ORDEM_ESTADOS, Conversa, Mensagem
 
 log = logging.getLogger("telezapp.banco")
 
-VERSAO_ESQUEMA = 7
+VERSAO_ESQUEMA = 10
 
 ESQUEMA = """
 CREATE TABLE IF NOT EXISTS conversas (
@@ -28,6 +28,11 @@ CREATE TABLE IF NOT EXISTS conversas (
     nao_lidas INTEGER NOT NULL DEFAULT 0,
     data REAL NOT NULL DEFAULT 0,
     lidas_ate INTEGER NOT NULL DEFAULT 0,
+    arquivada INTEGER NOT NULL DEFAULT 0,
+    trancada INTEGER NOT NULL DEFAULT 0,
+    fixada INTEGER NOT NULL DEFAULT 0,
+    silenciada_ate REAL NOT NULL DEFAULT 0,
+    somente_leitura INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (conta_id, id)
 );
 CREATE TABLE IF NOT EXISTS mensagens (
@@ -101,6 +106,32 @@ CREATE TABLE IF NOT EXISTS midias (
     data REAL NOT NULL DEFAULT 0,
     PRIMARY KEY (conta_id, conversa_id, mensagem_id)
 );
+-- Mensagens e midias limpas pela pessoa: o registro impede que voltem (por
+-- historico, nova leitura ou download) ate um novo pareamento da conta.
+-- alvo: 'mensagem' (a mensagem inteira) ou 'midia' (so o arquivo).
+CREATE TABLE IF NOT EXISTS limpas (
+    conta_id TEXT NOT NULL,
+    conversa_id TEXT NOT NULL,
+    mensagem_id TEXT NOT NULL,
+    alvo TEXT NOT NULL,
+    PRIMARY KEY (conta_id, conversa_id, mensagem_id)
+);
+-- Conversas apagadas pela pessoa: so voltam com mensagem mais nova que `ate`
+-- (data da ultima mensagem que ela tinha), ou com um novo pareamento.
+CREATE TABLE IF NOT EXISTS apagadas (
+    conta_id TEXT NOT NULL,
+    conversa_id TEXT NOT NULL,
+    ate REAL NOT NULL,
+    PRIMARY KEY (conta_id, conversa_id)
+);
+-- Agenda propria do TeleZapp: o nome que a pessoa deu a cada contato.
+CREATE TABLE IF NOT EXISTS contatos (
+    conta_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    nome TEXT NOT NULL,
+    telefone TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (conta_id, id)
+);
 -- Estrutura original das mensagens, so com o modo de depuracao ligado.
 CREATE TABLE IF NOT EXISTS depuracao (
     conta_id TEXT NOT NULL,
@@ -122,6 +153,9 @@ class Banco:
         self.caminho = caminho
         self._trava = threading.Lock()
         self.depuracao = False        # modo de depuracao (ver guardar_depuracao)
+        self._agenda = None           # cache de contatos: (conta, id) -> nome
+        self._limpas = None           # cache de `limpas`: chave -> alvo
+        self._apagadas = None         # cache de `apagadas`: chave -> ate
         self._con = sqlite3.connect(caminho, check_same_thread=False)
         self._con.execute("PRAGMA journal_mode=WAL")
         self._con.execute("PRAGMA synchronous=NORMAL")
@@ -132,6 +166,23 @@ class Banco:
 
     def _atualizar_esquema(self):
         """Bancos de versoes anteriores ganham as colunas novas."""
+        conv = {linha[1] for linha in self._con.execute(
+            "PRAGMA table_info(conversas)")}
+        if "arquivada" not in conv:
+            self._con.execute("ALTER TABLE conversas ADD COLUMN arquivada "
+                              "INTEGER NOT NULL DEFAULT 0")
+        if "trancada" not in conv:
+            self._con.execute("ALTER TABLE conversas ADD COLUMN trancada "
+                              "INTEGER NOT NULL DEFAULT 0")
+        if "fixada" not in conv:
+            self._con.execute("ALTER TABLE conversas ADD COLUMN fixada "
+                              "INTEGER NOT NULL DEFAULT 0")
+        if "silenciada_ate" not in conv:
+            self._con.execute("ALTER TABLE conversas ADD COLUMN "
+                              "silenciada_ate REAL NOT NULL DEFAULT 0")
+        if "somente_leitura" not in conv:
+            self._con.execute("ALTER TABLE conversas ADD COLUMN "
+                              "somente_leitura INTEGER NOT NULL DEFAULT 0")
         colunas = {linha[1] for linha in self._con.execute(
             "PRAGMA table_info(mensagens)")}
         if "remetente" not in colunas:
@@ -169,12 +220,23 @@ class Banco:
         with self._trava, self._con:
             self._con.execute("DELETE FROM depuracao")
 
+    def copiar_para(self, caminho):
+        """Grava uma copia consistente do banco (para o backup), mesmo com
+        ele em uso."""
+        with self._trava:
+            destino = sqlite3.connect(caminho)
+            try:
+                self._con.backup(destino)
+            finally:
+                destino.close()
+
     def fechar(self):
         with self._trava:
             self._con.close()
 
     # ------------------------------------------------------------ conversas
     def salvar_conversas(self, conversas):
+        conversas = [c for c in conversas if not self.conversa_apagada(c)]
         sql = "INSERT OR REPLACE INTO conversas (%s) VALUES (%s)" % (
             ", ".join(_CAMPOS_CONV), ", ".join("?" * len(_CAMPOS_CONV)))
         with self._trava, self._con:
@@ -202,12 +264,60 @@ class Banco:
             self._con.execute("DELETE FROM conversas WHERE conta_id=?",
                               (conta_id,))
             for tabela in ("mensagens", "recibos", "status", "midias",
-                           "fichas", "posicoes"):
+                           "fichas", "posicoes", "contatos", "limpas", "apagadas"):
                 self._con.execute(
                     "DELETE FROM %s WHERE conta_id=?" % tabela, (conta_id,))
+            self._agenda = None
+            self._limpas = None
+            self._apagadas = None
+
+    # ------------------------------------------------------------- contatos
+    def contatos(self, conta_id=None):
+        """[(conta_id, id, nome, telefone)] da agenda, por nome."""
+        sql = "SELECT conta_id, id, nome, telefone FROM contatos"
+        args = ()
+        if conta_id is not None:
+            sql, args = sql + " WHERE conta_id=?", (conta_id,)
+        with self._trava:
+            linhas = self._con.execute(
+                sql + " ORDER BY nome COLLATE NOCASE", args).fetchall()
+        return [tuple(l) for l in linhas]
+
+    def salvar_contato(self, conta_id, id_, nome, telefone=""):
+        with self._trava, self._con:
+            self._con.execute(
+                "INSERT OR REPLACE INTO contatos VALUES (?,?,?,?)",
+                (conta_id, id_, nome, telefone))
+            self._agenda = None
+
+    def remover_contato(self, conta_id, id_):
+        with self._trava, self._con:
+            self._con.execute(
+                "DELETE FROM contatos WHERE conta_id=? AND id=?",
+                (conta_id, id_))
+            self._agenda = None
+
+    def nome_de_contato(self, conta_id, *ids):
+        """Nome que a pessoa deu ao contato, pelo primeiro id conhecido;
+        vazio se nao houver. Usa um cache (chamado a cada nome mostrado)."""
+        with self._trava:
+            if self._agenda is None:
+                self._agenda = {
+                    (c, i): n for c, i, n in self._con.execute(
+                        "SELECT conta_id, id, nome FROM contatos")}
+            for i in ids:
+                nome = self._agenda.get((conta_id, i))
+                if nome:
+                    return nome
+        return ""
 
     # ------------------------------------------------------------ mensagens
     def salvar_mensagens(self, mensagens):
+        limpas = self._mapa_limpas()
+        apagadas = self._mapa_apagadas()
+        mensagens = [x for x in mensagens if limpas.get(
+            (x.conta_id, x.conversa_id, x.id)) != "mensagem"
+            and x.data > apagadas.get((x.conta_id, x.conversa_id), -1)]
         sql = "INSERT OR REPLACE INTO mensagens (%s) VALUES (%s)" % (
             ", ".join(_CAMPOS_MSG), ", ".join("?" * len(_CAMPOS_MSG)))
         with self._trava, self._con:
@@ -223,6 +333,57 @@ class Banco:
                 % ", ".join(_CAMPOS_MSG),
                 (conta_id, conversa_id, limite)).fetchall()
         return [_msg(l) for l in reversed(linhas)]
+
+    def mensagens_por_id(self, conta_id, ids, conversa_id=None):
+        """Mensagens guardadas com esses ids (no Telegram o id da mensagem
+        e unico na conta, fora dos canais)."""
+        ids = [str(i) for i in ids]
+        if not ids:
+            return []
+        sql = ("SELECT %s FROM mensagens WHERE conta_id=? AND id IN (%s)"
+               % (", ".join(_CAMPOS_MSG), ", ".join("?" * len(ids))))
+        args = [conta_id, *ids]
+        if conversa_id is not None:
+            sql += " AND conversa_id=?"
+            args.append(conversa_id)
+        with self._trava:
+            linhas = self._con.execute(sql, args).fetchall()
+        return [_msg(l) for l in linhas]
+
+    def renomear_autor(self, conta_id, remetentes, nome):
+        """Poe `nome` como autor das mensagens recebidas de quem aparece por
+        qualquer um desses enderecos. Devolve quantas mudaram."""
+        remetentes = [r for r in remetentes if r]
+        if not remetentes:
+            return 0
+        with self._trava, self._con:
+            return self._con.execute(
+                "UPDATE mensagens SET autor=? WHERE conta_id=? AND minha=0 "
+                "AND autor<>? AND remetente IN (%s)"
+                % ", ".join("?" * len(remetentes)),
+                (nome, conta_id, nome, *remetentes)).rowcount
+
+    def nome_do_remetente(self, conta_id, remetentes):
+        """Nome (autor) mais recente com que alguem dessa lista de enderecos
+        aparece nas mensagens guardadas, sem contar telefones soltos."""
+        remetentes = [r for r in remetentes if r]
+        if not remetentes:
+            return ""
+        with self._trava:
+            linha = self._con.execute(
+                "SELECT autor FROM mensagens WHERE conta_id=? AND minha=0 "
+                "AND autor<>'' AND autor NOT LIKE '+%%' AND autor NOT LIKE "
+                "'%%@%%' AND remetente IN (%s) ORDER BY data DESC LIMIT 1"
+                % ", ".join("?" * len(remetentes)),
+                (conta_id, *remetentes)).fetchone()
+        return linha[0] if linha else ""
+
+    def contar_mensagens(self, tipo):
+        """Quantas mensagens guardadas tem esse tipo."""
+        with self._trava:
+            return self._con.execute(
+                "SELECT COUNT(*) FROM mensagens WHERE tipo=?",
+                (tipo,)).fetchone()[0]
 
     def mensagem(self, conta_id, conversa_id, mensagem_id):
         with self._trava:
@@ -327,6 +488,14 @@ class Banco:
         with self._trava:
             return self._con.execute(sql + " ORDER BY data", args).fetchall()
 
+    def todas_midias(self):
+        """[(conta_id, conversa_id, mensagem_id, tipo, caminho, tamanho,
+        data)] de todas as contas."""
+        with self._trava:
+            return self._con.execute(
+                "SELECT conta_id, conversa_id, mensagem_id, tipo, caminho, "
+                "tamanho, data FROM midias ORDER BY data").fetchall()
+
     def midia(self, conta_id, conversa_id, mensagem_id):
         """(caminho, tamanho) da midia baixada, ou None."""
         with self._trava:
@@ -363,6 +532,141 @@ class Banco:
                 "SELECT mensagem_id FROM posicoes WHERE conta_id=? AND "
                 "conversa_id=?", (conta_id, conversa_id)).fetchone()
         return linha[0] if linha else None
+
+    # --------------------------------------------------------------- limpeza
+    def _mapa_limpas(self):
+        with self._trava:
+            if self._limpas is None:
+                self._limpas = {
+                    (c, v, i): a for c, v, i, a in self._con.execute(
+                        "SELECT conta_id, conversa_id, mensagem_id, alvo "
+                        "FROM limpas")}
+            return self._limpas
+
+    def foi_limpa(self, conta_id, conversa_id, mensagem_id):
+        """'mensagem', 'midia' ou None."""
+        return self._mapa_limpas().get((conta_id, conversa_id, mensagem_id))
+
+    def favoritas(self):
+        """{(conta_id, conversa_id, id)} das mensagens marcadas favoritas."""
+        with self._trava:
+            return set(self._con.execute(
+                "SELECT conta_id, conversa_id, id FROM mensagens WHERE "
+                "extras LIKE '%\"favorita\": true%'").fetchall())
+
+    def mensagens_para_limpar(self, conta_id="", conversa_id="", tipos=(),
+                              antes=None, minimo=0):
+        """[(conta_id, conversa_id, id, tipo, tamanho, data)] que passam
+        pelos filtros: conta/conversa ('' = todas), tipos (() = todos), mais
+        antigas que `antes` (segundos) e maiores que `minimo` bytes."""
+        sql = ("SELECT conta_id, conversa_id, id, tipo, tamanho, data "
+               "FROM mensagens WHERE 1=1")
+        args = []
+        if conta_id:
+            sql += " AND conta_id=?"
+            args.append(conta_id)
+        if conversa_id:
+            sql += " AND conversa_id=?"
+            args.append(conversa_id)
+        if tipos:
+            sql += " AND tipo IN (%s)" % ", ".join("?" * len(tipos))
+            args.extend(tipos)
+        if antes is not None:
+            sql += " AND data<?"
+            args.append(antes)
+        if minimo:
+            sql += " AND tamanho>?"
+            args.append(minimo)
+        with self._trava:
+            return self._con.execute(sql, args).fetchall()
+
+    def registrar_limpeza(self, chaves, alvo):
+        """chaves: [(conta_id, conversa_id, mensagem_id)]. 'mensagem' vale
+        mais que 'midia'."""
+        with self._trava, self._con:
+            self._con.executemany(
+                "INSERT OR REPLACE INTO limpas VALUES (?,?,?,?)",
+                [(*k, alvo) for k in chaves])
+            if self._limpas is not None:
+                for k in chaves:
+                    self._limpas[tuple(k)] = alvo
+
+    def apagar_mensagens(self, chaves):
+        """Tira as mensagens e tudo o que depende delas do banco."""
+        chaves = [tuple(k) for k in chaves]
+        with self._trava, self._con:
+            for tabela, col in (("mensagens", "id"),
+                                ("recibos", "mensagem_id"),
+                                ("fichas", "mensagem_id"),
+                                ("midias", "mensagem_id"),
+                                ("depuracao", "mensagem_id"),
+                                ("posicoes", "mensagem_id")):
+                self._con.executemany(
+                    "DELETE FROM %s WHERE conta_id=? AND conversa_id=? AND "
+                    "%s=?" % (tabela, col), chaves)
+
+    def apagar_fichas(self, chaves):
+        with self._trava, self._con:
+            self._con.executemany(
+                "DELETE FROM fichas WHERE conta_id=? AND conversa_id=? AND "
+                "mensagem_id=?", [tuple(k) for k in chaves])
+
+    def esquecer_limpezas(self, conta_id):
+        """Novo pareamento: o que foi limpo ou apagado pode voltar."""
+        with self._trava, self._con:
+            for tabela in ("limpas", "apagadas"):
+                self._con.execute("DELETE FROM %s WHERE conta_id=?" % tabela,
+                                  (conta_id,))
+            self._limpas = None
+            self._apagadas = None
+
+    # ------------------------------------------------ conversas apagadas
+    def _mapa_apagadas(self):
+        with self._trava:
+            if self._apagadas is None:
+                self._apagadas = {
+                    (c, v): ate for c, v, ate in self._con.execute(
+                        "SELECT conta_id, conversa_id, ate FROM apagadas")}
+            return self._apagadas
+
+    def apagada_ate(self, conta_id, conversa_id):
+        """Data da ultima mensagem da conversa apagada, ou None."""
+        return self._mapa_apagadas().get((conta_id, conversa_id))
+
+    def conversa_apagada(self, conv):
+        """True se a conversa foi apagada e nao tem mensagem mais nova."""
+        ate = self.apagada_ate(conv.conta_id, conv.id)
+        return ate is not None and conv.data <= ate
+
+    def apagar_conversa(self, conta_id, conversa_id, data):
+        """Tira a conversa e tudo dela do banco e registra que foi apagada
+        ate `data` (ou ate a mensagem mais nova que tinha)."""
+        with self._trava, self._con:
+            linha = self._con.execute(
+                "SELECT MAX(data) FROM mensagens WHERE conta_id=? AND "
+                "conversa_id=?", (conta_id, conversa_id)).fetchone()
+            ate = max(data or 0, (linha[0] if linha else 0) or 0)
+            for tabela, col in (("conversas", "id"),
+                                ("mensagens", "conversa_id"),
+                                ("recibos", "conversa_id"),
+                                ("fichas", "conversa_id"),
+                                ("midias", "conversa_id"),
+                                ("depuracao", "conversa_id"),
+                                ("posicoes", "conversa_id"),
+                                ("limpas", "conversa_id")):
+                self._con.execute(
+                    "DELETE FROM %s WHERE conta_id=? AND %s=?" % (tabela, col),
+                    (conta_id, conversa_id))
+            self._con.execute(
+                "INSERT OR REPLACE INTO apagadas VALUES (?,?,?)",
+                (conta_id, conversa_id, ate))
+            if self._apagadas is not None:
+                self._apagadas[(conta_id, conversa_id)] = ate
+            if self._limpas is not None:
+                for k in [k for k in self._limpas
+                          if k[0] == conta_id and k[1] == conversa_id]:
+                    del self._limpas[k]
+        return ate
 
     def esquecer_midia(self, conta_id, conversa_id, mensagem_id):
         with self._trava, self._con:

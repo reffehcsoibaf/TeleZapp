@@ -29,6 +29,9 @@ def main():
         sys.stdout = open(os.devnull, "w", encoding="utf-8")
     if sys.stderr is None:
         sys.stderr = open(os.devnull, "w", encoding="utf-8")
+    if "--desinstalar" in sys.argv[1:]:
+        from telezapp.interface.instalacao import desinstalar_pelo_aplicativo
+        return desinstalar_pelo_aplicativo()
     from telezapp import NOME, VERSAO, config
     arquivo_log = config.configurar_registro()
     log = logging.getLogger("telezapp")
@@ -69,6 +72,13 @@ def main():
         return 1
 
     app = wx.App(False)
+    from telezapp.nucleo import atualizador, instalacao
+    programa = instalacao.pasta_do_programa()
+    if programa:
+        atualizador.limpar_restos(programa)     # sobras de uma atualizacao
+        from telezapp.interface.instalacao import mostrar_boas_vindas
+        if mostrar_boas_vindas() != "continuar":
+            return 0
     unico = wx.SingleInstanceChecker("TeleZapp-" + os.environ.get(
         "USERNAME", ""), config.pasta())
     if unico.IsAnotherRunning():
@@ -76,6 +86,17 @@ def main():
                       wx.OK | wx.ICON_INFORMATION)
         return 0
     config.limpar_temporarios()   # sobras de uma abertura anterior
+    try:
+        from telezapp.nucleo import backup
+        trocadas = backup.aplicar_pendente(config.pasta_dados())
+        if trocadas:
+            log.info("backup restaurado: %s", ", ".join(trocadas))
+    except Exception:
+        log.error("falha ao restaurar o backup:\n%s", traceback.format_exc())
+        caixa_de_erro("O %s não conseguiu terminar de restaurar o backup. "
+                      "O que havia antes está na pasta antes-da-restauracao, "
+                      "dentro da pasta de dados. Detalhes no log:\n%s"
+                      % (NOME, arquivo_log))
 
     cfg = config.Config()
     banco = Banco(os.path.join(config.pasta(), "telezapp.db"))

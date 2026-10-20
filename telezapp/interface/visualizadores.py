@@ -412,7 +412,13 @@ def _reproducao(pai, msg, caminho, texto, fala, motor, video, cfg=None):
         mo.tocar()
         anterior["tocando"] = True
         atualizar_rotulo()
-        fala.falar("Tocando", interromper=True)
+        if video:
+            fala.falar("Tocando", interromper=True)
+        else:
+            v = vel.rotulo(mo.velocidade) if mo.velocidade != 1.0 else ""
+            fala.falar(m.anuncio_reproducao(
+                msg, v, detalhado=bool(cfg.get("falar_quem_toca"))
+                if cfg is not None else True), interromper=True)
 
     def iniciar():
         """Depois da janela aparecer: o MediaCtrl so carrega visivel."""

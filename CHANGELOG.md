@@ -3,6 +3,822 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.19.1
+
+Instalar a partir de uma cópia portátil e criar cópia portátil.
+
+- Desinstalar oferece o backup: `interface.instalacao.oferecer_backup`
+  (Sim/Não/Cancelar, depois `DialogoBackup`, onde salvar e `backup.criar`;
+  falha ou desistência cancelam a desinstalação). Vale no menu (com
+  `banco.copiar_para`) e em `--desinstalar` (cópia do arquivo pelo SQLite).
+- Atalhos: as pastas do menu Iniciar e da área de trabalho vêm de
+  `SHGetKnownFolderPath` (`instalacao._pasta_conhecida`), não de
+  `%USERPROFILE%\Desktop`: com a área de trabalho no OneDrive o atalho
+  ia para uma pasta que ninguém vê. A desinstalação apaga dos mesmos lugares.
+- Instalador de um arquivo só: `telezapp/instalador.py` (entrada
+  `ferramentas/empacotar/instalar.py`) abre `mostrar_boas_vindas(fonte, ..)`
+  sem "usar sem instalar"; Instalar e Criar cópia portátil extraem o
+  `TeleZapp.zip` embutido (`instalacao.extrair_pacote`, em
+  `%LOCALAPPDATA%\TeleZapp-instalador`, apagado no fim) e usam a lógica de
+  sempre. `ferramentas/empacotar.py` gera programa (spec `TeleZapp.spec`,
+  agora com `upx=False`, `cv2` e `emoji`), `TeleZapp.zip` (+ `.sha256`) e o
+  `TeleZapp.exe` instalador (spec `Instalador.spec`, um arquivo só);
+  `publicar.py` anexa os três e as notas mandam baixar o `TeleZapp.exe`. A
+  página do GitHub Pages aponta o botão para ele.
+- Janela da atualização (`interface/atualizacao.DialogoAtualizacao`): texto
+  somente leitura e focado com a versão oferecida, o tamanho e as novidades de
+  cada versão publicada desde a em uso (`Lancamento.historico`, montado em
+  `atualizacao.mais_nova` a partir de `## Novidades da versão X` das notas,
+  `novidades_do_corpo`), depois Tab para Sim (baixa e instala) e Não; sem o
+  zip ou fora do executável, "Abrir a página de download" e Fechar. A
+  verificação ao abrir (opção `verificar_atualizacoes`) agora abre essa janela,
+  uma vez por versão (`atualizacao_avisada`); antes só falava. Sai a
+  pergunta extra de `_atualizar`.
+- O zip da Release passou a se chamar sempre `TeleZapp.zip` (e
+  `TeleZapp.zip.sha256`): `/releases/latest/download/TeleZapp.zip` aponta para
+  a versão mais nova (só vale para Release que não seja pré-lançamento).
+  `atualizacao._arquivos` ainda aceita o nome antigo com a versão.
+- Tela de boas-vindas (`interface/instalacao.mostrar_boas_vindas`): no
+  executável que não é instalado, sem pasta `dados` e sem
+  `sem-boas-vindas.txt`, antes de tudo (depois do `wx.App`): Instalar, Criar
+  cópia portátil, Guia de uso, Usar sem instalar (com a opção de não mostrar
+  de novo) e Fechar. `fluxo_instalar` e `fluxo_criar_portatil` (também usados
+  pelo menu) rodam o trabalho numa thread com `wx.ProgressDialog`.
+- Atualizador (`nucleo/atualizador.py`): `atualizacao.Lancamento` ganha
+  `url_zip`, `url_hash`, `nome_zip`, `tamanho` (assets
+  `TeleZapp-<v>.zip` e `.sha256` do `publicar.py`). `baixar` (só https de
+  github.com, confere o SHA-256), `extrair` (exige `TeleZapp/TeleZapp.exe`,
+  recusa caminhos fora da pasta) e `aplicar`, que grava `atualizar.bat` ao
+  lado e o roda separado: espera a pasta liberar (até 90 s), renomeia a atual
+  para `.antiga`, põe a nova, devolve `dados`, `instalado.txt` e
+  `sem-boas-vindas.txt` e abre o exe. Sobras (`.atualizacao`, `.antiga`) saem
+  na abertura seguinte (`limpar_restos`). A janela oferece o botão em Ajuda,
+  Verificar atualizações, só no executável e se a Release tem os dois
+  arquivos.
+- `nucleo/instalacao.py`: modos `desenvolvimento`, `portatil` e `instalado`
+  (marca `instalado.txt` na pasta do programa). Instalar copia a pasta para
+  `.nova`, troca a instalação anterior pelo nome (se estiver em uso, desfaz e
+  avisa), cria atalhos (`WScript.Shell` por PowerShell, falha vira aviso) e a
+  entrada em `HKCU\...\Uninstall\TeleZapp` com `TeleZapp.exe --desinstalar`.
+  Sem administrador: `%LOCALAPPDATA%\Programs\TeleZapp`.
+- Dados: `config.pasta_dados()` usa a pasta `dados` ao lado do executável
+  quando existe (só congelado). Ao levar dados de um lugar para o outro,
+  bancos pelo `_copia_consistente`, sem `logs`/`temp`, e
+  `_acertar_caminhos_das_midias`; os dados anteriores de quem instala ficam
+  em `TeleZapp.antes-da-instalacao-<data>`.
+- Menu principal: Instalar, Criar cópia portátil e Desinstalar (explicam
+  quando não se aplicam). `--desinstalar` abre sem janela principal; a pasta do
+  programa é apagada por um `cmd` separado após 4 s.
+- Testes: `testes/test_instalacao.py`.
+
+## 2026.10.19.0
+
+Leitura dupla do NVDA na lista de conversas, busca das configurações, vídeo
+por quadros e IA automática.
+
+- `nome_de_participante` (listas de quem recebeu, abriu ou reproduziu) usa
+  `_dados_mencao(.., rede=False)`: agenda, apelido por qualquer endereço e
+  mensagens guardadas, sem consultar a rede (a lista pode ser grande).
+- Opção `enter_chega_ao_leitor` (desligada): no Enter da caixa o `_char_hook`
+  faz `evt.Skip()` (o controle recebe o `WM_CHAR` que o NVDA usa para fechar
+  a palavra digitada) e `wx.CallLater(40, _enviar_depois_do_enter)` envia o
+  texto (o `strip()` tira a quebra de linha) e limpa a caixa. Padrão: Enter
+  tratado no hook, que engole o `WM_CHAR`.
+- Evento de som `mencao_ou_resposta` (18º). `extras["citou_voce"]`: o WhatsApp
+  marca em `_ao_receber` (`_cita_voce`: `mentionedJID` com o telefone ou o LID
+  de `get_me()`), o Telegram usa `message.mentioned`; `guardar_extras` mantém
+  a marca. `Janela._cita_voce` soma a resposta a mensagem minha (cache ou
+  banco). Em `_ev_nova` o som substitui `nova_grupo`/`nova_aberta` e não
+  depende de `som`; passa pelo filtro de conversa muda. Som do TeleZapp:
+  `E6`+`C6` descendo, 0,79 s; bips: 1047, 1319 e 1047 Hz.
+- Tom padrão de "chamando": `fala.DURACAO_TOM_DE_CHAMADA_MS` = 1500 ms
+  (antes 400); a janela repete a cada 3 s (`_repetir_toque`).
+- Evento de som `reacao_recebida` (17º): `EVENTOS_SOM`, bip em `fala._tocar`
+  (1319 e 1568 Hz), `ferramentas/gerar_sons.py` (`E6` e `G6`, 0,45 s) e
+  `telezapp/sons/reacao_recebida.ogg`; `Janela._ev_atualizada` toca quando
+  `motivo == "reacao"` numa mensagem minha, com emoji e de outra pessoa,
+  depois do filtro de conversa muda.
+- Menções só com telefone: `_lembrar_apelido(.., alternativo)` guarda o nome
+  de perfil sob `Sender` e `SenderAlt` e `_aprender_par` registra o par
+  LID/telefone de cada mensagem; `_formas_do_endereco` junta o endereço, o
+  telefone, os LIDs do mapa e `get_lid_from_pn`, e `_dados_mencao` procura o
+  apelido e `banco.nome_do_remetente` por todos eles. `_reavaliar_mencoes`
+  (chamada em `carregar_mensagens` de grupos, até 300 por vez) refaz as
+  menções que ficaram com o telefone e regrava o texto e os extras.
+- Progresso de download e envio. `ev.ProgressoEnvio`; `Janela._ev_progresso_envio`
+  (título "enviando mídia N%", barra de situação, fala no passo de
+  `midias_passo_progresso`; some em `MensagemNova(enviada_daqui)`, falha ou
+  100%). Telegram: `send_file(progress_callback=)`. WhatsApp: a DLL de teste
+  ganhou `DownloadAnyToFile` (whatsmeow `DownloadToFile`, direto no disco),
+  `UploadFile` (`UploadReader` com um arquivo temporário que conta o que
+  escreve, 0 a 10 %, e o que lê ao enviar, 10 a 100 %), `TransferProgress` e
+  `TransferCancel` (patch em `docs/neonize/transferencias-main.go.diff`;
+  `_binder.py`/`client.py` do venv ganharam `download_any_to_file`,
+  `upload_file`, `transfer_progress`, `transfer_cancel`, `tem_transferencias`).
+  `baixar_arquivo` usa isso quando `tem_transferencias()` (progresso pelo
+  tamanho do `.parte`, Esc cancela na DLL); `_enviar_arquivo` usa para
+  arquivos ≥ `LIMITE_ENVIO_POR_ARQUIVO` (8 MiB), montando a mensagem de foto,
+  vídeo, áudio ou documento com `_mensagem_de_midia(up=)`. Sem a DLL de teste
+  tudo cai nos caminhos antigos. Não testado com uma conta real.
+- Publicar status e histórias: `Provedor.PODE_PUBLICAR_STATUS` e
+  `publicar_status(texto, anexo, publico)`. WhatsApp: envia para
+  `status@broadcast` (texto com `ExtendedTextMessage` e fundo verde, foto com
+  `send_image`, vídeo com `_mensagem_de_midia`) numa thread e guarda o status
+  em "Meu status" (`_guardar_meu_status`); quem vê é a privacidade de status
+  da conta. Telegram: `stories.SendStoryRequest` com `InputPeerSelf`,
+  mídia enviada por `upload_file` e regra `AllowContacts`/`AllowAll`.
+  `nucleo/publicar_status.validar` confere (WhatsApp: texto ≤ 700 ou foto ou
+  vídeo; Telegram: foto ou vídeo, legenda ≤ 200) e
+  `interface/publicar_status.DialogoPublicarStatus` é a janela; atalho
+  Ctrl+Shift+U. Resultado por `ev.Aviso`. Não testado com contas reais: o
+  envio ao `status@broadcast` pelo neonize e a história sem Premium são as
+  dúvidas.
+- Histórias do Telegram nas conversas de status (mesmo desenho do WhatsApp):
+  `GetAllStoriesRequest` (até 5 páginas) em `_buscar_historias`, chamada ao
+  fim de `_atualizar_conversas` e por `UpdateStory` (`_ao_historia`, no máximo
+  a cada 10 s). Cada pessoa vira `Conversa(id="status:<peer>", tipo="status")`
+  e cada `StoryItem` uma `Mensagem` (id = id da história, `tipo_de_historia`,
+  `dados_da_midia_de_historia`); `nao_lidas` = histórias acima de
+  `max_read_id`; o que sumiu do servidor sai do banco. `_carregar` lê do
+  banco; `_baixar` usa `GetStoriesByIDRequest` (`_midia_da_historia`);
+  `_marcar_lida` manda `ReadStoriesRequest`; `_reagir` usa
+  `stories.SendReactionRequest`; `responder_status` envia `SendMessageRequest`
+  com `InputReplyToStory`. Não testado com histórias reais.
+- Prévia de link buscada pelo TeleZapp (`nucleo/previa_links.py`), opções
+  `previa_receber` e `previa_enviar` (desligadas; `LIGADAS`/`definir`).
+  `buscar(url, baixar)` só abre http/https cujo nome resolva a endereços
+  globais (`endereco_publico`, também em cada redirecionamento por
+  `_SoPublico`), com 5 s e 400 KB, lê `og:*`, `twitter:*`, `description` e
+  `<title>` (`ler_previa`) e nunca levanta. Recebida: `Janela._previa_da_recebida`
+  (só ao vivo, texto, não minha, sem prévia) busca numa thread e grava com
+  `_previa_pronta`. Enviada no WhatsApp: `_previa_ao_enviar` põe `matchedText`,
+  `title` e `description` no `ExtendedTextMessage` e guarda a prévia na
+  mensagem. No Telegram `send_message(link_preview=LIGADAS["enviar"])`: com a
+  opção desligada a mensagem sai sem a prévia que o servidor montaria.
+- Prévia de link: `extras["previa"]` ({url, titulo, descricao, site}), vinda do
+  `ExtendedTextMessage` (`matchedText`, `title`, `description`) no WhatsApp
+  (`previa_do_whatsapp`) e do `web_preview` no Telegram (`previa_do_telegram`);
+  `guardar_extras(.., previa=)` a mantém quando outros extras são regravados.
+  `modelos.trecho_da_previa` entra em `formatar` conforme a opção
+  `previa_links` (`MODO_PREVIA`: completa, titulo, nenhuma) e `detalhes` a
+  mostra sempre. Sem buscar a página na rede. Para mensagens enviadas daqui o
+  WhatsApp não ganha prévia (isso exigiria abrir o link).
+- Status do WhatsApp como conversas: `PREFIXO_STATUS` (`status:<jid>`), uma
+  `Conversa(tipo="status")` por autor e os status como `Mensagem`s dela
+  (`_guardar_status` agora grava a ficha, para baixar a mídia; publica
+  `MensagemNova(silenciosa=True)`; `nao_lidas` = não vistos).
+  `_limpar_status_antigos` apaga o que passou de 25 h (na conexão e a cada
+  status). `marcar_como_lida` manda o recibo ao chat `status@broadcast`
+  (`_enviar_leitura`). `responder_status` envia à conversa do autor um
+  `ExtendedTextMessage` com `contextInfo(remoteJID="status@broadcast")`
+  (`RESPOSTA_A_STATUS` no `resposta_a`, que não vai para o banco); curtir usa
+  `reactionMessage` com `MessageKey(remoteJID="status@broadcast")` enviada ao
+  autor. Janela: filtro `status` em `FILTROS_TIPO` (`passa_filtro` deixa os
+  status só nele; `rotulo_conversa` diz "não vistos"), menu da conversa só
+  com Abrir e Apagar status, `_enviar_texto` responde ao status selecionado
+  e anexos/gravação são recusados. A tabela `status` antiga ficou sem uso.
+  Não testado com status reais; Telegram (histórias) é a próxima etapa.
+- Pacotes de sons e tela própria de Sons. `nucleo/pacotes_de_som.py`: pacotes
+  `padrao` (bips do sistema, valor `fala.BIP`), `telezapp` (arquivos de
+  `telezapp/sons`, gerados por `ferramentas/gerar_sons.py`: Ogg estéreo ≤ 2 s,
+  sem silêncio no início, termina em zero, pico ≈ 0,45) e `p:<nome>`
+  (pastas em `sons/pacotes/<nome>` com `<evento>.<ext>`). `mapa(pacote,
+  desativados)` vira o `{evento: valor}` de `fala.definir_sons` (o pacote
+  Padrão usa `BIP` explícito, então um evento desativado não silencia os que
+  herdam o tom dele). `EstadoDeSons` guarda o que a tela mudou (pacote,
+  eventos ativados/desativados, arquivos, pacotes a criar/excluir) e só grava
+  em `aplicar()`, que importa os arquivos (`importar_arquivo`, nome do evento
+  + extensão) e entrega `aplicador("sons_pacotes", {ativo, desativados,
+  erros})`; `Janela._aplicar_opcao` grava `pacote_de_sons` e
+  `sons_desativados`. As opções `som_*` saíram de `config.OPCOES`;
+  `migrar_antigos` cria o pacote "Personalizado" a partir delas.
+  `DialogoConfiguracoes._criar_sons`: Choice do pacote, ListBox dos eventos
+  (Enter/Espaço alternam, tratados em `_ao_tecla`), Ouvir som e, só em
+  personalizados, Procurar som; Novo e Excluir pacote. O backup leva
+  `pacote_de_sons` e `sons_desativados` (EXTRAS) e a pasta `sons`. O spec do
+  PyInstaller precisa de `datas` com `telezapp/sons`.
+- `modelos.LIMITE_IA_NA_LINHA` virou um dicionário (`descricao`: foto,
+  figurinha e vídeo, padrão 0 = inteira; `transcricao`: voz, áudio e PDF,
+  padrão 1000), definido por `definir_limites_ia` a partir das opções
+  `ia_linha_descricao` e `ia_linha_transcricao` (`Janela._carregar_limites_ia`).
+- `_ia_pronto` fala o texto da IA inteiro (sem o corte de 1500 letras); no modo
+  automático fala sempre, menos em conversa muda (`_conversa_muda`), sem
+  depender de `falar_novas`.
+- `midias_passo_progresso` (25, 20, 10, 5, 1 ou 0 = não falar): o passo da fala
+  do avanço do download em `_ev_progresso_midia`. O WhatsApp só informa 0 e
+  100 (`download_any` baixa tudo na memória), então só o Telegram usa.
+- Fala das mensagens novas por lugar: `falar_novas` (conversa aberta),
+  `falar_novas_outras_conversas` e `falar_novas_fora_do_telezapp` (janela
+  sem foco, `IsActive()` falso, qualquer conversa); `Janela._deve_falar_nova`
+  decide em `_ev_nova` e no resumo da sincronia. Independentes de `som`.
+  `Config._carregar` liga as duas novas uma vez para quem já tinha
+  `falar_novas` e não tinha as chaves novas no arquivo.
+- Avisos de chamada do WhatsApp (o TeleZapp ainda não atende): o provedor
+  registra `CallOfferEv`/`CallAcceptEv`/`CallTerminateEv` (`_ao_chamada`,
+  `_ao_chamada_atendida`, `_ao_chamada_encerrada`; vídeo se a árvore do pacote
+  tem a tag `video`; chamadas minhas em outro aparelho e em grupo ficam de
+  fora). A linha na conversa é uma `Mensagem` de tipo `OUTRO` com id
+  `chamada-<callID>` e `nao_lidas += 1`, publicada silenciosa; ao fim vira
+  perdida, recusada ou atendida (com duração) via `MensagemAtualizada(
+  "chamada")`. `ev.ChamadaWhatsApp` leva a janela `DialogoAvisoDeChamada`
+  (OK e Conversar, sem bloqueio; opção `avisar_chamadas_whatsapp`); textos
+  em `nucleo/chamadas.py` (`texto_na_conversa`, `texto_do_aviso`,
+  `texto_do_fim`). Não testado com chamada real.
+- Detalhes de mensagem de grupo: `modelos.detalhes(.., grupo, contagens)` troca
+  a lista por "Enviada em" e "Recebida/Aberta/Reproduzida por N pessoas"
+  (`pessoas_por_recibo`, `ROTULOS_RECIBO`, `texto_pessoas`).
+  `dialogos.mostrar_texto(.., botoes_extra=[(rotulo, funcao(janela))])` põe
+  os botões depois do texto. `detalhes.ControleRecibos` monta um botão por
+  assunto com gente e abre `DialogoLista` (membro, telefone, data e hora);
+  `_MembrosDeRecibo` reaproveita `ControleDetalhes._menu_membro`, então o
+  menu é o dos membros do grupo; "Iniciar conversa" fecha os detalhes e abre
+  a conversa (`abrir_conversa`). Só WhatsApp (o Telegram não guarda recibos
+  por membro).
+- `Janela._opcoes_midia`: o menu de contexto da mensagem com mídia ganha
+  "Reproduzir/Abrir ..." (`ROTULOS_ABRIR`) e "Salvar cópia" ou "Baixar sem
+  abrir", logo depois dos itens da IA, para o Enter configurado como IA ou
+  só baixar não tirar o acesso a abrir.
+- Reações e emojis: `nucleo/emojis.py` (pacote `emoji`, nomes em português
+  pelo `demojize(language="pt")`, sem tons de pele; busca por início de
+  palavra, sem acento, com `SINONIMOS`; `RAPIDOS`). `interface/emojis.py`:
+  `DialogoEmoji` (busca + lista, seta para baixo na busca vai à lista) e
+  `escolher_reacao` (rápidas + "Outro emoji..." + "Tirar"). Janela:
+  `_reagir` (Ctrl+Shift+G e menu de contexto) e `_inserir_emoji` (Ctrl+.).
+  `Provedor.PODE_REAGIR`/`reagir(msg, emoji)`: WhatsApp monta com
+  `build_reaction` (autor = eu se a mensagem é minha, senão o remetente) e
+  envia; Telegram usa `SendReactionRequest` (`ReactionInvalidError` avisa).
+  As duas guardam a reação em `extras["reacoes"]` com `"minha": True` e
+  publicam `MensagemAtualizada(motivo="reacao", quem="Você")` (a janela não
+  fala as minhas). Telegram recebe `UpdateMessageReactions` (`_ao_reacoes`:
+  `recent_reactions`, ou só a contagem em grupos grandes). `emoji>=2.14` em
+  `requirements.txt`.
+- Status no título: `ev.Presenca(conta_id, conversa_id, estado, quando, aprox,
+  quem)`; `Provedor.observar_presenca` / `parar_presenca` (chamados ao abrir e
+  ao fechar a conversa, só com a opção `status_no_titulo`). WhatsApp: abrir
+  envia `send_presence(AVAILABLE)` (uma vez) e `subscribe_presence` (privadas);
+  fechar volta a `UNAVAILABLE`; `PresenceEv` (online/`LastSeen`) e
+  `ChatPresenceEv` (digitando/gravando/parou, com o nome nos grupos) viram
+  `Presenca`. Telegram: `_ler_status` lê `user.status` ao abrir e
+  `events.UserUpdate` (registrado por último em `_conectar`) traz online,
+  visto por último (ou "recentemente", "na última semana", "no último mês"),
+  digitando, gravando e enviando. `Janela._status_da_conversa` monta o
+  sufixo do título com `modelos.texto_presenca`; "digitando" expira em 10 s
+  se o "parou" não vier.
+- Pareamento que falhava sem aviso: o registro mostrava
+  `Failed to handle code pair notification` (código) e `Failed to pair device:
+  invalid device identity HMAC` (QR, a chave ADV do QR já não era a do
+  cliente depois de o servidor girá-la ou de um código ter sido pedido).
+  `ProvedorWhatsApp._ouvir_falhas_do_pareamento` liga um `logging.Handler` em
+  `whatsmeow.Client` (só enquanto `_pareando`) que publica
+  `ev.PareamentoFalhou(conta_id, "codigo"|"qr")`; a janela avisa e chama
+  `Contas.reiniciar_pareamento` (para, apaga a sessão se puder e liga de novo
+  num fio), no máximo 3 vezes por janela. Escolher o QR depois de gerar um
+  código também reinicia (`DialogoPareamento.codigo_gerado`).
+  `DialogoPareamento.reiniciou()` limpa QR, código e a tela cheia.
+- `DialogoPareamento`: o `RadioBox` virou uma página inicial com dois botões
+  (`botao_telefone`, `botao_qr`); `_ir_para("inicio"|"codigo"|"qr")` troca de
+  página (Voltar em cada uma). A página do telefone pede formato internacional
+  (o campo e a mensagem de número inválido dizem isso). Ir para "qr" abre
+  `JanelaQrCheia` na hora (`_tela_cheia(esperar=True)`), com "Aguardando o QR
+  Code" até o QR chegar; o QR que chega com a página inicial aberta só fica
+  guardado.
+- Vídeo por quadros: `catalogo.video_nativo` (só o Gemini) e `aceita(.., "video")`
+  agora vale para quem lê imagens; `provedores_da_tarefa("video")` lista os cinco.
+  `nucleo/ia/video.grade_de_quadros` (OpenCV, import tardio; `opencv-python-headless`
+  entrou em `requirements.txt` e em `docs/licencas-de-terceiros.md`) monta um
+  JPEG com 4/9/12 quadros (perfil curto/médio/detalhado) com a hora desenhada em
+  cada um. `servico.executar` usa a grade quando o provedor não é nativo ou o
+  vídeo passa de 14 MB (`Resultado.via_quadros`, `prompts.instrucoes(.., quadros=n)`).
+  `executar_em_ordem(.., ordem_audio=)` soma "Fala no vídeo" transcrevendo o
+  próprio mp4 (`mime="video/mp4"`) pelos provedores de áudio. `montar_pedido`
+  recusa vídeo inteiro para quem não é nativo.
+- IA automática: opção por conversa em `ia_automatica_conversas` (lista de
+  `[conta, conversa]`, vai na parte "contas" do backup), alternada no menu de
+  contexto da conversa (`_alternar_ia_auto`). `_ev_nova` chama `_ia_automatica`
+  para mensagens recebidas (não minhas, não da sincronia). Opções `ia_auto_audio`
+  e `ia_auto_imagem`. `_ia_processar(x, auto=True)`: sem janelas nem perguntas
+  (sem provedor, chave ou consentimento, só retorna), baixa com
+  `midias.baixar(x, automatica=True)` (`_ia_pendentes` guarda `(x, auto)`) e no
+  máximo 2 pedidos ao mesmo tempo (`_ia_vagas`). `_ia_pronto(.., auto)`: erro só
+  na barra de situação; resultado na barra e falado (sem interromper) se
+  "Falar mensagens novas" estiver ligado e a conversa não estiver muda.
+
+- `janela.ListaDeTextos`: `wx.ListCtrl` de uma coluna com a interface do
+  `wx.ListBox` (`Set`, `Append`, `Delete`, `SetString`, `GetSelection`,
+  `SetSelection`, `HitTest` que devolve só o índice). `lista_conv` passou do
+  ListBox para ela, pelo mesmo motivo da lista de categorias das
+  configurações: o ListBox faz o NVDA falar o item em foco duas vezes. O duplo
+  clique virou `EVT_LIST_ITEM_ACTIVATED`; `testes/wx_falso.py` ganhou um
+  `ListCtrl` falso.
+- `DialogoConfiguracoes._ao_tecla`: seta para baixo no campo de busca foca o
+  primeiro controle dos resultados (ou a lista de categorias, sem busca ou sem
+  resultado).
+
+## 2026.10.18.0
+
+Copiar por tipo de conteúdo e colar mídia na caixa.
+
+- `modelos.conteudos_copiaveis(msg)` lista `(tipo, rótulo, valor)` com um item
+  por tipo de conteúdo (legenda/texto, mídia, cada link); sem nada, cai no
+  texto falado. `_menu_mensagem` monta os itens "Copiar ..." a partir dela e
+  `_copiar_conteudo` copia texto/endereço ou o arquivo baixado (`wx.FileDataObject`
+  e, na foto, também `BitmapDataObject`, num `DataObjectComposite`).
+  Control Shift C segue copiando `texto or conteudo`.
+- Colar na caixa (`EVT_TEXT_PASTE` → `_ao_colar`): lista de arquivos do
+  Explorer, ou bitmap quando não há texto na área de transferência (salvo em
+  PNG na pasta temporária), vira `envio.Anexo` em `Janela.anexos`, sem enviar.
+  Texto puro segue o fluxo normal (`evt.Skip()`). Enter (`_enviar_texto` →
+  `_enviar_anexos`) manda cada anexo; o texto da caixa é a legenda do primeiro
+  que aceita (não áudio/voz), senão vai como texto depois. Esc na caixa
+  (`_sair_da_caixa`) descarta; abrir/fechar conversa também.
+- A leitura da área de transferência foi para `interface/colagem.py`
+  (`ler`, `colar`, `descartar`), usada pela caixa da janela e pelo campo
+  Mensagem de `DialogoNovaMensagem`, que agora devolve
+  `(conta_id, destino, texto, pessoa, anexos)`; `_nova_mensagem` põe os anexos
+  em `Janela.anexos` antes de `_enviar_texto`. Esc no campo remove a mídia.
+- Salvar o conteúdo da conversa (`_salvar_conversa`, menu de contexto da
+  lista e Menu, Conversa): `nucleo/exportar.gravar_zip` grava `conversa.txt`
+  (UTF-8 com BOM) e `midias/<data>_<id>_<nome>` das mídias baixadas e não
+  limpas, numa thread; o aviso final vem por `wx.CallAfter`. Pasta lembrada
+  em `pasta_exportar`; `dialogos.escolher_destino_zip`.
+- `modelos.quem_enviou` (nome da conversa privada, agenda, nome guardado,
+  telefone) substitui "Desconhecido" na lista, na fala e no arquivo salvo;
+  `formatar(..., quem=)` recebe o resultado de `Janela._quem_enviou` (com
+  cache, limpo ao abrir conversa ou mexer nos contatos). No estilo "autor só
+  quando muda" o remetente também conta como mudança.
+- Modo de seleção (Control Espaço / Espaço / Esc em `_char_hook`):
+  `modo_conv`/`marc_conv` (chaves) e `modo_msg`/`marc_msg` (ids); o prefixo
+  "Marcada: " entra nos rótulos (`_com_marca`) e os `_preencher_*` atualizam
+  no lugar. Com marcas, os menus de contexto viram `_opcoes_em_massa_conv/msg`
+  (`_massa_conversas`, `_massa_mensagens`; uma pergunta só ao apagar). A
+  seleção de mensagens zera ao abrir ou fechar a conversa.
+- Apagar conversa de grupo: `dialogos.escolher_acao_grupo` (limpar, apagar
+  da lista, sair, sair e apagar). `_limpar_conversa` usa `limpeza` (todas as
+  mensagens, favoritas incluídas) e mantém a conversa; `_sair_do_grupo` chama
+  `Provedor.sair_do_grupo` (`SAI_DE_GRUPO`; WhatsApp `leave_group`, Telegram
+  `delete_dialog`) numa thread e só tira da lista se deu certo.
+- WhatsApp: em mensagem `IsFromMe` o `Pushname` é o da própria conta; deixa
+  de ser passado a `_conversa` (as duas chamadas ao vivo), e `_conversa`
+  renomeia conversa privada que ficou com o nome da conta.
+- WhatsApp: `ChatMarkAsReadEv` passa a ser tratado (`_ao_marcar_lida`): zera
+  `nao_lidas` se não há mensagem mais nova que a marca (`messageRange`). Os
+  recibos de outro aparelho meu (lida/ouvida) agora vão para o log, para
+  diagnosticar a marca de ouvida.
+- Atualização: `nucleo/atualizacao.py` lê as Releases do GitHub
+  (`consultar`, `mais_nova`, `e_mais_nova`); `Janela._verificar_atualizacoes`
+  (Ajuda, e 8 s depois de abrir se `verificar_atualizacoes`); só avisa, não
+  instala. `ferramentas/publicar.py` monta o zip, o SHA-256 e as notas
+  (`lancamento/`) e, com `--publicar`, chama `gh release create`
+  (pré-lançamento por padrão).
+- Backup e restauração: `nucleo/backup.py` (zip com `pyzipper`, AES-256 com
+  senha opcional; partes configuracoes, contas, conversas, midias;
+  `criar`, `ler_manifesto`, `restaurar`, `aplicar_pendente`). Configurações
+  se aplicam na hora por `_aplicar_opcao`; o resto vai para `restauracao/` e
+  `__main__` chama `aplicar_pendente` antes de abrir o banco, guardando o
+  anterior em `antes-da-restauracao/`, e acerta os caminhos de `midias`.
+  `Banco.copiar_para` usa a API de backup do SQLite. `OPCOES_FORA`
+  (depuração e exigência do código) nunca são restauradas. Nova dependência:
+  `pyzipper`. Telas em `interface/backup.py`. Ao terminar, `_reiniciar`
+  fecha a janela e um `cmd` separado (`timeout` + `start`) abre outra instância.
+- Sons dos eventos: `config.EVENTOS_SOM` gera as opções `som_<evento>`
+  (categoria Sons, `Opcao.som`); valor "" (padrão), "desligado" ou caminho.
+  `fala.definir_sons`/`acao_do_som`/`bipe(tipo, valor=None)`; arquivo toca
+  por `soundfile` + `sounddevice` (`_tocar_arquivo`, 15 s no máximo) e cai
+  no beep se falhar. O valor é o nome do arquivo em `config.pasta_sons()`
+  (`importar_som` copia para lá); caminho completo antigo ainda vale. A pasta
+  `sons/` vai na parte configuracoes do backup e volta na hora; arquivo que
+  sumiu cai no beep. Menu Ajuda, Abrir a pasta de sons. `DialogoConfiguracoes._criar_som` (caixa + Ouvir);
+  `Janela._carregar_sons` ao abrir e ao mudar uma opção `som_*`.
+- Contatos recebidos: `whatsapp.telefones_do_vcard` e `contatos_da_mensagem`
+  (um item por TEL, `waid=` dá o id) entram em `mencoes` (nome, telefone, id)
+  nos dois caminhos de conversão; o texto traz o telefone. Telegram:
+  `msg.contact` gera o mesmo item e o telefone no texto.
+- `modelos.conteudo`: tipo `OUTRO` com texto descritivo (contato, enquete...)
+  mostra só o texto; "mensagem sem suporte ainda" só para o não reconhecido
+  (texto vazio ou "tipo do WhatsApp: ...").
+- Encaminhar: `nucleo/encaminhar.py` (`preparar` → `Item` texto ou arquivo,
+  `destinos`, `filtrar`); `interface/encaminhar.py` (`DialogoEncaminhar`,
+  CheckListBox com busca e marcas persistentes); `Janela._encaminhar`
+  (Ctrl+Shift+E, menu de contexto e modo de seleção) reenvia por
+  `enviar_texto`/`enviar_arquivo` da conta de cada destino. Não usa o
+  encaminhamento nativo (sem o rótulo "Encaminhada"); mídia só se baixada.
+- Responder em particular: `Janela._responder_em_particular` abre/cria a
+  conversa privada de `pessoa_da_mensagem` e põe a mensagem do grupo em
+  `resposta_a`; `_mensagem_de_texto` do WhatsApp, quando a citada está em
+  outra conversa, copia texto/autor dela e põe `contextInfo.remoteJID`.
+  Só onde o provedor sabe achar o telefone (WhatsApp).
+- Mais eventos de som: `nova_aberta`, `nova_grupo`, `desconectada`,
+  `reconectada`, `falha_envio`, `download_pronto`, `tarefa_pronta`
+  (`config.EVENTOS_SOM`). `fala.HERDA` faz o evento tocar o som (e seguir a
+  escolha) de outro quando não tem escolha própria (`tom_padrao`,
+  `acao_do_som` recursivo). `_ev_estado` guarda `_caiu` para só tocar
+  "reconectada" depois de uma queda.
+- Conversas somente leitura: `Conversa.somente_leitura` (coluna nova no
+  banco). WhatsApp: canais sempre; grupos por `_conferir_escrita` (anúncio
+  sem ser admin, ou 403 = saí) ao abrir (`conversa_aberta`) e ao mudar o
+  grupo. Telegram: `somente_leitura_do_telegram(entidade)`. Janela:
+  `_mostrar_conversa(True, False)`, `_somente_leitura()` barra
+  responder/enviar/anexar, `_ev_conversas` reage à mudança, e
+  `encaminhar.destinos` as ignora.
+- Editar mensagem: `Provedor.JANELA_EDICAO`/`editar_mensagem` (WhatsApp:
+  `edit_message` do neonize com `_mensagem_de_texto`, mantendo a citação;
+  Telegram: `edit_message`); sucesso vira `MensagemAtualizada("editada")`,
+  falha vira `Aviso`. Janela: `_pode_editar`, `_editar_mensagem` (F2),
+  `_salvar_edicao`, `_cancelar_edicao`, rótulo "Editando sua mensagem";
+  a caixa guarda o rascunho enquanto edita.
+- Detalhes da conversa: `nucleo/detalhes.py` (`classes`, `midias`,
+  `estatisticas`, `linhas_de_uso`; filtros foto/vídeo/link/documento/
+  figurinha/contato/voz/áudio); `interface/detalhes.py` (`ControleDetalhes`,
+  `DialogoTexto`, `DialogoLista`, `DialogoAdministrar`); `Janela`:
+  `_detalhes_da_conversa` (Ctrl+I), `_opcoes_da_conversa` (itens do menu
+  compartilhados com membros e grupos em comum), `_garantir_conversa`,
+  `_ver_na_conversa`. Provedores: `dados_do_contato`, `detalhes_do_grupo`,
+  `detalhes_do_canal`, `grupos_em_comum`, `administrar_grupo`,
+  `administrar_canal`. Telegram: `_administrar` (nome, descrição, direitos
+  padrão do grupo, adicionar, remover, promover, link, sair).
+  `administrar_canal` só no WhatsApp.
+- Entrar em grupos: ações do tipo `entrar` em `extras["acoes"]`
+  (`whatsapp.entradas_de_grupo`: `groupInviteMessage` e links
+  chat.whatsapp.com; `telegram.entradas_do_telegram`: t.me/+, joinchat e
+  t.me/nome). `Janela._tocar_acao` desvia para `_entrar_no_grupo` (prévia
+  em thread, confirmação, `entrar_no_grupo`). Provedores:
+  `previa_do_convite` e `entrar_no_grupo` (neonize `join_group_with_invite`/
+  `with_link`, `get_group_info_from_*`; Telethon `CheckChatInvite`,
+  `ImportChatInvite`, `JoinChannel`).
+- Provedores de IA: pacote `nucleo/ia` (`catalogo`: provedores, capacidades,
+  limites; `prompts`; `provedores`: `montar_pedido`/`ler_resposta` puros para
+  Gemini, OpenAI, Claude, Groq e OpenRouter, transcrição multipart na OpenAI
+  e Groq; `servico`: `executar`, `testar`, HTTP por urllib; `cofre`: chaves
+  cifradas com DPAPI em `ia_chaves.json`, fora do backup). Opções
+  `ia_audio/imagem/video/pdf/perfil` e `ia_modelos`/`ia_consentimento` em
+  `Config`. Janela: `_opcoes_ia`, `_ia_processar` (consentimento, download
+  prévio por `_ia_pendentes`, thread), `_ia_pronto` (grava `extras["ia"]`),
+  `_ia_ver`; `modelos.trecho_da_ia` na linha e `conteudos_copiaveis`.
+  Configurações: bloco de chaves/modelos em `_criar_ia`, `_IaParaConfig`.
+  Ordem de tentativa: `ia_ordem` (tarefa → provedores ligados, em ordem;
+  substitui as opções `ia_audio/imagem/video/pdf`), `servico.executar_em_ordem`
+  (passa ao próximo em `PROXIMO_PROVEDOR`), lista de modelos por GET
+  (`pedido_de_modelos`, `ler_modelos`, `listar_modelos`, cache
+  `ia_lista_modelos`), `cadeia_de_modelos` (automático) e a caixa combinada
+  de modelos em `_criar_ia`. `ia_ordem` e `ia_modelos` entram no backup.
+  `servico.enviar_pela_rede` manda `User-Agent: TeleZapp/<versão>` (a Groq,
+  atrás da Cloudflare, dava 403 erro 1010 ao User-Agent do Python e parecia
+  chave recusada) e `_erro_http` lê o corpo (o Gemini responde 400 a chave
+  inválida).
+  A tela de IA ficou com a ordem das tarefas e um botão por provedor que abre
+  `DialogoProvedorIA` (chave, combo de modelo, Obter modelos, Testar).
+  Opções `enter_audio/imagem/video/pdf` (abrir, baixar ou ia) em
+  `Janela._enter_na_midia`; `_opcoes_ia` é o primeiro item de `_menu_mensagem`.
+  Fica para depois: modo automático por conversa, vídeo para outros
+  provedores (quadros), arquivos acima de 14 MB, perguntas de acompanhamento.
+- `_enviar_arquivo` foi dividido: `_enviar_anexo` recebe o anexo já preparado.
+- `_rotular_caixa` monta o rótulo da caixa (resposta e mídias coladas).
+
+## 2026.10.17.0
+
+Foco inicial na conta.
+
+- `Janela.comecar` põe o foco em `cx_conta` (antes `lista_conv`) ao abrir.
+- `_preencher_conversas` atualiza a lista no lugar (`SetString`/`Append`/
+  `Delete`) e só repõe a seleção se o índice mudou, em vez de `Set()` a cada
+  mudança de ordem: o NVDA repetia o nome da conversa durante as atualizações.
+- Menu de contexto na lista de conversas (`_menu_conversa`, botão direito ou
+  tecla Menu/Shift+F10): Abrir, Arquivar/Desarquivar, Salvar como contato
+  (só pessoas) e Depurar conversa (só com a depuração ligada). Age sobre a
+  conversa selecionada; `_arquivar_conversa`, `_salvar_pessoa` e
+  `_depurar_conversa` aceitam `conv`.
+- Trancar pelo TeleZapp (`_trancar_conversa`; Menu, Conversa, e no menu de
+  contexto): marca `Conversa.trancada` só no TeleZapp, como o arquivar do
+  WhatsApp. As trancadas por aqui ficam em `trancadas_locais` na config e são
+  reaplicadas em `_juntar_conversas` (o Telegram recria as conversas a cada
+  leitura). Destrancar tira da lista; uma trancada no celular destrancada aqui
+  só vale até o celular mudar. Se o celular destranca uma conversa trancada
+  aqui, ela continua trancada aqui até ser destrancada aqui.
+- Limpeza de mídias e mensagens (Menu, Mídias, Limpar mídias e mensagens):
+  `nucleo/limpeza.py` (`Filtros`, `selecionar`, `apagar`), `interface/limpeza.py`
+  (`DialogoLimpeza`). Escolhe entre só as mídias baixadas ou as mensagens
+  (com as mídias delas); filtros: conta, conversa, tipo (inclui texto), idade
+  em dias e tamanho mínimo. Mostra a contagem e o espaço e só apaga depois do
+  Sim.
+- Registro do que foi limpo: tabela `limpas` (`alvo` 'mensagem' ou 'midia'),
+  `Banco.registrar_limpeza`, `foi_limpa`, `apagar_mensagens`, `apagar_fichas`,
+  `mensagens_para_limpar`, `todas_midias`. `salvar_mensagens` e
+  `Janela._mesclar`/`_ev_nova` descartam mensagens limpas; `GerenteMidias.baixar`
+  e `_abrir_midia` recusam mídias limpas (`TEXTO_LIMPA`); a ficha de download
+  do WhatsApp é apagada. Só um novo pareamento
+  (`Contas.parear_de_novo` -> `esquecer_limpezas`) ou remover a conta
+  (`apagar_conta`) zera o registro.
+- Apagar conversa (menu de contexto da lista, `Janela._apagar_conversa`,
+  `Banco.apagar_conversa`, `armazem.apagar_conversa`): tira do banco a
+  conversa, mensagens, recibos, fichas, mídias (arquivos e pasta) e posição, e
+  registra em `apagadas` a data da última mensagem (`ate`). Conversas e
+  mensagens com `data <= ate` são descartadas em `salvar_conversas`,
+  `salvar_mensagens`, `_juntar_conversas`, `_mesclar` e `_ev_nova`; a
+  conversa volta quando chega mensagem mais nova. Novo pareamento
+  (`esquecer_limpezas`) e remover a conta zeram o registro. Só local: a
+  conta não é afetada.
+- Conversa apagada no celular (WhatsApp): o whatsmeow emite `events.DeleteChat`
+  na sincronia de estado, mas o neonize não o repassava. A DLL de teste ganhou
+  o evento 51 (`ChatDeleteEv`, mensagem `ChatDelete` no proto, `case
+  *events.DeleteChat` em `goneonize/main.go`, `neonize/events.py` e
+  `aioze/events.py`). `WhatsApp._ao_apagar_conversa` tira a conversa do
+  provedor e publica `ev.ConversaApagadaNoCelular`; `Janela._ev_conversa_apagada`
+  apaga aqui como em "Apagar conversa" (`_remover_conversa_local`), mas só se a
+  conversa não tem mensagem mais nova que o aviso (margem de 5 s).
+- Apagar no TeleZapp e no celular (WhatsApp): "Apagar conversa..." pergunta
+  "Apagar aqui e no celular", "Apagar só aqui" ou "Cancelar" quando a conta
+  está conectada (`Provedor.APAGA_NA_CONTA`). `WhatsApp.apagar_conversa` monta o
+  aviso de estado `deleteChat` (REGULAR_HIGH, versão 6, faixa de mensagens até a
+  última guardada, apagando também as mídias do celular: índice "1") e o manda com
+  `send_app_state`, numa thread; o resultado é falado. Exigiu corrigir a DLL
+  de teste: `DecodePatchInfo` do neonize comparava ponteiros de enum
+  (`PatchInfo_X.Enum()`) e nunca casava, deixando o tipo do patch vazio, e não
+  tratava REGULAR_HIGH/REGULAR_LOW. Corrigido em `utils/decoder.go` (branch
+  `fix/patchinfo-type` do worktree neonize-fix). O Telegram não entra: apagar
+  o diálogo lá sai de grupos e canais.
+- Conversas fixadas e silenciadas: `Conversa.fixada` e `silenciada_ate` (0 com
+  som, -1 para sempre, senão o timestamp; `Conversa.silenciada()`), colunas
+  novas no banco (esquema 10). Fixadas vão para o topo (`_ordenar`) e o
+  rótulo ganha ", fixada" e ", silenciada"; tipos novos Fixadas e Silenciadas
+  em `FILTROS_TIPO`; conversa silenciada fechada não avisa mensagem nova
+  (`_conversa_muda`). WhatsApp: histórico (`pinned`, `muteEndTime`), avisos
+  ao vivo `ChatPinEv`/`ChatMuteEv` (DLL de teste, eventos 47 e 48) e a
+  conferência de 60 s agora lê Arquivada, Fixada e MutedUntil do armazém numa
+  consulta só (`_ajustes_no_celular`). Telegram: `d.pinned` e
+  `notify_settings.mute_until` (sem aviso ao vivo; vale a cada leitura).
+- Fixar e silenciar pelo TeleZapp (Menu, Conversa, e no menu de contexto):
+  `Janela._fixar_conversa` e `_silenciar_conversa` (8 horas, 1 semana ou
+  sempre) mudam aqui na hora e avisam a conta numa thread
+  (`fixar_conversa`/`silenciar_conversa` nos provedores). WhatsApp manda
+  `pin_v1` (versão 5, REGULAR_LOW) e `mute` (versão 2, REGULAR_HIGH) com
+  `send_app_state`; Telegram usa `ToggleDialogPinRequest` e
+  `UpdateNotifySettingsRequest`. Se o serviço não aceita, a fala avisa que
+  ficou só no TeleZapp.
+- Voz ouvida nos dois sentidos: `Janela._marcar_ouvida` agora chama
+  `Provedor.marcar_ouvida`. WhatsApp manda o recibo `PLAYED` (ou `PLAYED_SELF`
+  com a confirmação de leitura desligada, para só os próprios aparelhos
+  saberem) com `mark_read`; Telegram usa `messages.ReadMessageContents`
+  (`channels.` nos canais). Do celular para cá, o WhatsApp já tratava o
+  recibo `played-self`; o Telegram ganhou o aviso ao vivo
+  (`UpdateReadMessagesContents` e a versão de canal, `_ao_conteudo_lido`,
+  `Banco.mensagens_por_id`), que antes só valia ao carregar a conversa.
+- Mensagem do WhatsApp que não deu para decifrar (`UndecryptableMessageEv`,
+  `WhatsApp._ao_indecifravel`): registra o aviso no log (id, conversa,
+  remetente, modo) e deixa no lugar da mensagem uma marca do tipo
+  `AGUARDANDO` ("mensagem ainda não recebida"), sem alerta. O whatsmeow pede de
+  novo ao remetente; quando a de verdade chega, com o mesmo id, ela substitui
+  a marca (`INSERT OR REPLACE` e o cache por id). Eventos que só trazem
+  controle e eram ignorados sem rastro agora deixam uma linha no log.
+- Apagar mensagem nos dois sentidos (Menu, Mensagem, e menu de contexto da
+  lista de mensagens): `Janela._apagar_mensagem` pergunta e tira a mensagem
+  daqui na hora (`limpeza.apagar_mensagem`: apaga a mídia, a mensagem e
+  registra em `limpas`, então não volta por histórico nem nova leitura). As
+  minhas têm "Apagar para todos" (`revoke_message`) ou "só para mim"; as dos
+  outros, só "para mim" (aviso de estado `deleteMessageForMe`, versão 3,
+  REGULAR_HIGH, com a mídia). Telegram: `delete_messages(revoke=...)`. Do
+  celular para cá: a DLL de teste ganhou o evento 52 (`MessageDeleteForMeEv`,
+  `events.DeleteForMe`) e o Telegram usa `events.MessageDeleted`; ambos
+  publicam `ev.MensagemApagadaNoCelular` (`Janela._ev_mensagem_apagada`).
+  "Apagar para todos" feito pelo remetente continua aparecendo como "mensagem
+  apagada", como no WhatsApp.
+- Tipos do WhatsApp que apareciam como "mensagem sem suporte ainda":
+  `ptvMessage` (mensagem de vídeo: vira vídeo e baixa pela ficha como
+  `videoMessage`), `contactsArrayMessage` ("N contatos: nomes"),
+  `eventMessage` ("evento: nome, início, fim, local, link, descrição" ou
+  "evento cancelado"), `productMessage` ("produto: título, preço, link") e
+  `secretEncryptedMessage` (edição cifrada de evento ou enquete: passa a ser só
+  controle, `SO_CONTROLE`, em vez de uma linha vazia). As mensagens antigas
+  que já estavam guardadas como "tipo do WhatsApp: ..." não mudam.
+- Contato do TeleZapp reconhecido pelo WhatsApp: `WhatsApp.salvar_contato`
+  manda o aviso de estado `contact` (coleção `critical_unblock_low`, versão 2)
+  com `ContactAction(fullName, firstName, pnJID, lidJID quando conhecido,
+  saveOnPrimaryAddressbook=False)`, o mesmo do WhatsApp Web ao adicionar um
+  contato: o celular reconhece a pessoa e nada é gravado na agenda do
+  aparelho. Chamado ao adicionar e editar contatos e ao salvar a pessoa da
+  conversa (`contatos.avisar_conta`, em segundo plano). "Trazer das contas"
+  não devolve nada à conta, e remover um contato do TeleZapp não o remove do
+  WhatsApp. O Telegram fica de fora.
+- Salvar quem enviou a mensagem como contato (Menu, Contatos, e menu de
+  contexto da lista de mensagens, nas mensagens recebidas com remetente):
+  `Janela._salvar_autor`, `Provedor.pessoa_da_mensagem` (o endereço LID do
+  remetente vira o telefone) e `Banco.renomear_autor`, que põe o nome nas
+  mensagens já guardadas e no cache. Também avisa a conta
+  (`contatos.avisar_conta`). Só no WhatsApp: o Telegram não guarda o remetente.
+- Mensagens favoritas: chave `favorita` nos extras (`extras_de`), "(favorita)"
+  na linha, `Janela._favoritar_mensagem` (Menu, Mensagem, Ctrl+Shift+F, e menu
+  de contexto). No WhatsApp vai e vem com a conta: aviso de estado `star`
+  (versão 2, REGULAR_HIGH) e o evento 53 da DLL de teste (`MessageStarEv`,
+  `events.Star`), mais `WebMessageInfo.starred` no histórico. No Telegram vale
+  só no TeleZapp (`Provedor.FAVORITA_NA_CONTA`).
+- Limpeza: caixa "Manter as mensagens favoritas" (ligada por padrão,
+  `Filtros.manter_favoritas`, `Banco.favoritas`): as favoritas e as mídias
+  delas ficam fora de `selecionar`.
+- Estado do aplicativo fora de sincronia (`mismatching LTHash`): depois de
+  mandar avisos de estado daqui, as coleções `regular_high` e
+  `critical_unblock_low` ficaram sem aplicar os avisos do celular (favoritar,
+  desfavoritar...) e recusavam os daqui (409). A DLL de teste ganhou
+  `FetchAppState` (`NewClient.fetch_app_state(nome, full_sync)`, nova no
+  `_binder.py` e no `client.py`). `WhatsApp._conferir_estado` roda ao
+  conectar: sincroniza cada coleção e, se ela não bate, baixa de novo;
+  `_enviar_estado` faz o mesmo e repete o envio uma vez quando o WhatsApp
+  recusa por conflito. Na sincronia completa só os estados (arquivada,
+  fixada, silenciada, favorita) são aplicados: apagar conversa e apagar
+  mensagem do celular só valem ao vivo (`FromFullSync` é ignorado).
+- Causa do `mismatching LTHash`: o celular reescreve registros antigos do
+  estado (troca de endereço telefone/LID, nova chave) e o whatsmeow não
+  consegue conferir o patch, mesmo com a coleção baixada do zero
+  (tulir/whatsmeow#858; ferramenta de diagnóstico em
+  `goneonize/cmd/diag`, que mostra as mutações do patch que falha). O
+  caminho oficial é pedir ao celular uma cópia nova: a DLL de teste ganhou
+  `RequestAppStateRecovery` (`NewClient.request_app_state_recovery`), que o
+  `_recuperar_colecao` usa depois do download completo e espera até 90 s
+  (`ESPERA_DA_RECUPERACAO`). O iPhone responde na hora com o WhatsApp
+  aberto; senão a pessoa é avisada para abri-lo e o TeleZapp tenta de novo ao
+  reconectar. A reparação roda numa thread própria (`_conferir_estado`).
+- Resposta cujo original o próprio TeleZapp tirou: a linha diz "em resposta a
+  uma mensagem que foi limpa deste computador" ou "de antes de a conversa ser
+  apagada", e "Ir para a mensagem respondida" explica o motivo
+  (`Janela._motivo_do_original_ausente`), em vez de "mais antiga". Mais
+  envelopes do WhatsApp abertos (`EMBRULHOS`: menção a todos, spoiler,
+  pergunta...).
+- Configurações > Privacidade: a leitura da conta (`privacidade.ler`, que vai ao
+  serviço) roda em thread (`_trocar_conta_priv`, `_priv_lido`); a categoria
+  abre na hora com as caixas apagadas e "Lendo a privacidade da conta...".
+  O resultado fica em cache enquanto a janela está aberta.
+  A categoria Privacidade passou para a última posição da lista
+  (`nucleo/configuracoes.categorias`), depois de Avançado.
+
+## 2026.10.16.9
+
+Nova mensagem, contatos do Telegram e rótulos para o NVDA.
+
+- Nova mensagem (Ctrl+N): `DialogoNovaMensagem` (a conta só aparece se há 2+
+  conectadas), `nucleo/nova_mensagem.py` (`tipo_de_destino`, `candidatos`),
+  provedor `resolver_destinatario` (Telegram: `get_entity`) e
+  `id_do_telefone` (WhatsApp). Abaixo do campo Para, lista de contatos e
+  conversas que filtra enquanto se digita (nome ou dígitos do telefone).
+- Contatos do Telegram: `contatos_da_conta` lê `contacts.GetContacts` (sem
+  bots nem apagados); o botão do gerenciador passa a ser "Trazer das contas".
+- Janelas novas criam o rótulo ANTES do controle (o NVDA usa o texto anterior
+  como nome do campo): `DialogoContato` e `DialogoNovaMensagem`.
+
+## 2026.10.16.8
+
+Privacidade das contas.
+
+- Privacidade do WhatsApp e do Telegram em Configurações > Privacidade
+  (`nucleo/privacidade_conta.py`; provedor `privacidade()`,
+  `definir_privacidade()`, `privacidade_status()`): visto por último, online,
+  recado (`status` no whatsmeow), confirmação de leitura e quem adiciona a
+  grupos; aplicar relê e confere. Status (stories) só leitura: o whatsmeow
+  só tem `GetStatusPrivacy`.
+- Telegram: `GetPrivacy/SetPrivacy` com as chaves StatusTimestamp, About e
+  ChatInvite, e `GlobalPrivacySettings.hide_read_marks`; `valor_das_regras`,
+  `ErroPrivacidade`.
+
+## 2026.10.16.7
+
+Contas ativáveis.
+
+- `ativa` (padrão verdadeiro) no registro da conta; `Contas.ativar/
+  desativar/esta_ativa`; `iniciar_salvas` e `reconectar` pulam as
+  desativadas (continuam em `Contas.contas`, para o serviço ser conhecido);
+  menu Contas > Ativar ou desativar contas (`wx.MultiChoiceDialog`).
+
+## 2026.10.16.6
+
+Fala configurável na sequência de áudios.
+
+- `modelos.anuncio_sequencia` e as opções `seq_falar_proximo/tipo/quem/
+  duracao/velocidade/fim` (Mídias; o fim vem de `_fim_da_sequencia`, só com
+  2+ áudios na sequência). Na sequência elas substituem `falar_quem_toca`,
+  que fica só para o 1º áudio.
+- Padrão de falar pouco: `falar_novas`, `confirmar_envio`, `falar_reacoes`,
+  `falar_quem_toca` e `seq_falar_*` vêm desmarcadas (quem já salvou mantém).
+
+## 2026.10.16.5
+
+Conversas trancadas, busca e código secreto.
+
+- `Conversa.trancada` (WhatsApp "Trancar conversa"; coluna nova): vem do
+  `locked` das conversas do pacote de histórico. Fora de todos os tipos, só
+  no tipo `trancadas`. O neonize 0.5.2 não repassa o `lockChatAction` e o
+  whatsmeow não o guarda (`chat_settings` só tem mudo, fixada e arquivada):
+  sem estado ao vivo, a menos do neonize de teste (ver `Backup/`).
+- Busca de conversas (`campo_busca`, `modelos.casa_busca`) e código secreto
+  das trancadas (`nucleo/codigo_secreto.py`: PBKDF2 com sal, só o resumo no
+  config). Digitar o código na busca libera o tipo Trancadas (no fim da
+  caixa de tipos); trocar de filtro, Ctrl+Shift+T, minimizar ou reabrir
+  escondem. Opção `trancadas_exigir_codigo` (Privacidade, padrão ligada);
+  sem código definido elas ficam escondidas. O código é definido em
+  Configurações > Privacidade (`ModeloConfiguracoes.erro_codigo/
+  acao_codigo`); mudar ou desligar pede o código atual e não há
+  redefinição: parear o WhatsApp de novo apaga o código
+  (`_limpar_codigo_trancadas`).
+- Arquivadas e trancadas (fechadas) não avisam: `_conversa_muda` em
+  `_ev_nova` e `_ev_atualizada` (sem som, fala nem texto na barra).
+
+## 2026.10.16.4
+
+Filtros da lista e conversas arquivadas.
+
+- Filtros da lista de conversas: duas caixas acima da lista (`cx_conta`:
+  todas, serviço e, com 2+ contas do serviço, cada conta; `cx_tipo`: todas,
+  não lidas, pessoais, grupos, canais, arquivadas). `modelos.passa_filtro`,
+  `opcoes_de_conta`, `FILTROS_TIPO`; valores `filtro_conversas` (tipo) e
+  `filtro_conta` (só no config). Alt+4/Alt+5. `Janela.conversas` é só o que
+  passa (mais a aberta); sem nenhuma, a lista avisa.
+- `Conversa.arquivada` (coluna nova no banco). Telegram: duas buscas
+  (`folder=0` e `folder=1`, a principal não traz as arquivadas) e
+  `arquivar_conversa` (`edit_folder`); item de menu Arquivar/desarquivar
+  (`_arquivar_conversa`; WhatsApp: só local). WhatsApp: o neonize não repassa
+  o aviso de arquivar, mas o whatsmeow grava o estado em `chat_settings`;
+  `_conferir_arquivadas` lê `chat_settings.get_chat_settings` a cada 60 s,
+  no F5 e depois de um pacote de histórico (a 1ª leitura de cada conversa
+  vale; depois só uma mudança do celular conta). Arquivadas só aparecem no
+  tipo Arquivadas.
+
+## 2026.10.16.3
+
+Mensagens carregadas por conversa e listas de transmissão.
+
+- Opção `mensagens_por_conversa` (Leitura, 50 a 5000, padrão 1200): vira o
+  `LIMITE_MEMORIA` da janela (`_limite_memoria`). `Opcao.numero` é novo:
+  opção numérica digitada (wx.SpinCtrl na janela de configurações; o modelo
+  limita ao intervalo).
+- Listas de transmissão do WhatsApp (`@broadcast`) deixam de aparecer como
+  conversa; mensagens recebidas por lista vão para a conversa de quem as
+  enviou; o envio para uma lista avisa que não é aceito
+  (`ListaDeTransmissao`).
+
+## 2026.10.16.2
+
+Agenda de contatos própria.
+
+- Tabela `contatos` no banco (`salvar_contato`, `remover_contato`,
+  `contatos`, `nome_de_contato` com cache). `interface/contatos.py` tem o
+  gerenciador (Adicionar, Editar, Remover, Trazer das contas) e o diálogo
+  "Salvar a pessoa desta conversa". O nome vale nas conversas privadas
+  (`_juntar_conversas`) e no `_nome_contato` do WhatsApp; Telegram: só nas
+  conversas. Nada é gravado na conta (local).
+- Provedor: `contatos_da_conta()` (WhatsApp lê `get_all_contacts`) e
+  `id_do_telefone()`.
+
+## 2026.10.16.1
+
+Menções como botões e nomes melhores nas menções.
+
+- Menções viram botões "Pessoa: nome" na ordem do Tab. Nome da menção:
+  agenda, pushname visto nas mensagens, participantes do grupo
+  (`_aprender_do_grupo`, 1 consulta por grupo a cada 10 min), autor
+  guardado no banco (`nome_do_remetente`) e nome verificado de empresa.
+
+## 2026.10.16.0
+
+Edições, mensagens apagadas e reações do WhatsApp deixam de ser descartadas.
+
+- Eram `protocolMessage` e `reactionMessage`, tratadas como "só controle".
+  `_tratar_alteracao` (antes de `converter`) aplica a mudança à mensagem já
+  guardada e publica `MensagemAtualizada` (`reacao`, `editada`, `apagada`).
+- Reação: uma por pessoa (trocar de emoji substitui; texto vazio tira).
+  Guardada em `extras.reacoes` com o jid de quem reagiu. A linha da mensagem
+  ganha "reações: 👍 de Ana" (até 3; com mais, a contagem); os detalhes
+  listam todas. Reação a mensagem minha é falada (opção `falar_reacoes`).
+- Edição: troca o texto e marca `extras.editada`; a linha ganha "(editada)".
+- Apagar para todos: limpa o texto e os links, marca `extras.apagada` e a
+  mensagem passa a ser lida como "mensagem apagada". A mídia já baixada
+  continua no armazém.
+- `modelos.atualizar_extras` muda só as chaves dadas, sem perder links nem
+  botões. Mensagem que não está guardada (anterior ao TeleZapp) é ignorada.
+- Áudio e mensagem de voz: ao começar a tocar, o leitor de tela fala o que é
+  e de quem ("Tocando mensagem de voz de Ana, 12 segundos", mais "a 1,5x"
+  fora da velocidade normal), no tocar sem janela e no player em janela
+  (`modelos.anuncio_reproducao`). Na sequência de áudios, "Próximo áudio" e
+  o anúncio saem numa fala só: antes eram duas e a segunda cortava a
+  primeira (cada fala interrompe a anterior), então não se ouvia de quem era.
+- O anúncio de quem é o áudio que toca é opcional: opção
+  `falar_quem_toca` (padrão ligada), no menu Exibição e em Configurações,
+  Avisos. Desligada, fala só "Tocando" (e a velocidade, se não for a normal).
+  `falar_reacoes` também entrou no menu Exibição, junto das outras.
+- Voz e áudio recebidos já tocados: a linha da mensagem diz "ouvida" ao
+  andar pela lista ("mensagem de voz, 12 segundos, ouvida"). Marcado
+  (`extras.ouvida`, `Janela._marcar_ouvida`) quando começa a tocar no
+  TeleZapp, com ou sem janela, e guardado no banco. Também chega de fora: no
+  WhatsApp, o recibo `PLAYED_SELF` (toquei no celular) vira
+  `MensagemAtualizada(motivo="ouvida")`; no Telegram, `media_unread` falso ao
+  receber. Não entra em citações nem em mensagens minhas; mensagens antigas
+  sem informação não dizem "não ouvida".
+- Áudios em sequência ganhou um terceiro modo, `bloco`: toca os áudios
+  seguidos e para na primeira mensagem que não for áudio (3 áudios, um
+  texto, 2 áudios: toca os 3 e para). `sim` continua tocando todos da
+  conversa, pulando o que não é áudio, e é o padrão; `nao` toca um só.
+- Ainda de fora: votos de enquete (cifrados com a chave da enquete) e o
+  histórico de edições (só o texto mais novo fica).
+- Telegram não foi mexido: o Telethon entrega reações e edições por outros
+  eventos, que ainda não são tratados.
+- Não verificado com um WhatsApp real: os eventos foram montados a partir
+  das definições do neonize.
+
 ## 2026.10.15.6
 
 Mensagens de grupo que o TeleZapp não mostrava.

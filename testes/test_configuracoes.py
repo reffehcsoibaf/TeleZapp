@@ -19,7 +19,7 @@ def test_categorias_sem_repeticao_e_com_todas_as_opcoes(mod):
     todas = [o for c in cats for o in mod.opcoes(c)]
     assert sorted(todas, key=config.OPCOES.index) ==         sorted(config.OPCOES, key=config.OPCOES.index)
     assert len(todas) == len(config.OPCOES)
-    assert cats[-1] == "Avançado"
+    assert cats[-3:] == ["Privacidade", "Avançado", "Atualizações"]
 
 
 def test_busca_acrescenta_categoria_de_resultados(mod):
@@ -76,3 +76,103 @@ def test_falar_descricoes_e_opcao_de_leitura_ligada_por_padrao(mod):
     assert mod.valor("falar_descricoes") is True
     mod.definir("falar_descricoes", False)
     assert mod.valor("falar_descricoes") is False   # vale ja na janela
+
+
+def test_opcao_numerica_e_limitada_ao_intervalo(tmp_path, monkeypatch):
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path))
+    from telezapp import config
+    from telezapp.nucleo.configuracoes import ModeloConfiguracoes
+    mod = ModeloConfiguracoes(config.Config())
+    mod.definir("mensagens_por_conversa", 10)
+    assert mod.valor("mensagens_por_conversa") == 50
+    mod.definir("mensagens_por_conversa", 99999)
+    assert mod.valor("mensagens_por_conversa") == 5000
+    mod.definir("mensagens_por_conversa", "abc")
+    assert mod.valor("mensagens_por_conversa") == 1200   # padrao: nada pendente
+    assert "mensagens_por_conversa" not in mod.pendentes
+
+
+# ------------------------------------------ codigo secreto das trancadas
+def _modelo(tmp_path, monkeypatch, codigo=None):
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path))
+    from telezapp import config
+    from telezapp.nucleo import codigo_secreto
+    from telezapp.nucleo.configuracoes import ModeloConfiguracoes
+    cfg = config.Config()
+    if codigo:
+        cfg.set("codigo_trancadas", codigo_secreto.criar(codigo))
+    return ModeloConfiguracoes(cfg)
+
+
+def _preencher(mod, atual="", novo="", repita=""):
+    mod.definir_codigo("atual", atual)
+    mod.definir_codigo("novo", novo)
+    mod.definir_codigo("repita", repita)
+
+
+def test_primeiro_codigo_exige_valor_valido_e_igual(tmp_path, monkeypatch):
+    mod = _modelo(tmp_path, monkeypatch)
+    assert mod.erro_codigo() == ""        # padrao ligado, nada mexido: ok
+    mod.definir("trancadas_exigir_codigo", False)
+    mod.definir("trancadas_exigir_codigo", True)   # volta ao padrao
+    _preencher(mod, novo="12")
+    assert "4 a 12" in mod.erro_codigo() or "iguais" in mod.erro_codigo()
+    _preencher(mod, novo="1234", repita="1235")
+    assert "iguais" in mod.erro_codigo()
+    _preencher(mod, novo="1234", repita="1234")
+    assert mod.erro_codigo() == ""
+    guardados = []
+    mod.aplicar(lambda c, v: guardados.append((c, v)))
+    assert ("codigo_trancadas", "1234") in guardados
+
+
+def test_mudar_ou_desligar_pede_o_codigo_atual(tmp_path, monkeypatch):
+    mod = _modelo(tmp_path, monkeypatch, codigo="2468")
+    _preencher(mod, novo="1357", repita="1357")      # sem o atual
+    assert "código atual" in mod.erro_codigo()
+    _preencher(mod, atual="0000", novo="1357", repita="1357")
+    assert "código atual" in mod.erro_codigo()
+    _preencher(mod, atual="2468", novo="1357", repita="1357")
+    assert mod.erro_codigo() == ""
+    _preencher(mod)                                   # desligar sem o atual
+    mod.definir("trancadas_exigir_codigo", False)
+    assert "código atual" in mod.erro_codigo()
+    _preencher(mod, atual="2468")
+    assert mod.erro_codigo() == ""
+    aplicadas = []
+    mod.aplicar(lambda c, v: aplicadas.append((c, v)))
+    assert ("trancadas_exigir_codigo", False) in aplicadas
+    assert ("codigo_trancadas", None) in aplicadas    # sai junto
+    assert mod.codigo == {"atual": "", "novo": "", "repita": ""}
+
+
+def test_nada_a_fazer_com_codigo_existente_nao_bloqueia(tmp_path, monkeypatch):
+    mod = _modelo(tmp_path, monkeypatch, codigo="2468")
+    mod.definir("som", False)                         # outra opcao qualquer
+    assert mod.erro_codigo() == ""
+    aplicadas = []
+    mod.aplicar(lambda c, v: aplicadas.append(c))
+    assert aplicadas == ["som"]
+
+
+def test_falas_automaticas_do_audio_vem_desmarcadas():
+    from telezapp import config
+    for chave in ("falar_novas", "confirmar_envio", "falar_reacoes",
+                  "falar_quem_toca", "seq_falar_proximo", "seq_falar_tipo",
+                  "seq_falar_quem", "seq_falar_duracao",
+                  "seq_falar_velocidade"):
+        assert config.PADROES[chave] is False, chave
+
+
+def test_mudancas_de_privacidade_vao_ao_aplicador(tmp_path, monkeypatch):
+    mod = _modelo(tmp_path, monkeypatch)
+    mod.priv_carregado["w1"] = {"last": "all", "online": "all",
+                                "status": "all", "readreceipts": "all",
+                                "groupadd": "all"}
+    mod.priv_definir("w1", "last", 2)            # Ninguem
+    mod.priv_definir("w1", "readreceipts", 0)    # igual ao que ja era
+    assert mod.priv_mudancas() == [("w1", "last", "none")]
+    recebidas = []
+    mod.aplicar(lambda c, v: recebidas.append((c, v)))
+    assert recebidas == [("privacidade_conta", [("w1", "last", "none")])]
+    assert mod.priv_mudancas() == []             # zerou

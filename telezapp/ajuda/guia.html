@@ -32,17 +32,17 @@
 </nav>
 
 <h2 id="o-que-e">O que é o TeleZapp</h2>
-<p>O TeleZapp reúne o WhatsApp e o Telegram numa só janela do Windows, pensada para quem usa leitor de tela, como o NVDA. Todos os controles são os do próprio Windows, sem telas desenhadas à mão.</p>
+<p>O TeleZapp reúne o WhatsApp e o Telegram numa só janela do Windows, pensada para quem usa leitores de tela. Todos os controles são os do próprio Windows, sem telas desenhadas à mão, e por isso os leitores de tela os leem normalmente. Os avisos que o TeleZapp fala por conta própria (mensagem nova, resultado da inteligência artificial) usam hoje a fala direta do NVDA; com outros leitores, boa parte deles aparece na barra de situação.</p>
 
 <h2 id="menu">O menu</h2>
-<p>Aperte Alt para abrir o Menu. Ele tem um submenu para cada assunto: Contas, Conversa, Mensagem, Mídias, Exibição, Depurar e Ajuda, e no fim o item Sair. Use a seta para baixo para percorrer, a seta para a direita para entrar num submenu, a seta para a esquerda para voltar e Esc para fechar.</p>
+<p>Aperte Alt para abrir o Menu. Ele tem um submenu para cada assunto: Contas, Contatos, Conversa, Mensagem, Mídias, Exibição, Depurar e Ajuda, e no fim o item Sair. Use a seta para baixo para percorrer, a seta para a direita para entrar num submenu, a seta para a esquerda para voltar e Esc para fechar.</p>
 
 <h2 id="contas">Adicionar e remover contas</h2>
 <p>No Menu, em Contas, escolha adicionar uma conta do Telegram ou do WhatsApp.</p>
 <h3>Telegram</h3>
 <p>Informe o telefone, depois o código que o Telegram envia e, se existir, a senha da verificação em duas etapas.</p>
 <h3>WhatsApp</h3>
-<p>Escolha quanto histórico pedir ao celular e como parear: pelo código de oito caracteres, que você digita no celular, ou pelo QR Code, que pode ser mostrado em tela cheia. Os dois métodos estão em Aparelhos conectados, no WhatsApp do celular.</p>
+<p>Escolha quanto histórico pedir ao celular e como parear: com os botões "Parear com número de telefone" (digite o número em formato internacional, como +55 51 99999 8888, e depois o código de oito caracteres no celular) ou "Parear via QR Code" (o QR abre em tela cheia; Esc volta). Os dois métodos estão em Aparelhos conectados, no WhatsApp do celular.</p>
 <h3>Remover</h3>
 <p>Em Contas, Remover uma conta apaga a sessão e as conversas guardadas daquela conta neste computador. Nada é apagado nos serviços.</p>
 
@@ -58,8 +58,16 @@
 <li>Control E: ir para a caixa de digitação.</li>
 <li>Control R: ouvir a última mensagem da conversa aberta.</li>
 <li>F5: atualizar a lista de conversas.</li>
+<li>Salvar o conteúdo da conversa (menu de contexto da conversa, ou Menu, Conversa): grava um .zip com o texto das mensagens e as mídias já baixadas.</li>
+<li>Control Espaço, na lista de conversas ou na de mensagens: liga o modo de seleção e já marca o item em foco. Depois, Espaço marca ou desmarca os outros itens (o leitor de tela diz "Marcada" e quantas há). A tecla Aplicativos ou Shift F10 mostra as ações para todos os marcados: nas conversas, arquivar, fixar, silenciar, trancar e apagar; nas mensagens, favoritar, copiar o texto e apagar. Esc desfaz as marcas e sai do modo.</li>
+<li>Delete: apaga a conversa selecionada, na lista de conversas, ou a mensagem selecionada, na lista de mensagens. O TeleZapp sempre pergunta antes.</li>
+<li>Responder em particular: no menu de contexto de uma mensagem de outra pessoa num grupo, abre a conversa particular com ela e cita a mensagem do grupo na resposta (WhatsApp).</li>
+<li>Control I: detalhes da conversa selecionada (pessoa, grupo ou canal): dados, uso de espaço, mídias com filtro por tipo, membros, grupos em comum e, para administradores de grupo do WhatsApp, as ferramentas de administração. Esc volta de cada lista para a janela de detalhes.</li>
+<li>F2: editar a mensagem de texto selecionada, se for sua e estiver dentro do prazo (15 minutos no WhatsApp, 48 horas no Telegram). Enter salva a edição e Esc cancela.</li>
+<li>Control Shift E: encaminhar a mensagem selecionada (ou as marcadas no modo de seleção) para as conversas e contatos que você escolher na janela de busca. A mídia precisa já estar baixada.</li>
 <li>Control Shift R: responder à mensagem selecionada.</li>
-<li>Control Shift C: copiar o texto da mensagem selecionada.</li>
+<li>Control Shift C: copiar o texto da mensagem selecionada. O menu de contexto da mensagem tem um item de cópia para cada tipo de conteúdo (legenda, foto, vídeo, link...).</li>
+<li>Control V na caixa de digitar: colar arquivos copiados no Explorer ou imagens. Eles esperam o Enter, e o texto da caixa, escrito antes ou depois da colagem, vira a legenda. Esc remove a mídia colada.</li>
 <li>Alt Enter: dados e texto completo da mensagem selecionada, com a lista de links. Enter abre a mídia (e toca áudio e vídeo), mesmo com link na legenda; numa mensagem só de texto, abre o texto numa caixa somente leitura com os botões Copiar texto e Fechar (Esc também fecha). Os links são botões: veja "Links e botões de endereço".</li>
 <li>Control O: abrir a mídia da mensagem. Control B: só baixar.</li>
 <li>Tecla Aplicativos ou Shift F10: menu da mensagem selecionada.</li>
@@ -72,10 +80,16 @@
 <p>Na caixa de digitação, Enter envia e Shift Enter faz uma nova linha. Esc fecha a conversa, e o que você digitou e não enviou fica guardado como rascunho. Para responder a uma mensagem, selecione-a e use Control Shift R; Esc cancela a resposta.</p>
 <p>Em Exibição você escolhe a ordem em que cada mensagem é lida (autor e hora primeiro, conteúdo primeiro, ou autor só quando muda) e liga ou desliga o som e a fala das mensagens novas.</p>
 
+<h3>Reações, edições e mensagens apagadas (WhatsApp)</h3>
+<p>Quando alguém reage a uma mensagem, a reação aparece no fim da linha dela, por exemplo "reações: 👍 de Ana"; com mais de três, só a contagem, e os detalhes (Alt Enter) listam todas. Se a reação for a uma mensagem sua, o TeleZapp também fala quem reagiu, com qual emoji e o começo da mensagem; essa fala pode ser desligada em Configurações, categoria Avisos, "Falar reações às minhas mensagens".</p>
+<p>Uma mensagem editada mostra o texto novo e termina com "(editada)". Uma mensagem apagada para todos pelo autor passa a ser lida como "mensagem apagada". Isso só vale para mensagens que o TeleZapp já tinha guardado.</p>
+
+<p>Com uma conversa aberta, o título da janela mostra o status da pessoa depois do nome: online, visto por último ou digitando (a opção está em Configurações, Avisos).</p>
+<p>Reagir a uma mensagem: Control Shift G com a mensagem selecionada, ou "Reagir..." no menu de contexto. Escolha um dos emojis da lista curta, "Outro emoji..." para buscar pelo nome ou "Tirar a minha reação". Inserir emoji na mensagem: Control Ponto, digite parte do nome (joinha, coração, bolo), desça com a seta e aperte Enter.</p>
 <h2 id="midias">Fotos, vídeos, áudios e documentos</h2>
 <p>Numa mensagem com mídia, Enter (ou Control O) abre a mídia dentro do TeleZapp. Se ela ainda não foi baixada, o TeleZapp baixa primeiro e avisa o andamento pelo leitor de tela; Esc cancela. Control B baixa sem abrir.</p>
 <p>Em áudios e mensagens de voz, o padrão é só tocar, sem abrir janela: Enter de novo na mesma mensagem pausa e continua, e Esc para o áudio. Se preferir o player em janela, com avançar, voltar e posição, mude em Menu, Mídias, Enter em áudio. Formatos que o TeleZapp não toca sozinho, como m4a, sempre abrem a janela.</p>
-<p>Por padrão, quando um áudio ou mensagem de voz termina, o próximo áudio da conversa toca em seguida (baixando antes, se precisar), e o leitor de tela fala "Próximo áudio" com o nome de quem enviou. Esc para tudo. Você desliga isso em Menu, Mídias, Áudios em sequência. A sequência só vale para o modo sem janela.</p>
+<p>Por padrão, quando um áudio ou mensagem de voz termina, o próximo áudio da conversa toca em seguida (baixando antes, se precisar), e o leitor de tela fala "Próximo áudio" com o nome de quem enviou. Esc para tudo. Em Menu, Mídias, Áudios em sequência você escolhe entre três comportamentos: tocar todos os áudios da conversa em sequência (o padrão, que pula as mensagens que não são áudio), tocar só os áudios seguidos, parando na primeira mensagem que não for áudio (por exemplo, com três áudios, um texto e mais dois áudios, toca os três primeiros e para antes do texto), ou parar quando o áudio terminar. A sequência só vale para o modo sem janela.</p>
 <h3>Velocidade do áudio</h3>
 <p>Áudios e mensagens de voz tocam de 0,25x até 3x sem mudar o tom da voz. Em Menu, Mídias: Áudio mais rápido (Control Shift Seta para cima), Áudio mais lento (Control Shift Seta para baixo), Velocidade normal (Control Shift 0) e Velocidade do áudio, que abre uma lista. A mudança vale na hora, até para o áudio que está tocando, e o leitor de tela fala, por exemplo, "Velocidade 1,5x". No player em janela, os botões Mais rápido e Mais lento e as teclas + e - fazem o mesmo.</p>
 <p>O passo é ajustável em Menu, Mídias, Passo da velocidade do áudio: de 0,25 em 0,25 (0,25x a 3x), de 0,5 em 0,5 (0,5x a 3x) ou de 1 em 1 (1x, 2x e 3x). Ao trocar o passo, a velocidade vai para o valor mais próximo que ele permite. A velocidade vale para todos os áudios e fica guardada. Em vídeos, e em áudios que abrem pelo player do Windows (como m4a), o tom pode acompanhar a velocidade.</p>
@@ -90,8 +104,8 @@
 <p>No menu Mídias você escolhe: baixar só quando você abrir, ou automaticamente ao receber, até um limite de tamanho que você define (5, 10, 20, 50 ou 100 MB). Mídias maiores que o limite de confirmação perguntam antes de baixar. O item Espaço usado pelas mídias fala quanto espaço elas ocupam.</p>
 
 <h2 id="enviar-midias">Enviar arquivos e gravar voz</h2>
-<p>Com uma conversa aberta, depois do botão Enviar há três botões: Anexar arquivo, Gravar do microfone e Gravar som do computador. Os mesmos comandos estão em Menu, Mídias, com os atalhos Control Shift A, Control Shift M e Control Shift S.</p>
-<p>Anexar arquivo abre a janela de arquivos do Windows. Fotos JPG, PNG e WEBP vão como foto; vídeos MP4, MOV, M4V e 3GP vão como vídeo; MP3, WAV, M4A e semelhantes vão como áudio; todo o resto, e os formatos que os serviços não tocam como mídia (MKV, AVI, BMP, HEIC, GIF), vão como documento. O limite é 2 GB. Se a caixa de digitação tem texto, ele vai como legenda de foto, vídeo e documento. Vídeos em HEVC (H.265) são enviados, mas o TeleZapp avisa que podem não tocar em todos os celulares.</p>
+<p>Com uma conversa aberta, depois do botão Enviar há três botões: Anexar e enviar arquivo, Gravar do microfone e Gravar som do computador. Os mesmos comandos estão em Menu, Mídias, com os atalhos Control Shift A, Control Shift M e Control Shift S.</p>
+<p>Anexar e enviar arquivo abre a janela de arquivos do Windows e envia o arquivo escolhido na hora (para anexar sem enviar ainda, cole o arquivo com Control V na caixa de digitação). Fotos JPG, PNG e WEBP vão como foto; vídeos MP4, MOV, M4V e 3GP vão como vídeo; MP3, WAV, M4A e semelhantes vão como áudio; todo o resto, e os formatos que os serviços não tocam como mídia (MKV, AVI, BMP, HEIC, GIF), vão como documento. O limite é 2 GB. Se a caixa de digitação tem texto, ele vai como legenda de foto, vídeo e documento. Vídeos em HEVC (H.265) são enviados, mas o TeleZapp avisa que podem não tocar em todos os celulares.</p>
 <p>Gravar do microfone usa o microfone padrão do Windows; Gravar som do computador captura tudo o que a saída de som padrão está tocando (um vídeo, uma chamada, e também a fala do leitor de tela). A gravação começa assim que a janela abre, depois de um bipe. Enter para de gravar; então os botões são Enviar, Ouvir, Gravar de novo e Descartar. Esc descarta. Se a gravação sair quase em silêncio, o TeleZapp avisa antes de você enviar. Ela vai como mensagem de voz, em Ogg/Opus.</p>
 <p>Enquanto envia, a mensagem aparece como "enviando" na lista; ao terminar, o TeleZapp toca o som de enviada, e se falhar fala o motivo. A mídia enviada fica guardada no programa e abre sem baixar. Por enquanto, mídia enviada não cita a mensagem respondida.</p>
 
@@ -110,6 +124,8 @@
 <p>Menu, Configurações (Control vírgula) abre uma janela com todas as opções do TeleZapp num só lugar. O primeiro campo é a busca: digite uma palavra (por exemplo, velocidade) e aparece, no alto da lista de categorias, Resultados da busca, com as opções que combinam. Tab vai da busca para a lista de categorias, depois para as opções da categoria escolhida e, por fim, para os botões OK, Cancelar e Aplicar.</p>
 <p>Cada opção é uma caixa de seleção ou uma lista de escolhas. Logo depois que você chega nela, o TeleZapp fala a explicação da opção; F1 repete. Se isso atrapalhar, desmarque "Falar a descrição de cada opção" (categoria Leitura): a explicação passa a ser falada só com F1. As mudanças só valem ao apertar OK ou Aplicar; Cancelar e Esc descartam. As mesmas opções continuam nos menus Exibição, Mídias e Depurar.</p>
 
+<h3>Sons dos avisos</h3>
+<p>Em Configurações, a categoria Sons tem uma caixa para cada aviso do TeleZapp: som padrão, sem som ou Escolher um arquivo de som. Ao lado de cada caixa há o botão Ouvir. Arquivos WAV, Ogg, MP3 e FLAC servem; arquivos longos tocam só os primeiros 15 segundos. O arquivo escolhido é copiado para a pasta sons, ao lado das contas e das mídias (Ajuda, Abrir a pasta de sons abre a pasta); se um som sumir, o TeleZapp usa o padrão. A pasta vai junto no backup das configurações.</p>
 <h2 id="detalhes">Dados de uma mensagem</h2>
 <p>Alt Enter mostra, num texto que você lê com as setas, a conversa, o autor, a data, o tipo e o texto completo. Nas mensagens que você enviou pelo WhatsApp, aparece também quando cada pessoa recebeu e leu. No Telegram, em grupos, só se sabe até que mensagem alguém leu, sem a hora.</p>
 
@@ -120,6 +136,17 @@
 
 <h2 id="dados">Onde ficam os seus dados</h2>
 <p>Tudo fica na pasta TeleZapp dentro de AppData\Roaming do seu usuário: configurações, sessões, conversas guardadas e registros de funcionamento (logs), sem o texto das suas mensagens. As mídias baixadas ficam na subpasta midias, e são apagadas junto com a conta quando você a remove. Arquivos temporários ficam numa subpasta do próprio programa e são apagados ao abrir e ao fechar.</p>
+<h2 id="backup">Backup e restauração</h2>
+<p>Menu, Fazer backup abre uma janela para marcar o que incluir: as configurações; as contas e sessões (dão acesso às suas contas); as conversas, mensagens e contatos; e as mídias baixadas. Há campos de senha (opcionais) para proteger o arquivo. Depois você escolhe onde salvar o zip. O TeleZapp avisa quando termina.</p>
+<p>Menu, Restaurar backup pede o arquivo (e a senha, se tiver) e mostra o que o backup contém, para você marcar o que voltar. As configurações valem na hora. As contas, as conversas e as mídias trocam o que existe hoje na próxima vez que o TeleZapp abrir, e o TeleZapp oferece reiniciar agora: o programa fecha e abre sozinho. O que havia antes fica guardado na pasta antes-da-restauracao, dentro da pasta de dados. Se perder a senha, não há como recuperar o backup.</p>
+<h2 id="ia">Inteligência artificial: transcrever e descrever</h2>
+<p>Em Configurações, categoria Inteligência artificial, cada tarefa (transcrição de voz e áudio, descrição de imagens e figurinhas, descrição de vídeos e PDF em texto acessível) tem uma lista de provedores com caixas de marcar: marque os que podem receber os arquivos e use Subir e Descer para pôr na ordem de tentativa; se um falhar, o TeleZapp tenta o próximo. Depois da lista, cada provedor tem um botão (por exemplo, "Google Gemini: sem chave, modelo automático. Configurar..."), que mostra a situação e abre a janela do provedor: nela você digita a chave (ela fica cifrada neste computador), deixa o Modelo em Automático ou abre a caixa e escolhe, e usa Obter modelos (pede ao provedor a lista que a sua chave pode usar), Testar, Apagar a chave e os botões que abrem a página da chave e a de privacidade. OK na janela do provedor e, depois, OK ou Aplicar nas Configurações. Nenhum arquivo sai do computador antes de você usar a ação numa mensagem e confirmar o envio, na primeira vez, para aquele provedor.</p>
+<p>No menu de contexto de uma mensagem de voz, áudio, foto, figurinha, vídeo ou PDF aparece a ação (por exemplo, Transcrever o áudio). A mídia é baixada antes, se ainda não estiver no computador. O texto fica guardado na mensagem: a linha mostra o começo, Ver a transcrição (ou a descrição, ou o texto do PDF) abre o texto inteiro com Copiar e Salvar em arquivo, e Copiar copia só ele. Para refazer, use a ação de novo. A descrição de PDF mantém a ordem da leitura e põe, no lugar de cada imagem, gráfico ou tabela, uma descrição entre colchetes.</p>
+<p>Vídeos: o Gemini recebe o vídeo inteiro (até 14 MB). Os outros provedores recebem uma imagem com quadros espalhados pelo vídeo, cada um com a hora, e a fala é transcrita a parte pelos provedores da transcrição, sob o título "Fala no vídeo". Transcrição e descrição automáticas: no menu de contexto de uma conversa, "Ligar a transcrição e descrição automáticas". Nas conversas ligadas, voz, áudios, fotos e figurinhas que chegarem são transcritos ou descritos sozinhos (as duas opções em Configurações, Inteligência artificial escolhem o que vale). Antes, use a ação uma vez no menu de uma mensagem para autorizar cada provedor.</p>
+<p>O Enter numa mídia (voz, áudio, foto, figurinha, vídeo, PDF) pode ser configurado em Configurações, Mídias: abrir ou reproduzir, só baixar, ou transcrever, descrever ou converter com a inteligência artificial. No menu de contexto da mensagem essa ação é o primeiro item.</p>
+<h2 id="atualizacoes">Versão nova e aviso importante</h2>
+<p>O TeleZapp é um software experimental, em desenvolvimento: pode ter erros, inclusive em mensagens e conversas. Use por sua conta e risco.</p>
+<p>Ajuda, Verificar atualizações consulta as versões publicadas no GitHub. Se houver uma nova, mostra as novidades e um botão que abre a página de download; baixe o zip, feche o TeleZapp e troque a pasta do programa pela nova (os seus dados ficam em AppData\Roaming\TeleZapp e não mudam). Ao abrir, o TeleZapp também avisa uma vez por versão; isso se desliga em Configurações, Atualizações.</p>
 </main>
 <footer>
 <p>TeleZapp versão {{versao}}. Software livre, licença GNU GPL versão 3 ou posterior. Desenvolvido pelos contribuidores do TeleZapp. Site e downloads: <a href="{{site}}">{{site}}</a></p>

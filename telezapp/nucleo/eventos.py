@@ -39,6 +39,24 @@ class ConversasAtualizadas:
 
 
 @dataclass
+class ConversaApagadaNoCelular:
+    """A pessoa apagou a conversa no celular (aviso de estado do WhatsApp).
+    `data`: quando, em segundos."""
+    conta_id: str
+    conversa_id: str
+    data: float = 0.0
+
+
+@dataclass
+class MensagemApagadaNoCelular:
+    """A pessoa apagou uma mensagem para si no celular (ou em outro
+    aparelho)."""
+    conta_id: str
+    conversa_id: str
+    mensagem_id: str
+
+
+@dataclass
 class MensagensCarregadas:
     conta_id: str
     conversa_id: str
@@ -97,6 +115,15 @@ class ProgressoSincronia:
 
 
 @dataclass
+class ProgressoEnvio:
+    """Um envio de arquivo andou: `percentual` de 0 a 100 (100 = chegou ao
+    servidor; a mensagem enviada vem em seguida)."""
+    conta_id: str
+    conversa_id: str
+    percentual: int
+
+
+@dataclass
 class ProgressoMidia:
     """Um download de midia andou: `percentual` de 0 a 100."""
     conta_id: str
@@ -126,12 +153,49 @@ class QrPareamento:
 
 
 @dataclass
+class Presenca:
+    """Como esta a outra pessoa na conversa observada. `estado`: "online",
+    "offline" (`quando` = ultima vez, em segundos; ou `aprox`, como
+    "recentemente", quando o servico so informa isso), "digitando",
+    "gravando", "enviando" (arquivo) ou "parou" (de digitar). `quem` e o nome
+    de quem digita, nos grupos."""
+    conta_id: str
+    conversa_id: str
+    estado: str
+    quando: float = 0.0
+    aprox: str = ""
+    quem: str = ""
+
+
+@dataclass
+class PareamentoFalhou:
+    """WhatsApp: o celular nao aceitou o codigo (`metodo` "codigo") ou o
+    WhatsApp recusou o pareamento pelo QR Code ("qr"). A conexao precisa
+    recomecar para valer de novo."""
+    conta_id: str
+    metodo: str
+
+
+@dataclass
 class CodigoPareamento:
     """WhatsApp: o codigo de 8 caracteres para digitar no celular, ou o
     motivo de nao ter conseguido gerar."""
     conta_id: str
     codigo: str = ""
     erro: str = ""
+
+
+@dataclass
+class MensagemAtualizada:
+    """Uma mensagem ja conhecida mudou: `motivo` e "reacao" (alguem reagiu ou
+    tirou a reacao), "editada" ou "apagada". `mensagem` ja vem atualizada;
+    `quem` e `emoji` so valem para reacao (emoji vazio: tirou)."""
+    conta_id: str
+    conversa_id: str
+    mensagem: object
+    motivo: str
+    quem: str = ""
+    emoji: str = ""
 
 
 @dataclass
@@ -145,6 +209,20 @@ class EstadoChamada:
     entrante: bool = False
     motivo: str = ""
     erro: str = ""
+
+
+@dataclass
+class ChamadaWhatsApp:
+    """Uma chamada do WhatsApp que o TeleZapp ainda nao atende: so avisa.
+    `fase`: "tocando" (alguem esta ligando), "perdida", "recusada",
+    "atendida" (em outro aparelho; `segundos` = duracao) ou "encerrada"."""
+    conta_id: str
+    conversa_id: str
+    nome: str
+    video: bool
+    fase: str
+    chamada_id: str = ""
+    segundos: int = 0
 
 
 @dataclass

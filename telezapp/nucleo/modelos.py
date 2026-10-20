@@ -6,6 +6,7 @@ import json
 import os
 import re
 import time
+import unicodedata
 from dataclasses import dataclass
 
 SERVICOS = {"telegram": "Telegram", "whatsapp": "WhatsApp"}
@@ -14,10 +15,14 @@ SERVICOS = {"telegram": "Telegram", "whatsapp": "WhatsApp"}
 TEXTO, FOTO, VIDEO, VOZ, AUDIO, DOCUMENTO, FIGURINHA, OUTRO = (
     "texto", "foto", "video", "voz", "audio", "documento", "figurinha",
     "outro")
+# Marca de lugar de uma mensagem que o WhatsApp avisou mas nao conseguiu
+# entregar (nao decifrada); a mensagem de verdade, com o mesmo id, a substitui
+AGUARDANDO = "aguardando"
 NOMES_TIPOS = {
     TEXTO: "texto", FOTO: "foto", VIDEO: "vídeo", VOZ: "mensagem de voz",
     AUDIO: "áudio", DOCUMENTO: "documento", FIGURINHA: "figurinha",
     OUTRO: "mensagem sem suporte ainda",
+    AGUARDANDO: "mensagem ainda não recebida",
 }
 
 # Estados de uma mensagem enviada
@@ -55,10 +60,24 @@ class Conversa:
     nao_lidas: int = 0
     data: float = 0.0          # momento da ultima mensagem (timestamp)
     lidas_ate: int = 0         # Telegram: ultima msg minha lida pelo outro
+    arquivada: bool = False    # arquivada no servico (so no filtro Arquivadas)
+    trancada: bool = False     # WhatsApp: "Trancar conversa" do celular
+    fixada: bool = False       # fixada no topo da lista
+    silenciada_ate: float = 0.0   # 0 = com som; -1 = para sempre; senao ate
+                                  # quando (timestamp)
+    somente_leitura: bool = False  # a conta nao pode escrever aqui (canal,
+                                   # grupo so de admins, grupo que saiu...)
 
     @property
     def chave(self):
         return (self.conta_id, self.id)
+
+    def silenciada(self, agora=None):
+        """Em silencio agora? (o silencio com hora marcada expira sozinho)"""
+        ate = self.silenciada_ate
+        if ate == 0:
+            return False
+        return ate < 0 or ate > (agora if agora is not None else time.time())
 
 
 @dataclass
@@ -100,14 +119,31 @@ def extras_de(msg):
             "botoes": list(dados.get("botoes") or []),
             "mencoes": list(dados.get("mencoes") or []),
             "acoes": list(dados.get("acoes") or []),
-            "original": dados.get("original") or ""}
+            "original": dados.get("original") or "",
+            "editada": bool(dados.get("editada")),
+            "apagada": bool(dados.get("apagada")),
+            "ouvida": bool(dados.get("ouvida")),
+            "favorita": bool(dados.get("favorita")),
+            "reacoes": list(dados.get("reacoes") or []),
+            "citou_voce": bool(dados.get("citou_voce")),
+            "previa": dados.get("previa")
+            if isinstance(dados.get("previa"), dict) else {},
+            "ia": dados.get("ia") if isinstance(dados.get("ia"), dict)
+            else {}}
 
 
 def guardar_extras(msg, links=(), botoes=(), mencoes=(), acoes=(),
-                   original=""):
+                   original="", previa=None):
     """Poe links, botoes, mencoes e acoes (botoes de resposta e opcoes de
-    lista que podem ser tocados) na mensagem (nada, se tudo vazio)."""
+    lista que podem ser tocados) na mensagem (nada, se tudo vazio). A
+    previa de link ({url, titulo, descricao, site}) que a mensagem ja tinha
+    fica, a menos que venha outra."""
     dados = {}
+    previa = previa or extras_de(msg)["previa"]
+    if previa:
+        dados["previa"] = dict(previa)
+    if extras_de(msg)["citou_voce"]:
+        dados["citou_voce"] = True
     if links:
         dados["links"] = [list(x) for x in links]
     if botoes:
@@ -120,6 +156,43 @@ def guardar_extras(msg, links=(), botoes=(), mencoes=(), acoes=(),
         dados["original"] = original    # JSON da mensagem com botoes
     msg.extras = json.dumps(dados, ensure_ascii=False) if dados else ""
     return msg
+
+
+def atualizar_extras(msg, **campos):
+    """Muda so as chaves dadas dos extras (editada, apagada, reacoes...),
+    mantendo links, botoes e o resto. Valor vazio ou falso remove a chave."""
+    try:
+        dados = json.loads(msg.extras) if msg.extras else {}
+    except ValueError:
+        dados = {}
+    if not isinstance(dados, dict):
+        dados = {}
+    for chave, valor in campos.items():
+        if valor in (None, False, "", [], {}):
+            dados.pop(chave, None)
+        else:
+            dados[chave] = valor
+    msg.extras = json.dumps(dados, ensure_ascii=False) if dados else ""
+    return msg
+
+
+def minha_reacao(msg):
+    """O emoji com que eu reagi a esta mensagem ("" se nao reagi)."""
+    for r in extras_de(msg)["reacoes"]:
+        if r.get("minha") or r.get("quem") == "Você":
+            return r.get("emoji", "")
+    return ""
+
+
+def resumo_reacoes(msg, maximo=3):
+    """'👍 de Ana, ❤ de Bruno' (ate `maximo`; com mais, so a contagem)."""
+    reacoes = extras_de(msg)["reacoes"]
+    if not reacoes:
+        return ""
+    if len(reacoes) > maximo:
+        return "%d reações" % len(reacoes)
+    return ", ".join("%s de %s" % (r.get("emoji", ""), r.get("quem", ""))
+                     for r in reacoes)
 
 
 # ------------------------------------------------------------- formatacao
@@ -160,12 +233,53 @@ def hora_legivel(ts, agora=None):
     return time.strftime("%d/%m/%Y", t)
 
 
+def texto_visto_por_ultimo(quando, aprox="", agora=None):
+    """"visto por último hoje às 08:10", "ontem às ...", "em 12/10 às ...";
+    com so uma ideia aproximada ("recentemente"), ela entra no lugar. ""
+    se o servico nao informa (a pessoa escondeu)."""
+    if quando:
+        h = hora_legivel(quando, agora)
+        if h.startswith("ontem "):
+            h = "ontem às " + h[6:]
+        elif len(h) == 5:
+            h = "hoje às " + h
+        elif len(h) > 5 and h[2] == "/" and " " in h:
+            dia, hm = h.split(" ", 1)
+            h = "em %s às %s" % (dia, hm)
+        else:
+            h = "em " + h
+        return "visto por último " + h
+    if aprox:
+        return "visto por último " + aprox
+    return ""
+
+
+def texto_presenca(estado, quando=0.0, aprox="", quem="", agora=None):
+    """O status da pessoa para o titulo da janela; "" se nao ha o que dizer."""
+    if estado == "online":
+        return "online"
+    if estado == "offline":
+        return texto_visto_por_ultimo(quando, aprox, agora)
+    acao = {"digitando": "digitando", "gravando": "gravando áudio",
+            "enviando": "enviando arquivo"}.get(estado)
+    if acao is None:
+        return ""
+    return "%s está %s" % (quem, acao) if quem else acao
+
+
 def _partes(*itens):
     return ", ".join(p for p in itens if p)
 
 
-def conteudo(m):
-    """Texto falado do conteudo de uma mensagem, sem autor nem hora."""
+def conteudo(m, com_estado=True):
+    """Texto falado do conteudo de uma mensagem, sem autor nem hora.
+    `com_estado`: acrescenta "ouvida" num audio ou voz que ja foi tocado
+    (nao entra em citacoes)."""
+    extras = extras_de(m)
+    if extras["apagada"]:
+        return "mensagem apagada"
+    ouvida = "ouvida" if com_estado and extras["ouvida"] and \
+        not m.minha else ""
     legenda = ("legenda: " + m.texto) if m.texto else ""
     dur = duracao_legivel(m.segundos) if m.segundos else ""
     tam = tamanho_legivel(m.tamanho) if m.tamanho else ""
@@ -176,13 +290,20 @@ def conteudo(m):
     if m.tipo == VIDEO:
         return _partes("vídeo", dur, tam, legenda)
     if m.tipo == VOZ:
-        return _partes("mensagem de voz", dur)
+        return _partes("mensagem de voz", dur, ouvida)
     if m.tipo == AUDIO:
-        return _partes("áudio", m.nome_arquivo, dur, tam, legenda)
+        return _partes("áudio", m.nome_arquivo, dur, tam, ouvida, legenda)
     if m.tipo == DOCUMENTO:
         return _partes("documento", m.nome_arquivo, tam, legenda)
     if m.tipo == FIGURINHA:
         return _partes("figurinha", m.texto)
+    if m.tipo == AGUARDANDO:
+        return ("mensagem ainda não recebida: o WhatsApp não entregou o "
+                "conteúdo, ela pode chegar depois")
+    if m.texto and not m.texto.startswith("tipo do WhatsApp"):
+        # contato, enquete, local, convite, evento, produto...: o TeleZapp
+        # entende e descreve; so o que ele nao reconhece diz "sem suporte"
+        return m.texto
     return _partes(NOMES_TIPOS[OUTRO], m.texto)
 
 
@@ -199,21 +320,180 @@ def _juntar(cont, resto):
 LIMITE_CITACAO = 80
 
 
+def anuncio_reproducao(msg, velocidade="", proximo=False,
+                       detalhado=True):
+    """O que o leitor de tela fala quando um audio ou mensagem de voz comeca
+    a tocar: quem enviou, o que e e quanto dura.
+    'Tocando mensagem de voz de Ana, 12 segundos.' `velocidade` e o rotulo
+    ('1,5x'), dito so quando nao e a normal; `proximo`: veio da sequencia.
+    `detalhado` falso: so 'Tocando.' (com a velocidade, se nao e a normal)."""
+    if not detalhado:
+        texto = "Tocando" + (", a " + velocidade if velocidade else "") + "."
+        return ("Próximo áudio. " + texto) if proximo else texto
+    coisa = {VOZ: "mensagem de voz", AUDIO: "áudio",
+             VIDEO: "vídeo"}.get(msg.tipo, "áudio")
+    if msg.minha:
+        o_que = "sua " + coisa if msg.tipo == VOZ else "seu " + coisa
+    else:
+        o_que = coisa + (" de " + msg.autor if msg.autor else "")
+    partes = ["Tocando " + o_que]
+    if msg.segundos:
+        partes.append(duracao_legivel(msg.segundos))
+    if velocidade:
+        partes.append("a " + velocidade)
+    texto = ", ".join(partes) + "."
+    return ("Próximo áudio. " + texto) if proximo else texto
+
+
+def anuncio_sequencia(msg, velocidade="", proximo=True, tipo=True,
+                      quem=True, duracao=True, mostrar_velocidade=True):
+    """O que se fala quando um audio da sequencia comeca, conforme as
+    opcoes da pessoa. Tudo ligado = 'Próximo áudio. Tocando mensagem de voz
+    de Ana, 12 segundos, a 1,5x.'; tudo desligado = nada (texto vazio).
+    `velocidade`: rotulo ('1,5x'), vazio na velocidade normal."""
+    coisa = {VOZ: "mensagem de voz", AUDIO: "áudio",
+             VIDEO: "vídeo"}.get(msg.tipo, "áudio")
+    partes = []
+    if tipo and quem and msg.minha:
+        partes.append("Tocando " + ("sua " if msg.tipo == VOZ else "seu ")
+                      + coisa)
+    elif tipo and quem:
+        partes.append("Tocando " + coisa
+                      + (" de " + msg.autor if msg.autor else ""))
+    elif tipo:
+        partes.append("Tocando " + coisa)
+    elif quem:
+        partes.append("Enviado por você" if msg.minha else
+                      ("De " + msg.autor if msg.autor else ""))
+    if duracao and msg.segundos:
+        partes.append(duracao_legivel(msg.segundos))
+    if mostrar_velocidade and velocidade:
+        partes.append("a " + velocidade)
+    partes = [p for p in partes if p]
+    corpo = ", ".join(partes) + "." if partes else ""
+    if proximo:
+        return "Próximo áudio. " + corpo if corpo else "Próximo áudio."
+    return corpo
+
+
 def citacao(original, max_caracteres=LIMITE_CITACAO):
     """Trecho curto de uma mensagem para mostrar numa resposta."""
-    texto = " ".join(conteudo(original).split())
+    texto = " ".join(conteudo(original, com_estado=False).split())
     if len(texto) > max_caracteres:
         texto = texto[:max_caracteres].rsplit(" ", 1)[0].rstrip(" ,;:.") + "…"
     return texto
 
 
-def formatar(m, estilo, anterior=None, agora=None, respondida=None):
+def _telefone_do_endereco(remetente):
+    """'+5551999998888' de '5551999998888@s.whatsapp.net'; o proprio endereco
+    quando nao e um telefone (@lid, por exemplo)."""
+    usuario, _, dominio = (remetente or "").partition("@")
+    if dominio == "s.whatsapp.net" and usuario.isdigit():
+        return "+" + usuario
+    return remetente or ""
+
+
+def quem_enviou(msg, conv=None, nome_do_remetente=None):
+    """Quem enviou, na lista e no arquivo salvo: o autor da mensagem; sem ele, o nome
+    da conversa (se e com uma pessoa), o nome que a agenda ou as outras
+    mensagens guardadas dao ao remetente, o telefone dele e, so no fim,
+    Desconhecido. `nome_do_remetente(msg)` e opcional."""
+    if msg.minha:
+        return "Você"
+    if msg.autor:
+        return msg.autor
+    if conv is not None and conv.tipo == "privada" and conv.nome:
+        return conv.nome
+    if nome_do_remetente is not None and msg.remetente:
+        nome = nome_do_remetente(msg)
+        if nome:
+            return nome
+    return _telefone_do_endereco(msg.remetente) or "Desconhecido"
+
+
+# Quantas letras do texto da IA a linha da mensagem traz (0 = tudo): uma para
+# as descricoes de foto, figurinha e video, outra para transcricoes e PDFs
+# Como a previa de um link (titulo e descricao que o servico manda junto)
+# entra na linha da mensagem: "completa", "titulo" ou "nenhuma"
+MODO_PREVIA = ["completa"]
+LIMITE_PREVIA = 400
+
+
+def definir_modo_previa(modo):
+    MODO_PREVIA[0] = modo if modo in ("completa", "titulo", "nenhuma") \
+        else "completa"
+
+
+def previa_de_link(url="", titulo="", descricao="", site=""):
+    """Dicionario da previa, ou {} se nao ha titulo nem descricao."""
+    titulo, descricao = " ".join((titulo or "").split()), \
+        " ".join((descricao or "").split())
+    if not titulo and not descricao:
+        return {}
+    return {"url": url or "", "titulo": titulo, "descricao": descricao,
+            "site": " ".join((site or "").split())}
+
+
+def trecho_da_previa(msg):
+    """"prévia do link: Título. Descrição" para a linha da mensagem."""
+    previa = extras_de(msg)["previa"]
+    modo = MODO_PREVIA[0]
+    if not previa or modo == "nenhuma":
+        return ""
+    titulo, descricao = previa.get("titulo", ""), previa.get("descricao", "")
+    partes = [titulo]
+    if modo == "completa" and descricao and descricao != titulo:
+        partes.append(descricao)
+    texto = ". ".join(p.rstrip(".") for p in partes if p)
+    if len(texto) > LIMITE_PREVIA:
+        texto = texto[:LIMITE_PREVIA].rstrip() + "…"
+    return "prévia do link: " + texto if texto else ""
+
+
+LIMITE_IA_NA_LINHA = {"descricao": 0, "transcricao": 1000}
+
+
+def definir_limites_ia(descricao, transcricao):
+    LIMITE_IA_NA_LINHA["descricao"] = max(0, int(descricao or 0))
+    LIMITE_IA_NA_LINHA["transcricao"] = max(0, int(transcricao or 0))
+
+
+def rotulo_da_ia(msg):
+    """"transcrição" ou "descrição", conforme o que a IA fez na mensagem."""
+    ia = extras_de(msg)["ia"]
+    if not ia.get("texto"):
+        return ""
+    return "transcrição" if ia.get("genero") == "audio" else (
+        "texto do PDF" if ia.get("genero") == "pdf" else "descrição")
+
+
+def trecho_da_ia(msg):
+    """O comeco do texto feito pela IA, para a linha da mensagem."""
+    rotulo = rotulo_da_ia(msg)
+    if not rotulo:
+        return ""
+    ia = extras_de(msg)["ia"]
+    texto = " ".join(ia["texto"].split())
+    limite = LIMITE_IA_NA_LINHA["descricao" if ia.get("genero") in (
+        "imagem", "figurinha", "video") else "transcricao"]
+    if limite and len(texto) > limite:
+        texto = texto[:limite].rstrip() + "… (o menu mostra tudo)"
+    return "%s: %s" % (rotulo, texto)
+
+
+def formatar(m, estilo, anterior=None, agora=None, respondida=None,
+             quem=None):
     """Uma linha da lista de mensagens, no estilo escolhido.
 
     respondida: a mensagem respondida (Mensagem), se conhecida; ou só o nome
-    do autor (texto).
+    do autor (texto). quem: nome de quem enviou, quando a mensagem nao traz
+    o autor (ver quem_enviou).
     """
     cont = conteudo(m).replace("\r", " ").replace("\n", " ")
+    if extras_de(m)["editada"]:
+        cont = _juntar(cont, "(editada)")
+    if extras_de(m)["favorita"]:
+        cont = _juntar(cont, "(favorita)")
     n_links = len(itens_de_link(m))
     if n_links:
         cont = _juntar(cont, "com %d %s (Tab)" % (
@@ -224,6 +504,12 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None):
         cont = _juntar(cont, "com %d %s (Tab)" % (
             len(acoes), ("opção" if len(acoes) == 1 else "opções")
             if so_opcoes else ("botão" if len(acoes) == 1 else "botões")))
+    cont = _juntar(cont, trecho_da_previa(m))
+    cont = _juntar(cont, trecho_da_ia(m))
+    reacoes = resumo_reacoes(m)
+    if reacoes:
+        cont = _juntar(cont, "reações: " + reacoes if " de " in reacoes
+                       else "com " + reacoes)
     if m.resposta_a:
         if isinstance(respondida, Mensagem):
             quem = "você" if respondida.minha else (
@@ -234,7 +520,7 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None):
             cont = _juntar(cont, "em resposta a %s" % respondida)
         else:
             cont = _juntar(cont, "em resposta a uma mensagem mais antiga")
-    autor = "Você" if m.minha else (m.autor or "Desconhecido")
+    autor = "Você" if m.minha else (m.autor or quem or "Desconhecido")
     estado = m.estado if (m.minha and m.estado) else ""
     hora = hora_legivel(m.data, agora)
     if estilo == ESTILO_CONTEUDO_PRIMEIRO:
@@ -247,8 +533,103 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None):
     return _juntar("%s, %s: %s" % (autor, hora, cont), estado)
 
 
+FILTROS_TIPO = (("todas", "Todas as conversas"),
+                ("nao_lidas", "Não lidas"),
+                ("pessoais", "Pessoais"),
+                ("grupos", "Grupos"),
+                ("canais", "Canais"),
+                ("fixadas", "Fixadas"),
+                ("silenciadas", "Silenciadas"),
+                ("arquivadas", "Arquivadas"),
+                ("status", "Status e histórias"),
+                ("trancadas", "Trancadas no celular"))
+CONTA_TODAS = "todas"
+
+
+def tipos_visiveis(trancadas):
+    """FILTROS_TIPO; o tipo Trancadas so entra quando liberado."""
+    return tuple(t for t in FILTROS_TIPO if trancadas or t[0] != "trancadas")
+
+
+def _sem_acento(texto):
+    return "".join(c for c in unicodedata.normalize("NFD", texto.lower())
+                   if unicodedata.category(c) != "Mn")
+
+
+def casa_busca(nome, busca):
+    """Todas as palavras da busca aparecem no nome (sem maiusculas nem
+    acentos)? Busca vazia casa com tudo."""
+    alvo = _sem_acento(nome or "")
+    return all(p in alvo for p in _sem_acento(busca or "").split())
+ROTULO_TODAS_AS_CONTAS = "Todas as contas"
+
+
+def passa_filtro(c, tipo="todas", conta=CONTA_TODAS, busca=""):
+    """A conversa aparece na lista? `conta`: "todas", um servico
+    ("telegram", "whatsapp") ou "conta:<id>". `tipo`: ver FILTROS_TIPO. As
+    arquivadas so aparecem no tipo Arquivadas. Valor desconhecido nao
+    filtra."""
+    if busca and not casa_busca(c.nome, busca):
+        return False
+    if conta in SERVICOS and c.servico != conta:
+        return False
+    if conta.startswith("conta:") and c.conta_id != conta[6:]:
+        return False
+    if tipo == "status":
+        return c.tipo == "status"        # um por pessoa, como uma conversa
+    if c.tipo == "status":
+        return False                     # so aparece no filtro Status
+    if tipo == "trancadas":
+        return bool(c.trancada)
+    if c.trancada:
+        return False             # trancada: so no tipo Trancadas
+    if tipo == "arquivadas":
+        return bool(c.arquivada)
+    if c.arquivada:
+        return False
+    if tipo == "nao_lidas":
+        return c.nao_lidas > 0
+    if tipo == "pessoais":
+        return c.tipo == "privada"
+    if tipo == "grupos":
+        return c.tipo == "grupo"
+    if tipo == "canais":
+        return c.tipo == "canal"
+    if tipo == "fixadas":
+        return bool(c.fixada)
+    if tipo == "silenciadas":
+        return c.silenciada()
+    return True
+
+
+def opcoes_de_conta(contas):
+    """[(valor, rotulo)] do filtro de conta. contas: [(id, servico, nome)].
+    Todas as contas, os servicos que tem conta e, para o servico com mais de
+    uma conta, cada conta."""
+    opcoes = [(CONTA_TODAS, ROTULO_TODAS_AS_CONTAS)]
+    for servico, nome_servico in SERVICOS.items():
+        do_servico = [c for c in contas if c[1] == servico]
+        if not do_servico:
+            continue
+        opcoes.append((servico, nome_servico))
+        if len(do_servico) > 1:
+            opcoes += [("conta:" + i, "%s, %s" % (n, nome_servico))
+                       for i, _, n in do_servico]
+    return opcoes
+
+
 def rotulo_conversa(c):
     base = "%s, %s" % (c.nome, SERVICOS.get(c.servico, c.servico))
+    if c.fixada:
+        base += ", fixada"
+    if c.silenciada():
+        base += ", silenciada"
+    if c.tipo == "status":
+        if c.nao_lidas == 1:
+            return base + ", 1 não visto"
+        if c.nao_lidas > 1:
+            return base + ", %d não vistos" % c.nao_lidas
+        return base
     if c.nao_lidas == 1:
         return base + ", 1 não lida"
     if c.nao_lidas > 1:
@@ -296,6 +677,34 @@ def itens_de_link(m):
     return itens
 
 
+def conteudos_copiaveis(msg, maximo_links=12):
+    """O que da para copiar da mensagem, um item por tipo de conteudo:
+    [(tipo, rotulo, valor)], com tipo "texto" (valor = o texto), "midia"
+    (valor vazio: o arquivo baixado) ou "link" (valor = o endereco). Uma
+    mensagem so com texto tem so o texto; uma foto com legenda e link tem a
+    legenda, a foto e o link. Sem nada para copiar (mensagem apagada, sem
+    suporte), sobra o texto falado da mensagem."""
+    itens = []
+    if extras_de(msg)["apagada"]:
+        return [("texto", "Copiar texto", conteudo(msg))]
+    ia = extras_de(msg)["ia"].get("texto")
+    midia = msg.tipo in (FOTO, VIDEO, VOZ, AUDIO, DOCUMENTO, FIGURINHA)
+    if msg.texto and msg.tipo not in (VOZ, FIGURINHA):
+        itens.append(("texto", "Copiar legenda" if midia else "Copiar texto",
+                      msg.texto))
+    if midia:
+        itens.append(("midia", "Copiar " + NOMES_TIPOS[msg.tipo], ""))
+    if ia:
+        itens.append(("texto", "Copiar " + rotulo_da_ia(msg), ia))
+    links = itens_de_link(msg)[:maximo_links]
+    for rotulo, url in links:
+        itens.append(("link", "Copiar link" if len(links) == 1
+                      else "Copiar " + rotulo, url))
+    if not itens:
+        itens.append(("texto", "Copiar texto", conteudo(msg)))
+    return itens
+
+
 def tem_links(m):
     """A mensagem tem algum link (na legenda ou escondido)?"""
     return bool(extrair_links(m.texto) or extras_de(m)["links"])
@@ -315,8 +724,30 @@ def _quem_legivel(quem):
     return quem
 
 
+# O que cada recibo quer dizer para quem enviou: recebeu, abriu, reproduziu
+ROTULOS_RECIBO = (("entregue", "Recebida", "recebeu"),
+                  ("lida", "Aberta", "abriu"),
+                  ("ouvida", "Reproduzida", "reproduziu"))
+
+
+def pessoas_por_recibo(recibos):
+    """{tipo: [(participante, data)]}, uma vez por pessoa, na ordem do
+    evento; `recibos` e a lista (participante, tipo, data) do banco."""
+    saida = {tipo: [] for tipo, _, _ in ROTULOS_RECIBO}
+    vistos = set()
+    for quem, tipo, data in recibos or []:
+        if tipo in saida and (quem, tipo) not in vistos:
+            vistos.add((quem, tipo))
+            saida[tipo].append((quem, data))
+    return saida
+
+
+def texto_pessoas(n):
+    return "1 pessoa" if n == 1 else "%d pessoas" % n
+
+
 def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
-             midia=None):
+             midia=None, grupo=False, contagens=True):
     linhas = [
         "Conversa: %s" % nome_conversa,
         "De: %s" % ("Você" if m.minha else (m.autor or "Desconhecido")),
@@ -324,6 +755,22 @@ def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
                       if m.data else "-"),
         "Tipo: %s" % NOMES_TIPOS.get(m.tipo, m.tipo),
     ]
+    extras_m = extras_de(m)
+    if extras_m["editada"]:
+        linhas.append("Editada: sim")
+    if extras_m["apagada"]:
+        linhas.append("Apagada pelo autor: sim")
+    for r in extras_m["reacoes"]:
+        linhas.append("Reação: %s de %s" % (r.get("emoji", ""),
+                                            r.get("quem", "")))
+    previa = extras_m["previa"]
+    if previa:
+        linhas.append("Prévia do link: %s" % " - ".join(
+            p for p in (previa.get("titulo"), previa.get("site")) if p))
+        if previa.get("descricao"):
+            linhas.append("Descrição da prévia: %s" % previa["descricao"])
+        if previa.get("url"):
+            linhas.append("Endereço da prévia: %s" % previa["url"])
     if m.nome_arquivo:
         linhas.append("Arquivo: %s" % m.nome_arquivo)
     if m.tamanho:
@@ -334,7 +781,17 @@ def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
         linhas.append("Estado: %s" % m.estado)
     if midia:
         linhas.append("Mídia: %s" % midia)
-    if m.minha and recibos:
+    if m.minha and grupo:
+        # grupo: so o resumo; quem e quando fica nas listas dos botoes
+        linhas.append("Enviada em: %s" % (time.strftime(
+            "%d/%m/%Y %H:%M:%S", time.localtime(m.data)) if m.data else "-"))
+        por_tipo = pessoas_por_recibo(recibos)
+        for tipo, rotulo, _ in ROTULOS_RECIBO:
+            n = len(por_tipo[tipo])
+            if contagens and (n or tipo != "ouvida" or
+                              m.tipo in (VOZ, AUDIO, VIDEO)):
+                linhas.append("%s por %s" % (rotulo, texto_pessoas(n)))
+    elif m.minha and recibos:
         nomes = nomes or {}
         rotulos = {"entregue": "Entregue", "lida": "Lida",
                    "ouvida": "Ouvida"}

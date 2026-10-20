@@ -2,9 +2,12 @@ wxPython>=4.3.1
 Telethon>=1.45,<2
 cryptg>=0.6
 neonize==0.5.2
+pyzipper>=0.4
 segno>=1.6
 soundfile>=0.13
 sounddevice>=0.5
 soundcard>=0.4.6
 py-tgcalls>=3.0,<4
 numpy>=2.1
+emoji>=2.14
+opencv-python-headless>=5.0

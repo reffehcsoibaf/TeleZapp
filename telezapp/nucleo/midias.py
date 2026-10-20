@@ -19,6 +19,9 @@ from telezapp.provedores.base import DownloadCancelado, ErroMidia
 log = logging.getLogger("telezapp.midias")
 
 PRONTA, INICIADO, EM_ANDAMENTO = "pronta", "iniciado", "em andamento"
+LIMPA = "limpa"
+TEXTO_LIMPA = ("Esta mídia foi limpada e só volta com um novo pareamento "
+               "da conta.")
 
 
 class _Andamento:
@@ -69,6 +72,11 @@ class GerenteMidias:
     def baixar(self, msg, automatica=False):
         """PRONTA (ja existe; o evento sai na hora), INICIADO ou
         EM_ANDAMENTO."""
+        if self.banco.foi_limpa(msg.conta_id, msg.conversa_id, msg.id):
+            self.barramento.publicar(ev.MidiaBaixada(
+                msg.conta_id, msg.conversa_id, msg.id, erro=TEXTO_LIMPA,
+                automatica=automatica))
+            return LIMPA
         existente = self.caminho(msg)
         if existente:
             self.barramento.publicar(ev.MidiaBaixada(
