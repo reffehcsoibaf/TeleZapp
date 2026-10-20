@@ -251,3 +251,28 @@ def test_desinstalar_oferece_o_backup(mundo, monkeypatch, tmp_path):
     # Sim, mas desistiu de escolher onde salvar: nao desinstala
     ui, _, _ = _preparar_oferta(monkeypatch, tmp_path, 2, salvar=False)
     assert ui.oferecer_backup(None, {}) is False
+
+
+def test_desinstalar_tira_atalhos_registro_e_pasta(mundo, monkeypatch):
+    import time
+    if os.name != "nt":
+        pytest.skip("usa o cmd do Windows")
+    tmp, prog = mundo
+    lnk = tmp / "atalho.lnk"
+    lnk.write_text("x")
+    chamadas = []
+    monkeypatch.setattr(ins, "_caminhos_dos_atalhos",
+                        lambda: (str(lnk), str(tmp / "nao-existe.lnk")))
+    monkeypatch.setattr(ins, "_desregistrar", lambda: chamadas.append(1))
+    dados = tmp / "dados-a-apagar"
+    dados.mkdir()
+    (dados / "a.db").write_text("x")
+    with open(os.path.join(prog, "instalado.txt"), "w") as f:
+        f.write("sim")
+    ins.desinstalar(prog, apagar_dados=True, dados=str(dados))
+    assert not lnk.exists() and chamadas == [1] and not dados.exists()
+    for _ in range(100):                  # a pasta sai em segundo plano
+        if not os.path.exists(prog):
+            break
+        time.sleep(0.2)
+    assert not os.path.exists(prog)

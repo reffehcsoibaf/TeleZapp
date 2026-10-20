@@ -367,8 +367,13 @@ def desinstalar(programa=None, apagar_dados=False, dados=None):
         log.warning("não consegui tirar a entrada de Aplicativos instalados")
     if apagar_dados:
         shutil.rmtree(dados or dados_do_computador(), ignore_errors=True)
+    # `timeout` volta na hora sem console; `ping` espera de verdade. Tenta ate
+    # o programa soltar a pasta (ele ainda esta fechando).
     subprocess.Popen(
-        'timeout /t 4 /nobreak >nul & rmdir /s /q "%s"' % programa,
-        shell=True, creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0)
-                                   | getattr(subprocess, "DETACHED_PROCESS",
-                                             0)))
+        'for /l %%i in (1,1,30) do (ping -n 2 127.0.0.1 >nul & '
+        'rmdir /s /q "%s" 2>nul & if not exist "%s" exit)' % (
+            programa, programa),
+        # sem DETACHED_PROCESS: com ele o laco `for` do cmd nao roda
+        shell=True, creationflags=(
+            getattr(subprocess, "CREATE_NO_WINDOW", 0) |
+            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)))

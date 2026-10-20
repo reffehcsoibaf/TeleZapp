@@ -377,7 +377,7 @@ def oferecer_backup(pai, cfg_dados, copiar_banco=None, pasta_inicial=""):
 def desinstalar_pelo_aplicativo():
     """`TeleZapp.exe --desinstalar` (Aplicativos instalados). Devolve o codigo
     de saida."""
-    wx.App(False)
+    app = wx.App(False)       # precisa continuar referenciado
     if ins.modo() != "instalado":
         wx.MessageBox("Esta cópia do %s não é uma instalação." % NOME, NOME,
                       wx.OK | wx.ICON_INFORMATION)

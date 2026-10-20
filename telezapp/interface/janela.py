@@ -5638,7 +5638,7 @@ class Janela(wx.Frame):
 
     def _abrir_depois(self, exe):
         """Fecha este programa e abre o `exe` (o programa so abre uma vez)."""
-        linha = "timeout /t 4 /nobreak >nul & start \"\" " + \
+        linha = "ping -n 5 127.0.0.1 >nul & start \"\" " + \
             subprocess.list2cmdline([exe])
         if not self.Close():
             return
@@ -5691,7 +5691,7 @@ class Janela(wx.Frame):
             alvo = [sys.executable] + sys.argv[1:]
         else:
             alvo = [sys.executable, "-m", "telezapp"]
-        linha = "timeout /t 4 /nobreak >nul & start \"\" " + \
+        linha = "ping -n 5 127.0.0.1 >nul & start \"\" " + \
             subprocess.list2cmdline(alvo)
         if not self.Close():
             return              # a pessoa desistiu de fechar
