@@ -528,6 +528,15 @@ def trecho_da_previa(msg):
     return "prévia do link: " + texto if texto else ""
 
 
+def _so_link(m):
+    """Verdadeiro se a mensagem e um texto que e apenas um link e tem previa."""
+    if m.tipo != TEXTO or extras_de(m)["apagada"] or not (m.texto or "").strip():
+        return False
+    achados = extrair_links(m.texto)
+    return len(achados) == 1 and m.texto.strip().rstrip(_FIM_DE_LINK) == \
+        achados[0][1] and bool(trecho_da_previa(m))
+
+
 LIMITE_IA_NA_LINHA = {"descricao": 0, "transcricao": 1000}
 
 
@@ -568,6 +577,11 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None,
     o autor (ver quem_enviou).
     """
     cont = conteudo(m).replace("\r", " ").replace("\n", " ")
+    so_link = _so_link(m)
+    if so_link:
+        # mensagem so com o link: a previa vem antes, para saber do que se
+        # trata sem ouvir o endereco inteiro
+        cont = _juntar(trecho_da_previa(m), cont)
     if extras_de(m)["editada"]:
         cont = _juntar(cont, "(editada)")
     if extras_de(m)["favorita"]:
@@ -584,7 +598,8 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None,
         cont = _juntar(cont, "com %d %s (Tab)" % (
             len(acoes), ("opção" if len(acoes) == 1 else "opções")
             if so_opcoes else ("botão" if len(acoes) == 1 else "botões")))
-    cont = _juntar(cont, trecho_da_previa(m))
+    if not so_link:
+        cont = _juntar(cont, trecho_da_previa(m))
     cont = _juntar(cont, trecho_da_ia(m))
     reacoes = resumo_reacoes(m)
     if reacoes:

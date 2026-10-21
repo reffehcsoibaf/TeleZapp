@@ -1111,10 +1111,7 @@ def test_escolher_opcao_de_lista_e_botoes_simples(amb):
     amb.p.responder_acao(recebida, {"tipo": "botoes", "rotulo": "Sim",
                                     "id": "1"})
     esperar(amb.fila, ev.MensagemNova)
-    # 1a variante, experimental: a resposta vai dentro de um documento com
-    # legenda (assim a biblioteca nao poe o no <biz><buttons_response/>)
-    b = amb.c.enviadas[-1][1].documentWithCaptionMessage.message \
-        .buttonsResponseMessage
+    b = amb.c.enviadas[-1][1].buttonsResponseMessage
     assert (b.selectedButtonID, b.selectedDisplayText) == ("1", "Sim")
 
 
@@ -1180,12 +1177,12 @@ def test_resposta_de_botao_tenta_variantes_quando_o_servidor_recusa(amb):
     recebida = esperar(amb.fila, ev.MensagemNova).mensagem
     recebida.remetente = "94476496285751@lid"
     acao = m.extras_de(recebida)["acoes"][1]
-    amb.c.recusar_479 = 2                    # a experimental e a do celular
+    amb.c.recusar_479 = 1                    # a do celular (conversa LID)
     amb.p.responder_acao(recebida, acao)
     esperar(amb.fila, ev.MensagemNova)
     destino, proto = amb.c.enviadas[-1]
     r = proto.buttonsResponseMessage
-    assert destino == "5551988887777@s.whatsapp.net"      # 3a variante
+    assert destino == "5551988887777@s.whatsapp.net"      # 2a variante
     assert (r.selectedButtonID, r.selectedDisplayText) == ("2", "Residência")
     assert r.contextInfo.quotedMessage.HasField("buttonsMessage")
     assert r.contextInfo.participant == "94476496285751@lid"
@@ -1202,10 +1199,10 @@ def test_resposta_de_botao_so_falha_se_todas_as_variantes_forem_recusadas(
     amb.p.responder_acao(recebida, m.extras_de(recebida)["acoes"][0])
     falha = esperar(amb.fila, ev.EnvioFalhou)
     assert "erro do WhatsApp" in falha.motivo and not falha.devolver_texto
-    assert amb.c.recusar_479 == 99 - 4       # tentou as 4 variantes
+    assert amb.c.recusar_479 == 99 - 3       # tentou as 3 variantes
 
 
-def test_resposta_de_botao_tenta_primeiro_a_variante_experimental(amb):
+def test_resposta_de_botao_tenta_primeiro_a_do_celular_sem_embrulho(amb):
     amb.f["Connected"](amb.c, N.Connected())
     esperar(amb.fila, ev.ContaPronta)
     amb.f["Message"](amb.c, evento("O5", _buttons_message()))
@@ -1215,8 +1212,10 @@ def test_resposta_de_botao_tenta_primeiro_a_variante_experimental(amb):
     esperar(amb.fila, ev.MensagemNova)
     destino, proto = amb.c.enviadas[-1]
     assert destino == "94476496285751@lid"
-    assert not proto.HasField("buttonsResponseMessage")
-    r = proto.documentWithCaptionMessage.message.buttonsResponseMessage
+    # sem embrulho: a empresa ignora o que vem dentro de "documento com
+    # legenda" (o servidor aceita, mas ela nao responde)
+    assert not proto.HasField("documentWithCaptionMessage")
+    r = proto.buttonsResponseMessage
     assert (r.selectedButtonID, r.selectedDisplayText) == ("2", "Residência")
     assert r.contextInfo.stanzaID == "O5"
 
@@ -2463,6 +2462,33 @@ def test_mencao_acha_o_nome_de_quem_falou_pelo_outro_endereco(amb):
     assert men["nome"] == "Ana Souza" and men["telefone"] == "+5551955550001"
 
 
+def test_mensagem_editada_com_mencao_mostra_o_nome_e_a_antiga_e_corrigida(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    _fala_no_grupo(amb, "H1", "5551955550004", pushname="Edu Ferreira")
+    amb.f["Message"](amb.c, evento(
+        "H2", E.Message(conversation="quando o ligou"), grupo=True,
+        chat="1203", remetente="5551988887777"))
+    esperar(amb.fila, ev.MensagemNova)
+    edicao = E.Message(protocolMessage=E.ProtocolMessage(
+        key=_chave("H2"), type=E.ProtocolMessage.MESSAGE_EDIT,
+        editedMessage=_com_mencoes(
+            "quando o @5551955550004 ligou",
+            "5551955550004@s.whatsapp.net")))
+    amb.f["Message"](amb.c, evento("H3", edicao, grupo=True, chat="1203",
+                                   remetente="5551988887777"))
+    a = esperar(amb.fila, ev.MensagemAtualizada)
+    assert a.motivo == "editada"
+    assert a.mensagem.texto == "quando o @Edu Ferreira ligou"
+    assert m.extras_de(a.mensagem)["mencoes"][0]["nome"] == "Edu Ferreira"
+    # mensagem editada antes desta correcao: nome achado, texto com numero
+    velha = amb.banco.mensagem("w1", "1203@g.us", "H2")
+    velha.texto = "quando o @5551955550004 ligou"
+    amb.banco.salvar_mensagens([velha])
+    corrigidas = amb.p._reavaliar_mencoes([velha])
+    assert corrigidas and corrigidas[0].texto == "quando o @Edu Ferreira ligou"
+
+
 def test_mencao_acha_o_nome_nas_mensagens_guardadas_pelo_lid(amb):
     amb.f["Connected"](amb.c, N.Connected())
     esperar(amb.fila, ev.ContaPronta)
@@ -2483,13 +2509,32 @@ def test_mencao_antiga_so_com_telefone_e_corrigida_ao_abrir_a_conversa(amb):
     _fala_no_grupo(amb, "G6", "5551955550002", pushname="Bia Lima")
     amb.p.carregar_mensagens("1203@g.us")
     carregadas = esperar(amb.fila, ev.MensagensCarregadas).mensagens
-    x = [y for y in carregadas if y.id == "G5"][0]
-    assert x.texto == "oi @Bia Lima"
+    # a abertura nao espera a correcao: ela vem depois, em segundo plano
+    x = esperar(amb.fila, ev.MensagemAtualizada)
+    assert x.motivo == "mencao"
+    x = x.mensagem
+    assert x.id == "G5" and x.texto == "oi @Bia Lima"
     assert m.extras_de(x)["mencoes"][0]["nome"] == "Bia Lima"
     assert amb.banco.mensagem("w1", "1203@g.us", "G5").texto == \
         "oi @Bia Lima"
     # sem novidade nenhuma, nada muda nem e regravado
-    assert amb.p._reavaliar_mencoes(carregadas) == 0
+    assert amb.p._reavaliar_mencoes(
+        amb.banco.mensagens("w1", "1203@g.us", 100)) == []
+
+
+def test_mencao_sem_nome_nao_e_procurada_de_novo_logo_em_seguida(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    _menciona(amb, "G7", "5551955550003")           # ninguem conhecido
+    msgs = amb.banco.mensagens("w1", "1203@g.us", 100)
+    chamadas = []
+    original = amb.p._dados_mencao
+    amb.p._dados_mencao = lambda *a, **k: (chamadas.append(a),
+                                           original(*a, **k))[1]
+    assert amb.p._reavaliar_mencoes(msgs) == []
+    assert len(chamadas) == 1
+    assert amb.p._reavaliar_mencoes(msgs) == []
+    assert len(chamadas) == 1                       # cache negativo
 
 
 def test_nome_de_quem_recebeu_ou_abriu_vem_do_perfil_visto_no_grupo(amb):
@@ -2666,3 +2711,17 @@ def test_grupo_sem_autor_ganha_o_nome_pela_lista_de_participantes(amb):
     assert e.conversa_id == gid and e.nomes == {lid: "Bia"}
     por_id = {x.id: x.autor for x in amb.banco.mensagens("w1", gid)}
     assert por_id == {"H1": "Bia", "H2": "Bia", "H3": ""}
+
+
+def test_registro_da_mensagem_interativa_nao_leva_o_texto():
+    texto = "Olá! *Recebemos seu pedido* 701-4795929-3141840 de 1 produto"
+    forma = wa.forma_sem_textos({"templateMessage": {"hydratedTemplate": {
+        "hydratedTitleText": "", "hydratedContentText": texto,
+        "templateID": "1440738371050375",
+        "hydratedButtons": [{"quickReplyButton": {"displayText": "Sim"}}],
+        "tipo": "QUICK_REPLY", "n": 7}}})
+    dump = str(forma)
+    assert "pedido" not in dump and "701-" not in dump and "Sim" not in dump
+    assert "hydratedContentText" in dump and "<texto 60>" in dump
+    assert "QUICK_REPLY" in dump and "'n': '<n>'" in dump
+    assert len(wa.forma_sem_textos(list(range(20)))) == 5

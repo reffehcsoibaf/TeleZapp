@@ -115,6 +115,7 @@ def test_nome_de_som_vale_na_pasta_de_sons_e_arquivo_que_sumiu_cai_no_padrao(
     fala.definir_sons({"nova": nome})
     assert fala.acao_do_som("nova") == (
         "arquivo", str(tmp_path / "sons" / "x.wav"))
+    fala._thread_pre_carga.join()       # a pre-carga ainda pode ter o arquivo
     (tmp_path / "sons" / "x.wav").unlink()
     assert fala.acao_do_som("nova") == ("padrao", "")
     fala.definir_sons({})
@@ -195,3 +196,14 @@ def test_tom_de_chamando_do_pacote_padrao_dura_um_segundo_e_meio(monkeypatch):
     tons.clear()
     fala._tocar("toque")                      # o toque de quem recebe segue
     assert len(tons) == 4 and all(ms == 120 for _, ms in tons)
+
+
+def test_som_curto_fica_pre_carregado_e_o_longo_nao(tmp_path):
+    curto = wav(tmp_path / "curto.wav")
+    longo = wav(tmp_path / "longo.wav", segundos=5)
+    fala.definir_sons({"enviada": curto, "toque": longo})
+    fala._thread_pre_carga.join()
+    assert curto in fala._pre_carregados
+    assert longo not in fala._pre_carregados
+    fala.definir_sons({})
+    assert not fala._pre_carregados

@@ -155,11 +155,19 @@ def _copia_consistente(origem, destino):
     shutil.copyfile(origem, destino)
 
 
+def _contar_arquivos(pasta, excluir=()):
+    n = 0
+    for _, _, arquivos in os.walk(pasta):
+        n += sum(1 for a in arquivos if not a.endswith(tuple(excluir)))
+    return n
+
+
 def criar(destino, pasta_dados, cfg_dados, partes, senha="",
           copiar_banco=None, progresso=None):
     """Grava o backup em `destino`. `cfg_dados`: o dicionario do config.json;
     `copiar_banco(caminho)`: grava uma copia consistente do banco (se for
-    None, copia o arquivo). Devolve {parte: quantidade de arquivos}. Em erro
+    None, copia o arquivo). `progresso(pct, texto)`: o avanco, de 0 a 100,
+    por arquivo gravado. Devolve {parte: quantidade de arquivos}. Em erro
     apaga o arquivo parcial e deixa a excecao subir."""
     partes = [p for p, _ in PARTES if p in partes]
     if not partes:
@@ -168,6 +176,23 @@ def criar(destino, pasta_dados, cfg_dados, partes, senha="",
                                int(time.time()))
     os.makedirs(temporarios, exist_ok=True)
     resumo = {}
+    total = 1
+    if "configuracoes" in partes:
+        total += 1 + _contar_arquivos(os.path.join(pasta_dados, "sons"))
+    if "contas" in partes:
+        total += 1 + _contar_arquivos(os.path.join(pasta_dados, "sessoes"),
+                                      ("-wal", "-shm", ".tmp"))
+    if "conversas" in partes:
+        total += 1
+    if "midias" in partes:
+        total += _contar_arquivos(os.path.join(pasta_dados, "midias"),
+                                  (".parte",))
+    feitos = [0]
+
+    def andou(texto):
+        feitos[0] += 1
+        if progresso:
+            progresso(min(feitos[0] * 100 // total, 99), texto)
     try:
         with pyzipper.AESZipFile(destino, "w", compression=pyzipper.ZIP_DEFLATED,
                                  allowZip64=True) as z:
@@ -183,6 +208,7 @@ def criar(destino, pasta_dados, cfg_dados, partes, senha="",
                     {"opcoes": opcoes_do_backup(cfg_dados)},
                     ensure_ascii=False, indent=1))
                 resumo["configuracoes"] = 1
+                andou("Copiando as configurações")
                 # as chaves de IA so vao dentro de um zip cifrado: sem senha
                 # ficariam legiveis para quem pegasse o arquivo
                 chaves = _chaves_de_ia(pasta_dados) if senha else {}
@@ -197,6 +223,7 @@ def criar(destino, pasta_dados, cfg_dados, partes, senha="",
                             origem, sons).replace("\\", "/"),
                             compress_type=pyzipper.ZIP_STORED)
                         resumo["configuracoes"] += 1
+                        andou("Copiando as configurações")
             if "contas" in partes:
                 z.writestr("contas.json", json.dumps(
                     {c: cfg_dados[c] for c in CHAVES_CONTAS if c in cfg_dados},
@@ -214,6 +241,7 @@ def criar(destino, pasta_dados, cfg_dados, partes, senha="",
                             origem, sessoes).replace("\\", "/"))
                         os.remove(copia)
                         n += 1
+                        andou("Copiando as contas")
                 resumo["contas"] = n
             if "conversas" in partes:
                 copia = os.path.join(temporarios, "banco.db")
@@ -224,6 +252,7 @@ def criar(destino, pasta_dados, cfg_dados, partes, senha="",
                         os.path.join(pasta_dados, "telezapp.db"), copia)
                 z.write(copia, "telezapp.db")
                 resumo["conversas"] = 1
+                andou("Copiando as conversas")
             if "midias" in partes:
                 n = 0
                 for atual, _, arquivos in os.walk(midias):
@@ -235,8 +264,7 @@ def criar(destino, pasta_dados, cfg_dados, partes, senha="",
                             origem, midias).replace("\\", "/"),
                             compress_type=pyzipper.ZIP_STORED)
                         n += 1
-                        if progresso and n % 50 == 0:
-                            progresso(n)
+                        andou("Copiando as mídias")
                 resumo["midias"] = n
     except BaseException:
         try:
@@ -246,6 +274,8 @@ def criar(destino, pasta_dados, cfg_dados, partes, senha="",
         raise
     finally:
         shutil.rmtree(temporarios, ignore_errors=True)
+    if progresso:
+        progresso(100, "Backup pronto")
     return resumo
 
 
@@ -325,12 +355,14 @@ def _restaurar_chaves(z, pasta_dados):
     return n
 
 
-def restaurar(arquivo, senha, partes, pasta_dados, resultado=None):
+def restaurar(arquivo, senha, partes, pasta_dados, resultado=None,
+              progresso=None):
     """Das `partes` escolhidas: devolve as opcoes validas (para aplicar na
     hora, ou {} se "configuracoes" nao foi escolhida) e deixa as demais na
     pasta de espera, para `aplicar_pendente` na proxima abertura. Devolve
     (opcoes, partes_em_espera). `resultado`, se dado, recebe
-    {"ia_chaves": quantas chaves de IA voltaram}."""
+    {"ia_chaves": quantas chaves de IA voltaram}. `progresso(pct, texto)`:
+    o avanco da leitura do backup, de 0 a 100."""
     manifesto = ler_manifesto(arquivo, senha)
     escolhidas = [p for p in partes if p in manifesto.partes]
     espera = os.path.join(pasta_dados, ESPERA)
@@ -354,16 +386,24 @@ def restaurar(arquivo, senha, partes, pasta_dados, resultado=None):
             prefixos = {"contas": ("contas.json", "sessoes/"),
                         "conversas": ("telezapp.db",),
                         "midias": ("midias/",)}
-            for parte in ("contas", "conversas", "midias"):
-                if parte not in escolhidas:
-                    continue
-                for nome in z.namelist():
-                    if nome == MANIFESTO or nome.endswith("/"):
-                        continue
-                    if any(nome == p or (p.endswith("/") and
-                                         nome.startswith(p))
-                           for p in prefixos[parte]):
-                        _extrair(z, nome, espera)
+            def a_extrair(parte):
+                return [nome for nome in z.namelist()
+                        if nome != MANIFESTO and not nome.endswith("/") and
+                        any(nome == p or (p.endswith("/") and
+                                          nome.startswith(p))
+                            for p in prefixos[parte])]
+            planos = [(parte, a_extrair(parte))
+                      for parte in ("contas", "conversas", "midias")
+                      if parte in escolhidas]
+            total = max(sum(len(n) for _, n in planos), 1)
+            feitos = 0
+            for parte, nomes in planos:
+                for nome in nomes:
+                    _extrair(z, nome, espera)
+                    feitos += 1
+                    if progresso:
+                        progresso(min(feitos * 100 // total, 99),
+                                  "Lendo o backup")
                 em_espera.append(parte)
         except RuntimeError:
             shutil.rmtree(espera, ignore_errors=True)

@@ -504,6 +504,22 @@ def estrutura_bruta(mensagem, info=None):
     return json.dumps(saida, ensure_ascii=False, indent=2, default=str)
 
 
+_NOME_DE_ENUM = re.compile(r"^[A-Z][A-Z0-9_]{2,40}$")
+
+
+def forma_sem_textos(x):
+    """So o formato de uma estrutura (chaves e nomes de tipo em maiusculas):
+    os textos viram '<texto N>', para o registro nao guardar o que foi
+    escrito nas mensagens."""
+    if isinstance(x, dict):
+        return {k: forma_sem_textos(v) for k, v in x.items()}
+    if isinstance(x, list):
+        return [forma_sem_textos(v) for v in x[:5]]
+    if isinstance(x, str):
+        return x if _NOME_DE_ENUM.match(x) else "<texto %d>" % len(x)
+    return "<n>" if isinstance(x, (int, float)) else x
+
+
 def estrutura_interativa(interna):
     """Formato (sem textos longos nem imagens) de uma mensagem de empresa
     com botoes ou lista, para o registro: serve para implementarmos o toque
@@ -660,8 +676,8 @@ def converter(evento, conta_id, conversa_id, autor=""):
     ctx = _contexto(interna)
     forma = estrutura_interativa(interna)
     if forma:
-        log.info("mensagem interativa: %s", json.dumps(forma,
-                                                       ensure_ascii=False))
+        log.info("mensagem interativa: %s", json.dumps(
+            forma_sem_textos(forma), ensure_ascii=False))
     msg = m.Mensagem(
         conta_id=conta_id, conversa_id=conversa_id, id=info.ID,
         autor="" if minha else (autor or info.Pushname or
@@ -784,8 +800,8 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
                   HIST_OUVIDA: m.LIDA}.get(int(wmi.status), m.ENVIADA)
     forma = estrutura_interativa(desembrulhar(wmi.message))
     if forma:
-        log.info("mensagem interativa: %s", json.dumps(forma,
-                                                       ensure_ascii=False))
+        log.info("mensagem interativa: %s", json.dumps(
+            forma_sem_textos(forma), ensure_ascii=False))
     ctx = _contexto(desembrulhar(wmi.message))
     remetente = wmi.key.participant or wmi.participant or wmi.key.remoteJID
     msg = m.Mensagem(
@@ -896,6 +912,7 @@ class ProvedorWhatsApp(Provedor):
         self._sem_nome_registrados = set()
         self._conectada = False
         self._cache_mencoes = {}   # jid mencionado -> nome, id, telefone
+        self._mencoes_tentadas = {}  # jid sem nome -> quando procurei por ultimo
         self._escrita_conferida = {}   # grupo -> quando conferi se posso escrever
         self._grupos_lidos = {}    # grupo -> quando os participantes foram lidos
         self._arquivada_vista = {}  # conversa -> arquivada, como o celular disse
@@ -2412,18 +2429,26 @@ class ProvedorWhatsApp(Provedor):
     def _reavaliar_mencoes(self, msgs, maximo=300):
         """Mensagens guardadas cuja mencao ficou so com o telefone: o nome
         pode ter sido aprendido depois (a pessoa falou, o grupo foi lido).
-        Tenta de novo e regrava o que mudou. Devolve quantas mudaram."""
+        Tenta de novo e regrava o que mudou. Devolve as que mudaram. Quem
+        continua sem nome so e procurado de novo depois de 10 minutos (cada
+        procura pode ir a rede)."""
         mudaram, tentativas = [], 0
+        agora = time.time()
         for x in msgs:
             extras = m.extras_de(x)
-            pendentes = [men for men in extras["mencoes"]
-                         if men.get("jid") and self._mencao_sem_nome(men)]
+            pendentes = [
+                men for men in extras["mencoes"] if men.get("jid") and (
+                    self._mencao_sem_nome(men) or re.search(
+                        r"@%s(?!\d)" % re.escape(jid_de_texto(men["jid"])[0]),
+                        x.texto))]
             if not pendentes:
                 continue
             texto, alterou = x.texto, False
             for men in pendentes:
                 if tentativas >= maximo:
                     break
+                if agora - self._mencoes_tentadas.get(men["jid"], 0) < 600:
+                    continue
                 tentativas += 1
                 antigo = men.get("nome") or ""
                 try:
@@ -2433,7 +2458,9 @@ class ProvedorWhatsApp(Provedor):
                     continue
                 novo = achado.get("nome") or ""
                 if not novo or self._mencao_sem_nome({**men, **achado}):
+                    self._mencoes_tentadas[men["jid"]] = agora
                     continue
+                self._mencoes_tentadas.pop(men["jid"], None)
                 men.update(achado)
                 usuario = jid_de_texto(men["jid"])[0]
                 for velho in {antigo, "+" + usuario, usuario}:
@@ -2449,7 +2476,21 @@ class ProvedorWhatsApp(Provedor):
                 mudaram.append(x)
         if mudaram:
             self.banco.salvar_mensagens(mudaram)
-        return len(mudaram)
+        return mudaram
+
+    def _rever_mencoes_do_grupo(self, conversa_id):
+        """Em segundo plano, depois de abrir um grupo: corrige as mencoes
+        que ficaram so com o telefone e avisa a tela de cada mensagem que
+        mudou."""
+        try:
+            if self.cliente is None or not self._conectada:
+                return
+            msgs = self.banco.mensagens(self.conta.id, conversa_id, 1000)
+            for x in self._reavaliar_mencoes(msgs):
+                self.barramento.publicar(ev.MensagemAtualizada(
+                    self.conta.id, conversa_id, x, "mencao"))
+        except Exception:
+            log.exception("erro ao rever as menções")
 
     def _conversa(self, conversa_id, chat, pushname, grupo, data):
         canal = chat.Server == "newsletter"
@@ -2966,8 +3007,14 @@ class ProvedorWhatsApp(Provedor):
                     return True
 
                 def editar(x):
+                    # o texto novo traz as suas proprias mencoes (@): sem
+                    # elas ficaria o numero no lugar do nome
                     x.texto = novo[1] or ""
-                    m.atualizar_extras(x, editada=True)
+                    editada = desembrulhar(p.editedMessage)
+                    m.atualizar_extras(
+                        x, editada=True,
+                        mencoes=mencoes_do_contexto(_contexto(editada)))
+                    self._enriquecer_mencoes(x)
                 self._alterar(cid, alvo, editar, "editada")
                 return True
         return False
@@ -3238,13 +3285,11 @@ class ProvedorWhatsApp(Provedor):
     def carregar_mensagens(self, conversa_id, limite=50):
         msgs = self.banco.mensagens(self.conta.id, conversa_id,
                                     max(limite, 100))
-        if conversa_id.endswith("@g.us"):
-            try:
-                self._reavaliar_mencoes(msgs)
-            except Exception:
-                log.exception("erro ao rever as menções")
         self.barramento.publicar(ev.MensagensCarregadas(
             self.conta.id, conversa_id, msgs))
+        if conversa_id.endswith("@g.us"):
+            # pode ir a rede: nunca na abertura da conversa
+            self._fila.put(lambda: self._rever_mencoes_do_grupo(conversa_id))
 
     def enviar_texto(self, conversa_id, texto, resposta_a=""):
         self._fila.put(lambda: self._enviar(conversa_id, texto, resposta_a))
@@ -3355,19 +3400,12 @@ class ProvedorWhatsApp(Provedor):
         variantes = [(nome, dest, self._mensagem_de_acao(msg, acao, citada),
                       segredo)
                      for nome, dest, citada, segredo in candidatas]
-        if acao.get("tipo") == "botoes" and variantes:
-            # EXPERIMENTAL: o servidor recusa (479) a resposta de botão com
-            # o no <biz><buttons_response/> que a biblioteca poe sozinha; o
-            # celular nao manda esse no. A biblioteca so o poe quando
-            # reconhece a mensagem, e nao olha dentro do envelope de
-            # "documento com legenda".
-            from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (
-                FutureProofMessage)
-            nome, dest, interna, segredo = variantes[0]
-            variantes.insert(0, (
-                "experimental: dentro de documento com legenda", dest,
-                Message(documentWithCaptionMessage=FutureProofMessage(
-                    message=interna)), segredo))
+        # Nota: o servidor recusa (479) a resposta de botao ou de lista com o
+        # no <biz><buttons_response/> (ou <list_response/>) que o whatsmeow
+        # poe sozinho; o WhatsApp Web nao manda esse no. A DLL de teste do
+        # neonize (Backup\neonize-0.5.2-teste) vem sem ele (docs/neonize).
+        # Embrulhar a resposta em "documento com legenda" tira o no mas o
+        # servidor aceita e a empresa ignora a mensagem: nao fazer isso.
         return variantes
 
     def _mensagem_de_acao(self, msg, acao, citada=None):

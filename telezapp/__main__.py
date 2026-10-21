@@ -48,8 +48,22 @@ def main():
         _ARQUIVO_FALHA.write("---- %s iniciado ----\n" % VERSAO)
         _ARQUIVO_FALHA.flush()
         faulthandler.enable(file=_ARQUIVO_FALHA, all_threads=True)
+        # sem janela de terminal o stderr do processo vai para o nada: o que
+        # as DLLs (a do WhatsApp, em Go) escrevem ao cair fica neste arquivo
+        os.dup2(_ARQUIVO_FALHA.fileno(), 2)
     except Exception:
         log.exception("não foi possível ativar o registro de falhas nativas")
+    # a marca some no fim normal; se ainda existir, a vez anterior caiu
+    marca = os.path.join(os.path.dirname(arquivo_log), "sessao-aberta")
+    try:
+        if os.path.exists(marca):
+            log.warning("a vez anterior terminou sem fechar normalmente "
+                        "(queda do programa ou do Windows); veja "
+                        "falha-nativa.log")
+        with open(marca, "w") as f:
+            f.write(str(os.getpid()))
+    except OSError:
+        marca = None
 
     def erro_nao_tratado(tipo, valor, tb):
         log.error("ERRO NÃO TRATADO:\n%s",
@@ -113,6 +127,11 @@ def main():
     banco.fechar()
     config.limpar_temporarios()
     log.info("encerrado normalmente")
+    if marca:
+        try:
+            os.remove(marca)
+        except OSError:
+            pass
     # Garante o fim do processo mesmo se alguma biblioteca deixar uma
     # thread presa (tudo ja foi gravado e fechado acima).
     logging.shutdown()

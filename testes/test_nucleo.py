@@ -679,6 +679,21 @@ def test_previa_de_link_na_linha_e_nos_detalhes():
         m.definir_modo_previa("completa")
 
 
+def test_mensagem_so_com_link_fala_a_previa_antes_do_link():
+    x = m.Mensagem("c", "v", "1", autor="Ana", data=1760000000,
+                   texto="https://a.com/x")
+    m.guardar_extras(x, previa=m.previa_de_link(
+        "https://a.com/x", "Título", "Descrição", "A.com"))
+    linha = m.formatar(x, m.ESTILO_AUTOR_PRIMEIRO)
+    assert linha.index("prévia do link: Título") < linha.index("https://a.com/x")
+    # com texto junto do link, a previa continua depois do texto
+    y = m.Mensagem("c", "v", "2", autor="Ana", data=1760000000,
+                   texto="olha https://a.com/x")
+    m.guardar_extras(y, previa=m.previa_de_link("https://a.com/x", "Título"))
+    linha = m.formatar(y, m.ESTILO_AUTOR_PRIMEIRO)
+    assert linha.index("olha") < linha.index("prévia do link")
+
+
 def test_conferir_o_que_vai_ser_publicado_como_status(tmp_path):
     from telezapp.nucleo import publicar_status as ps
     foto = tmp_path / "f.jpg"
@@ -729,3 +744,50 @@ def test_mensagem_temporaria_na_linha_e_nos_detalhes():
         m.Mensagem("c", "1", "2", data=AGORA, texto="oi"), 1)
     vencida = m.Mensagem("c", "1", "3", data=AGORA, expira=AGORA - 5)
     assert "já passou do prazo" in m.texto_temporaria(vencida, AGORA)
+
+
+# ------------------------------------------------ registro sem telefones
+def test_mascarar_texto_troca_telefones_e_enderecos_pelo_fim():
+    from telezapp import config
+    mt = config.mascarar_texto
+    assert mt("conversa=556136863608@s.whatsapp.net remetente="
+              "119975851360270@lid") == \
+        "conversa=...3608@s.whatsapp.net remetente=...0270@lid"
+    # grupo: o numero antes do traco e de quem o criou
+    assert mt("557791063633-1577487873@g.us/3EB09A44BBE71D332F35B5 de "
+              "140844996767940:58@lid") == \
+        "...3633-1577487873@g.us/3EB09A44BBE71D332F35B5 de ...7940:58@lid"
+    assert mt("5551999998888.0:12@s.whatsapp.net") == \
+        "...8888.0:12@s.whatsapp.net"
+    assert mt("conta +5551999998888 pronta") == "conta +55...8888 pronta"
+    # o que nao e telefone nem endereco fica como esta
+    assert mt("id 12345678901, 1234567 ms, ip 192.168.0.10, 123@newsletter, "
+              "3EB0827E0A26817AE5571B") == \
+        "id 12345678901, 1234567 ms, ip 192.168.0.10, 123@newsletter, " \
+        "3EB0827E0A26817AE5571B"
+    assert mt(5551) == "5551"
+
+
+def test_formatador_do_registro_mascara_ate_a_excecao():
+    import io
+    import logging
+    from telezapp import config
+    saida = io.StringIO()
+    h = logging.StreamHandler(saida)
+    h.setFormatter(config.FormatadorSemTelefones("%(levelname)s %(message)s"))
+    lg = logging.getLogger("teste-mascara")
+    lg.propagate = False
+    lg.addHandler(h)
+    try:
+        try:
+            raise ValueError("falhou em 5511953057252@s.whatsapp.net")
+        except ValueError:
+            lg.error("conversa %s e +5551999998888", "556136863608@s.whatsapp.net",
+                     exc_info=True)
+    finally:
+        lg.removeHandler(h)
+    texto = saida.getvalue()
+    assert "...3608@s.whatsapp.net e +55...8888" in texto
+    assert "ValueError: falhou em ...7252@s.whatsapp.net" in texto
+    for numero in ("556136863608", "5511953057252", "5551999998888"):
+        assert numero not in texto

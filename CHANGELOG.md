@@ -3,6 +3,67 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.21.0
+
+- Resposta a botões e listas de mensagens de empresa (erro 479). O whatsmeow
+  (`send.go`, `getButtonTypeFromMessage`) acrescentava `<biz><buttons_response/>`,
+  `<list_response/>` ou `<interactive_response/>` ao envio; o WhatsApp Web não
+  manda esse nó nas respostas (`WAWebSendMsgCreateFanoutStanza`: o biz só existe
+  para mensagens interativas nativas e no modo de privacidade), só o atributo
+  `mediatype` do `enc`. A DLL de teste do neonize (`Backup
+eonize-0.5.2-teste`)
+  vem sem o nó (`docs/neonize/sem-no-biz-whatsmeow-send.go.diff`). Embrulhar a
+  resposta em `documentWithCaptionMessage` tira o nó e o servidor aceita, mas a
+  empresa ignora: o embrulho experimental de `_variantes_da_acao` foi removido.
+  Visto ao vivo: lista da Equatorial. Sem a DLL de teste (neonize oficial) as
+  respostas voltam a dar 479.
+
+- Registro sem telefones nem textos. `config.mascarar_texto` troca
+  `5551999998888@s.whatsapp.net`, `...@lid`, `...-1577...@g.us` e
+  `+5551999998888` pelo fim (`...8888@...`, `+55...8888`; o número antes do
+  traço do grupo é de quem o criou) e `FormatadorSemTelefones` passa todo o
+  texto do registro, exceção incluída, por ela (o log do usuário tinha
+  telefones nos avisos "mensagem não decifrada" e nos do whatsmeow).
+  `forma_sem_textos` no registro "mensagem interativa:" (guardava os 80
+  primeiros caracteres do texto das mensagens de empresa; agora só chaves e
+  nomes de tipo).
+
+- Barras de progresso (`interface/progresso.JanelaDeProgresso`, um `wx.Dialog`
+  sem modal com `wx.Gauge`; Cancelar e Esc só quando há `ao_cancelar`; sem
+  Enter padrão): o NVDA só toca os bipes da barra de uma janela em primeiro
+  plano. Usada em: atualização (`Janela._atualizar`: baixar vai a 90%, extrair
+  a 100%; `atualizador.baixar(.., cancelado)` apaga o parcial e
+  `atualizador.extrair(.., progresso)`), `instalacao.com_espera(pai, titulo,
+  trabalho(progresso))` (instalar, criar portátil, backup do desinstalar; o
+  instalador de um arquivo só dá 40% à extração do zip embutido),
+  `nucleo/instalacao`: `faixa`, cópia do programa e dos dados por bytes e
+  arquivos (`instalar`, `criar_portatil`, `extrair_pacote` com
+  `progresso(pct, texto)`), `backup.criar` e `backup.restaurar`
+  (`progresso(pct, texto)` por arquivo; `Janela._barra_de_tarefa`),
+  downloads pedidos e envios por arquivo (`_barra_de_transferencia`: só abre
+  depois de 1 s e abaixo de 90%; fecha em `MidiaBaixada` e `_fim_do_envio`).
+  Opção `barra_de_progresso` (Mídias, ligada) vale para as transferências;
+  com a barra aberta, não se fala "N por cento". Nem a fala nem o rótulo
+  levam a porcentagem (o NVDA decide pela configuração dele, como no
+  WinZapp): `JanelaDeProgresso.atualizar` só troca o rótulo e só chama
+  `falar` quando a etapa muda; os callers passam etapas ("Baixando a versão
+  X", "Copiando as mídias"), sem número.
+
+- Áudio M4A/AAC: a libsndfile não abre AAC; o `Reprodutor` decodifica com o
+  PyAV para um WAV temporário e toca normalmente (entra na sequência). Se nem
+  assim abrir, `FormatoNaoSuportado` e a janela usa o outro motor.
+- Abrir grupo: `_rever_mencoes_do_grupo` roda em segundo plano e avisa a tela
+  por `MensagemAtualizada` (motivo `mencao`); quem continua sem nome só é
+  procurado de novo após 10 min (`_mencoes_tentadas`). A edição lê as menções
+  do texto novo e a revisão corrige as guardadas com nome mas texto com número.
+- Sons: `sd.play` de várias threads corrompia o PortAudio; há `_trava_som`.
+  Sons de até 2 s são pré-carregados na RAM em segundo plano (`fala.py`,
+  `_pre_carregados`, conferidos por mtime). O stderr vai para o
+  `falha-nativa.log` (`os.dup2`) e a marca `sessao-aberta` avisa no log se a
+  vez anterior não fechou normalmente.
+- Mensagem só com link e prévia: a prévia vem antes do endereço (`_so_link`).
+- Opção `enter_chega_ao_leitor`: espera de 40 para 10 ms.
+
 ## 2026.10.20.0
 
 - Menus: o Menu único com submenus continua, em nova ordem (`_criar_menus`):
@@ -145,7 +206,7 @@ por quadros e IA automática.
   mensagens guardadas, sem consultar a rede (a lista pode ser grande).
 - Opção `enter_chega_ao_leitor` (desligada): no Enter da caixa o `_char_hook`
   faz `evt.Skip()` (o controle recebe o `WM_CHAR` que o NVDA usa para fechar
-  a palavra digitada) e `wx.CallLater(40, _enviar_depois_do_enter)` envia o
+  a palavra digitada) e `wx.CallLater(10, _enviar_depois_do_enter)` envia o
   texto (o `strip()` tira a quebra de linha) e limpa a caixa. Padrão: Enter
   tratado no hook, que engole o `WM_CHAR`.
 - Evento de som `mencao_ou_resposta` (18º). `extras["citou_voce"]`: o WhatsApp

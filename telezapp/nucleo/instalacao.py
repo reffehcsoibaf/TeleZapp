@@ -82,15 +82,44 @@ def dados_do_computador():
 
 
 # ------------------------------------------------------------------ copiar
-def _copiar_programa(origem, destino):
+def faixa(progresso, inicio, fim):
+    """Um `progresso(pct, texto)` que leva o avanco de 0 a 100 de uma etapa
+    para a faixa [inicio, fim] do avanco total."""
+    if progresso is None:
+        return None
+
+    def mapeado(pct, texto=""):
+        total = None if pct is None else inicio + pct * (fim - inicio) / 100
+        progresso(total, texto)
+    return mapeado
+
+
+def _copiar_programa(origem, destino, passo=None):
     """Copia a pasta do programa, sem a pasta `dados` nem a marca de
-    instalado."""
-    def ignorar(pasta, nomes):
-        if _igual(pasta, origem):
-            return [n for n in nomes
-                    if n in (PASTA_DADOS_PORTATIL, "instalado.txt")]
-        return []
-    shutil.copytree(origem, destino, ignore=ignorar)
+    instalado. `passo(feito, total)`: bytes ja copiados."""
+    ignorados = (PASTA_DADOS_PORTATIL, "instalado.txt")
+    arquivos, total = [], 0
+    for raiz, pastas, nomes in os.walk(origem):
+        if _igual(raiz, origem):
+            pastas[:] = [p for p in pastas if p not in ignorados]
+            nomes = [n for n in nomes if n not in ignorados]
+        rel = os.path.relpath(raiz, origem)
+        alvo = destino if rel == "." else os.path.join(destino, rel)
+        arquivos.append((alvo, None))
+        for n in nomes:
+            de = os.path.join(raiz, n)
+            tam = os.path.getsize(de)
+            arquivos.append((os.path.join(alvo, n), de))
+            total += tam
+    feito = 0
+    for alvo, de in arquivos:
+        if de is None:
+            os.makedirs(alvo, exist_ok=True)
+            continue
+        shutil.copy2(de, alvo)
+        feito += os.path.getsize(de)
+        if passo:
+            passo(feito, max(total, 1))
 
 
 def _copiar_dados(origem, destino, progresso=None):
@@ -99,23 +128,29 @@ def _copiar_dados(origem, destino, progresso=None):
     midias no banco novo."""
     from telezapp.nucleo import backup as bk
     os.makedirs(destino, exist_ok=True)
+    lista = []
     for raiz, pastas, arquivos in os.walk(origem):
         rel = os.path.relpath(raiz, origem)
         if rel == ".":
             pastas[:] = [p for p in pastas if p not in NAO_LEVAR]
         alvo = destino if rel == "." else os.path.join(destino, rel)
-        os.makedirs(alvo, exist_ok=True)
+        lista.append((alvo, None, None))
         for nome in arquivos:
-            if nome.endswith(("-wal", "-shm", ".tmp", ".lock")):
-                continue
-            de = os.path.join(raiz, nome)
-            para = os.path.join(alvo, nome)
-            try:
-                bk._copia_consistente(de, para)
-            except OSError:
-                log.warning("não copiei %s", nome)
-            if progresso:
-                progresso()
+            if not nome.endswith(("-wal", "-shm", ".tmp", ".lock")):
+                lista.append((alvo, os.path.join(raiz, nome), nome))
+    n = sum(1 for _, de, _n in lista if de)
+    feitos = 0
+    for alvo, de, nome in lista:
+        os.makedirs(alvo, exist_ok=True)
+        if de is None:
+            continue
+        try:
+            bk._copia_consistente(de, os.path.join(alvo, nome))
+        except OSError:
+            log.warning("não copiei %s", nome)
+        feitos += 1
+        if progresso:
+            progresso(feitos, max(n, 1))
     bk._acertar_caminhos_das_midias(
         os.path.join(destino, "telezapp.db"),
         os.path.join(origem, "midias"), os.path.join(destino, "midias"))
@@ -222,16 +257,20 @@ def _desregistrar():
 
 # ------------------------------------------------- pacote do instalador
 @contextlib.contextmanager
-def extrair_pacote(arquivo_zip):
+def extrair_pacote(arquivo_zip, progresso=None):
     """Para o instalador de um arquivo so: extrai o zip do programa numa
-    pasta de trabalho, entrega a pasta TeleZapp de dentro e a apaga depois."""
+    pasta de trabalho, entrega a pasta TeleZapp de dentro e a apaga depois.
+    `progresso(pct, texto)`: o avanco da extracao, de 0 a 100."""
     from telezapp.nucleo import atualizador
     base = os.path.join(os.environ.get("LOCALAPPDATA") or
                         os.path.expanduser("~"), "TeleZapp-instalador")
     pasta = os.path.join(base, str(os.getpid()))
     try:
         try:
-            yield atualizador.extrair(arquivo_zip, pasta)
+            yield atualizador.extrair(arquivo_zip, pasta, (
+                lambda f, t: progresso(f * 100 / max(t, 1),
+                                       "Extraindo o programa"))
+                if progresso else None)
         except atualizador.ErroAtualizacao as e:
             raise ErroInstalacao(str(e))
     finally:
@@ -265,9 +304,12 @@ def instalar(programa, destino=None, atalho_menu=True, atalho_area=False,
         if os.path.exists(nova):
             shutil.rmtree(nova)
         os.makedirs(os.path.dirname(destino), exist_ok=True)
+        levando = bool(levar_dados_de)
+        etapa = faixa(progresso, 0, 60 if levando else 90)
         if progresso:
-            progresso("Copiando o programa")
-        _copiar_programa(programa, nova)
+            progresso(0, "Copiando o programa")
+        _copiar_programa(programa, nova, (lambda f, t: etapa(
+            f * 100 / t, "Copiando o programa")) if etapa else None)
         with open(os.path.join(nova, "instalado.txt"), "w",
                   encoding="utf-8") as f:
             f.write("Esta pasta é uma instalação do TeleZapp %s.\n" % VERSAO)
@@ -290,13 +332,17 @@ def instalar(programa, destino=None, atalho_menu=True, atalho_area=False,
     exe = os.path.join(destino, EXE)
     if levar_dados_de:
         if progresso:
-            progresso("Levando os dados")
+            progresso(60, "Levando os dados")
         alvo = dados_do_computador()
         if os.path.isdir(alvo):
             guardada = _guardar_pasta(alvo, "antes-da-instalacao-%s" %
                                       time.strftime("%Y%m%d-%H%M%S"))
             log.info("dados anteriores guardados em %s", guardada)
-        _copiar_dados(levar_dados_de, alvo)
+        etapa_dados = faixa(progresso, 60, 95)
+        _copiar_dados(levar_dados_de, alvo, (lambda f, t: etapa_dados(
+            f * 100 / t, "Levando os dados")) if etapa_dados else None)
+    if progresso:
+        progresso(95, "Criando os atalhos")
     menu, area = _caminhos_dos_atalhos()
     avisos = []
     for quer, lnk in ((atalho_menu, menu), (atalho_area, area)):
@@ -312,6 +358,8 @@ def instalar(programa, destino=None, atalho_menu=True, atalho_area=False,
         log.warning("registro de desinstalação: %s", e)
         avisos.append("Não consegui criar a entrada em Aplicativos "
                       "instalados.")
+    if progresso:
+        progresso(100, "Instalado")
     return exe, avisos
 
 
@@ -333,15 +381,20 @@ def criar_portatil(programa, pasta_destino, levar_dados_de=None,
     try:
         if os.path.isdir(alvo):
             os.rmdir(alvo)
+        etapa = faixa(progresso, 0, 50 if levar_dados_de else 100)
         if progresso:
-            progresso("Copiando o programa")
-        _copiar_programa(programa, alvo)
+            progresso(0, "Copiando o programa")
+        _copiar_programa(programa, alvo, (lambda f, t: etapa(
+            f * 100 / t, "Copiando o programa")) if etapa else None)
         dados = os.path.join(alvo, PASTA_DADOS_PORTATIL)
         os.makedirs(dados)
         if levar_dados_de:
+            etapa_dados = faixa(progresso, 50, 100)
             if progresso:
-                progresso("Copiando os dados")
-            _copiar_dados(levar_dados_de, dados)
+                progresso(50, "Copiando os dados")
+            _copiar_dados(levar_dados_de, dados, (
+                lambda f, t: etapa_dados(f * 100 / t, "Copiando os dados"))
+                if etapa_dados else None)
     except BaseException:
         shutil.rmtree(alvo, ignore_errors=True)
         raise

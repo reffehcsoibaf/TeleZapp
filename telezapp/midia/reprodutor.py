@@ -4,10 +4,13 @@
 FLAC...) e toca com sounddevice, lendo o arquivo aos poucos (sem carregar
 tudo na memoria). Pausa, retoma e anda para qualquer ponto.
 
-Formatos que a libsndfile nao abre (m4a/aac, por exemplo) levantam
-FormatoNaoSuportado; a janela usa outro motor nesses casos.
+Formatos que a libsndfile nao abre (m4a/aac, por exemplo) sao decodificados
+antes pelo PyAV para um WAV temporario, que toca do mesmo jeito. Se nem assim
+abrir, levanta FormatoNaoSuportado e a janela usa outro motor.
 """
 import logging
+import os
+import tempfile
 import threading
 
 from telezapp.midia.velocidade import Esticador
@@ -19,14 +22,59 @@ class FormatoNaoSuportado(Exception):
     pass
 
 
+def decodificar_para_wav(caminho, pasta=None):
+    """Decodifica qualquer audio que o PyAV (FFmpeg) abra para um WAV de 16
+    bits na pasta dada (padrao: a temporaria do sistema) e devolve o
+    caminho do WAV."""
+    import av
+    import numpy as np
+    import soundfile as sf
+    entrada = av.open(caminho)
+    destino = None
+    try:
+        fluxo = next(s for s in entrada.streams if s.type == "audio")
+        taxa = fluxo.rate
+        canais = 1 if fluxo.codec_context.channels == 1 else 2
+        fd, destino = tempfile.mkstemp(".wav", "aac-", pasta)
+        os.close(fd)
+        with sf.SoundFile(destino, "w", samplerate=taxa, channels=canais,
+                          subtype="PCM_16") as saida:
+            conversor = av.AudioResampler(format="flt", layout=(
+                "mono" if canais == 1 else "stereo"), rate=taxa)
+            for quadro in entrada.decode(fluxo):
+                for q in conversor.resample(quadro):
+                    saida.write(q.to_ndarray().reshape(-1, canais))
+            for q in conversor.resample(None):
+                saida.write(q.to_ndarray().reshape(-1, canais))
+        return destino
+    except Exception:
+        if destino:
+            try:
+                os.remove(destino)
+            except OSError:
+                pass
+        raise
+    finally:
+        entrada.close()
+
+
 class Reprodutor:
     def __init__(self, caminho, fabrica_saida=None):
         """fabrica_saida(taxa, canais, callback) -> objeto com start(),
         stop() e close() (padrao: sounddevice.OutputStream)."""
+        self._wav = None
         try:
             import soundfile as sf
-            self._arq = sf.SoundFile(caminho)
+            try:
+                self._arq = sf.SoundFile(caminho)
+            except Exception:
+                # m4a/aac e afins: a libsndfile nao abre; o PyAV decodifica
+                from telezapp import config
+                self._wav = decodificar_para_wav(caminho,
+                                                 config.pasta("temp"))
+                self._arq = sf.SoundFile(self._wav)
         except Exception as e:
+            self._apagar_wav()
             raise FormatoNaoSuportado(str(e))
         self.taxa = self._arq.samplerate
         self.canais = self._arq.channels
@@ -38,6 +86,14 @@ class Reprodutor:
         self.terminou = False
         self._velocidade = 1.0
         self._esticador = None
+
+    def _apagar_wav(self):
+        wav, self._wav = self._wav, None
+        if wav:
+            try:
+                os.remove(wav)
+            except OSError:
+                pass
 
     @staticmethod
     def _saida_padrao(taxa, canais, callback):
@@ -139,6 +195,7 @@ class Reprodutor:
                 self._arq.close()
             except Exception:
                 pass
+        self._apagar_wav()
 
     # ---------------------------------------------------------- callback
     def _callback(self, saida, quadros, tempo, status):

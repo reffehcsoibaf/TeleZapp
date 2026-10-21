@@ -20,6 +20,7 @@ cabeçalhos dos arquivos. Não é parecer jurídico. O TeleZapp usa a
 | soundcard 0.4.6 | Captura do som interno do computador (loopback do WASAPI) | BSD-3-Clause | Sim |
 | cffi 2.1.1 (da soundcard) | Ligação com as DLLs do Windows | MIT-0 | Sim |
 | libsndfile 1.2.2 (dentro do soundfile) | Decodificar Ogg/Opus, MP3, WAV, FLAC | LGPL-2.1 | Sim, como biblioteca dinâmica separada; manter o aviso e indicar onde obter o código-fonte |
+| av (PyAV) 19.0 | Decodificar áudio M4A/AAC, que a libsndfile não abre, para tocar na sequência | BSD-3-Clause (o PyAV); a roda traz as DLLs do FFmpeg, LGPL-2.1 ou GPL conforme a compilação | Sim, mantendo o aviso do FFmpeg e indicando onde obter o código-fonte (conferir a compilação da roda antes do lançamento, como a libsndfile) |
 | numpy | Áudio | BSD-3-Clause (e outras permissivas) | Sim |
 | opencv-python-headless 5.0 | Ler os quadros de um vídeo para descrevê-lo com a IA | Apache-2.0 (o OpenCV); a roda traz o FFmpeg como DLL separada, LGPL-2.1 | Sim, mantendo o aviso do FFmpeg e indicando onde obter o código-fonte (conferir antes do lançamento, como a libsndfile) |
 | emoji 2.16 | Lista de emojis com nomes em português, para reagir e escrever | BSD-3-Clause (os nomes vêm do CLDR, licença Unicode) | Sim |

@@ -341,6 +341,63 @@ automáticos): a lista do que falta testar fica na memória do projeto.
   memória), opcional e desligado por padrão, sem trocar o acesso atual às
   mensagens pelo WPPConnect. O responsável deixou o assunto de lado.
 
+## Versão 2026.10.21.0 (21/10/2026): botões e listas de empresa, registro e barras de progresso
+
+- **Resposta a botões e listas de mensagens de empresa**: o servidor do
+  WhatsApp recusava (erro 479) porque o whatsmeow põe um nó `<biz>` nessas
+  respostas e o WhatsApp Web não. Decisão: tirar o nó na DLL de teste do
+  neonize, em vez de embrulhar a resposta em "documento com legenda" (o
+  servidor aceita, mas a empresa ignora a mensagem, e o aplicativo diria
+  "enviada" sem resposta). Um PR para o whatsmeow foi proposto. Sem a DLL de
+  teste, as respostas voltam a dar 479 (`docs/neonize/sem-no-biz-whatsmeow-send.go.diff`).
+
+- **Verificado ao vivo pelo responsável** (o que só os testes automáticos não mostram):
+  - lista de uma empresa de energia (Equatorial, "Consulta de Débitos"): a empresa respondeu, em 21/10/2026, com a DLL de teste sem o nó `biz`;
+  - barras de progresso (atualizar, instalar, backup, transferências): ficaram como ele queria (confirmado em 20/10/2026, em outra conversa);
+  - não verificado ao vivo: o quick_reply nativo de mensagens interativas pelo TeleZapp (só testes automáticos; no WinZapp foi visto).
+
+### Áudio, grupos, sons e quedas
+
+- **M4A/AAC no player do app**: decodificar com o PyAV para WAV temporário em
+  vez de mandar ao player do Windows, para entrar na sequência de áudios.
+- **Abrir grupo sem esperar as menções**: a releitura de nomes (rede, ~0,3 s
+  cada) vai para segundo plano; quem segue sem nome só é procurado após 10 min.
+  Mensagem editada passa a mostrar o nome.
+- **Sons**: uma thread por vez no PortAudio (acessos simultâneos derrubavam o
+  programa); sons de até 2 s pré-carregados na RAM; espera do Enter de 40 para
+  10 ms. `falha-nativa.log` recebe também o stderr das DLLs.
+- **Visto no app real pelo responsável (21/10/2026)**: barras de progresso e a
+  espera de 10 ms. Não visto: M4A, som de envio mais rápido, atualização pela
+  janela.
+
+### Registro e barras de progresso
+
+- **Registro (log) que o usuário manda ao suporte**: o texto prometia nunca
+  guardar telefone completo nem texto de mensagem, mas o log real trazia
+  telefones (aviso "mensagem não decifrada" e avisos do whatsmeow, com
+  endereços `@s.whatsapp.net`, `@lid` e `@g.us`) e os 80 primeiros
+  caracteres de mensagens de empresa. Agora todo o registro passa por
+  `mascarar_texto` e a estrutura das mensagens de empresa sai sem os textos.
+  O que pedir: `telezapp.log` (e `.1` a `.4`) e, se o programa fechou
+  sozinho, `falha-nativa.log`, mais a versão e a hora do problema. Nunca
+  `sessoes`, `config.json`, `telezapp.db`, `ia_chaves.json`, backups nem o
+  que o modo de depuração grava. Nomes de grupos e de contatos não são
+  mascarados.
+
+### Barras de progresso
+
+- **Por que**: o NVDA toca bipes que sobem do grave ao agudo numa barra de
+  progresso (só na janela em primeiro plano); isso diz mais ao cego do que a
+  fala "20 por cento" (pedido do responsável). Avanços longos abrem uma
+  janela com `wx.Gauge`: atualizar (com Cancelar), instalar, criar portátil,
+  fazer e restaurar backup, download pedido (Cancelar) e envio grande. Os dois
+  últimos só abrem depois de 1 s e há a opção `barra_de_progresso` para eles.
+- **Cuidado**: a janela toma o foco; no envio, quem está digitando perde as
+  teclas para a janela (ela não tem Enter padrão, então um Enter perdido não
+  cancela nada). Por isso a opção e o atraso de 1 s.
+- **Não visto no app real**: nada disso foi visto com o NVDA ligado (bipes,
+  foco na volta à janela principal).
+
 ## Versão 2026.10.20.0 (20/10/2026): mensagens temporárias
 
 - **Identificar e definir**: o WhatsApp manda o prazo em cada mensagem

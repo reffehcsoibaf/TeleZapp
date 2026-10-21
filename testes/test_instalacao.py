@@ -203,6 +203,24 @@ class _Dialogo:
         pass
 
 
+class JanelaFalsa:
+    """No lugar da JanelaDeProgresso: guarda o que a tela mostraria."""
+    criadas = []
+
+    def __init__(self, pai, titulo, texto="", ao_cancelar=None, falar=None):
+        self.titulo, self.passos, self.fechada = titulo, [], False
+        JanelaFalsa.criadas.append(self)
+
+    def mostrar(self):
+        pass
+
+    def atualizar(self, percentual=None, texto=None):
+        self.passos.append((percentual, texto))
+
+    def fechar(self):
+        self.fechada = True
+
+
 def _preparar_oferta(monkeypatch, tmp_path, resposta, salvar=True):
     from telezapp.interface import backup as jb
     from telezapp.interface import instalacao as ui
@@ -230,7 +248,7 @@ def _preparar_oferta(monkeypatch, tmp_path, resposta, salvar=True):
                         ("PD_APP_MODAL", 0)):
         monkeypatch.setattr(ui.wx, nome, valor, raising=False)
     monkeypatch.setattr(ui.wx, "FileDialog", Arquivo, raising=False)
-    monkeypatch.setattr(ui.wx, "ProgressDialog", _Dialogo, raising=False)
+    monkeypatch.setattr(ui, "JanelaDeProgresso", JanelaFalsa)
     monkeypatch.setattr(ui.wx, "MilliSleep", lambda ms: None, raising=False)
     monkeypatch.setattr(ui.wx, "YieldIfNeeded", lambda: None, raising=False)
     monkeypatch.setattr(jb, "DialogoBackup", DlgBackup)
@@ -276,3 +294,53 @@ def test_desinstalar_tira_atalhos_registro_e_pasta(mundo, monkeypatch):
             break
         time.sleep(0.2)
     assert not os.path.exists(prog)
+
+
+# ----------------------------------------------------- barra de progresso
+def test_faixa_leva_o_avanco_de_uma_etapa_para_a_faixa_do_total():
+    vistos = []
+    f = ins.faixa(lambda pct, texto="": vistos.append((pct, texto)), 40, 100)
+    f(0, "a")
+    f(50, "b")
+    f(100, "c")
+    f(None, "d")
+    assert vistos == [(40, "a"), (70, "b"), (100, "c"), (None, "d")]
+    assert ins.faixa(None, 0, 10) is None
+
+
+def test_instalar_e_criar_portatil_informam_o_avanco(mundo):
+    tmp, prog = mundo
+    dados = _dados_portateis(prog)
+    _, atalho, registro = _sem_atalhos()
+    vistos = []
+    ins.instalar(prog, levar_dados_de=dados, fazer_atalho=atalho,
+                 registrar=registro,
+                 progresso=lambda pct, texto="": vistos.append((pct, texto)))
+    pcts = [p for p, _ in vistos if p is not None]
+    assert pcts == sorted(pcts) and pcts[0] == 0 and pcts[-1] == 100
+    assert any(p and 0 < p < 60 for p in pcts)          # copiou o programa
+    textos = {t for _, t in vistos}
+    assert {"Copiando o programa", "Levando os dados",
+            "Criando os atalhos", "Instalado"} <= textos
+    vistos.clear()
+    ins.criar_portatil(prog, str(tmp / "pen"), levar_dados_de=dados,
+                       progresso=lambda pct, texto="": vistos.append(
+                           (pct, texto)))
+    pcts = [p for p, _ in vistos if p is not None]
+    assert pcts == sorted(pcts) and pcts[0] == 0
+    assert {"Copiando o programa", "Copiando os dados"} <= \
+        {t for _, t in vistos}
+
+
+def test_extrair_pacote_informa_o_avanco(mundo, tmp_path):
+    import zipfile
+    zip_ = tmp_path / "pacote.zip"
+    with zipfile.ZipFile(zip_, "w") as z:
+        z.writestr("TeleZapp/TeleZapp.exe", b"x")
+        for i in range(4):
+            z.writestr("TeleZapp/dados%d.txt" % i, b"y")
+    vistos = []
+    with ins.extrair_pacote(str(zip_), lambda pct, t: vistos.append(pct)) \
+            as pasta:
+        assert os.path.isfile(os.path.join(pasta, "TeleZapp.exe"))
+    assert vistos == sorted(vistos) and vistos[-1] == 100
