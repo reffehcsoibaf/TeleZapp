@@ -13,6 +13,7 @@ import json
 import logging
 import logging.handlers
 import os
+import re
 import shutil
 import sys
 import threading
@@ -53,7 +54,7 @@ def configurar_registro():
     arquivo = os.path.join(pasta("logs"), "telezapp.log")
     h = logging.handlers.RotatingFileHandler(
         arquivo, maxBytes=1024 * 1024, backupCount=4, encoding="utf-8")
-    h.setFormatter(logging.Formatter(
+    h.setFormatter(FormatadorSemTelefones(
         "%(asctime)s %(levelname)s %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S"))
     raiz.addHandler(h)
     raiz.setLevel(logging.INFO)
@@ -69,6 +70,40 @@ def configurar_registro():
         lib.propagate = False
     raiz.info("==== %s %s iniciado ====", NOME, VERSAO)
     return arquivo
+
+
+# Enderecos do WhatsApp (5551999998888@s.whatsapp.net, 5577...-1577...@g.us,
+# 1011...@lid, com ou sem parte do aparelho) e telefones com "+": o registro
+# nao pode levar numero de ninguem, porque o usuario o manda ao suporte.
+_ENDERECO = re.compile(
+    r"(?<![\w.:-])(\d{7,})((?:[.:]\d+)*)(-\d+)?"
+    r"@(s\.whatsapp\.net|c\.us|g\.us|lid|hosted\.lid|hosted)\b")
+_TELEFONE_COM_MAIS = re.compile(r"(?<!\w)\+(\d{8,15})\b")
+
+
+def mascarar_texto(texto):
+    """Troca telefones e enderecos do WhatsApp do texto pelo fim deles:
+    '5551999998888@s.whatsapp.net' -> '...8888@s.whatsapp.net'; um grupo
+    '557791063633-1577487873@g.us' -> '...3633-1577487873@g.us' (o numero
+    antes do traco e de quem criou o grupo); '+5551999998888' ->
+    '+55...8888'. O resto do texto fica como esta."""
+    def endereco(m):
+        return "...%s%s%s@%s" % (m.group(1)[-4:], m.group(2),
+                                 m.group(3) or "", m.group(4))
+
+    def telefone(m):
+        n = m.group(1)
+        return "+%s...%s" % (n[:2], n[-4:])
+    return _TELEFONE_COM_MAIS.sub(telefone, _ENDERECO.sub(endereco,
+                                                          str(texto)))
+
+
+class FormatadorSemTelefones(logging.Formatter):
+    """O formatador do registro: passa o texto final (inclusive o de uma
+    excecao) por `mascarar_texto`."""
+
+    def format(self, record):
+        return mascarar_texto(super().format(record))
 
 
 def mascarar_telefone(telefone):

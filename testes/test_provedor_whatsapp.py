@@ -2666,3 +2666,17 @@ def test_grupo_sem_autor_ganha_o_nome_pela_lista_de_participantes(amb):
     assert e.conversa_id == gid and e.nomes == {lid: "Bia"}
     por_id = {x.id: x.autor for x in amb.banco.mensagens("w1", gid)}
     assert por_id == {"H1": "Bia", "H2": "Bia", "H3": ""}
+
+
+def test_registro_da_mensagem_interativa_nao_leva_o_texto():
+    texto = "Olá! *Recebemos seu pedido* 701-4795929-3141840 de 1 produto"
+    forma = wa.forma_sem_textos({"templateMessage": {"hydratedTemplate": {
+        "hydratedTitleText": "", "hydratedContentText": texto,
+        "templateID": "1440738371050375",
+        "hydratedButtons": [{"quickReplyButton": {"displayText": "Sim"}}],
+        "tipo": "QUICK_REPLY", "n": 7}}})
+    dump = str(forma)
+    assert "pedido" not in dump and "701-" not in dump and "Sim" not in dump
+    assert "hydratedContentText" in dump and "<texto 60>" in dump
+    assert "QUICK_REPLY" in dump and "'n': '<n>'" in dump
+    assert len(wa.forma_sem_textos(list(range(20)))) == 5

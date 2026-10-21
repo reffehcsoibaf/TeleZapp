@@ -504,6 +504,22 @@ def estrutura_bruta(mensagem, info=None):
     return json.dumps(saida, ensure_ascii=False, indent=2, default=str)
 
 
+_NOME_DE_ENUM = re.compile(r"^[A-Z][A-Z0-9_]{2,40}$")
+
+
+def forma_sem_textos(x):
+    """So o formato de uma estrutura (chaves e nomes de tipo em maiusculas):
+    os textos viram '<texto N>', para o registro nao guardar o que foi
+    escrito nas mensagens."""
+    if isinstance(x, dict):
+        return {k: forma_sem_textos(v) for k, v in x.items()}
+    if isinstance(x, list):
+        return [forma_sem_textos(v) for v in x[:5]]
+    if isinstance(x, str):
+        return x if _NOME_DE_ENUM.match(x) else "<texto %d>" % len(x)
+    return "<n>" if isinstance(x, (int, float)) else x
+
+
 def estrutura_interativa(interna):
     """Formato (sem textos longos nem imagens) de uma mensagem de empresa
     com botoes ou lista, para o registro: serve para implementarmos o toque
@@ -660,8 +676,8 @@ def converter(evento, conta_id, conversa_id, autor=""):
     ctx = _contexto(interna)
     forma = estrutura_interativa(interna)
     if forma:
-        log.info("mensagem interativa: %s", json.dumps(forma,
-                                                       ensure_ascii=False))
+        log.info("mensagem interativa: %s", json.dumps(
+            forma_sem_textos(forma), ensure_ascii=False))
     msg = m.Mensagem(
         conta_id=conta_id, conversa_id=conversa_id, id=info.ID,
         autor="" if minha else (autor or info.Pushname or
@@ -784,8 +800,8 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
                   HIST_OUVIDA: m.LIDA}.get(int(wmi.status), m.ENVIADA)
     forma = estrutura_interativa(desembrulhar(wmi.message))
     if forma:
-        log.info("mensagem interativa: %s", json.dumps(forma,
-                                                       ensure_ascii=False))
+        log.info("mensagem interativa: %s", json.dumps(
+            forma_sem_textos(forma), ensure_ascii=False))
     ctx = _contexto(desembrulhar(wmi.message))
     remetente = wmi.key.participant or wmi.participant or wmi.key.remoteJID
     msg = m.Mensagem(

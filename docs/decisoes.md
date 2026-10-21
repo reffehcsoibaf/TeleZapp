@@ -341,7 +341,21 @@ automáticos): a lista do que falta testar fica na memória do projeto.
   memória), opcional e desligado por padrão, sem trocar o acesso atual às
   mensagens pelo WPPConnect. O responsável deixou o assunto de lado.
 
-## Versão 2026.10.20.1 (20/10/2026): barras de progresso
+## Versão 2026.10.20.1 (20/10/2026): registro e barras de progresso
+
+- **Registro (log) que o usuário manda ao suporte**: o texto prometia nunca
+  guardar telefone completo nem texto de mensagem, mas o log real trazia
+  telefones (aviso "mensagem não decifrada" e avisos do whatsmeow, com
+  endereços `@s.whatsapp.net`, `@lid` e `@g.us`) e os 80 primeiros
+  caracteres de mensagens de empresa. Agora todo o registro passa por
+  `mascarar_texto` e a estrutura das mensagens de empresa sai sem os textos.
+  O que pedir: `telezapp.log` (e `.1` a `.4`) e, se o programa fechou
+  sozinho, `falha-nativa.log`, mais a versão e a hora do problema. Nunca
+  `sessoes`, `config.json`, `telezapp.db`, `ia_chaves.json`, backups nem o
+  que o modo de depuração grava. Nomes de grupos e de contatos não são
+  mascarados.
+
+### Barras de progresso
 
 - **Por que**: o NVDA toca bipes que sobem do grave ao agudo numa barra de
   progresso (só na janela em primeiro plano); isso diz mais ao cego do que a

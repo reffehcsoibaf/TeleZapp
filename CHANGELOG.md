@@ -5,6 +5,16 @@ Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 
 ## 2026.10.20.1
 
+- Registro sem telefones nem textos. `config.mascarar_texto` troca
+  `5551999998888@s.whatsapp.net`, `...@lid`, `...-1577...@g.us` e
+  `+5551999998888` pelo fim (`...8888@...`, `+55...8888`; o número antes do
+  traço do grupo é de quem o criou) e `FormatadorSemTelefones` passa todo o
+  texto do registro, exceção incluída, por ela (o log do usuário tinha
+  telefones nos avisos "mensagem não decifrada" e nos do whatsmeow).
+  `forma_sem_textos` no registro "mensagem interativa:" (guardava os 80
+  primeiros caracteres do texto das mensagens de empresa; agora só chaves e
+  nomes de tipo).
+
 - Barras de progresso (`interface/progresso.JanelaDeProgresso`, um `wx.Dialog`
   sem modal com `wx.Gauge`; Cancelar e Esc só quando há `ao_cancelar`; sem
   Enter padrão): o NVDA só toca os bipes da barra de uma janela em primeiro
