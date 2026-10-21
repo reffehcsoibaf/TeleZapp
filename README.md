@@ -65,6 +65,9 @@ dispositivo.
   histórias", cada pessoa vira uma entrada; ver, tocar, marcar como visto,
   responder em particular e curtir, e também postar o seu (texto, foto ou
   vídeo). Quem vê o status do WhatsApp se define pelo celular.
+- **Mensagens temporárias** (WhatsApp e Telegram): identifica as mensagens
+  que somem, mostra o prazo, deixa ligar, mudar e desligar por conversa e
+  apaga daqui quando o prazo acaba (opção, ligada).
 - **Prévia de links** com o título e a descrição que quem enviou mandou
   junto; buscar a página no computador é opcional e vem desligado, porque o
   site veria o seu IP.

@@ -214,6 +214,26 @@ class Contas:
         c = self.contas.get(conta_id)
         return (c.nome or c.telefone or c.id) if c else conta_id
 
+    def renomear(self, conta_id, apelido):
+        """Da um nome seu a conta (vazio volta ao nome do servico). O apelido
+        fica na configuracao e sobrevive a cada conexao."""
+        apelido = " ".join((apelido or "").split())
+        for dados in self.cfg.contas():
+            if dados["id"] != conta_id:
+                continue
+            if apelido:
+                dados["apelido"] = apelido
+            else:
+                dados.pop("apelido", None)
+            dados["nome"] = apelido or dados.get("nome_servico") or \
+                dados.get("nome", "")
+            self.cfg.salvar_conta(dados)
+            conta = self.contas.get(conta_id)
+            if conta is not None:
+                conta.nome = dados["nome"]
+            return True
+        return False
+
     def parar_todos(self):
         for p in list(self.provedores.values()):
             try:
@@ -226,9 +246,17 @@ class Contas:
             conta = self.contas.get(e.conta_id)
             if conta is None:
                 return
-            conta.nome, conta.telefone = e.nome, e.telefone
+            antigo = next((d for d in self.cfg.contas()
+                           if d["id"] == conta.id), {})
+            apelido = antigo.get("apelido", "")
+            conta.nome, conta.telefone = apelido or e.nome, e.telefone
             dados = {"id": conta.id, "servico": conta.servico,
-                     "telefone": conta.telefone, "nome": conta.nome}
+                     "telefone": conta.telefone, "nome": conta.nome,
+                     "nome_servico": e.nome}
+            if apelido:
+                dados["apelido"] = apelido
+            if antigo.get("ativa") is False:
+                dados["ativa"] = False
             if conta.servico == "whatsapp":
                 dados["historico"] = self._historico.get(conta.id,
                                                          "recentes")

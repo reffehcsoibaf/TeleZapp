@@ -170,7 +170,7 @@ class GerenciadorContatos(wx.Dialog):
             wx.MessageBox(
                 "Adicionar por telefone só funciona no WhatsApp. Para um "
                 "contato do Telegram, abra a conversa com a pessoa e use "
-                "Menu, Contatos, Salvar a pessoa desta conversa.",
+                "Contatos, Salvar a pessoa desta conversa.",
                 "Contatos", wx.OK | wx.ICON_INFORMATION, self)
             return
         dlg = DialogoContato(self, "Adicionar contato", contas)

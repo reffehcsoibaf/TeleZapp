@@ -5,6 +5,60 @@ Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 
 ## 2026.10.20.0
 
+- Menus: o Menu único com submenus continua, em nova ordem (`_criar_menus`):
+  Mensagens (Nova mensagem em primeiro), Conversas, Contatos, Chamadas,
+  Contas, Mídias, Exibir, Ferramentas (backup, restaurar, configurações,
+  instalar, criar portátil, desinstalar, sair) e Ajuda (com Depurar como
+  submenu). Botão `botao_sair` ("Sair", sem tecla de acesso) entre a busca e
+  a lista (ordem de Tab). `comecar` põe o foco na lista de conversas, no
+  topo; some `ultima_conversa` e `_guardar_lista` (a posição dentro de cada
+  conversa, `banco.posicao`, continua). Contas: `adicionar_conta` pelo menu abre
+  `_escolher_servico_e_adicionar` (a mesma escolha da primeira conta) e
+  `_gerenciar_contas` abre `interface/gerenciar_contas.DialogoContas`
+  (`wx.CheckListBox`: marcada = ativa; botões Excluir e Renomear), que
+  substitui Ativar ou desativar, Remover e os dois "Adicionar conta do ...".
+  `Contas.renomear` grava `apelido` (e `nome_servico`) na configuração;
+  `ContaPronta` não o sobrescreve. Os caminhos "Menu, X" da ajuda e das
+  mensagens viraram "X" ou "Ferramentas, X". `wx_falso.MenuBar` guarda os
+  menus para o teste da ordem.
+- Mensagens temporárias. Modelo: `Conversa.temporaria_s` (segundos, 0 =
+  desligado) e `Mensagem.expira` (timestamp); colunas novas no banco
+  (esquema 11, com índice parcial `mensagens_por_expira`) e
+  `Banco.mensagens_expiradas`. `modelos`: `PERIODOS_TEMPORARIAS` por serviço,
+  `texto_periodo(seg, servico)`, `texto_temporaria`, `expira_em`; marca
+  "(temporária)" em `formatar` e linha em `detalhes`.
+  WhatsApp: `_prazo(ctx)` lê `contextInfo.expiration` em `converter` e
+  `converter_historico`; `_ao_receber` guarda o prazo visto na conversa e
+  `_tratar_alteracao` trata `ProtocolMessage.EPHEMERAL_SETTING`
+  (`_temporaria_mudou`, com aviso); `definir_temporaria` chama
+  `SetDisappearingTimer` da DLL direto (`_NewClient__client`, prazo em
+  nanossegundos e hora em milissegundos: o `set_disappearing_timer` do
+  neonize converte errado); `com_expiracao` põe o prazo nas mensagens que o
+  TeleZapp envia (texto simples vira `extendedTextMessage`; mídia com prazo
+  é montada à mão). Telegram: `prazo_da_mensagem` (`ttl_period`), prazo do
+  diálogo em `_atualizar_conversas`, `MessageActionSetMessagesTTL` em
+  `_ao_receber` e `definir_temporaria` (`SetHistoryTTLRequest`). Janela:
+  `_apagar_expiradas` (ao abrir e a cada minuto, via
+  `limpeza.apagar_mensagem`, que registra para não voltar), título, e
+  Detalhes da conversa com a linha e o botão. Opção
+  `temporarias_apagar_aqui` (Privacidade, ligada). Falta ver no app real.
+- Correção: o status da pessoa no título quebrava com data inválida (o
+  "visto por último" escondido vem como a data zero do Go, negativa, e o
+  Windows recusa `time.localtime`), o que abortava abrir mídia, baixar e
+  transcrever: `hora_legivel` e `_ultima_vez` aceitam só datas válidas e
+  `_status_da_conversa` não deixa o título derrubar nada.
+- Grupos do WhatsApp com participante só em LID: `quem_enviou` nunca devolve
+  o endereço `@lid` ("Participante final NNNN" se nada acha);
+  `Janela._nome_do_remetente` também pergunta ao provedor
+  (`nome_de_participante`, sem rede); `conversa_aberta` de grupo enfileira
+  `_completar_autores` (agenda, nomes vistos e `_aprender_do_grupo`, grava
+  com `renomear_autor` e publica `ev.AutoresAtualizados`, que a janela aplica
+  ao cache e à lista).
+- Áudio ao fundo: `_pular_audio` (Control Shift Esquerda/Direita 5 s, Page
+  Up/Down 30 s, em Menu, Mídias; fala `posição de duração`). O player em
+  janela já tinha as setas.
+- Envio por arquivo registra no log quantos avisos de avanço foram gerados.
+
 - Backup com senha leva as chaves dos provedores de IA: `backup.criar` grava
   `ia_chaves.json` (`CHAVES_IA`, só com `senha` e a parte configurações) com as
   chaves lidas do `Cofre`; `restaurar(.., resultado)` as devolve ao cofre

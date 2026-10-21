@@ -230,6 +230,15 @@ class Provedor(ABC):
         na hora; o resultado chega como ev.MensagemAtualizada (motivo
         "reacao") ou ev.Aviso."""
 
+    # True nos servicos em que da para ligar e desligar as mensagens
+    # temporarias de uma conversa
+    PODE_TEMPORARIAS = False
+
+    def definir_temporaria(self, conversa_id, segundos):
+        """Liga (segundos > 0) ou desliga (0) as mensagens temporarias da
+        conversa. O resultado chega como ev.ConversasAtualizadas (com
+        `temporaria_s` novo) ou ev.Aviso."""
+
     # True nos servicos em que da para publicar status (historia)
     PODE_PUBLICAR_STATUS = False
 

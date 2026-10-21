@@ -57,7 +57,11 @@ class Janela:
         self.vivo = True
 
     def Bind(self, *a, **k):
-        pass
+        # guarda o tratador de cada evento, para os testes o chamarem
+        if len(a) >= 2:
+            if not hasattr(self, "ligacoes"):
+                self.ligacoes = {}
+            self.ligacoes[a[0]] = a[1]
 
     def Show(self, v=True):
         self.visivel = v
@@ -94,7 +98,11 @@ class Frame(Janela):
     def SetStatusText(self, t):
         self.status = t
 
+    def GetMenuBar(self):
+        return getattr(self, "barra_de_menus", None)
+
     def SetMenuBar(self, b):
+        self.barra_de_menus = b
         pass
 
     def Centre(self):
@@ -430,8 +438,15 @@ class MenuItem:
 
 
 class Menu:
+    def __init__(self, *a, **k):
+        self.itens = []
+        self.submenus = []
+
     def Append(self, *a, **k):
-        return MenuItem()
+        item = MenuItem()
+        item.rotulo = a[1] if len(a) > 1 else ""
+        self.itens.append(item)
+        return item
 
     AppendCheckItem = AppendRadioItem = Append
 
@@ -439,12 +454,16 @@ class Menu:
         pass
 
     def AppendSubMenu(self, submenu, rotulo):
+        self.submenus.append((rotulo, submenu))
         return MenuItem()
 
 
 class MenuBar:
-    def Append(self, *a):
-        pass
+    def __init__(self):
+        self.menus = []
+
+    def Append(self, menu, rotulo=""):
+        self.menus.append((rotulo, menu))
 
 
 TheClipboard = types.SimpleNamespace(Open=lambda: False)

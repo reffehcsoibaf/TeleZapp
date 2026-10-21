@@ -27,7 +27,8 @@ from telezapp.midia import armazem
 from telezapp.midia import envio
 from telezapp.midia import velocidade as vel
 from telezapp.midia.gravador import MICROFONE, SOM_INTERNO, Gravador
-from telezapp.midia.reprodutor import FormatoNaoSuportado, Reprodutor
+from telezapp.midia.reprodutor import (FormatoNaoSuportado, Reprodutor,
+                                       formatar_tempo)
 from telezapp.nucleo import chamadas as ch
 from telezapp.provedores.base import ErroPrivacidade
 from telezapp.nucleo import atualizacao
@@ -117,6 +118,9 @@ Control Shift M: gravar uma nota de voz pelo microfone
 Control Shift S: gravar o som do computador e enviar como nota de voz
 Control Shift Seta para cima e para baixo: áudio mais rápido e mais lento
 (0,25x a 3x); Control Shift 0: velocidade normal
+Control Shift Seta para a esquerda e para a direita: voltar e avançar 5
+segundos no áudio que toca (Control Shift Page Up e Page Down: 30
+segundos)
 Control vírgula: abrir as configurações (busca, categorias e opções)
 Control Shift L: ligar para a conversa (Telegram, conversa com uma pessoa)
 Control Shift J: voltar à janela da chamada
@@ -431,17 +435,16 @@ class Janela(wx.Frame):
             self.itens[chave] = it
             return it
 
-        # Menu vertical (como no telezapp migration): uma unica entrada na
-        # barra, aberta pelo Alt, com as secoes como submenus (seta para a
-        # direita). E um menu nativo: o NVDA le como qualquer outro.
+        # Menu vertical: uma unica entrada na barra, aberta pelo Alt, com as
+        # secoes como submenus (seta para a direita), na ordem: Mensagens,
+        # Conversas, Contatos, Chamadas, Contas, Midias, Exibir, Ferramentas
+        # e Ajuda. E um menu nativo: o NVDA le como qualquer outro.
         raiz = wx.Menu()
 
         m_contas = wx.Menu()
-        item(m_contas, "add_tg", "Adicionar conta do &Telegram...")
-        item(m_contas, "add_wa", "Adicionar conta do &WhatsApp...")
-        item(m_contas, "ativar_contas", "&Ativar ou desativar contas...")
+        item(m_contas, "adicionar_conta", "&Adicionar conta...")
+        item(m_contas, "gerenciar_contas", "&Gerenciar contas...")
         item(m_contas, "reconectar", "&Conectar as contas de novo")
-        item(m_contas, "remover", "&Remover uma conta...")
 
         m_ctt = wx.Menu()
         item(m_ctt, "contatos", "&Gerenciar contatos...")
@@ -457,7 +460,6 @@ class Janela(wx.Frame):
         item(m_conv, "ir_msgs", "Ir para a lista de &mensagens\tAlt+3")
         item(m_conv, "ir_caixa", "&Escrever mensagem\tCtrl+E")
         m_conv.AppendSeparator()
-        item(m_conv, "nova_msg", "&Nova mensagem...\tCtrl+N")
         item(m_conv, "postar_status", "Postar &status ou história...\t"
                                       "Ctrl+Shift+U")
         item(m_conv, "abrir_conv", "&Abrir a conversa selecionada")
@@ -479,6 +481,8 @@ class Janela(wx.Frame):
              "Esconder as conversas tr&ancadas\tCtrl+Shift+T")
 
         m_msg = wx.Menu()
+        item(m_msg, "nova_msg", "&Nova mensagem...\tCtrl+N")
+        m_msg.AppendSeparator()
         item(m_msg, "responder_particular", "Responder em &particular")
         item(m_msg, "responder", "&Responder\tCtrl+Shift+R")
         item(m_msg, "copiar", "&Copiar texto\tCtrl+Shift+C")
@@ -519,6 +523,14 @@ class Janela(wx.Frame):
         m_mid.AppendSeparator()
         item(m_mid, "audio_janela", "&Enter em áudio...")
         item(m_mid, "audio_sequencia", "Áudios em &sequência...")
+        item(m_mid, "audio_voltar", "Voltar &5 segundos no áudio\t"
+                                    "Ctrl+Shift+Left")
+        item(m_mid, "audio_avancar", "Avançar 5 s&egundos no áudio\t"
+                                     "Ctrl+Shift+Right")
+        item(m_mid, "audio_voltar_mais", "Voltar 30 segundos no áudio\t"
+                                         "Ctrl+Shift+PgUp")
+        item(m_mid, "audio_avancar_mais", "Avançar 30 segundos no áudio\t"
+                                          "Ctrl+Shift+PgDn")
         item(m_mid, "vel_mais", "Áudio mais &rápido\tCtrl+Shift+Up")
         item(m_mid, "vel_menos", "Áudio mais le&nto\tCtrl+Shift+Down")
         item(m_mid, "vel_normal", "&Velocidade normal do áudio\tCtrl+Shift+0")
@@ -558,33 +570,33 @@ class Janela(wx.Frame):
         item(m_aj, "atualizacoes", "&Verificar atualizações...")
         item(m_aj, "logs", "Abrir a pasta de &logs")
         item(m_aj, "pasta_sons", "Abrir a pasta de s&ons")
+        m_aj.AppendSubMenu(m_dep, "&Depurar")
         item(m_aj, "sobre", "&Sobre o %s" % NOME)
 
-        for submenu, rotulo in ((m_contas, "&Contas"), (m_ctt, "Conta&tos"),
-                                (m_conv, "C&onversa"),
-                                (m_msg, "&Mensagem"),
-                                (m_cham, "C&hamada"), (m_mid, "Mí&dias"),
-                                (m_exib, "&Exibição"),
-                                (m_dep, "&Depurar"),
+        m_fer = wx.Menu()
+        item(m_fer, "backup", "Fazer &backup...")
+        item(m_fer, "restaurar_backup", "&Restaurar backup...")
+        item(m_fer, "configuracoes", "C&onfigurações...\tCtrl+,")
+        m_fer.AppendSeparator()
+        item(m_fer, "instalar", "&Instalar o %s neste computador..." % NOME)
+        item(m_fer, "criar_portatil", "Criar cópia &portátil...")
+        item(m_fer, "desinstalar", "&Desinstalar o %s..." % NOME)
+        m_fer.AppendSeparator()
+        item(m_fer, "sair", "&Sair\tCtrl+Q")
+
+        for submenu, rotulo in ((m_msg, "&Mensagens"), (m_conv, "C&onversas"),
+                                (m_ctt, "Conta&tos"), (m_cham, "C&hamadas"),
+                                (m_contas, "Co&ntas"), (m_mid, "Mí&dias"),
+                                (m_exib, "&Exibir"), (m_fer, "&Ferramentas"),
                                 (m_aj, "A&juda")):
             raiz.AppendSubMenu(submenu, rotulo)
-        raiz.AppendSeparator()
-        item(raiz, "backup", "Fazer &backup...")
-        item(raiz, "restaurar_backup", "Restaurar bac&kup...")
-        item(raiz, "instalar", "Instalar o %s neste computador..." % NOME)
-        item(raiz, "criar_portatil", "Criar cópia &portátil...")
-        item(raiz, "desinstalar", "&Desinstalar o %s..." % NOME)
-        item(raiz, "configuracoes", "C&onfigurações...	Ctrl+,")
-        item(raiz, "sair", "&Sair\tCtrl+Q")
         barra.Append(raiz, "&Menu")
         self.SetMenuBar(barra)
 
         ligacoes = {
-            "add_tg": lambda e: self.adicionar_conta("telegram"),
-            "add_wa": lambda e: self.adicionar_conta("whatsapp"),
-            "ativar_contas": lambda e: self._ativar_contas(),
+            "adicionar_conta": lambda e: self._adicionar_conta_pelo_menu(),
+            "gerenciar_contas": lambda e: self._gerenciar_contas(),
             "reconectar": lambda e: self._reconectar(),
-            "remover": lambda e: self._remover_conta(),
             "ir_filtro_conta": lambda e: self._ir_para(self.cx_conta, ""),
             "ir_filtro_tipo": lambda e: self._ir_para(self.cx_tipo, ""),
             "buscar_conv": lambda e: self._ir_para(self.campo_busca, ""),
@@ -642,6 +654,10 @@ class Janela(wx.Frame):
             "audio_janela": lambda e: self._escolher_opcao("audio_janela"),
             "audio_sequencia": lambda e: self._escolher_opcao(
                 "audio_sequencia"),
+            "audio_voltar": lambda e: self._pular_audio(-5),
+            "audio_avancar": lambda e: self._pular_audio(5),
+            "audio_voltar_mais": lambda e: self._pular_audio(-30),
+            "audio_avancar_mais": lambda e: self._pular_audio(30),
             "vel_mais": lambda e: self._mudar_velocidade(+1),
             "vel_menos": lambda e: self._mudar_velocidade(-1),
             "vel_normal": lambda e: self._aplicar_velocidade(1.0),
@@ -701,6 +717,11 @@ class Janela(wx.Frame):
         self.campo_busca.Bind(
             wx.EVT_TEXT_ENTER,
             seguro(lambda e: self._busca_pronta()))
+        # Sair logo depois da busca (e antes da lista, na ordem de Tab), como
+        # na maioria dos programas; sem tecla de acesso, porque Alt abre o
+        # Menu. O item Sair de Ferramentas e Control Q continuam valendo.
+        self.botao_sair = wx.Button(painel, label="Sair")
+        self.botao_sair.Bind(wx.EVT_BUTTON, seguro(lambda e: self.Close()))
         self.cx_conta.Bind(wx.EVT_CHOICE, seguro(self._ao_filtro_conta))
         self.cx_tipo.Bind(wx.EVT_CHOICE, seguro(self._ao_filtro_tipo))
         rot_conv = wx.StaticText(painel, label="Conversas")
@@ -754,6 +775,7 @@ class Janela(wx.Frame):
         esq.Add(self.cx_tipo, 0, wx.EXPAND | wx.BOTTOM, 6)
         esq.Add(rot_busca, 0, wx.BOTTOM, 2)
         esq.Add(self.campo_busca, 0, wx.EXPAND | wx.BOTTOM, 6)
+        esq.Add(self.botao_sair, 0, wx.BOTTOM, 6)
         esq.Add(rot_conv, 0, wx.BOTTOM, 4)
         esq.Add(self.lista_conv, 1, wx.EXPAND)
         dir_ = wx.BoxSizer(wx.VERTICAL)
@@ -902,7 +924,13 @@ class Janela(wx.Frame):
         p = self.presenca
         if p is None:
             return ""
-        return m.texto_presenca(p.estado, p.quando, p.aprox)
+        try:
+            return m.texto_presenca(p.estado, p.quando, p.aprox)
+        except Exception:
+            # o titulo nunca pode derrubar o que a pessoa pediu (tocar,
+            # baixar, transcrever): sem status, so o nome
+            log.exception("não consegui montar o status da conversa")
+            return ""
 
     def _ev_presenca(self, e):
         if (e.conta_id, e.conversa_id) != self.atual or \
@@ -927,6 +955,10 @@ class Janela(wx.Frame):
         if conv is not None:
             base = "%s: %s" % (NOME, conv.nome)
             status = self._status_da_conversa()
+            if getattr(conv, "temporaria_s", 0):
+                status = ", ".join(x for x in (status, "mensagens "
+                                   "temporárias: %s" % m.texto_periodo(
+                                       conv.temporaria_s, conv.servico)) if x)
             if status:
                 base += " (%s)" % status
         extras = []
@@ -968,25 +1000,33 @@ class Janela(wx.Frame):
         if not self.cfg.contas():
             self.lista_conv.Set([TEXTO_SEM_CONTAS])
             wx.CallLater(400, self._oferecer_primeira_conta)
-        self.cx_conta.SetFocus()
+        # a lista de conversas sempre abre no topo, com o foco nela; onde a
+        # pessoa parou fica guardado dentro de cada conversa (posicao)
+        self.lista_conv.SetFocus()
         if self.lista_conv.GetCount():
-            ultima = self.cfg.get("ultima_conversa")
-            chave = tuple(ultima) if isinstance(ultima, list) else None
-            self.lista_conv.SetSelection(
-                self._chaves_conv.index(chave)
-                if chave in self._chaves_conv else 0)
+            self.lista_conv.SetSelection(0)
         log.info("fala direta pelo NVDA: %s", self.fala.ativa())
+        self._apagar_expiradas()
         if self.cfg.get("verificar_atualizacoes"):
             wx.CallLater(8000, lambda: self._verificar_atualizacoes(False))
 
     @seguro
     def _oferecer_primeira_conta(self):
-        servicos = ["telegram", "whatsapp"]
-        dlg = wx.SingleChoiceDialog(
-            self, "Bem-vindo ao %s. Ainda não há nenhuma conta. Escolha qual "
+        self._escolher_servico_e_adicionar(
+            "Bem-vindo ao %s. Ainda não há nenhuma conta. Escolha qual "
             "adicionar agora, ou cancele para fazer isso depois pelo menu "
-            "(tecla Alt), em Contas." % NOME, NOME,
-            [m.SERVICOS[s] for s in servicos])
+            "(tecla Alt), em Contas, Adicionar conta." % NOME)
+
+    @seguro
+    def _adicionar_conta_pelo_menu(self):
+        self._escolher_servico_e_adicionar(
+            "Escolha o serviço da conta que quer adicionar.")
+
+    def _escolher_servico_e_adicionar(self, texto):
+        """Janela para escolher o servico; depois, a tela de dados dele."""
+        servicos = ["telegram", "whatsapp"]
+        dlg = wx.SingleChoiceDialog(self, texto, "Adicionar conta",
+                                    [m.SERVICOS[x] for x in servicos])
         try:
             if dlg.ShowModal() != wx.ID_OK:
                 return
@@ -1036,30 +1076,93 @@ class Janela(wx.Frame):
             self._limpar_codigo_trancadas()
             self._abrir_pareamento(conta_id, self._telefone_sugerido())
 
+    def _nome_da_conta(self, dados):
+        return dados.get("nome") or dados.get("telefone") or dados["id"]
+
+    def _itens_de_contas(self):
+        """[(id, rotulo, ativa)] das contas, para Gerenciar contas."""
+        return [(c["id"], "%s, %s" % (self._nome_da_conta(c),
+                                      m.SERVICOS.get(c.get("servico"), "")),
+                 c.get("ativa", True) is not False)
+                for c in self.cfg.contas()]
+
     @seguro
-    def _remover_conta(self):
-        contas = self.cfg.contas()
-        if not contas:
-            self.fala.falar("Não há contas para remover.")
+    def _gerenciar_contas(self):
+        """Lista de contas com caixa de marcar (ativada ou desativada) e,
+        com a conta em foco, os botoes Excluir e Renomear."""
+        if not self.cfg.contas():
+            self.fala.falar("Não há contas. Use Contas, Adicionar conta.")
             return
-        nomes = ["%s, %s" % (c.get("nome") or c.get("telefone") or c["id"],
-                             m.SERVICOS.get(c.get("servico"), "")) for c in contas]
-        dlg = wx.SingleChoiceDialog(self, "Escolha a conta que vai sair do "
-                                    "TeleZapp.", "Remover uma conta", nomes)
+        from telezapp.interface.gerenciar_contas import DialogoContas
+        dlg = DialogoContas(self, self._itens_de_contas, self._marcar_conta,
+                            self._excluir_conta_id, self._renomear_conta_id)
         try:
-            if dlg.ShowModal() != wx.ID_OK:
-                return
-            escolhida = contas[dlg.GetSelection()]
-            nome = nomes[dlg.GetSelection()]
+            dlg.ShowModal()
         finally:
             dlg.Destroy()
+
+    def _marcar_conta(self, conta_id, ativa):
+        """Liga ou desliga uma conta e diz o que aconteceu."""
+        dados = next((c for c in self.cfg.contas() if c["id"] == conta_id),
+                     None)
+        if dados is None:
+            return False
+        nome = self._nome_da_conta(dados)
+        if ativa:
+            mudou = self.contas.ativar(conta_id)
+            texto = "%s ativada, conectando." % nome
+        else:
+            mudou = self.contas.desativar(conta_id)
+            texto = "%s desativada." % nome
+        self._atualizar_caixa_conta()
+        self.fala.falar(texto if mudou else "Não consegui mudar %s." % nome,
+                        interromper=True)
+        return bool(mudou)
+
+    def _renomear_conta_id(self, conta_id, nome=None):
+        """Pede um nome para a conta (se `nome` nao vier) e o grava. True se
+        mudou."""
+        dados = next((c for c in self.cfg.contas() if c["id"] == conta_id),
+                     None)
+        if dados is None:
+            return False
+        if nome is None:
+            dlg = dialogos.DialogoCampos(
+                self, "Renomear a conta", "Escolha o nome que esta conta "
+                "terá no TeleZapp. Deixe em branco para voltar ao nome do "
+                "serviço.", [("Nome da conta", self._nome_da_conta(dados),
+                              False)])
+            try:
+                if dlg.ShowModal() != wx.ID_OK:
+                    return False
+                nome = dlg.valores()[0]
+            finally:
+                dlg.Destroy()
+        if not self.contas.renomear(conta_id, nome):
+            return False
+        self._atualizar_caixa_conta()
+        novo_nome = self.contas.nome(conta_id)
+        self.fala.falar("Conta renomeada para %s." % novo_nome,
+                        interromper=True)
+        return True
+
+    @seguro
+    def _excluir_conta_id(self, conta_id):
+        """Pergunta e remove a conta do TeleZapp (as conversas e mensagens
+        guardadas dela neste computador). True se removeu."""
+        dados = next((c for c in self.cfg.contas() if c["id"] == conta_id),
+                     None)
+        if dados is None:
+            return False
+        nome = "%s, %s" % (self._nome_da_conta(dados),
+                           m.SERVICOS.get(dados.get("servico"), ""))
         r = wx.MessageBox(
-            "Remover a conta %s? As conversas e mensagens guardadas dela neste "
-            "computador serão apagadas. A conta continua existindo no celular."
-            % nome, "Remover uma conta", wx.YES_NO | wx.ICON_QUESTION, self)
+            "Excluir a conta %s? As conversas e mensagens guardadas dela "
+            "neste computador serão apagadas. A conta continua existindo no "
+            "celular." % nome, "Excluir uma conta",
+            wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
         if r != wx.YES:
-            return
-        conta_id = escolhida["id"]
+            return False
         self.contas.remover(conta_id)
         for chave in [k for k in self.indice if k[0] == conta_id]:
             del self.indice[chave]
@@ -1077,7 +1180,9 @@ class Janela(wx.Frame):
             self._chaves_conv = []
             self._rotulos_conv = []
             self.lista_conv.Set([TEXTO_SEM_CONTAS])
-        self.fala.falar("Conta removida.")
+        self._atualizar_caixa_conta()
+        self.fala.falar("Conta excluída.", interromper=True)
+        return True
 
     # --------------------------------------------------- pareamento WhatsApp
     def _abrir_pareamento(self, conta_id, telefone=""):
@@ -1193,6 +1298,7 @@ class Janela(wx.Frame):
             ev.ContaPronta: self._ev_conta_pronta,
             ev.ConversasAtualizadas: self._ev_conversas,
             ev.ConversaApagadaNoCelular: self._ev_conversa_apagada,
+            ev.AutoresAtualizados: self._ev_autores_atualizados,
             ev.MensagemApagadaNoCelular: self._ev_mensagem_apagada,
             ev.MensagensCarregadas: self._ev_mensagens,
             ev.MensagemNova: self._ev_nova,
@@ -2179,6 +2285,18 @@ class Janela(wx.Frame):
             self.fala.falar("Uma mensagem desta conversa foi apagada no "
                             "celular.")
 
+    def _ev_autores_atualizados(self, e):
+        """O servico achou o nome de gente que aparecia sem nome no grupo."""
+        for lista in self.cache.values():
+            for y in lista:
+                if y.conta_id == e.conta_id and y.conversa_id == \
+                        e.conversa_id and not y.minha and not y.autor and \
+                        y.remetente in e.nomes:
+                    y.autor = e.nomes[y.remetente]
+        self._quem_cache.clear()
+        if self.atual == (e.conta_id, e.conversa_id):
+            self._preencher_mensagens()
+
     def _ev_conversa_apagada(self, e):
         """Conversa apagada no celular: apaga aqui tambem, a menos que ja
         tenha mensagem mais nova que o aviso (ela voltou a ser usada)."""
@@ -2937,7 +3055,6 @@ class Janela(wx.Frame):
         self._cancelar_edicao(falar=False)
         self.modo_msg, self.marc_msg = False, set()
         self._guardar_posicao()
-        self._guardar_lista()
         self.volta_para = []
         texto = self.caixa.GetValue()
         if texto.strip():
@@ -3022,50 +3139,6 @@ class Janela(wx.Frame):
             if dados.get("ativa", True) is not False and \
                     self.estados.get(dados["id"]) != ev.CONECTADA:
                 self.contas.reconectar(dados["id"])
-
-    @seguro
-    def _ativar_contas(self):
-        """Marca quais contas ficam ligadas. Todas desmarcadas = navegar so
-        no que ja esta guardado, sem conexao."""
-        contas = self.cfg.contas()
-        if not contas:
-            self.fala.falar("Não há contas.")
-            return
-        nomes = ["%s, %s" % (c.get("nome") or c.get("telefone") or c["id"],
-                             m.SERVICOS.get(c.get("servico"), ""))
-                 for c in contas]
-        dlg = wx.MultiChoiceDialog(
-            self, "Marque as contas que devem ficar conectadas. Contas "
-            "desmarcadas não conectam; as conversas guardadas continuam na "
-            "tela. Sem nenhuma marcada, o TeleZapp funciona sem conexão.",
-            "Ativar ou desativar contas", nomes)
-        dlg.SetSelections([i for i, c in enumerate(contas)
-                           if c.get("ativa", True) is not False])
-        try:
-            if dlg.ShowModal() != wx.ID_OK:
-                return
-            marcadas = set(dlg.GetSelections())
-        finally:
-            dlg.Destroy()
-        ligadas = desligadas = 0
-        for i, c in enumerate(contas):
-            antes = c.get("ativa", True) is not False
-            if (i in marcadas) == antes:
-                continue
-            if i in marcadas:
-                ligadas += self.contas.ativar(c["id"])
-            else:
-                desligadas += self.contas.desativar(c["id"])
-        self._atualizar_caixa_conta()
-        partes = []
-        if ligadas:
-            partes.append("%d conectando" % ligadas)
-        if desligadas:
-            partes.append("%d desativada%s" % (desligadas,
-                                               "s" if desligadas > 1 else ""))
-        self.fala.falar("Contas: " + (", ".join(partes) if partes
-                                      else "nada mudou") + ".",
-                        interromper=True)
 
     # ============================================================ mensagens
     def _mensagens_atuais(self):
@@ -3161,11 +3234,6 @@ class Janela(wx.Frame):
             self.banco.salvar_posicao(self.atual[0], self.atual[1], alvo or "")
         except Exception:
             log.exception("erro ao guardar a posição da conversa")
-
-    def _guardar_lista(self):
-        i = self.lista_conv.GetSelection()
-        if 0 <= i < len(self._chaves_conv):
-            self.cfg.set("ultima_conversa", list(self._chaves_conv[i]))
 
     def _ir_nao_lidas(self):
         """Alt 2: na lista de conversas, a proxima conversa com nao lidas;
@@ -4141,7 +4209,16 @@ class Janela(wx.Frame):
 
     def _nome_do_remetente(self, x):
         """Nome que a agenda ou as mensagens guardadas dao a quem enviou."""
-        return self.banco.nome_de_contato(x.conta_id, x.remetente) or             self.banco.nome_do_remetente(x.conta_id, [x.remetente])
+        nome = self.banco.nome_de_contato(x.conta_id, x.remetente) or \
+            self.banco.nome_do_remetente(x.conta_id, [x.remetente])
+        if nome or not self.contas:
+            return nome
+        # o servico ainda pode saber (agenda, outro endereco da pessoa)
+        prov = self.contas.provedor(x.conta_id)
+        try:
+            return prov.nome_de_participante(x.remetente) if prov else ""
+        except Exception:
+            return ""
 
     def _quem_enviou(self, x):
         """Quem enviou a mensagem, para a lista e a fala; so vale a pena
@@ -4633,7 +4710,7 @@ class Janela(wx.Frame):
                 not self.contas.esta_ativa(conta_id)
             self.fala.falar(
                 "A conta está desativada. A mensagem não foi enviada. Ative "
-                "a conta em Menu, Contas." if desativada else
+                "a conta em Contas." if desativada else
                 "A conta não está conectada. A mensagem não foi enviada.",
                 interromper=True)
             return
@@ -4983,6 +5060,21 @@ class Janela(wx.Frame):
         if tocados and self.cfg.get("seq_falar_fim"):
             self.fala.falar("Fim da sequência.", interromper=True)
 
+    def _pular_audio(self, segundos):
+        """Volta ou avanca o audio que toca ao fundo (sem a janela do
+        player, que tem as proprias setas) e fala em que ponto ficou."""
+        if self.audio is None or self.audio[1].terminou:
+            self.fala.falar("Nenhum áudio tocando.", interromper=True)
+            return
+        motor = self.audio[1]
+        try:
+            motor.avancar(segundos)
+            self.fala.falar("%s de %s" % (
+                formatar_tempo(motor.posicao), formatar_tempo(motor.duracao)),
+                interromper=True)
+        except Exception:
+            log.exception("erro ao pular no áudio")
+
     def _parar_audio(self, falar=True):
         if self.audio is None:
             return False
@@ -5112,6 +5204,25 @@ class Janela(wx.Frame):
         if selecao.o_que != "mensagens":
             return
         self._tirar_da_memoria({(c, v, i) for c, v, i, *_ in selecao.itens})
+
+    def _apagar_expiradas(self, repetir=True):
+        """Mensagens temporarias cujo prazo acabou: apaga daqui (e a midia),
+        se a opcao estiver ligada; confere a cada minuto e ao abrir."""
+        try:
+            if self.cfg.get("temporarias_apagar_aqui"):
+                chaves = self.banco.mensagens_expiradas()
+                if chaves:
+                    for conta, conversa, mensagem in chaves:
+                        limpeza.apagar_mensagem(self.banco, conta, conversa,
+                                                mensagem)
+                    self._tirar_da_memoria(set(chaves))
+                    log.info("mensagens temporárias vencidas apagadas: %d",
+                             len(chaves))
+        except Exception:
+            log.exception("erro ao apagar mensagens temporárias vencidas")
+        finally:
+            if repetir:
+                wx.CallLater(60000, self._apagar_expiradas)
 
     def _tirar_da_memoria(self, chaves):
         """Tira as mensagens (conta, conversa, id) do cache e da lista."""
@@ -5834,7 +5945,6 @@ class Janela(wx.Frame):
         log.info("fechando a janela")
         self.Hide()
         self._guardar_posicao()
-        self._guardar_lista()
         self._parar_audio(falar=False)
         try:
             if self.contas is not None:

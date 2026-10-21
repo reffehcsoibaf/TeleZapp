@@ -125,3 +125,33 @@ def test_ativar_e_desativar_conta(tmp_path, monkeypatch):
     assert criados[1].iniciado and contas.provedor("telegram-1") is criados[1]
     assert cfg.contas()[0]["ativa"] is True
     assert not contas.desativar("nao-existe")
+
+
+def test_renomear_conta_sobrevive_a_nova_conexao(tmp_path, monkeypatch):
+    cfg, b, contas, criados = montar(tmp_path, monkeypatch)
+    contas.adicionar("telegram", "+5551999998888")
+    cid = criados[0].conta.id
+    b.publicar(ev.ContaPronta(cid, "Fábio", "+5551999998888"))
+    assert contas.renomear(cid, "  Meu   trabalho ") is True
+    assert contas.nome(cid) == "Meu trabalho"
+    assert cfg.contas()[0]["apelido"] == "Meu trabalho"
+    assert cfg.contas()[0]["nome"] == "Meu trabalho"
+    # conecta de novo: o servico informa o nome dele, o apelido continua
+    b.publicar(ev.ContaPronta(cid, "Fábio Silva", "+5551999998888"))
+    assert contas.nome(cid) == "Meu trabalho"
+    assert cfg.contas()[0]["nome_servico"] == "Fábio Silva"
+    # nome vazio volta ao nome do servico
+    assert contas.renomear(cid, "") is True
+    assert contas.nome(cid) == "Fábio Silva"
+    assert "apelido" not in cfg.contas()[0]
+    assert contas.renomear("nao-existe", "x") is False
+
+
+def test_desativada_continua_desativada_apos_pronta(tmp_path, monkeypatch):
+    cfg, b, contas, criados = montar(tmp_path, monkeypatch)
+    contas.adicionar("telegram")
+    cid = criados[0].conta.id
+    b.publicar(ev.ContaPronta(cid, "Fábio", ""))
+    assert contas.desativar(cid)
+    b.publicar(ev.ContaPronta(cid, "Fábio", ""))
+    assert cfg.contas()[0]["ativa"] is False

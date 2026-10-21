@@ -1051,3 +1051,62 @@ def test_mensagem_do_telegram_que_cita_esta_conta_fica_marcada():
     # as minhas nunca contam
     minha = tg.converter(mensagem(7, "oi", out=True, mentioned=True), "t1", 10)
     assert not m.extras_de(minha)["citou_voce"]
+
+
+# ------------------------------------------------ mensagens temporarias
+def test_converter_guarda_o_prazo_das_mensagens_temporarias():
+    x = tg.converter(mensagem(7, "Oi", sender=ANA, ttl_period=86400), "t1", 10)
+    assert x.expira == DATA.timestamp() + 86400
+    assert tg.converter(mensagem(8, "Oi", sender=ANA), "t1", 10).expira == 0
+
+
+def test_prazo_ao_vivo_aviso_de_servico_e_definir(ambiente):
+    import asyncio
+    cliente = ClienteFalso()
+    p = ambiente.criar(cliente)
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ConversasAtualizadas)
+        receber = cliente.handlers[0]
+
+        async def chat():
+            return ANA
+
+        async def entrada():
+            return "peer88"
+
+        def evento(msg):
+            return types.SimpleNamespace(
+                message=msg, chat_id=88, is_group=False, is_channel=False,
+                get_chat=chat, get_input_chat=entrada)
+
+        async def rodar(msg):
+            await receber(evento(msg))
+        # uma mensagem com prazo: a conversa passa a ser temporaria
+        asyncio.run_coroutine_threadsafe(
+            rodar(mensagem(50, "nova", sender=ANA, ttl_period=604800)),
+            p._loop).result(5)
+        esperar(ambiente.fila, ev.MensagemNova)
+        assert ambiente.banco.conversas("t1")[0].temporaria_s == 604800 or \
+            [c.temporaria_s for c in ambiente.banco.conversas("t1")
+             if c.id == "88"] == [604800]
+        # o aviso de servico do Telegram muda o prazo e avisa
+        acao = type("MessageActionSetMessagesTTL", (), {})()
+        acao.period = 86400
+        asyncio.run_coroutine_threadsafe(
+            rodar(mensagem(51, "", sender=ANA, action=acao)),
+            p._loop).result(5)
+        aviso = esperar(ambiente.fila, ev.Aviso)
+        assert "1 dia" in aviso.texto and aviso.texto.startswith("Mudaram")
+        assert p._conversas["88"].temporaria_s == 86400
+        # definir daqui: pede o setHistoryTTL e atualiza
+        assert p.PODE_TEMPORARIAS
+        p.definir_temporaria("88", 2678400)
+        aviso = esperar(ambiente.fila, ev.Aviso)
+        assert aviso.texto.startswith("Você mudou") and "1 mês" in aviso.texto
+        pedido = [r for r in cliente.requisicoes
+                  if type(r).__name__ == "SetHistoryTTLRequest"][0]
+        assert pedido.period == 2678400
+        assert p._conversas["88"].temporaria_s == 2678400
+    finally:
+        p.parar()

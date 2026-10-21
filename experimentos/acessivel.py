@@ -128,7 +128,16 @@ def pedir_por_arquivo(caminho, modelo, validar, instrucao, timeout=600):
     return None
 
 
-def _mensagem_final(nome):
+def _mensagem_final(nome, falhou=False):
+    if nome == "chamada-whatsapp" and falhou:
+        return (
+            "O teste de chamada do WhatsApp NÃO chegou a completar uma "
+            "chamada. A pasta com o arquivo de log foi aberta: envie o "
+            "arquivo resultado-teste-chamada-whatsapp.log, que diz onde "
+            "parou.\n\nSe a conta de teste chegou a ser pareada, apague, na "
+            "pasta 10-chamada-whatsapp-meowcaller, o arquivo "
+            "sessao-chamadas.db quando terminar os testes e remova o "
+            "aparelho Chrome (Windows) no celular da conta de teste.")
     if nome.startswith(("grande-", "velocidade-")):
         return (
             "O teste de arquivos grandes terminou. A pasta com o arquivo de "
@@ -138,6 +147,20 @@ def _mensagem_final(nome):
             "Telegram apaga a mensagem de teste sozinho. Não envie as "
             "pastas sessao-telegram ou sessao-whatsapp nem os arquivos de "
             "configuração." % nome)
+    if nome == "chamada-whatsapp":
+        return (
+            "O teste de chamada de voz do WhatsApp terminou. A pasta com o "
+            "arquivo de log foi aberta: envie o arquivo "
+            "resultado-teste-chamada-whatsapp.log e me diga se a voz foi "
+            "boa nos dois lados, se houve cortes e se a chamada caiu."
+            "\n\n"
+            "Quando terminar: apague, na pasta "
+            "10-chamada-whatsapp-meowcaller, o arquivo sessao-chamadas.db "
+            "(dá acesso à conta de teste) e os arquivos chamada-*.wav "
+            "(guardam o que a outra pessoa falou). No celular da conta de "
+            "teste, remova o aparelho Chrome (Windows) em Aparelhos "
+            "conectados. Não envie esses arquivos nem o arquivo "
+            "configuracao-chamada-whatsapp.txt.")
     if nome == "gravacao-voz":
         return (
             "O teste de gravação de voz terminou. A pasta com o arquivo de "
@@ -171,4 +194,5 @@ def _mensagem_final(nome):
 
 if __name__ == "__main__":
     if len(sys.argv) >= 3 and sys.argv[1] == "fim":
-        aviso(_mensagem_final(sys.argv[2]), bloquear=True)
+        falhou = len(sys.argv) >= 4 and sys.argv[3] not in ("0", "")
+        aviso(_mensagem_final(sys.argv[2], falhou), bloquear=True)

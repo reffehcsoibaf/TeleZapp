@@ -506,14 +506,21 @@ def test_desconectada_pelo_celular_oferece_parear_de_novo(j):
     assert "w1" in j.pareamentos
 
 
-def test_remover_conta(j):
+def test_excluir_conta(j):
     wx_falso.resposta_messagebox[0] = wx_falso.YES
     try:
-        j._remover_conta()
+        assert j._excluir_conta_id("t1") is True
     finally:
         wx_falso.resposta_messagebox[0] = wx_falso.NO
     assert j.contas.removida == "t1"
     assert j.lista_conv.itens == [jm.TEXTO_SEM_CONTAS]
+
+
+def test_excluir_conta_pede_confirmacao(j):
+    wx_falso.resposta_messagebox[0] = wx_falso.NO
+    assert j._excluir_conta_id("t1") is False
+    assert getattr(j.contas, "removida", None) is None
+    assert j._excluir_conta_id("nao-existe") is False
 
 
 def test_qr_gerado_e_lido_por_um_leitor_de_qr():
@@ -839,13 +846,21 @@ def test_alt2_marcador_na_conversa_e_proxima_na_lista(j):
     assert j._conversa_selecionada().id == "20"
 
 
-def test_lista_de_conversas_lembra_onde_parou(j):
+def test_lista_de_conversas_abre_no_topo_com_o_foco(j):
+    # nao lembra qual conversa estava selecionada: sempre o topo da lista
     j.lista_conv.SetSelection(1)
-    j._guardar_lista()
-    assert j.cfg.get("ultima_conversa") == ["t1", "20"]
-    j.lista_conv.SetSelection(0)
+    j.cx_conta.SetFocus()
     j.comecar()
-    assert j.lista_conv.GetSelection() == 1
+    assert j.lista_conv.GetSelection() == 0
+    assert j.lista_conv.HasFocus()
+
+
+def test_botao_sair_depois_da_busca_fecha_a_janela(j):
+    assert j.botao_sair.GetLabel() == "Sair"
+    fechou = []
+    j.Close = lambda *a, **k: fechou.append(True) or True
+    j.botao_sair.ligacoes[jm.wx.EVT_BUTTON](None)
+    assert fechou == [True]
 
 
 def test_foco_vem_mesmo_se_o_servico_demora(j):
@@ -2153,22 +2168,87 @@ def test_aplicar_codigo_vindo_das_configuracoes_e_novo_pareamento_apaga(j):
     assert j.cfg.get("codigo_trancadas") is None
 
 
-def test_ativar_ou_desativar_contas_pelo_menu(j, monkeypatch):
+def test_marcar_e_desmarcar_conta_no_gerenciar_contas(j):
     chamadas = []
     j.contas.ativar = lambda cid: chamadas.append(("ativar", cid)) or True
     j.contas.desativar = lambda cid: chamadas.append(("desativar", cid)) or True
     j.cfg.salvar_conta({"id": "t1", "servico": "telegram", "nome": "Fábio"})
-
-    class Dlg(wx_falso.MultiChoiceDialog):
-        def ShowModal(self):
-            self.novas = []                    # desmarca tudo
-            return wx_falso.ID_OK
-    monkeypatch.setattr(jm.wx, "MultiChoiceDialog", Dlg, raising=False)
     ditas = []
     j.fala.falar = lambda t, interromper=False: ditas.append(t)
-    j._ativar_contas()
+    assert j._itens_de_contas() == [("t1", "Fábio, Telegram", True)]
+    assert j._marcar_conta("t1", False) is True
     assert chamadas == [("desativar", "t1")]
-    assert ditas[-1] == "Contas: 1 desativada."
+    assert ditas[-1] == "Fábio desativada."
+    assert j._marcar_conta("t1", True) is True
+    assert chamadas[-1] == ("ativar", "t1")
+    assert ditas[-1] == "Fábio ativada, conectando."
+    assert j._marcar_conta("nao-existe", True) is False
+
+
+def test_renomear_conta_vale_na_caixa_de_contas(j):
+    j.cfg.salvar_conta({"id": "t1", "servico": "telegram", "nome": "Fábio"})
+    guardado = []
+    j.contas.renomear = lambda cid, nome: (
+        guardado.append((cid, nome)),
+        j.cfg.salvar_conta({"id": cid, "servico": "telegram",
+                            "nome": nome}))[1] or True
+    j.contas.nome = lambda cid: "Trabalho"
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    assert j._renomear_conta_id("t1", "Trabalho") is True
+    assert guardado == [("t1", "Trabalho")]
+    assert ditas[-1] == "Conta renomeada para Trabalho."
+    assert j._itens_de_contas()[0][1] == "Trabalho, Telegram"
+
+
+def test_menu_unico_com_submenus_na_ordem_pedida(j):
+    barra = j.GetMenuBar().menus
+    assert [r.replace("&", "") for r, _ in barra] == ["Menu"]
+    raiz = barra[0][1]
+    rotulos = [r.replace("&", "") for r, _ in raiz.submenus]
+    assert rotulos == ["Mensagens", "Conversas", "Contatos", "Chamadas",
+                       "Contas", "Mídias", "Exibir", "Ferramentas", "Ajuda"]
+    menus = {r.replace("&", ""): mn for r, mn in raiz.submenus}
+
+    def nomes(menu):
+        return [i.rotulo.split("\t")[0].replace("&", "")
+                for i in menu.itens]
+    # Nova mensagem e o primeiro item de Mensagens, e saiu de Conversas
+    assert nomes(menus["Mensagens"])[0] == "Nova mensagem..."
+    assert "Nova mensagem..." not in nomes(menus["Conversas"])
+    # Contas: adicionar (uma entrada so), gerenciar e reconectar
+    assert nomes(menus["Contas"]) == [
+        "Adicionar conta...", "Gerenciar contas...",
+        "Conectar as contas de novo"]
+    # o que ficava solto no Menu foi para Ferramentas
+    ferramentas = nomes(menus["Ferramentas"])
+    for esperado in ("Fazer backup...", "Restaurar backup...",
+                     "Configurações...", "Sair"):
+        assert esperado in ferramentas
+    assert any(x.startswith("Instalar o") for x in ferramentas)
+    assert any(x.startswith("Desinstalar o") for x in ferramentas)
+    # a depuracao e um submenu de Ajuda
+    assert [r.replace("&", "") for r, _ in menus["Ajuda"].submenus] == [
+        "Depurar"]
+    assert "Modo de depuração" in "".join(
+        i.rotulo for _, sub in menus["Ajuda"].submenus for i in sub.itens)
+
+
+def test_adicionar_conta_pelo_menu_escolhe_o_servico_e_segue(j, monkeypatch):
+    chamadas = []
+    j.adicionar_conta = lambda servico: chamadas.append(servico)
+    wx_falso.escolha_lista[0] = 1               # WhatsApp
+    wx_falso.resposta_lista[0] = wx_falso.ID_OK
+    try:
+        j._adicionar_conta_pelo_menu()
+        wx_falso.escolha_lista[0] = 0           # Telegram
+        j._adicionar_conta_pelo_menu()
+        wx_falso.resposta_lista[0] = wx_falso.ID_CANCEL
+        j._adicionar_conta_pelo_menu()          # cancelou: nada
+    finally:
+        wx_falso.escolha_lista[0] = 0
+        wx_falso.resposta_lista[0] = wx_falso.ID_OK
+    assert chamadas == ["whatsapp", "telegram"]
 
 
 def test_fim_da_sequencia_so_se_pedido_e_com_mais_de_um_audio(jm_midia,
@@ -3631,3 +3711,82 @@ def test_enter_entregue_ao_leitor_antes_de_enviar_quando_a_opcao_esta_ligada(
     com_shift = Tecla(wx_falso.WXK_RETURN, shift=True)
     j._char_hook(com_shift)
     assert com_shift.pulou
+
+
+# ------------------------------------------------ mensagens temporarias
+def test_mensagens_temporarias_vencidas_somem_daqui(j):
+    vencida = msg("1", "some", data=AGORA - 100)
+    vencida.expira = time.time() - 5
+    valida = msg("2", "fica", data=AGORA - 90)
+    valida.expira = time.time() + 3600
+    comum = msg("3", "normal", data=AGORA - 80)
+    j.banco.salvar_mensagens([vencida, valida, comum])
+    j.cache[("t1", "10")] = [vencida, valida, comum]
+    j._apagar_expiradas(repetir=False)
+    assert [x.id for x in j.banco.mensagens("t1", "10")] == ["2", "3"]
+    assert [x.id for x in j.cache[("t1", "10")]] == ["2", "3"]
+    assert j.banco.foi_limpa("t1", "10", "1")      # nao volta na sincronia
+    # com a opcao desligada, a vencida fica
+    outra = msg("4", "vencida", data=AGORA - 70)
+    outra.expira = time.time() - 5
+    j.banco.salvar_mensagens([outra])
+    j.cfg.set("temporarias_apagar_aqui", False)
+    j._apagar_expiradas(repetir=False)
+    assert "4" in [x.id for x in j.banco.mensagens("t1", "10")]
+
+
+def test_titulo_mostra_o_prazo_das_mensagens_temporarias(j):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert "temporárias" not in j.GetTitle()
+    j.indice[("t1", "10")].temporaria_s = 604800
+    j._atualizar_titulo()
+    assert "mensagens temporárias: 1 semana" in j.GetTitle()
+    j.indice[("t1", "10")].temporaria_s = 0
+    j._atualizar_titulo()
+    assert "temporárias" not in j.GetTitle()
+
+
+# ------------------------------------------------ autores e pulo no audio
+def test_autores_achados_entram_na_lista_e_na_fala(j):
+    anon = m.Mensagem("t1", "10", "9", autor="", minha=False,
+                      data=AGORA + 9, texto="oi",
+                      remetente="101198187253781@lid")
+    outro = m.Mensagem("t1", "10", "8", autor="", minha=False,
+                       data=AGORA + 8, texto="e eu", remetente="55@lid")
+    j.cache[("t1", "10")] = [outro, anon]
+    j._quem_cache[("t1", "10", "55@lid")] = "velho"
+    j.b.publicar(ev.AutoresAtualizados(
+        "t1", "10", {"101198187253781@lid": "Bia"}))
+    assert anon.autor == "Bia" and outro.autor == ""
+    assert j._quem_cache == {}        # a fala e a lista refazem o nome
+
+
+def test_pular_no_audio_que_toca_ao_fundo(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+
+    class Motor:
+        terminou = False
+        posicao = 12.0
+        duracao = 39.0
+
+        def __init__(self):
+            self.pulos = []
+
+        def avancar(self, delta):
+            self.pulos.append(delta)
+            self.posicao += delta
+
+    j._pular_audio(5)
+    assert ditas == ["Nenhum áudio tocando."]
+    motor = Motor()
+    j.audio = (("t1", "10", "1"), motor)
+    j._pular_audio(-5)
+    j._pular_audio(30)
+    assert motor.pulos == [-5, 30]
+    assert ditas[-1] == "0:37 de 0:39"
+    motor.terminou = True
+    j._pular_audio(5)
+    assert ditas[-1] == "Nenhum áudio tocando."
+    j.audio = None

@@ -200,9 +200,18 @@ OPCOES = (
           "Privacidade", True,
           "As conversas que você trancou no celular só aparecem depois que "
           "você digita, no campo de busca de conversas, o código secreto "
-          "que definiu em Menu, Conversa, Código secreto das conversas "
+          "que definiu em Conversas, Código secreto das conversas "
           "trancadas. Sem código definido elas ficam escondidas. Desmarcada, "
           "o tipo Trancadas no celular aparece sempre."),
+    Opcao("temporarias_apagar_aqui",
+          "Apagar daqui as mensagens temporárias quando o prazo acabar",
+          "Privacidade", True,
+          "Nas conversas com mensagens temporárias (WhatsApp e Telegram), "
+          "cada celular apaga a mensagem no prazo. Marcada, o TeleZapp "
+          "também apaga daqui, com a mídia baixada, quando o prazo acaba "
+          "(e confere ao abrir, para o que venceu com ele fechado). "
+          "Desmarcada, as mensagens ficam guardadas aqui, marcadas como "
+          "vencidas. O que o TeleZapp apaga não volta numa nova sincronia."),
     Opcao("verificar_atualizacoes",
           "Avisar quando houver versão nova do TeleZapp", "Atualizações",
           True,

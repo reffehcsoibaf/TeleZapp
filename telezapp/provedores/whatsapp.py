@@ -150,6 +150,38 @@ def _contexto(interna):
     return None
 
 
+def _prazo(ctx):
+    """Segundos de prazo (mensagens temporarias) do contexto da mensagem; 0
+    se nao ha."""
+    try:
+        return int(ctx.expiration or 0) if ctx is not None else 0
+    except (TypeError, ValueError, AttributeError):
+        return 0
+
+
+def com_expiracao(mensagem, segundos):
+    """A mensagem pronta para enviar, com o prazo das mensagens temporarias
+    da conversa (o servidor nao poe sozinho: sem isso a mensagem nao some
+    no celular). Texto simples vira extendedTextMessage."""
+    segundos = int(segundos or 0)
+    if segundos <= 0:
+        return mensagem
+    from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (
+        ContextInfo, ExtendedTextMessage)
+    if mensagem.HasField("conversation"):
+        texto = mensagem.conversation
+        mensagem.ClearField("conversation")
+        mensagem.extendedTextMessage.CopyFrom(ExtendedTextMessage(
+            text=texto, contextInfo=ContextInfo(expiration=segundos)))
+        return mensagem
+    for nome in ("extendedTextMessage", "imageMessage", "videoMessage",
+                 "audioMessage", "documentMessage", "stickerMessage"):
+        if mensagem.HasField(nome):
+            getattr(mensagem, nome).contextInfo.expiration = segundos
+            return mensagem
+    return mensagem
+
+
 def _valor_vcard(linha):
     return linha.split(":", 1)[1].strip() if ":" in linha else ""
 
@@ -641,6 +673,7 @@ def converter(evento, conta_id, conversa_id, autor=""):
         resposta_a=(ctx.stanzaID if ctx is not None and ctx.stanzaID
                     else ""),
         remetente="" if minha else jid_texto(origem.Sender))
+    msg.expira = m.expira_em(msg.data, _prazo(ctx))
     interna_ = desembrulhar(evento.Message)
     acoes_ = acoes_do_whatsapp(interna_)
     m.guardar_extras(msg, botoes=botoes_do_whatsapp(interna_),
@@ -765,6 +798,7 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
         resposta_a=(ctx.stanzaID if ctx is not None and ctx.stanzaID
                     else ""),
         remetente="" if minha else _sem_aparelho(remetente))
+    msg.expira = m.expira_em(msg.data, _prazo(ctx))
     interna_ = desembrulhar(wmi.message)
     acoes_ = acoes_do_whatsapp(interna_)
     m.guardar_extras(msg, botoes=botoes_do_whatsapp(interna_),
@@ -816,6 +850,19 @@ def resumo_historico(dados):
 
 
 # ---------------------------------------------------------------- provedor
+def _ultima_vez(valor):
+    """Segundos desde 1970 de um "visto por ultimo", ou 0 se o valor nao
+    serve (escondido costuma vir como a data zero do Go, negativa, e alguns
+    avisos trazem milissegundos)."""
+    try:
+        v = float(valor or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if v > 1e11:
+        v /= 1000
+    return v if 0 < v < time.time() + 86400 else 0.0
+
+
 class ProvedorWhatsApp(Provedor):
     servico = "whatsapp"
 
@@ -1295,6 +1342,53 @@ class ProvedorWhatsApp(Provedor):
             if dados.Found:
                 return dados
         return None
+
+    PODE_TEMPORARIAS = True
+
+    def definir_temporaria(self, conversa_id, segundos):
+        self._fila.put(lambda: self._definir_temporaria(conversa_id,
+                                                        int(segundos or 0)))
+
+    def _definir_temporaria(self, conversa_id, segundos):
+        try:
+            if not self._conectada or self.cliente is None:
+                raise ConnectionError("sem conexão")
+            jid = self._jid(conversa_id)
+            dados = jid.SerializeToString()
+            # o neonize converte o prazo de um jeito que nao serve (o Go o
+            # le em nanossegundos e a hora da mudanca em milissegundos);
+            # chama a DLL direto
+            erro = self.cliente._NewClient__client.SetDisappearingTimer(
+                self.cliente.uuid, dados, len(dados),
+                segundos * 1_000_000_000, int(time.time() * 1000))
+            erro = erro.decode() if isinstance(erro, bytes) else (erro or "")
+            if erro:
+                raise RuntimeError(erro)
+        except Exception as e:
+            log.warning("mensagens temporárias: falhou: %s: %s",
+                        type(e).__name__, str(e)[:200])
+            self._avisar("Não consegui mudar as mensagens temporárias: %s" % (
+                "sem conexão" if isinstance(e, ConnectionError)
+                else str(e)[:120] or type(e).__name__), True)
+            return
+        self._temporaria_mudou(conversa_id, segundos, True)
+
+    def _temporaria_mudou(self, conversa_id, segundos, minha):
+        """O prazo das mensagens temporarias da conversa mudou (aqui ou em
+        outro aparelho)."""
+        with self._trava:
+            conv = self._conversas.get(conversa_id)
+            if conv is None or conv.temporaria_s == segundos:
+                return
+            conv.temporaria_s = segundos
+        log.info("mensagens temporárias de uma conversa: %s",
+                 m.texto_periodo(segundos, "whatsapp"))
+        self.banco.salvar_conversas([conv])
+        self._publicar_conversas()
+        self._avisar("%s as mensagens temporárias de %s%s." % (
+            "Você mudou" if minha else "Mudaram", conv.nome,
+            ": " + m.texto_periodo(segundos, "whatsapp") if segundos else
+            ": desligadas"))
 
     def _marcar_conversa(self, evento, campo, valor):
         """Poe uma marca (arquivada, trancada) numa conversa que o celular
@@ -2532,7 +2626,7 @@ class ProvedorWhatsApp(Provedor):
             if e.Unavailable:
                 self.barramento.publicar(ev.Presenca(
                     self.conta.id, cid, "offline",
-                    quando=float(e.LastSeen or 0)))
+                    quando=_ultima_vez(e.LastSeen)))
             else:
                 self.barramento.publicar(ev.Presenca(
                     self.conta.id, cid, "online"))
@@ -2559,6 +2653,40 @@ class ProvedorWhatsApp(Provedor):
     def conversa_aberta(self, conversa_id):
         if conversa_id.endswith("@g.us"):
             self._fila.put(lambda: self._conferir_escrita(conversa_id))
+            self._fila.put(lambda: self._completar_autores(conversa_id))
+
+    def _completar_autores(self, cid):
+        """Mensagens de grupo (do historico, sobretudo) de gente que so
+        aparece como LID ficam sem autor: acha o nome pela agenda, pelos
+        nomes vistos e pela lista de participantes do grupo, grava e avisa a
+        tela."""
+        try:
+            if self.cliente is None or not self._conectada:
+                return
+            sem = {x.remetente for x in self.banco.mensagens(
+                self.conta.id, cid, 3000)
+                if not x.minha and not x.autor and x.remetente}
+            if not sem:
+                return
+            try:
+                self._aprender_do_grupo(cid)
+            except Exception:
+                log.info("não consegui ler os participantes do grupo")
+            nomes = {}
+            for rem in sem:
+                nome = self.nome_de_participante(rem)
+                if not nome:
+                    continue
+                formas = {rem} | set(self._formas_do_endereco(rem))
+                if self.banco.renomear_autor(self.conta.id, formas, nome):
+                    nomes[rem] = nome
+            if nomes:
+                log.info("autores achados para %d participantes de um grupo",
+                         len(nomes))
+                self.barramento.publicar(ev.AutoresAtualizados(
+                    self.conta.id, cid, nomes))
+        except Exception:
+            log.exception("erro ao completar os autores do grupo")
 
     def _conferir_escrita(self, cid, forcar=False):
         """Grupo so de administradores em que nao sou admin, ou grupo de que
@@ -2728,10 +2856,13 @@ class ProvedorWhatsApp(Provedor):
                          "veio" if nome_verificado(info) else "não veio")
             if not grupo and not msg.minha and not msg.autor:
                 msg.autor = conv.nome       # conversa privada: quem fala
+            prazo = _prazo(_contexto(desembrulhar(evento.Message)))
             with self._trava:
                 conv.data = max(conv.data, msg.data)
                 self._remetentes[msg.id] = (remetente, msg.texto)
                 silenciosa = self._sincronizando
+                if conv.temporaria_s != prazo:
+                    conv.temporaria_s = prazo
                 if not msg.minha:
                     conv.nao_lidas += 1
                     self._nao_lidas.setdefault(cid, []).append(
@@ -2815,6 +2946,10 @@ class ProvedorWhatsApp(Provedor):
             return True
         if "protocolMessage" in presentes:
             p = interna.protocolMessage
+            if p.HasField("type") and p.type == p.EPHEMERAL_SETTING:
+                self._temporaria_mudou(cid, int(p.ephemeralExpiration or 0),
+                                       bool(origem.IsFromMe))
+                return True
             if not p.HasField("type") or not p.key.ID:
                 return False
             alvo = p.key.ID
@@ -3304,8 +3439,9 @@ class ProvedorWhatsApp(Provedor):
                 previa = self._previa_ao_enviar(texto)
                 resp = self.cliente.send_message(
                     self._jid(conversa_id),
-                    self._mensagem_de_texto(conversa_id, texto, resposta_a,
-                                            previa))
+                    com_expiracao(self._mensagem_de_texto(
+                        conversa_id, texto, resposta_a, previa),
+                        self._prazo_da_conversa(conversa_id)))
             else:
                 resp = self._enviar_variantes(construir())
         except Exception as e:
@@ -3330,6 +3466,12 @@ class ProvedorWhatsApp(Provedor):
             resposta_a="" if resposta_a.startswith(RESPOSTA_A_STATUS)
             else resposta_a, previa=previa)
 
+    def _prazo_da_conversa(self, conversa_id):
+        """Segundos das mensagens temporarias da conversa (0 = desligadas)."""
+        with self._trava:
+            conv = self._conversas.get(conversa_id)
+        return int(conv.temporaria_s) if conv is not None else 0
+
     @staticmethod
     def _previa_ao_enviar(texto):
         """Com a opcao ligada, a previa do primeiro link do texto."""
@@ -3346,6 +3488,8 @@ class ProvedorWhatsApp(Provedor):
                          data=segundos(resp.Timestamp) or time.time(),
                          texto=texto, estado=m.ENVIADA, resposta_a=resposta_a,
                          **campos)
+        msg.expira = m.expira_em(msg.data,
+                                 self._prazo_da_conversa(conversa_id))
         if previa:
             m.guardar_extras(msg, previa=previa)
         if arquivo is not None:
@@ -3390,13 +3534,17 @@ class ProvedorWhatsApp(Provedor):
                 }.get(anexo.tipo, MediaType.MediaDocument)
         chave = "up-" + uuid.uuid4().hex
         fim = threading.Event()
+        avisos = [0, -1]          # quantos avancos publicados, ultimo valor
+        log.info("envio por arquivo: %d bytes", anexo.tamanho)
 
         def vigiar():
             ultimo = -1
             while not fim.wait(0.3):
                 pct = self.cliente.transfer_progress(chave)
+                avisos[1] = pct
                 if pct >= 0 and pct != ultimo and pct < 100:
                     ultimo = pct
+                    avisos[0] += 1
                     self.barramento.publicar(ev.ProgressoEnvio(
                         self.conta.id, conversa_id, pct))
         vigia = threading.Thread(target=vigiar, daemon=True,
@@ -3407,6 +3555,8 @@ class ProvedorWhatsApp(Provedor):
         finally:
             fim.set()
             vigia.join(2)
+            log.info("envio por arquivo terminou: %d avisos de avanço "
+                     "(último valor lido %d)", avisos[0], avisos[1])
         self.barramento.publicar(ev.ProgressoEnvio(self.conta.id,
                                                    conversa_id, 100))
         return self._mensagem_de_midia(anexo, legenda, up)
@@ -3451,11 +3601,18 @@ class ProvedorWhatsApp(Provedor):
             if not self._conectada or self.cliente is None:
                 raise ConnectionError("sem conexão")
             jid = self._jid(conversa_id)
+            prazo = self._prazo_da_conversa(conversa_id)
             if anexo.tamanho >= LIMITE_ENVIO_POR_ARQUIVO and \
                     self._tem_transferencias():
                 resp = self.cliente.send_message(
-                    jid, self._enviar_por_arquivo(conversa_id, anexo,
-                                                  legenda))
+                    jid, com_expiracao(self._enviar_por_arquivo(
+                        conversa_id, anexo, legenda), prazo))
+            elif prazo:
+                # com mensagens temporarias a mensagem e montada a mao, para
+                # levar o prazo
+                resp = self.cliente.send_message(
+                    jid, com_expiracao(self._mensagem_de_midia(
+                        anexo, legenda), prazo))
             elif anexo.tipo == m.FOTO:
                 resp = self.cliente.send_image(jid, anexo.caminho,
                                                caption=legenda or None)

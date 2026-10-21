@@ -67,6 +67,8 @@ class Conversa:
                                   # quando (timestamp)
     somente_leitura: bool = False  # a conta nao pode escrever aqui (canal,
                                    # grupo so de admins, grupo que saiu...)
+    temporaria_s: int = 0      # mensagens temporarias: segundos ate sumirem
+                               # (0 = desligado)
 
     @property
     def chave(self):
@@ -97,10 +99,78 @@ class Mensagem:
     resposta_a: str = ""       # id da mensagem respondida
     remetente: str = ""        # WhatsApp: jid de quem enviou (para "lida")
     extras: str = ""           # JSON: links, botoes e mencoes (ver extras_de)
+    expira: float = 0.0        # mensagem temporaria: quando some (timestamp);
+                               # 0 = nao some
 
     @property
     def chave(self):
         return (self.conta_id, self.conversa_id, self.id)
+
+
+# ------------------------------------------------- mensagens temporarias
+# Periodos que cada servico oferece, em segundos (0 = desligadas).
+PERIODOS_TEMPORARIAS = {
+    "whatsapp": ((0, "Desligadas"), (86400, "24 horas"),
+                 (604800, "7 dias"), (7776000, "90 dias")),
+    "telegram": ((0, "Desligadas"), (86400, "1 dia"), (604800, "1 semana"),
+                 (2678400, "1 mês")),
+}
+
+
+def texto_periodo(segundos, servico=None):
+    """86400 -> "24 horas" (WhatsApp) ou "1 dia" (Telegram); 604800 -> "7
+    dias"; 2678400 -> "1 mês"... Sem servico, vale o nome do WhatsApp."""
+    s = int(segundos or 0)
+    if s <= 0:
+        return "desligadas"
+    proprios = PERIODOS_TEMPORARIAS.get(servico, ())[1:]
+    for valor, rotulo in (proprios + PERIODOS_TEMPORARIAS["whatsapp"][1:] +
+                          PERIODOS_TEMPORARIAS["telegram"][1:]):
+        if s == valor:
+            return rotulo
+    if s % 86400 == 0:
+        d = s // 86400
+        return "1 dia" if d == 1 else "%d dias" % d
+    if s % 3600 == 0:
+        h = s // 3600
+        return "1 hora" if h == 1 else "%d horas" % h
+    if s % 60 == 0:
+        mi = s // 60
+        return "1 minuto" if mi == 1 else "%d minutos" % mi
+    return "%d segundos" % s
+
+
+def periodos_temporarias(servico):
+    return PERIODOS_TEMPORARIAS.get(servico, PERIODOS_TEMPORARIAS["telegram"])
+
+
+def texto_temporaria(msg, agora=None):
+    """"temporária, some hoje às 14:30" numa mensagem que tem prazo; "" nas
+    outras."""
+    if not getattr(msg, "expira", 0):
+        return ""
+    quando = hora_legivel(msg.expira, agora)
+    if not quando:
+        return "temporária"
+    if quando.startswith("ontem "):
+        quando = "ontem às " + quando[6:]
+    elif len(quando) == 5:
+        quando = "hoje às " + quando
+    elif len(quando) > 5 and quando[2] == "/" and " " in quando:
+        dia, hm = quando.split(" ", 1)
+        quando = "em %s às %s" % (dia, hm)
+    else:
+        quando = "em " + quando
+    agora = time.time() if agora is None else agora
+    if msg.expira <= agora:
+        return "temporária, já passou do prazo"
+    return "temporária, some " + quando
+
+
+def expira_em(data, segundos):
+    """Quando uma mensagem de `data` com prazo de `segundos` some."""
+    segundos = int(segundos or 0)
+    return float(data) + segundos if segundos > 0 and data else 0.0
 
 
 # ---------------------------------------------------- links, botoes, mencoes
@@ -217,10 +287,13 @@ def duracao_legivel(seg):
 
 def hora_legivel(ts, agora=None):
     """'08:10' hoje, 'ontem 08:10', '12/10 08:10' no ano, '12/10/2025' antes."""
-    if not ts:
+    if not ts or ts < 0:
         return ""
     agora = time.time() if agora is None else agora
-    t = time.localtime(ts)
+    try:
+        t = time.localtime(ts)
+    except (OSError, OverflowError, ValueError):
+        return ""            # data impossivel (o Windows recusa)
     a = time.localtime(agora)
     hm = time.strftime("%H:%M", t)
     if (t.tm_year, t.tm_yday) == (a.tm_year, a.tm_yday):
@@ -237,8 +310,8 @@ def texto_visto_por_ultimo(quando, aprox="", agora=None):
     """"visto por último hoje às 08:10", "ontem às ...", "em 12/10 às ...";
     com so uma ideia aproximada ("recentemente"), ela entra no lugar. ""
     se o servico nao informa (a pessoa escondeu)."""
-    if quando:
-        h = hora_legivel(quando, agora)
+    h = hora_legivel(quando, agora) if quando else ""
+    if h:
         if h.startswith("ontem "):
             h = "ontem às " + h[6:]
         elif len(h) == 5:
@@ -408,6 +481,11 @@ def quem_enviou(msg, conv=None, nome_do_remetente=None):
         nome = nome_do_remetente(msg)
         if nome:
             return nome
+    usuario, _, dominio = (msg.remetente or "").partition("@")
+    if dominio == "lid" and usuario:
+        # endereco interno do WhatsApp: nao diz nada a quem ouve, mas o fim
+        # separa uma pessoa da outra no grupo
+        return "Participante final %s" % usuario[-4:]
     return _telefone_do_endereco(msg.remetente) or "Desconhecido"
 
 
@@ -494,6 +572,8 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None,
         cont = _juntar(cont, "(editada)")
     if extras_de(m)["favorita"]:
         cont = _juntar(cont, "(favorita)")
+    if getattr(m, "expira", 0):
+        cont = _juntar(cont, "(temporária)")
     n_links = len(itens_de_link(m))
     if n_links:
         cont = _juntar(cont, "com %d %s (Tab)" % (
@@ -760,6 +840,9 @@ def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
         linhas.append("Editada: sim")
     if extras_m["apagada"]:
         linhas.append("Apagada pelo autor: sim")
+    temp = texto_temporaria(m, agora)
+    if temp:
+        linhas.append("Mensagem " + temp)
     for r in extras_m["reacoes"]:
         linhas.append("Reação: %s de %s" % (r.get("emoji", ""),
                                             r.get("quem", "")))
