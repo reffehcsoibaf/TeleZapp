@@ -26,6 +26,7 @@ procuram os `.py` ao lado deles.
 | `7-teste-telegram-velocidade.bat` | `telegram_velocidade.py` | Quatro jeitos de transferir: partes de 128 e 512 KB, em série e em paralelo | Telegram |
 | `8-teste-gravacao-voz.bat` | `gravacao_voz.py`, `opus_util.py` | Gravação pelo microfone, cinco níveis de compressão Opus, reprodução e envio ao Telegram | Telegram (opcional) |
 | `9-teste-chamada-telegram.bat` | `chamada_telegram.py` | Chamada de voz 1 a 1 com py-tgcalls (NTgCalls): liga ou espera uma chamada por 45 s, mede o tempo para conectar, o uso de CPU e o tamanho do ambiente | Telegram e uma segunda pessoa (com fones de ouvido) |
+| `10-teste-chamada-whatsapp.bat` | `chamada_whatsapp.py`, `10-chamada-whatsapp-meowcaller\` (programa em Go) | Chamada de voz do WhatsApp com o meowcaller: pareia uma conta de teste, liga ou espera uma chamada por 45 s com microfone e alto-falante, mede o tempo para conectar e se a voz passa nos dois sentidos | WhatsApp de TESTE e uma segunda pessoa (com fones de ouvido) |
 
 Em `historico/` ficam dois testes do projeto anterior (WPPConnect com Node), que
 medem o tempo de instalação e foram a origem desta investigação.
@@ -42,7 +43,7 @@ medem o tempo de instalação e foram a origem desta investigação.
 
 ## Arquivos que os testes criam (não vão para o Git)
 
-`venv-*`, `logs/`, `sessao-telegram/`, `sessao-whatsapp/`,
+`venv-*`, `logs/`, `sessao-telegram/`, `sessao-whatsapp/`, `10-chamada-whatsapp-meowcaller\sessao-chamadas.db` e `chamada-*.wav`,
 `configuracao-*.txt`, `codigo-*.txt`, `senha-*.txt`, `empacotado/`,
 `build-pyinstaller/`, `gravacoes-teste/`, `arquivos-grandes/`, entre outros.
 As pastas `sessao-*` e os arquivos de configuração dão acesso às contas: apague
