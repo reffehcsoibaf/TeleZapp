@@ -48,6 +48,16 @@ class ConversaApagadaNoCelular:
 
 
 @dataclass
+class AutoresAtualizados:
+    """O servico descobriu o nome de quem enviou mensagens que estavam sem
+    autor (grupo do WhatsApp com participante so em LID).
+    `nomes`: {endereco de quem enviou: nome}."""
+    conta_id: str
+    conversa_id: str
+    nomes: dict = field(default_factory=dict)
+
+
+@dataclass
 class MensagemApagadaNoCelular:
     """A pessoa apagou uma mensagem para si no celular (ou em outro
     aparelho)."""

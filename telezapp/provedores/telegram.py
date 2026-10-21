@@ -294,6 +294,15 @@ def extras_do_telegram(msg):
     return links, botoes, mencoes
 
 
+def prazo_da_mensagem(msg):
+    """Segundos das mensagens temporarias (ttl_period) de uma mensagem; 0 se
+    nao ha."""
+    try:
+        return int(getattr(msg, "ttl_period", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def converter(msg, conta_id, conversa_id, lidas_ate=0, nome_padrao=""):
     """Mensagem do Telethon -> modelos.Mensagem (None para mensagens de
     servico, como 'fulano entrou no grupo')."""
@@ -328,6 +337,7 @@ def converter(msg, conta_id, conversa_id, lidas_ate=0, nome_padrao=""):
         tipo=tipo, texto=texto, segundos=segundos,
         nome_arquivo=nome_arquivo, tamanho=tamanho, estado=estado,
         resposta_a=str(resposta_a) if resposta_a else "")
+    nova.expira = m.expira_em(nova.data, prazo_da_mensagem(msg))
     links, botoes, mencoes = extras_do_telegram(msg)
     m.guardar_extras(nova, links, botoes, mencoes,
                      acoes=entradas_do_telegram(links),
@@ -726,7 +736,8 @@ class ProvedorTelegram(Provedor):
                     fixada=bool(getattr(d, "pinned", False)),
                     silenciada_ate=silencio_do_dialogo(d),
                     somente_leitura=somente_leitura_do_telegram(
-                        getattr(d, "entity", None)))
+                        getattr(d, "entity", None)),
+                    temporaria_s=int(getattr(d.dialog, "ttl_period", 0) or 0))
                 self._conversas[cid] = c
                 lista.append(c)
         self.banco.salvar_conversas(lista)
@@ -735,6 +746,46 @@ class ProvedorTelegram(Provedor):
         lista += [c for c in self._conversas.values() if c.tipo == "status"]
         self.barramento.publicar(ev.ConversasAtualizadas(self.conta.id, lista))
         await self._atualizar_historias()
+
+    PODE_TEMPORARIAS = True
+
+    def definir_temporaria(self, conversa_id, segundos):
+        """Liga ou desliga as mensagens temporarias (setHistoryTTL)."""
+        entidade = self._entidades.get(conversa_id)
+        if entidade is None:
+            return
+        self._agendar(self._definir_temporaria(conversa_id, entidade,
+                                               int(segundos or 0)))
+
+    async def _definir_temporaria(self, conversa_id, entidade, segundos):
+        from telethon.tl.functions.messages import SetHistoryTTLRequest
+        try:
+            await self.cliente(SetHistoryTTLRequest(peer=entidade,
+                                                    period=segundos))
+        except Exception as e:
+            log.warning("mensagens temporárias: falhou: %s", type(e).__name__)
+            self.barramento.publicar(ev.Aviso(
+                self.conta.id, "Não consegui mudar as mensagens temporárias "
+                "(%s)." % type(e).__name__, True))
+            return
+        conv = self._conversas.get(conversa_id)
+        if conv is not None:
+            self._temporaria_mudou(conv, segundos, True)
+
+    def _temporaria_mudou(self, conv, segundos, minha):
+        """O prazo das mensagens temporarias mudou (aqui ou em outro
+        aparelho)."""
+        if conv.temporaria_s == segundos:
+            return
+        conv.temporaria_s = segundos
+        self.banco.salvar_conversas([conv])
+        lista = sorted(self._conversas.values(), key=lambda c: -c.data)
+        self.barramento.publicar(ev.ConversasAtualizadas(self.conta.id,
+                                                         lista))
+        self.barramento.publicar(ev.Aviso(
+            self.conta.id, "%s as mensagens temporárias de %s: %s." % (
+                "Você mudou" if minha else "Mudaram", conv.nome,
+                m.texto_periodo(segundos, "telegram"))))
 
     def fixar_conversa(self, conversa_id, fixar):
         """Fixa a conversa no topo (ou tira a fixacao) na conta."""
@@ -1654,11 +1705,19 @@ class ProvedorTelegram(Provedor):
                 self._conversas[cid] = conv
             if not getattr(msg, "out", False) and msg.sender is None:
                 await evento.get_sender()
+            acao = getattr(msg, "action", None)
+            if type(acao).__name__ == "MessageActionSetMessagesTTL":
+                self._temporaria_mudou(conv, int(acao.period or 0),
+                                       bool(getattr(msg, "out", False)))
+                return
             nova = converter(msg, self.conta.id, cid, conv.lidas_ate,
                              conv.nome)
             if nova is None:
                 return
             await self._resolver_mencoes([nova])
+            prazo = prazo_da_mensagem(msg)
+            if conv.temporaria_s != prazo:
+                conv.temporaria_s = prazo
             conv.data = nova.data
             if not nova.minha:
                 conv.nao_lidas += 1

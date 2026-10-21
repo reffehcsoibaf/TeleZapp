@@ -10,13 +10,14 @@ da interface podem chamar qualquer metodo.
 import logging
 import sqlite3
 import threading
+import time
 from dataclasses import astuple, fields
 
 from telezapp.nucleo.modelos import ORDEM_ESTADOS, Conversa, Mensagem
 
 log = logging.getLogger("telezapp.banco")
 
-VERSAO_ESQUEMA = 10
+VERSAO_ESQUEMA = 11
 
 ESQUEMA = """
 CREATE TABLE IF NOT EXISTS conversas (
@@ -33,6 +34,7 @@ CREATE TABLE IF NOT EXISTS conversas (
     fixada INTEGER NOT NULL DEFAULT 0,
     silenciada_ate REAL NOT NULL DEFAULT 0,
     somente_leitura INTEGER NOT NULL DEFAULT 0,
+    temporaria_s INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (conta_id, id)
 );
 CREATE TABLE IF NOT EXISTS mensagens (
@@ -51,6 +53,7 @@ CREATE TABLE IF NOT EXISTS mensagens (
     resposta_a TEXT NOT NULL DEFAULT '',
     remetente TEXT NOT NULL DEFAULT '',
     extras TEXT NOT NULL DEFAULT '',
+    expira REAL NOT NULL DEFAULT 0,
     PRIMARY KEY (conta_id, conversa_id, id)
 );
 CREATE INDEX IF NOT EXISTS mensagens_por_data
@@ -183,6 +186,9 @@ class Banco:
         if "somente_leitura" not in conv:
             self._con.execute("ALTER TABLE conversas ADD COLUMN "
                               "somente_leitura INTEGER NOT NULL DEFAULT 0")
+        if "temporaria_s" not in conv:
+            self._con.execute("ALTER TABLE conversas ADD COLUMN "
+                              "temporaria_s INTEGER NOT NULL DEFAULT 0")
         colunas = {linha[1] for linha in self._con.execute(
             "PRAGMA table_info(mensagens)")}
         if "remetente" not in colunas:
@@ -193,6 +199,12 @@ class Banco:
             self._con.execute("ALTER TABLE mensagens ADD COLUMN extras "
                               "TEXT NOT NULL DEFAULT ''")
             log.info("banco atualizado para a versão %d", VERSAO_ESQUEMA)
+        if "expira" not in colunas:
+            self._con.execute("ALTER TABLE mensagens ADD COLUMN expira "
+                              "REAL NOT NULL DEFAULT 0")
+            log.info("banco atualizado: coluna expira")
+        self._con.execute("CREATE INDEX IF NOT EXISTS mensagens_por_expira "
+                          "ON mensagens (expira) WHERE expira > 0")
 
     # ------------------------------------------------------------ depuracao
     def guardar_depuracao(self, conta_id, conversa_id, mensagem_id, dados):
@@ -323,6 +335,15 @@ class Banco:
         with self._trava, self._con:
             self._con.executemany(
                 sql, [_linha_msg(m) for m in mensagens])
+
+    def mensagens_expiradas(self, agora=None):
+        """Chaves (conta, conversa, id) das mensagens temporarias cujo prazo
+        ja passou."""
+        agora = time.time() if agora is None else agora
+        with self._trava:
+            return [tuple(l) for l in self._con.execute(
+                "SELECT conta_id, conversa_id, id FROM mensagens "
+                "WHERE expira > 0 AND expira <= ?", (agora,)).fetchall()]
 
     def mensagens(self, conta_id, conversa_id, limite=100):
         """As `limite` mais recentes, da mais antiga para a mais nova."""

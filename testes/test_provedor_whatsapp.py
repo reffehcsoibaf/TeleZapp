@@ -2544,3 +2544,125 @@ def test_mensagem_de_grupo_que_menciona_esta_conta_fica_marcada(amb):
                                    remetente="5551988887777"))
     assert not m.extras_de(esperar(amb.fila, ev.MensagemNova).mensagem)[
         "citou_voce"]
+
+
+def test_ultima_vez_so_aceita_datas_que_servem():
+    from telezapp.provedores import whatsapp as w
+    assert w._ultima_vez(1.7e9) == 1.7e9
+    assert w._ultima_vez(1.7e12) == 1.7e9          # milissegundos
+    for ruim in (None, 0, -62135596800, "x", 1e30):
+        assert w._ultima_vez(ruim) == 0.0
+
+
+# ------------------------------------------------ mensagens temporarias
+def _com_prazo(texto, segundos):
+    ctx = E.ContextInfo(expiration=segundos) if segundos else None
+    est = E.ExtendedTextMessage(text=texto)
+    if ctx is not None:
+        est.contextInfo.CopyFrom(ctx)
+    return E.Message(extendedTextMessage=est)
+
+
+def test_converter_guarda_quando_a_mensagem_temporaria_some():
+    msg, _ = wa.converter(evento("T1", _com_prazo("oi", 604800)), "w1", "c")
+    assert msg.expira == TS + 604800
+    msg, _ = wa.converter(evento("T2", _com_prazo("oi", 0)), "w1", "c")
+    assert msg.expira == 0
+
+
+def test_com_expiracao_poe_o_prazo_na_mensagem_a_enviar():
+    texto = wa.com_expiracao(E.Message(conversation="oi"), 86400)
+    assert not texto.HasField("conversation")
+    assert texto.extendedTextMessage.text == "oi"
+    assert texto.extendedTextMessage.contextInfo.expiration == 86400
+    foto = wa.com_expiracao(E.Message(imageMessage=E.ImageMessage(
+        caption="x")), 604800)
+    assert foto.imageMessage.contextInfo.expiration == 604800
+    citada = E.Message(extendedTextMessage=E.ExtendedTextMessage(
+        text="r", contextInfo=E.ContextInfo(stanzaID="A0")))
+    c = wa.com_expiracao(citada, 86400).extendedTextMessage.contextInfo
+    assert c.stanzaID == "A0" and c.expiration == 86400
+    sem = E.Message(conversation="oi")
+    assert wa.com_expiracao(sem, 0).conversation == "oi"
+
+
+def test_prazo_da_conversa_vem_das_mensagens_e_do_aviso_de_ajuste(amb):
+    cid = "5551988887777@s.whatsapp.net"
+    amb.f["Message"](amb.c, evento("T1", _com_prazo("a", 604800)))
+    esperar(amb.fila, ev.MensagemNova)
+    assert amb.banco.conversas("w1")[0].temporaria_s == 604800
+    assert amb.banco.mensagens("w1", cid)[0].expira == TS + 604800
+    # uma mensagem sem prazo: as temporarias foram desligadas
+    amb.f["Message"](amb.c, evento("T2", _com_prazo("b", 0)))
+    esperar(amb.fila, ev.MensagemNova)
+    assert amb.banco.conversas("w1")[0].temporaria_s == 0
+    # o aviso do ajuste muda a conversa e fala
+    ajuste = E.Message(protocolMessage=E.ProtocolMessage(
+        type=E.ProtocolMessage.EPHEMERAL_SETTING, ephemeralExpiration=86400))
+    amb.f["Message"](amb.c, evento("T3", ajuste, de_mim=True))
+    aviso = esperar(amb.fila, ev.Aviso)
+    assert "24 horas" in aviso.texto and aviso.texto.startswith("Você mudou")
+    assert amb.banco.conversas("w1")[0].temporaria_s == 86400
+
+
+def test_envio_numa_conversa_temporaria_leva_o_prazo(amb):
+    cid = "5551988887777@s.whatsapp.net"
+    amb.f["Connected"](amb.c, N.Connected())
+    amb.f["Message"](amb.c, evento("T1", _com_prazo("a", 604800)))
+    esperar(amb.fila, ev.MensagemNova)
+    amb.p.enviar_texto(cid, "resposta")
+    enviada = esperar(amb.fila, ev.MensagemNova)
+    _, proto = amb.c.enviadas[-1]
+    assert proto.extendedTextMessage.text == "resposta"
+    assert proto.extendedTextMessage.contextInfo.expiration == 604800
+    assert enviada.mensagem.expira == enviada.mensagem.data + 604800
+
+
+def test_definir_temporaria_chama_a_dll_em_nanossegundos(amb):
+    cid = "5551988887777@s.whatsapp.net"
+    amb.f["Connected"](amb.c, N.Connected())
+    amb.f["Message"](amb.c, evento("T1", _com_prazo("a", 0)))
+    esperar(amb.fila, ev.MensagemNova)
+    chamadas = []
+    resposta = [b""]
+    amb.c.uuid = b"id"
+    amb.c._NewClient__client = types.SimpleNamespace(
+        SetDisappearingTimer=lambda *a: (chamadas.append(a), resposta[0])[1])
+    assert amb.p.PODE_TEMPORARIAS
+    amb.p.definir_temporaria(cid, 604800)
+    aviso = esperar(amb.fila, ev.Aviso)
+    assert "7 dias" in aviso.texto
+    uuid, dados, tam, ns, agora_ms = chamadas[0]
+    assert (uuid, tam, ns) == (b"id", len(dados), 604800 * 10 ** 9)
+    assert agora_ms > 1.7e12            # milissegundos de agora
+    assert amb.banco.conversas("w1")[0].temporaria_s == 604800
+    # a DLL recusou: avisa e nao muda
+    resposta[0] = b"nao deu"
+    amb.p.definir_temporaria(cid, 86400)
+    aviso = esperar(amb.fila, ev.Aviso)
+    assert aviso.grave and "nao deu" in aviso.texto
+    assert amb.banco.conversas("w1")[0].temporaria_s == 604800
+
+
+def test_grupo_sem_autor_ganha_o_nome_pela_lista_de_participantes(amb):
+    gid = "12345@g.us"
+    lid = "101198187253781@lid"
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    antigas = [m.Mensagem("w1", gid, "H1", autor="", minha=False, data=100,
+                          texto="oi", remetente=lid),
+               m.Mensagem("w1", gid, "H2", autor="", minha=False, data=101,
+                          texto="de novo", remetente=lid),
+               m.Mensagem("w1", gid, "H3", autor="", minha=False, data=102,
+                          texto="de outro", remetente="999@lid")]
+    amb.banco.salvar_mensagens(antigas)
+    amb.c.get_group_info = lambda j: N.GroupInfo(
+        GroupName=N.GroupName(Name="Família"),
+        Participants=[N.GroupParticipant(
+            JID=jid("5551966665555"), LID=jid("101198187253781", "lid"),
+            PhoneNumber=jid("5551966665555"), DisplayName="Bia")])
+    amb.p.conversa_aberta(gid)
+    e = esperar(amb.fila, ev.AutoresAtualizados)
+    assert e.conversa_id == gid and e.nomes == {lid: "Bia"}
+    por_id = {x.id: x.autor for x in amb.banco.mensagens("w1", gid)}
+    assert por_id == {"H1": "Bia", "H2": "Bia", "H3": ""}

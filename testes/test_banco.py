@@ -39,3 +39,43 @@ def test_conversa_trancada_e_arquivada_vao_e_voltam_do_banco(tmp_path):
                                    trancada=True, arquivada=True)])
     c = b.conversas("w1")[0]
     assert c.trancada and c.arquivada
+
+
+# ------------------------------------------------ mensagens temporarias
+def test_prazo_da_conversa_e_da_mensagem_sao_guardados(tmp_path):
+    from telezapp.armazenamento.banco import Banco
+    from telezapp.nucleo import modelos as m
+    b = Banco(str(tmp_path / "t.db"))
+    b.salvar_conversas([m.Conversa("c", "1", "Ana", "whatsapp",
+                                   temporaria_s=604800)])
+    assert b.conversas("c")[0].temporaria_s == 604800
+    b.salvar_mensagens([
+        m.Mensagem("c", "1", "a", data=100, expira=500),
+        m.Mensagem("c", "1", "b", data=100, expira=5000),
+        m.Mensagem("c", "1", "c", data=100)])
+    assert b.mensagens_expiradas(1000) == [("c", "1", "a")]
+    assert b.mensagens_expiradas(10 ** 6) == [("c", "1", "a"), ("c", "1", "b")]
+    assert [x.expira for x in b.mensagens("c", "1")] == [500, 5000, 0]
+    b.fechar()
+
+
+def test_banco_antigo_ganha_as_colunas_das_temporarias(tmp_path):
+    import sqlite3
+    from telezapp.armazenamento import banco as bd
+    from telezapp.armazenamento.banco import Banco
+    from telezapp.nucleo import modelos as m
+    caminho = str(tmp_path / "velho.db")
+    antigo = "\n".join(l for l in bd.ESQUEMA.splitlines()
+                       if "temporaria_s" not in l and "expira REAL" not in l)
+    con = sqlite3.connect(caminho)
+    con.executescript(antigo)
+    con.execute("INSERT INTO mensagens (conta_id, conversa_id, id, data) "
+                "VALUES ('c', '1', 'x', 5)")
+    con.commit()
+    con.close()
+    b = Banco(caminho)
+    assert b.mensagens("c", "1")[0].expira == 0
+    b.salvar_conversas([m.Conversa("c", "1", "Ana", "telegram",
+                                   temporaria_s=86400)])
+    assert b.conversas("c")[0].temporaria_s == 86400
+    b.fechar()

@@ -309,6 +309,9 @@ class ControleDetalhes:
                 "canal": "Canal"}.get(conv.tipo, "Conversa")
         linhas = ["Nome: %s" % conv.nome, "Tipo: %s" % tipo,
                   "Conta: %s, %s" % (conta, servico)]
+        if self._pode_temporarias():
+            linhas.append("Mensagens temporárias: %s" % m.texto_periodo(
+                self._conv_atual().temporaria_s, conv.servico))
         if conv.somente_leitura:
             linhas.append("Você não pode escrever nesta conversa.")
         return linhas
@@ -382,9 +385,51 @@ class ControleDetalhes:
         return linhas
 
     # ---------------------------------------------------------- botoes
+    def _conv_atual(self):
+        """A conversa como esta agora na lista (o prazo das mensagens
+        temporarias pode ter mudado)."""
+        return self.jan.indice.get(self.conv.chave, self.conv)
+
+    def _pode_temporarias(self):
+        return bool(self.prov is not None and getattr(
+            self.prov, "PODE_TEMPORARIAS", False) and
+            self.conv.tipo in ("privada", "grupo"))
+
+    def temporarias(self):
+        """Escolhe o prazo das mensagens temporarias da conversa."""
+        conv = self._conv_atual()
+        periodos = m.periodos_temporarias(
+            self.jan.contas.servico(conv.conta_id))
+        dlg = wx.SingleChoiceDialog(
+            self.dlg, "Por quanto tempo as mensagens desta conversa ficam "
+            "antes de sumir? As que já existem não mudam.",
+            "Mensagens temporárias de %s" % conv.nome,
+            [r for _, r in periodos])
+        atual = [s for s, _ in periodos].index(conv.temporaria_s) \
+            if conv.temporaria_s in [s for s, _ in periodos] else 0
+        dlg.SetSelection(atual)
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            segundos = periodos[dlg.GetSelection()][0]
+        finally:
+            dlg.Destroy()
+        if segundos == conv.temporaria_s:
+            return
+        self.prov.definir_temporaria(conv.id, segundos)
+        self.jan.fala.falar("Mudando as mensagens temporárias.",
+                            interromper=True)
+        wx.CallLater(2500, self._depois_de_temporarias)
+
+    def _depois_de_temporarias(self):
+        if self.dlg is not None:
+            self._atualizar()
+
     def _botoes(self):
         conv, d = self.conv, self.dados or {}
         botoes = []
+        if self._pode_temporarias():
+            botoes.append(("Mensagens &temporárias...", self.temporarias))
         if conv.tipo == "privada":
             botoes.append(("&Editar contato", self.editar_contato))
             botoes.append(("&Mídias", self.midias))

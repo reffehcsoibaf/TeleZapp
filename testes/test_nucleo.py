@@ -26,6 +26,12 @@ def test_hora_legivel():
     assert m.hora_legivel(AGORA - 10 * 86400, AGORA) == "03/10 15:00"
     assert m.hora_legivel(AGORA - 400 * 86400, AGORA).count("/") == 2
     assert m.hora_legivel(0, AGORA) == ""
+    # datas que o Windows recusa (zero do Go, milissegundos, infinito) nao
+    # derrubam nada
+    for ruim in (-62135596800, -1, 10 ** 12, 10 ** 18, float("inf")):
+        assert m.hora_legivel(ruim, AGORA) == ""
+        assert m.texto_presenca("offline", ruim, "recentemente") ==             "visto por último recentemente"
+        assert m.texto_presenca("offline", ruim) == ""
 
 
 def test_estilos():
@@ -465,8 +471,9 @@ def test_salvar_conversa_identifica_quem_enviou():
     assert m.quem_enviou(sem_autor, priv) == "Ana Souza"
     assert m.quem_enviou(sem_autor, grupo, lambda x: "Carlos") == "Carlos"
     assert m.quem_enviou(sem_autor, grupo) == "+5551999998888"
-    assert m.quem_enviou(msg(autor="", remetente="1234@lid"),
-                          grupo) == "1234@lid"
+    # o endereco interno (@lid) nunca vai para a lista nem para a fala
+    assert m.quem_enviou(msg(autor="", remetente="101198187253781@lid"),
+                         grupo) == "Participante final 3781"
     assert m.quem_enviou(msg(autor=""), grupo) == "Desconhecido"
 
 
@@ -692,3 +699,33 @@ def test_conferir_o_que_vai_ser_publicado_como_status(tmp_path):
     assert "precisa de uma foto" in ps.validar("telegram", "so texto", "")[2]
     assert not ps.validar("telegram", "legenda", str(foto))[2]
     assert "passa de 200" in ps.validar("telegram", "a" * 201, str(foto))[2]
+
+
+# ------------------------------------------------ mensagens temporarias
+def test_periodos_e_texto_das_temporarias():
+    assert m.texto_periodo(0) == "desligadas"
+    assert m.texto_periodo(86400) == "24 horas"
+    assert m.texto_periodo(604800) == "7 dias"
+    assert m.texto_periodo(7776000) == "90 dias"
+    assert m.texto_periodo(2678400) == "1 mês"
+    assert m.texto_periodo(3 * 86400) == "3 dias"
+    assert m.texto_periodo(7200) == "2 horas"
+    assert [s for s, _ in m.periodos_temporarias("whatsapp")] == [
+        0, 86400, 604800, 7776000]
+    assert [s for s, _ in m.periodos_temporarias("telegram")] == [
+        0, 86400, 604800, 2678400]
+    assert m.expira_em(1000, 604800) == 1000 + 604800
+    assert m.expira_em(1000, 0) == 0.0 and m.expira_em(0, 60) == 0.0
+
+
+def test_mensagem_temporaria_na_linha_e_nos_detalhes():
+    x = m.Mensagem("c", "1", "1", data=AGORA, texto="oi", expira=AGORA + 3600)
+    assert "(temporária)" in m.formatar(x, 1)
+    texto = m.texto_temporaria(x, AGORA)
+    assert texto.startswith("temporária, some ") and "às" in texto
+    assert "Mensagem temporária, some" in m.detalhes(x, "Ana", AGORA)
+    assert m.texto_temporaria(m.Mensagem("c", "1", "2"), AGORA) == ""
+    assert "(temporária)" not in m.formatar(
+        m.Mensagem("c", "1", "2", data=AGORA, texto="oi"), 1)
+    vencida = m.Mensagem("c", "1", "3", data=AGORA, expira=AGORA - 5)
+    assert "já passou do prazo" in m.texto_temporaria(vencida, AGORA)

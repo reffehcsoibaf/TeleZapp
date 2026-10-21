@@ -341,6 +341,29 @@ automáticos): a lista do que falta testar fica na memória do projeto.
   memória), opcional e desligado por padrão, sem trocar o acesso atual às
   mensagens pelo WPPConnect. O responsável deixou o assunto de lado.
 
+## Versão 2026.10.20.0 (20/10/2026): mensagens temporárias
+
+- **Identificar e definir**: o WhatsApp manda o prazo em cada mensagem
+  (`contextInfo.expiration`) e o ajuste da conversa em
+  `ProtocolMessage.EPHEMERAL_SETTING`; o Telegram, `ttl_period` na mensagem e
+  o aviso de serviço `MessageActionSetMessagesTTL`. Períodos: WhatsApp 24
+  horas, 7 dias e 90 dias; Telegram 1 dia, 1 semana e 1 mês; 0 desliga. Em
+  Detalhes da conversa (só conversas e grupos; canais não têm). Chats
+  secretos do Telegram ficam de fora (o Telethon não os cobre).
+- **Enviar**: o whatsmeow não põe o prazo sozinho, então o TeleZapp o põe em
+  cada mensagem (`com_expiracao`); sem isso a mensagem enviada daqui não some
+  no celular. O Telegram aplica o prazo da conversa no servidor.
+- **Apagar aqui**: cada aparelho apaga no prazo; o TeleZapp apaga daqui (e a
+  mídia baixada) por uma varredura ao abrir e a cada minuto, com a opção
+  `temporarias_apagar_aqui` (Privacidade, ligada, decisão do responsável).
+  Usa `limpeza.apagar_mensagem`, que registra para a sincronia não trazer de
+  volta. Desligada, a mensagem fica e a linha diz que passou do prazo.
+- **Não verificado no app real**: nada disso foi visto em conta real
+  (mudar o prazo no WhatsApp, receber e enviar com prazo, a unidade que a DLL
+  espera, o aviso do Telegram). O `set_disappearing_timer` do neonize não
+  serve (confunde nanossegundos e milissegundos e manda a hora errada), por
+  isso o TeleZapp chama a DLL direto.
+
 ## Versão 2026.10.19.1 (19/10/2026): instalar e portátil
 
 - **Como o NVDA, sem administrador**: o executável de uma cópia portátil
