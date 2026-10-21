@@ -3790,3 +3790,160 @@ def test_pular_no_audio_que_toca_ao_fundo(j):
     j._pular_audio(5)
     assert ditas[-1] == "Nenhum áudio tocando."
     j.audio = None
+
+
+# ------------------------------------------------ barras de progresso
+class _BarraFalsa:
+    criadas = []
+
+    def __init__(self, pai, titulo, texto="", ao_cancelar=None):
+        self.titulo, self.ao_cancelar = titulo, ao_cancelar
+        self.passos, self.fechada = [], False
+        _BarraFalsa.criadas.append(self)
+
+    def mostrar(self):
+        self.mostrada = True
+
+    def atualizar(self, percentual=None, texto=None):
+        self.passos.append((percentual, texto))
+
+    def fechar(self):
+        self.fechada = True
+
+
+def test_atualizar_mostra_a_barra_e_fecha_no_fim(j, monkeypatch):
+    _BarraFalsa.criadas.clear()
+    monkeypatch.setattr(jm, "JanelaDeProgresso", _BarraFalsa)
+    monkeypatch.setattr(jm.instalacao, "pasta_do_programa",
+                        lambda: r"C:\x\TeleZapp")
+    monkeypatch.setattr(jm.atualizador, "pasta_de_espera",
+                        lambda p: r"C:\x\TeleZapp.atualizacao")
+
+    def baixar(lanc, pasta, progresso, abrir=None, cancelado=None):
+        progresso(50, 100)
+        progresso(100, 100)
+        return "arquivo.zip"
+
+    def extrair(arquivo, pasta, progresso=None):
+        progresso(1, 2)
+        progresso(2, 2)
+        return "nova"
+    aplicado = []
+    monkeypatch.setattr(jm.atualizador, "baixar", baixar)
+    monkeypatch.setattr(jm.atualizador, "extrair", extrair)
+    monkeypatch.setattr(jm.atualizador, "aplicar",
+                        lambda programa, nova: aplicado.append((programa,
+                                                                nova)))
+    j.Close = lambda *a, **k: True
+    lanc = jm.atualizacao.Lancamento("2026.11.1.0", "", "p", False,
+                                     "TeleZapp.zip", "u", "h", 100)
+    j._atualizar(lanc)
+    for _ in range(200):                  # o trabalho roda numa thread
+        if aplicado:
+            break
+        time.sleep(0.02)
+    barra = _BarraFalsa.criadas[0]
+    assert barra.titulo.startswith("Atualizando") and barra.mostrada
+    pcts = [p for p, _ in barra.passos if p is not None]
+    assert pcts == sorted(pcts) and pcts[-1] == 100 and 45 in pcts
+    assert barra.fechada and aplicado == [(r"C:\x\TeleZapp", "nova")]
+
+
+def test_atualizar_cancelado_fecha_a_barra_sem_trocar_nada(j, monkeypatch):
+    _BarraFalsa.criadas.clear()
+    monkeypatch.setattr(jm, "JanelaDeProgresso", _BarraFalsa)
+    monkeypatch.setattr(jm.instalacao, "pasta_do_programa",
+                        lambda: r"C:\x\TeleZapp")
+    monkeypatch.setattr(jm.atualizador, "pasta_de_espera",
+                        lambda p: r"C:\x\TeleZapp.atualizacao")
+
+    def baixar(lanc, pasta, progresso, abrir=None, cancelado=None):
+        _BarraFalsa.criadas[0].ao_cancelar()        # a pessoa cancelou
+        assert cancelado()
+        raise jm.atualizador.ErroAtualizacao("Atualização cancelada.")
+    aplicado, ditas = [], []
+    monkeypatch.setattr(jm.atualizador, "baixar", baixar)
+    monkeypatch.setattr(jm.atualizador, "aplicar",
+                        lambda *a: aplicado.append(a))
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    lanc = jm.atualizacao.Lancamento("2026.11.1.0", "", "p", False,
+                                     "TeleZapp.zip", "u", "h", 100)
+    j._atualizar(lanc)
+    for _ in range(200):
+        if j._atualizando is False:
+            break
+        time.sleep(0.02)
+    assert _BarraFalsa.criadas[0].fechada and aplicado == []
+    assert ditas[-1] == "Atualização cancelada."
+    assert j._atualizando is False
+
+
+def test_download_pedido_so_abre_a_barra_se_demora_e_fecha_no_fim(
+        j, monkeypatch):
+    _BarraFalsa.criadas.clear()
+    monkeypatch.setattr(jm, "JanelaDeProgresso", _BarraFalsa)
+    agora = [100.0]
+    monkeypatch.setattr(jm.time, "monotonic", lambda: agora[0])
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.abrindo = ("t1", "10", "7")
+    j.b.publicar(ev.ProgressoMidia("t1", "10", "7", 5))
+    assert _BarraFalsa.criadas == []         # ainda nao passou de 1 segundo
+    agora[0] = 101.5
+    j.b.publicar(ev.ProgressoMidia("t1", "10", "7", 40))
+    barra = _BarraFalsa.criadas[0]
+    assert barra.titulo == "Baixando mídia" and barra.passos[-1][0] == 40
+    assert callable(barra.ao_cancelar)
+    j.b.publicar(ev.ProgressoMidia("t1", "10", "7", 60))
+    assert barra.passos[-1][0] == 60 and len(_BarraFalsa.criadas) == 1
+    assert not [d for d in ditas if "por cento" in d]   # a barra e o aviso
+    j.b.publicar(ev.MidiaBaixada("t1", "10", "7", cancelada=True))
+    assert barra.fechada and j._barras == {}
+
+
+def test_barra_de_download_cancela_e_a_opcao_desliga(j, monkeypatch):
+    _BarraFalsa.criadas.clear()
+    monkeypatch.setattr(jm, "JanelaDeProgresso", _BarraFalsa)
+    agora = [10.0]
+    monkeypatch.setattr(jm.time, "monotonic", lambda: agora[0])
+    cancelados = []
+    j.midias = types.SimpleNamespace(
+        baixando=lambda c: True, cancelar=lambda c: cancelados.append(c))
+    j.abrindo = ("t1", "10", "7")
+    j.b.publicar(ev.ProgressoMidia("t1", "10", "7", 1))
+    agora[0] = 12.0
+    j.b.publicar(ev.ProgressoMidia("t1", "10", "7", 30))
+    _BarraFalsa.criadas[0].ao_cancelar()
+    assert cancelados == [("t1", "10", "7")]
+    j.b.publicar(ev.MidiaBaixada("t1", "10", "7", cancelada=True))
+    # opcao desligada: nenhuma barra, o avanco so vai para o titulo e a fala
+    _BarraFalsa.criadas.clear()
+    j.cfg.set("barra_de_progresso", False)
+    j.abrindo = ("t1", "10", "8")
+    j.b.publicar(ev.ProgressoMidia("t1", "10", "8", 1))
+    agora[0] = 20.0
+    j.b.publicar(ev.ProgressoMidia("t1", "10", "8", 50))
+    assert _BarraFalsa.criadas == []
+
+
+def test_envio_grande_abre_a_barra_e_fecha_no_fim_ou_na_falha(j, monkeypatch):
+    _BarraFalsa.criadas.clear()
+    monkeypatch.setattr(jm, "JanelaDeProgresso", _BarraFalsa)
+    agora = [50.0]
+    monkeypatch.setattr(jm.time, "monotonic", lambda: agora[0])
+    j.b.publicar(ev.ProgressoEnvio("t1", "20", 3))
+    agora[0] = 52.0
+    j.b.publicar(ev.ProgressoEnvio("t1", "20", 30))
+    barra = _BarraFalsa.criadas[0]
+    assert barra.titulo == "Enviando arquivo" and barra.ao_cancelar is None
+    j.b.publicar(ev.ProgressoEnvio("t1", "20", 100))
+    assert barra.fechada and j._barras == {}
+    # outro envio que falha no meio tambem fecha a barra
+    agora[0] = 60.0
+    j.b.publicar(ev.ProgressoEnvio("t1", "20", 2))
+    agora[0] = 62.0
+    j.b.publicar(ev.ProgressoEnvio("t1", "20", 40))
+    segunda = _BarraFalsa.criadas[1]
+    j.b.publicar(ev.EnvioFalhou("t1", "20", "arquivo", "sem conexão",
+                                devolver_texto=False, tipo=m.DOCUMENTO))
+    assert segunda.fechada and j._barras == {}

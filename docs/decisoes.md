@@ -341,6 +341,20 @@ automáticos): a lista do que falta testar fica na memória do projeto.
   memória), opcional e desligado por padrão, sem trocar o acesso atual às
   mensagens pelo WPPConnect. O responsável deixou o assunto de lado.
 
+## Versão 2026.10.20.1 (20/10/2026): barras de progresso
+
+- **Por que**: o NVDA toca bipes que sobem do grave ao agudo numa barra de
+  progresso (só na janela em primeiro plano); isso diz mais ao cego do que a
+  fala "20 por cento" (pedido do responsável). Avanços longos abrem uma
+  janela com `wx.Gauge`: atualizar (com Cancelar), instalar, criar portátil,
+  fazer e restaurar backup, download pedido (Cancelar) e envio grande. Os dois
+  últimos só abrem depois de 1 s e há a opção `barra_de_progresso` para eles.
+- **Cuidado**: a janela toma o foco; no envio, quem está digitando perde as
+  teclas para a janela (ela não tem Enter padrão, então um Enter perdido não
+  cancela nada). Por isso a opção e o atraso de 1 s.
+- **Não visto no app real**: nada disso foi visto com o NVDA ligado (bipes,
+  foco na volta à janela principal).
+
 ## Versão 2026.10.20.0 (20/10/2026): mensagens temporárias
 
 - **Identificar e definir**: o WhatsApp manda o prazo em cada mensagem

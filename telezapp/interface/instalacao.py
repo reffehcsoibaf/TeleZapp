@@ -10,6 +10,7 @@ import traceback
 import wx
 
 from telezapp import NOME, VERSAO, config
+from telezapp.interface.progresso import JanelaDeProgresso
 from telezapp.nucleo import instalacao as ins
 
 
@@ -120,31 +121,39 @@ log = logging.getLogger("telezapp.instalacao")
 
 
 def com_espera(pai, titulo, trabalho):
-    """Roda `trabalho()` numa thread, com uma janela de espera aberta.
-    Devolve (resultado, erro): erro e o texto da excecao, se houve."""
+    """Roda `trabalho(progresso)` numa thread, com uma janela de barra de
+    progresso aberta (o NVDA toca os bipes da barra). `progresso(pct, texto)`:
+    pct de 0 a 100, ou None quando nao se sabe quanto falta. Devolve
+    (resultado, erro): erro e o texto da excecao, se houve."""
     saida = {}
+    estado = {"pct": None, "texto": ""}
+
+    def progresso(pct, texto=""):
+        estado["pct"], estado["texto"] = pct, texto or estado["texto"]
 
     def corpo():
         try:
-            saida["r"] = trabalho()
+            saida["r"] = trabalho(progresso)
         except Exception as e:
             log.error("%s:\n%s", titulo, traceback.format_exc())
             saida["e"] = str(e) or e.__class__.__name__
     th = threading.Thread(target=corpo, daemon=True, name="instalacao")
     th.start()
-    dlg = wx.ProgressDialog(titulo, "Aguarde, isto leva alguns instantes...",
-                            parent=pai, style=wx.PD_APP_MODAL)
+    barra = JanelaDeProgresso(pai, titulo, "Aguarde...")
+    barra.mostrar()
     try:
         while th.is_alive():
-            dlg.Pulse()
+            barra.atualizar(estado["pct"], estado["texto"] or None)
             wx.MilliSleep(100)
             wx.YieldIfNeeded()
+        if "e" not in saida:
+            barra.atualizar(100)
     finally:
-        dlg.Destroy()
+        barra.fechar()
     return saida.get("r"), saida.get("e")
 
 
-def _fonte_padrao():
+def _fonte_padrao(progresso=None):
     """A pasta do proprio programa em execucao."""
     return contextlib.nullcontext(ins.pasta_do_programa())
 
@@ -165,11 +174,16 @@ def fluxo_instalar(pai, fonte=None):
         r = dlg.resultado()
     finally:
         dlg.Destroy()
-    def trabalho():
-        with fonte() as programa:
+    def trabalho(progresso):
+        # o instalador de um arquivo so primeiro extrai o zip embutido (40%)
+        extrai = fonte is not _fonte_padrao
+        with fonte(ins.faixa(progresso, 0, 40) if extrai else None) \
+                as programa:
             return ins.instalar(
                 programa, r["pasta"], r["atalho_menu"], r["atalho_area"],
-                portatil if r["dados"] else None)
+                portatil if r["dados"] else None,
+                progresso=ins.faixa(progresso, 40, 100) if extrai
+                else progresso)
     res, erro = com_espera(pai, "Instalando o %s" % NOME, trabalho)
     if erro:
         wx.MessageBox("Não consegui instalar: %s" % erro, NOME,
@@ -199,10 +213,14 @@ def fluxo_criar_portatil(pai, pasta_inicial, fonte=None):
     dados = config.pasta_dados()
     fonte = fonte or _fonte_padrao
 
-    def trabalho():
-        with fonte() as programa:
-            return ins.criar_portatil(programa, r["pasta"],
-                                      dados if r["dados"] else None)
+    def trabalho(progresso):
+        extrai = fonte is not _fonte_padrao
+        with fonte(ins.faixa(progresso, 0, 40) if extrai else None) \
+                as programa:
+            return ins.criar_portatil(
+                programa, r["pasta"], dados if r["dados"] else None,
+                progresso=ins.faixa(progresso, 40, 100) if extrai
+                else progresso)
     alvo, erro = com_espera(pai, "Criando a cópia portátil", trabalho)
     if erro:
         wx.MessageBox("Não consegui criar a cópia: %s" % erro, NOME,
@@ -360,9 +378,9 @@ def oferecer_backup(pai, cfg_dados, copiar_banco=None, pasta_inicial=""):
     if not caminho.lower().endswith(".zip"):
         caminho += ".zip"
     pasta = config.pasta_dados()
-    _, erro = com_espera(pai, "Fazendo o backup", lambda: bk.criar(
+    _, erro = com_espera(pai, "Fazendo o backup", lambda progresso: bk.criar(
         caminho, pasta, dict(cfg_dados), partes, senha,
-        copiar_banco=copiar_banco))
+        copiar_banco=copiar_banco, progresso=progresso))
     if erro:
         wx.MessageBox("Não consegui fazer o backup: %s\n\nA desinstalação "
                       "não foi feita." % erro, NOME,

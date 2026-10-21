@@ -62,9 +62,10 @@ def _hash_esperado(lanc, abrir):
     return achou.group(1).lower()
 
 
-def baixar(lanc, pasta, progresso=None, abrir=_abrir):
+def baixar(lanc, pasta, progresso=None, abrir=_abrir, cancelado=None):
     """Baixa o zip da Release para `pasta` e confere o SHA-256. Devolve o
-    caminho do zip. `progresso(feito, total)`."""
+    caminho do zip. `progresso(feito, total)`; `cancelado()` devolve True
+    quando a pessoa desistiu (o arquivo parcial e apagado)."""
     if not (lanc.url_zip and lanc.url_hash and lanc.nome_zip):
         raise ErroAtualizacao("Esta versão não tem o arquivo para "
                               "atualização automática.")
@@ -79,12 +80,18 @@ def baixar(lanc, pasta, progresso=None, abrir=_abrir):
         with abrir(lanc.url_zip) as r, open(destino, "wb") as f:
             total = int(r.headers.get("Content-Length") or lanc.tamanho or 0)
             for bloco in iter(lambda: r.read(1 << 20), b""):
+                if cancelado is not None and cancelado():
+                    raise ErroAtualizacao("Atualização cancelada.")
                 f.write(bloco)
                 h.update(bloco)
                 feito += len(bloco)
                 if progresso:
                     progresso(feito, total)
     except ErroAtualizacao:
+        try:
+            os.remove(destino)
+        except OSError:
+            pass
         raise
     except OSError as e:
         raise ErroAtualizacao("Não consegui baixar a atualização (%s). "
@@ -96,8 +103,9 @@ def baixar(lanc, pasta, progresso=None, abrir=_abrir):
     return destino
 
 
-def extrair(arquivo_zip, pasta):
-    """Extrai o zip em `pasta` e devolve a pasta TeleZapp de dentro dela."""
+def extrair(arquivo_zip, pasta, progresso=None):
+    """Extrai o zip em `pasta` e devolve a pasta TeleZapp de dentro dela.
+    `progresso(feito, total)`: quantos itens ja foram extraidos."""
     shutil.rmtree(pasta, ignore_errors=True)
     os.makedirs(pasta)
     raiz = os.path.realpath(pasta)
@@ -112,7 +120,10 @@ def extrair(arquivo_zip, pasta):
                 if alvo != raiz and not alvo.startswith(raiz + os.sep):
                     raise ErroAtualizacao("O arquivo da atualização tem "
                                           "caminhos inválidos.")
-            z.extractall(pasta)
+            for i, n in enumerate(nomes, 1):
+                z.extract(n, pasta)
+                if progresso:
+                    progresso(i, len(nomes))
     except zipfile.BadZipFile:
         raise ErroAtualizacao("O arquivo da atualização está corrompido.")
     return os.path.join(pasta, "TeleZapp")

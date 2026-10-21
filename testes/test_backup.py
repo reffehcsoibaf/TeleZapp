@@ -197,3 +197,25 @@ def test_chaves_de_ia_so_vao_em_backup_com_senha(tmp_path):
     extra = {}
     bk.restaurar(ruim, "s", ["configuracoes"], str(tmp_path / "d"), extra)
     assert extra == {"ia_chaves": 1}
+
+
+def test_backup_e_restauracao_informam_o_avanco(tmp_path):
+    origem = tmp_path / "a"
+    cfg = preparar(origem)
+    for i in range(5):
+        (origem / "midias" / "w1" / ("f%d.jpg" % i)).write_bytes(b"x" * 10)
+    arquivo = str(tmp_path / "b.zip")
+    vistos = []
+    bk.criar(arquivo, str(origem), cfg,
+             ["configuracoes", "contas", "conversas", "midias"], "senha",
+             progresso=lambda pct, texto="": vistos.append((pct, texto)))
+    pcts = [p for p, _ in vistos]
+    assert pcts == sorted(pcts) and pcts[-1] == 100
+    assert all(0 <= p <= 100 for p in pcts) and len(set(pcts)) > 3
+    assert "Copiando as mídias" in {t for _, t in vistos}
+    # restaurar tambem informa
+    vistos.clear()
+    bk.restaurar(arquivo, "senha", ["contas", "conversas", "midias"],
+                 str(tmp_path / "c"),
+                 progresso=lambda pct, texto="": vistos.append(pct))
+    assert vistos == sorted(vistos) and vistos[-1] >= 90

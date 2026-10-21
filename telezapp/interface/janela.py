@@ -20,6 +20,7 @@ from telezapp import NOME, VERSAO, config
 from telezapp.acessibilidade.fala import Fala, bipe, definir_sons
 from telezapp.interface import colagem, dialogos, visualizadores
 from telezapp.interface import emojis as ui_emojis
+from telezapp.interface.progresso import JanelaDeProgresso
 from telezapp.interface.publicar_status import DialogoPublicarStatus
 from telezapp.interface.detalhes import ControleDetalhes, ControleRecibos
 from telezapp.interface.chamada import DialogoChamada
@@ -399,6 +400,8 @@ class Janela(wx.Frame):
         self.abrindo = None           # chave da midia que abre ao baixar
         self.abrindo_abrir = True     # False: so baixar, sem abrir
         self.progresso_falado = 0
+        self._barras = {}             # chave -> JanelaDeProgresso aberta
+        self._inicio_progresso = {}   # chave -> quando o avanco comecou
         self.progresso_envios = {}    # (conta, conversa) -> % do envio
         self._envio_falado = {}       # idem: ultimo marco falado
         self.estados = {}             # conta_id -> estado
@@ -5278,12 +5281,43 @@ class Janela(wx.Frame):
         if r == wx.YES:
             self._parear_whatsapp_de_novo(conta_id)
 
+    def _barra_de_transferencia(self, chave, pct, titulo, cancelar=None):
+        """A janela com barra de progresso de um download pedido ou de um
+        envio grande: so abre se a transferencia passa de um segundo (as
+        rapidas nao tomam o foco). Devolve True se a barra esta aberta (a
+        fala do avanco fica quieta, o NVDA toca os bipes da barra)."""
+        if not self.cfg.get("barra_de_progresso"):
+            return False
+        agora = time.monotonic()
+        inicio = self._inicio_progresso.setdefault(chave, agora)
+        barra = self._barras.get(chave)
+        if barra is None:
+            if agora - inicio < 1.0 or pct >= 90:
+                return False
+            barra = JanelaDeProgresso(self, titulo, "%s: %d%%" % (titulo, pct),
+                                      ao_cancelar=cancelar)
+            self._barras[chave] = barra
+            barra.mostrar()
+        barra.atualizar(pct, "%s: %d%%" % (titulo, pct))
+        return True
+
+    def _fechar_barra_de_transferencia(self, chave):
+        self._inicio_progresso.pop(chave, None)
+        barra = self._barras.pop(chave, None)
+        if barra is not None:
+            barra.fechar()
+
     def _ev_progresso_midia(self, e):
         chave = (e.conta_id, e.conversa_id, e.mensagem_id)
         if self.progresso_midias.get(chave) != e.percentual:
             self.progresso_midias[chave] = e.percentual
             self._atualizar_titulo()
         if chave != self.abrindo:
+            return
+        if self._barra_de_transferencia(
+                ("baixando",) + chave, e.percentual, "Baixando mídia",
+                self._cancelar_download):
+            self.SetStatusText("Baixando mídia: %d%%" % e.percentual)
             return
         passo = int(self.cfg.get("midias_passo_progresso") or 0)
         marco = e.percentual // passo * passo if passo > 0 else 0
@@ -5304,6 +5338,9 @@ class Janela(wx.Frame):
         if antes != e.percentual:
             self._atualizar_titulo()
         self.SetStatusText("Enviando arquivo: %d%%" % e.percentual)
+        if self._barra_de_transferencia(("enviando",) + chave, e.percentual,
+                                        "Enviando arquivo"):
+            return
         if e.percentual < self._envio_falado.get(chave, 0):
             self._envio_falado[chave] = 0          # outro envio na conversa
         passo = int(self.cfg.get("midias_passo_progresso") or 0)
@@ -5313,12 +5350,14 @@ class Janela(wx.Frame):
             self.fala.falar("%d por cento" % marco)
 
     def _fim_do_envio(self, chave):
+        self._fechar_barra_de_transferencia(("enviando",) + tuple(chave))
         if self.progresso_envios.pop(chave, None) is not None:
             self._atualizar_titulo()
         self._envio_falado.pop(chave, None)
 
     def _ev_midia_baixada(self, e):
         chave = (e.conta_id, e.conversa_id, e.mensagem_id)
+        self._fechar_barra_de_transferencia(("baixando",) + chave)
         if self.progresso_midias.pop(chave, None) is not None:
             self._atualizar_titulo()
         pedida = chave == self.abrindo
@@ -5594,11 +5633,14 @@ class Janela(wx.Frame):
         self.cfg.set("pasta_backup", os.path.dirname(caminho))
         dados = dict(self.cfg.dados)
 
+        andamento, fechar_barra = self._barra_de_tarefa("Fazendo o backup")
+
         def trabalho():
             try:
                 resumo = backup.criar(
                     caminho, config.pasta_dados(), dados, partes, senha,
-                    copiar_banco=self.banco.copiar_para)
+                    copiar_banco=self.banco.copiar_para,
+                    progresso=andamento)
                 texto = "Backup salvo em %s%s." % (
                     caminho, " (com senha)" if senha else "")
                 grave = False
@@ -5608,11 +5650,33 @@ class Janela(wx.Frame):
                           traceback.format_exc())
                 texto = "Não consegui fazer o backup: %s" % e
                 grave = True
+            fechar_barra()
             wx.CallAfter(self._fim_do_backup, texto, grave)
         self.fala.falar("Fazendo o backup. Aviso quando terminar.",
                         interromper=True)
         threading.Thread(target=trabalho, daemon=True,
                          name="backup").start()
+
+    def _barra_de_tarefa(self, titulo, ao_cancelar=None):
+        """Abre uma janela com barra de progresso para uma tarefa que roda
+        numa thread. Devolve (andamento, fechar): `andamento(pct, texto)` e
+        `fechar()` podem ser chamadas da thread (vao para a janela pelo
+        wx.CallAfter) e so atualizam quando a porcentagem muda."""
+        barra = JanelaDeProgresso(self, titulo, "%s: 0%%" % titulo,
+                                  ao_cancelar=ao_cancelar)
+        barra.mostrar()
+        ultimo = [-1]
+
+        def andamento(pct, texto=""):
+            if pct is None or int(pct) == ultimo[0]:
+                return
+            ultimo[0] = int(pct)
+            wx.CallAfter(barra.atualizar, pct, "%s: %d%%" % (
+                texto or titulo, pct))
+
+        def fechar():
+            wx.CallAfter(barra.fechar)
+        return andamento, fechar
 
     def _fim_do_backup(self, texto, grave):
         bipe("erro" if grave else "tarefa_pronta")
@@ -5673,11 +5737,14 @@ class Janela(wx.Frame):
             if r != wx.YES:
                 return
 
+        andamento, fechar_barra = self._barra_de_tarefa("Restaurando o backup")
+
         def trabalho():
             try:
                 extra = {}
                 opcoes, espera = backup.restaurar(
-                    arquivo, senha, partes, config.pasta_dados(), extra)
+                    arquivo, senha, partes, config.pasta_dados(), extra,
+                    progresso=andamento)
                 erro = ""
             except backup.ErroBackup as e:
                 opcoes, espera, erro, extra = {}, [], str(e), {}
@@ -5685,6 +5752,7 @@ class Janela(wx.Frame):
                 log.error("erro ao restaurar:\n%s", traceback.format_exc())
                 opcoes, espera, erro, extra = {}, [], \
                     "Erro ao restaurar: %s" % e, {}
+            fechar_barra()
             wx.CallAfter(self._fim_da_restauracao, opcoes, espera, erro,
                          extra.get("ia_chaves", 0))
         self.fala.falar("Restaurando o backup. Aviso quando terminar.",
@@ -5876,27 +5944,39 @@ class Janela(wx.Frame):
     @seguro
     def _atualizar(self, lanc):
         """Baixa a versao nova, confere o hash, extrai e reinicia trocando a
-        pasta do programa."""
+        pasta do programa. Uma janela com barra de progresso mostra o avanco
+        (o NVDA toca bipes do grave ao agudo) e deixa cancelar."""
         if getattr(self, "_atualizando", False):
             return
         programa = instalacao.pasta_do_programa()
         espera = atualizador.pasta_de_espera(programa)
         self._atualizando = True
-        ultimo = [-1]
+        cancelou = [False]
+        barra = JanelaDeProgresso(
+            self, "Atualizando o %s" % NOME,
+            "Baixando a versão %s: 0%%" % lanc.versao,
+            ao_cancelar=lambda: cancelou.__setitem__(0, True))
+        self._barra_atualizacao = barra
+        barra.mostrar()
 
-        def progresso(feito, total):
+        def baixando(feito, total):
             if total:
-                pct = feito * 100 // total // 20 * 20
-                if pct != ultimo[0]:
-                    ultimo[0] = pct
-                    wx.CallAfter(self.fala.falar,
-                                 "Baixando a atualização, %d%%" % pct)
+                pct = feito * 90 // total        # baixar vai ate 90%
+                wx.CallAfter(barra.atualizar, pct,
+                             "Baixando a versão %s: %d%%" % (
+                                 lanc.versao, feito * 100 // total))
+
+        def extraindo(feito, total):
+            wx.CallAfter(barra.atualizar, 90 + feito * 10 // max(total, 1),
+                         "Preparando a atualização")
 
         def trabalho():
             try:
-                arquivo = atualizador.baixar(lanc, espera, progresso)
+                arquivo = atualizador.baixar(
+                    lanc, espera, baixando,
+                    cancelado=lambda: cancelou[0])
                 nova = atualizador.extrair(
-                    arquivo, os.path.join(espera, "novo"))
+                    arquivo, os.path.join(espera, "novo"), extraindo)
                 erro = ""
             except atualizador.ErroAtualizacao as e:
                 nova, erro = None, str(e)
@@ -5904,15 +5984,22 @@ class Janela(wx.Frame):
                 log.error("erro ao atualizar:\n%s", traceback.format_exc())
                 nova, erro = None, "Não consegui atualizar: %s" % e
             wx.CallAfter(self._atualizacao_pronta, nova, erro, programa)
-        self.fala.falar("Baixando a atualização. Aviso quando terminar.",
-                        interromper=True)
+        self.fala.falar("Baixando a atualização.", interromper=True)
         threading.Thread(target=trabalho, daemon=True,
                          name="atualizar").start()
 
     @seguro
     def _atualizacao_pronta(self, nova, erro, programa):
         self._atualizando = False
+        barra = getattr(self, "_barra_atualizacao", None)
+        self._barra_atualizacao = None
+        if barra is not None:
+            barra.atualizar(100 if not erro else None)
+            barra.fechar()
         if erro:
+            if erro.startswith("Atualização cancelada"):
+                self.fala.falar("Atualização cancelada.", interromper=True)
+                return
             bipe("erro")
             self.fala.falar(erro, interromper=True)
             wx.MessageBox(erro, NOME, wx.OK | wx.ICON_WARNING, self)

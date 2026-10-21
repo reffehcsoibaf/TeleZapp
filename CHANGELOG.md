@@ -3,6 +3,25 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.20.1
+
+- Barras de progresso (`interface/progresso.JanelaDeProgresso`, um `wx.Dialog`
+  sem modal com `wx.Gauge`; Cancelar e Esc só quando há `ao_cancelar`; sem
+  Enter padrão): o NVDA só toca os bipes da barra de uma janela em primeiro
+  plano. Usada em: atualização (`Janela._atualizar`: baixar vai a 90%, extrair
+  a 100%; `atualizador.baixar(.., cancelado)` apaga o parcial e
+  `atualizador.extrair(.., progresso)`), `instalacao.com_espera(pai, titulo,
+  trabalho(progresso))` (instalar, criar portátil, backup do desinstalar; o
+  instalador de um arquivo só dá 40% à extração do zip embutido),
+  `nucleo/instalacao`: `faixa`, cópia do programa e dos dados por bytes e
+  arquivos (`instalar`, `criar_portatil`, `extrair_pacote` com
+  `progresso(pct, texto)`), `backup.criar` e `backup.restaurar`
+  (`progresso(pct, texto)` por arquivo; `Janela._barra_de_tarefa`),
+  downloads pedidos e envios por arquivo (`_barra_de_transferencia`: só abre
+  depois de 1 s e abaixo de 90%; fecha em `MidiaBaixada` e `_fim_do_envio`).
+  Opção `barra_de_progresso` (Mídias, ligada) vale para as transferências;
+  com a barra aberta, não se fala "N por cento".
+
 ## 2026.10.20.0
 
 - Menus: o Menu único com submenus continua, em nova ordem (`_criar_menus`):

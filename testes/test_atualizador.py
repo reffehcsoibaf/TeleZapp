@@ -142,3 +142,26 @@ def test_script_troca_a_pasta_e_mantem_os_dados(tmp_path):
     time.sleep(0.5)
     au.limpar_restos(str(prog))
     assert not espera.exists() and not (tmp_path / "TeleZapp.antiga").exists()
+
+
+def test_baixar_pode_ser_cancelado_e_apaga_o_parcial(tmp_path):
+    dados = _zip({"TeleZapp/TeleZapp.exe": b"x" * (3 << 20)})
+    chamadas = []
+
+    def cancelado():
+        chamadas.append(1)
+        return len(chamadas) >= 2           # desiste no segundo pedaco
+    with pytest.raises(au.ErroAtualizacao) as e:
+        au.baixar(_lanc(), str(tmp_path), abrir=_abrir_de(dados),
+                  cancelado=cancelado)
+    assert "cancelada" in str(e.value)
+    assert not os.path.exists(tmp_path / "TeleZapp.zip")
+
+
+def test_extrair_informa_o_avanco(tmp_path):
+    z = tmp_path / "a.zip"
+    z.write_bytes(_zip())
+    vistos = []
+    au.extrair(str(z), str(tmp_path / "espera"),
+               lambda feito, total: vistos.append((feito, total)))
+    assert vistos[-1][0] == vistos[-1][1] == 2 and len(vistos) == 2

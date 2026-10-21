@@ -44,7 +44,9 @@ def main():
             return 1
         guia = tempfile.mkdtemp(prefix="telezapp-guia-")
         try:
-            mostrar_boas_vindas(lambda: ins.extrair_pacote(pacote), guia)
+            mostrar_boas_vindas(
+                lambda progresso=None: ins.extrair_pacote(pacote, progresso),
+                guia)
         finally:
             shutil.rmtree(guia, ignore_errors=True)
         del app

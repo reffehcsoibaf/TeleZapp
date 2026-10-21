@@ -280,6 +280,18 @@ OPCOES = (
           "Na janela de configurações, o TeleZapp fala a explicação de cada "
           "opção logo depois que você chega nela. Desmarcada, a explicação "
           "só é falada com F1."),
+    Opcao("barra_de_progresso",
+          "Janela com barra de progresso em downloads e envios longos",
+          "Mídias", True,
+          "Quando um download que você pediu, ou o envio de um arquivo "
+          "grande, demora mais de um segundo, abre uma janela com uma barra "
+          "de progresso. O NVDA toca bipes que sobem do grave ao agudo "
+          "conforme a barra avança. No download a janela tem o botão "
+          "Cancelar (Esc também cancela). Com a janela aberta, a fala "
+          "do avanço (Porcentagem falada no download) fica quieta. "
+          "Desmarcada, o avanço só aparece no título, na barra de situação "
+          "e na fala. Atualizar, instalar e fazer backup sempre mostram a "
+          "barra."),
     Opcao("audio_janela", "Ao reproduzir áudio e mensagem de voz", "Mídias",
           "sem",
           "Só tocar começa a tocar sem abrir janela: Enter de novo pausa e "
