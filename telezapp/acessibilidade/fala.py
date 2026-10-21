@@ -19,6 +19,7 @@ except ImportError:  # fora do Windows (testes)
     winsound = None
 
 log = logging.getLogger("telezapp.fala")
+_trava_som = threading.Lock()
 
 
 class Fala:
@@ -160,7 +161,10 @@ def _tocar_arquivo(tipo, caminho):
             dados = f.read(int(f.samplerate * LIMITE_SEGUNDOS_ARQUIVO),
                            dtype="float32", always_2d=True)
             taxa = f.samplerate
-        sd.play(dados, taxa)
+        # sd.play para o som anterior e abre o novo: duas threads juntas
+        # mexem no mesmo fluxo do PortAudio e derrubam o programa
+        with _trava_som:
+            sd.play(dados, taxa)
     except Exception as e:
         log.warning("não consegui tocar o som escolhido (%r); usando o "
                     "padrão", e)
