@@ -3371,19 +3371,12 @@ class ProvedorWhatsApp(Provedor):
         variantes = [(nome, dest, self._mensagem_de_acao(msg, acao, citada),
                       segredo)
                      for nome, dest, citada, segredo in candidatas]
-        if acao.get("tipo") == "botoes" and variantes:
-            # EXPERIMENTAL: o servidor recusa (479) a resposta de botão com
-            # o no <biz><buttons_response/> que a biblioteca poe sozinha; o
-            # celular nao manda esse no. A biblioteca so o poe quando
-            # reconhece a mensagem, e nao olha dentro do envelope de
-            # "documento com legenda".
-            from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (
-                FutureProofMessage)
-            nome, dest, interna, segredo = variantes[0]
-            variantes.insert(0, (
-                "experimental: dentro de documento com legenda", dest,
-                Message(documentWithCaptionMessage=FutureProofMessage(
-                    message=interna)), segredo))
+        # Nota: o servidor recusa (479) a resposta de botao ou de lista com o
+        # no <biz><buttons_response/> (ou <list_response/>) que o whatsmeow
+        # poe sozinho; o WhatsApp Web nao manda esse no. A DLL de teste do
+        # neonize (Backup\neonize-0.5.2-teste) vem sem ele (docs/neonize).
+        # Embrulhar a resposta em "documento com legenda" tira o no mas o
+        # servidor aceita e a empresa ignora a mensagem: nao fazer isso.
         return variantes
 
     def _mensagem_de_acao(self, msg, acao, citada=None):

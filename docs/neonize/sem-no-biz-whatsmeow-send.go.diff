@@ -1,0 +1,23 @@
+diff --git a/send.go b/send.go
+index 33f2174..be8bf3b 100644
+--- a/send.go
++++ b/send.go
+@@ -1004,14 +1004,12 @@ func getButtonTypeFromMessage(msg *waE2E.Message) string {
+ 		return getButtonTypeFromMessage(msg.EphemeralMessage.Message)
+ 	case msg.ButtonsMessage != nil:
+ 		return "buttons"
+-	case msg.ButtonsResponseMessage != nil:
+-		return "buttons_response"
+ 	case msg.ListMessage != nil:
+ 		return "list"
+-	case msg.ListResponseMessage != nil:
+-		return "list_response"
+-	case msg.InteractiveResponseMessage != nil:
+-		return "interactive_response"
++	// Respostas de botao e de lista (buttons_response, list_response,
++	// interactive_response) nao levam o no <biz>: o WhatsApp Web nao o manda
++	// (WAWebSendMsgCreateFanoutStanza) e o servidor recusa com 479. O tipo de
++	// midia do "enc" (getMediaTypeFromMessage) continua dizendo o que e.
+ 	default:
+ 		return ""
+ 	}

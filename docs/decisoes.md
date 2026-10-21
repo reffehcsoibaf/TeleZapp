@@ -341,7 +341,22 @@ automáticos): a lista do que falta testar fica na memória do projeto.
   memória), opcional e desligado por padrão, sem trocar o acesso atual às
   mensagens pelo WPPConnect. O responsável deixou o assunto de lado.
 
-## Versão 2026.10.20.1 (20/10/2026): registro e barras de progresso
+## Versão 2026.10.21.0 (21/10/2026): botões e listas de empresa, registro e barras de progresso
+
+- **Resposta a botões e listas de mensagens de empresa**: o servidor do
+  WhatsApp recusava (erro 479) porque o whatsmeow põe um nó `<biz>` nessas
+  respostas e o WhatsApp Web não. Decisão: tirar o nó na DLL de teste do
+  neonize, em vez de embrulhar a resposta em "documento com legenda" (o
+  servidor aceita, mas a empresa ignora a mensagem, e o aplicativo diria
+  "enviada" sem resposta). Um PR para o whatsmeow foi proposto. Sem a DLL de
+  teste, as respostas voltam a dar 479 (`docs/neonize/sem-no-biz-whatsmeow-send.go.diff`).
+
+- **Verificado ao vivo pelo responsável** (o que só os testes automáticos não mostram):
+  - lista de uma empresa de energia (Equatorial, "Consulta de Débitos"): a empresa respondeu, em 21/10/2026, com a DLL de teste sem o nó `biz`;
+  - barras de progresso (atualizar, instalar, backup, transferências): ficaram como ele queria (confirmado em 20/10/2026, em outra conversa);
+  - não verificado ao vivo: o quick_reply nativo de mensagens interativas pelo TeleZapp (só testes automáticos; no WinZapp foi visto).
+
+### Registro e barras de progresso
 
 - **Registro (log) que o usuário manda ao suporte**: o texto prometia nunca
   guardar telefone completo nem texto de mensagem, mas o log real trazia

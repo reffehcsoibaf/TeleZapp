@@ -3,7 +3,20 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
-## 2026.10.20.1
+## 2026.10.21.0
+
+- Resposta a botões e listas de mensagens de empresa (erro 479). O whatsmeow
+  (`send.go`, `getButtonTypeFromMessage`) acrescentava `<biz><buttons_response/>`,
+  `<list_response/>` ou `<interactive_response/>` ao envio; o WhatsApp Web não
+  manda esse nó nas respostas (`WAWebSendMsgCreateFanoutStanza`: o biz só existe
+  para mensagens interativas nativas e no modo de privacidade), só o atributo
+  `mediatype` do `enc`. A DLL de teste do neonize (`Backup
+eonize-0.5.2-teste`)
+  vem sem o nó (`docs/neonize/sem-no-biz-whatsmeow-send.go.diff`). Embrulhar a
+  resposta em `documentWithCaptionMessage` tira o nó e o servidor aceita, mas a
+  empresa ignora: o embrulho experimental de `_variantes_da_acao` foi removido.
+  Visto ao vivo: lista da Equatorial. Sem a DLL de teste (neonize oficial) as
+  respostas voltam a dar 479.
 
 - Registro sem telefones nem textos. `config.mascarar_texto` troca
   `5551999998888@s.whatsapp.net`, `...@lid`, `...-1577...@g.us` e

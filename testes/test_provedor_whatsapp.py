@@ -1111,10 +1111,7 @@ def test_escolher_opcao_de_lista_e_botoes_simples(amb):
     amb.p.responder_acao(recebida, {"tipo": "botoes", "rotulo": "Sim",
                                     "id": "1"})
     esperar(amb.fila, ev.MensagemNova)
-    # 1a variante, experimental: a resposta vai dentro de um documento com
-    # legenda (assim a biblioteca nao poe o no <biz><buttons_response/>)
-    b = amb.c.enviadas[-1][1].documentWithCaptionMessage.message \
-        .buttonsResponseMessage
+    b = amb.c.enviadas[-1][1].buttonsResponseMessage
     assert (b.selectedButtonID, b.selectedDisplayText) == ("1", "Sim")
 
 
@@ -1180,12 +1177,12 @@ def test_resposta_de_botao_tenta_variantes_quando_o_servidor_recusa(amb):
     recebida = esperar(amb.fila, ev.MensagemNova).mensagem
     recebida.remetente = "94476496285751@lid"
     acao = m.extras_de(recebida)["acoes"][1]
-    amb.c.recusar_479 = 2                    # a experimental e a do celular
+    amb.c.recusar_479 = 1                    # a do celular (conversa LID)
     amb.p.responder_acao(recebida, acao)
     esperar(amb.fila, ev.MensagemNova)
     destino, proto = amb.c.enviadas[-1]
     r = proto.buttonsResponseMessage
-    assert destino == "5551988887777@s.whatsapp.net"      # 3a variante
+    assert destino == "5551988887777@s.whatsapp.net"      # 2a variante
     assert (r.selectedButtonID, r.selectedDisplayText) == ("2", "Residência")
     assert r.contextInfo.quotedMessage.HasField("buttonsMessage")
     assert r.contextInfo.participant == "94476496285751@lid"
@@ -1202,10 +1199,10 @@ def test_resposta_de_botao_so_falha_se_todas_as_variantes_forem_recusadas(
     amb.p.responder_acao(recebida, m.extras_de(recebida)["acoes"][0])
     falha = esperar(amb.fila, ev.EnvioFalhou)
     assert "erro do WhatsApp" in falha.motivo and not falha.devolver_texto
-    assert amb.c.recusar_479 == 99 - 4       # tentou as 4 variantes
+    assert amb.c.recusar_479 == 99 - 3       # tentou as 3 variantes
 
 
-def test_resposta_de_botao_tenta_primeiro_a_variante_experimental(amb):
+def test_resposta_de_botao_tenta_primeiro_a_do_celular_sem_embrulho(amb):
     amb.f["Connected"](amb.c, N.Connected())
     esperar(amb.fila, ev.ContaPronta)
     amb.f["Message"](amb.c, evento("O5", _buttons_message()))
@@ -1215,8 +1212,10 @@ def test_resposta_de_botao_tenta_primeiro_a_variante_experimental(amb):
     esperar(amb.fila, ev.MensagemNova)
     destino, proto = amb.c.enviadas[-1]
     assert destino == "94476496285751@lid"
-    assert not proto.HasField("buttonsResponseMessage")
-    r = proto.documentWithCaptionMessage.message.buttonsResponseMessage
+    # sem embrulho: a empresa ignora o que vem dentro de "documento com
+    # legenda" (o servidor aceita, mas ela nao responde)
+    assert not proto.HasField("documentWithCaptionMessage")
+    r = proto.buttonsResponseMessage
     assert (r.selectedButtonID, r.selectedDisplayText) == ("2", "Residência")
     assert r.contextInfo.stanzaID == "O5"
 
