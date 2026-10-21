@@ -7,6 +7,12 @@ que sobem do grave ao agudo conforme ela avança, e isso só acontece com uma
 barra de progresso na janela em primeiro plano. Por isso os avanços longos
 (atualização, instalar, backup, download pedido, envio grande) abrem esta
 janela em vez de só falar "20 por cento".
+
+O TeleZapp não fala nem escreve a porcentagem: quem decide se a barra fala,
+bipa, os dois ou fica quieta é a configuração de barras de progresso do
+próprio NVDA. O texto da janela diz só a etapa ("Baixando a versão...",
+"Copiando as mídias") e a etapa é falada (por `falar`) quando muda, nunca a
+cada avanço.
 """
 import wx
 
@@ -18,9 +24,11 @@ class JanelaDeProgresso(wx.Dialog):
     cancela) e a função é chamada uma vez. Sem ela, Esc só fecha a janela.
     Sem Enter padrão: um Enter perdido de quem digita não cancela nada."""
 
-    def __init__(self, pai, titulo, texto="", ao_cancelar=None):
+    def __init__(self, pai, titulo, texto="", ao_cancelar=None, falar=None):
         super().__init__(pai, title=titulo, style=wx.CAPTION | wx.SYSTEM_MENU)
         self._ao_cancelar = ao_cancelar
+        self._falar = falar
+        self._etapa = texto or titulo
         self._cancelada = False
         self._fechada = False
         lay = wx.BoxSizer(wx.VERTICAL)
@@ -57,11 +65,15 @@ class JanelaDeProgresso(wx.Dialog):
 
     def atualizar(self, percentual=None, texto=None):
         """`percentual` de 0 a 100; sem ele (None), a barra só anda (não se
-        sabe quanto falta)."""
+        sabe quanto falta). `texto` é a etapa: o rótulo só muda, e a etapa só
+        é falada, quando ela é outra (nunca a cada avanço da barra)."""
         if self._fechada:
             return
-        if texto is not None:
+        if texto and texto != self._etapa:
+            self._etapa = texto
             self.rotulo.SetLabel(texto)
+            if self._falar is not None:
+                self._falar(texto)
         if percentual is None:
             self.barra.Pulse()
         else:

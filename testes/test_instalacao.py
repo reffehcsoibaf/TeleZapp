@@ -207,7 +207,7 @@ class JanelaFalsa:
     """No lugar da JanelaDeProgresso: guarda o que a tela mostraria."""
     criadas = []
 
-    def __init__(self, pai, titulo, texto="", ao_cancelar=None):
+    def __init__(self, pai, titulo, texto="", ao_cancelar=None, falar=None):
         self.titulo, self.passos, self.fechada = titulo, [], False
         JanelaFalsa.criadas.append(self)
 

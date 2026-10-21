@@ -3796,8 +3796,9 @@ def test_pular_no_audio_que_toca_ao_fundo(j):
 class _BarraFalsa:
     criadas = []
 
-    def __init__(self, pai, titulo, texto="", ao_cancelar=None):
+    def __init__(self, pai, titulo, texto="", ao_cancelar=None, falar=None):
         self.titulo, self.ao_cancelar = titulo, ao_cancelar
+        self.texto, self.falar = texto, falar
         self.passos, self.fechada = [], False
         _BarraFalsa.criadas.append(self)
 

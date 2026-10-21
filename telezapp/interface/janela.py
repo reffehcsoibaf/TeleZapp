@@ -5294,11 +5294,11 @@ class Janela(wx.Frame):
         if barra is None:
             if agora - inicio < 1.0 or pct >= 90:
                 return False
-            barra = JanelaDeProgresso(self, titulo, "%s: %d%%" % (titulo, pct),
+            barra = JanelaDeProgresso(self, titulo, titulo,
                                       ao_cancelar=cancelar)
             self._barras[chave] = barra
             barra.mostrar()
-        barra.atualizar(pct, "%s: %d%%" % (titulo, pct))
+        barra.atualizar(pct)
         return True
 
     def _fechar_barra_de_transferencia(self, chave):
@@ -5662,8 +5662,10 @@ class Janela(wx.Frame):
         numa thread. Devolve (andamento, fechar): `andamento(pct, texto)` e
         `fechar()` podem ser chamadas da thread (vao para a janela pelo
         wx.CallAfter) e so atualizam quando a porcentagem muda."""
-        barra = JanelaDeProgresso(self, titulo, "%s: 0%%" % titulo,
-                                  ao_cancelar=ao_cancelar)
+        barra = JanelaDeProgresso(self, titulo, titulo,
+                                  ao_cancelar=ao_cancelar,
+                                  falar=lambda t: self.fala.falar(
+                                      t, interromper=True))
         barra.mostrar()
         ultimo = [-1]
 
@@ -5671,8 +5673,7 @@ class Janela(wx.Frame):
             if pct is None or int(pct) == ultimo[0]:
                 return
             ultimo[0] = int(pct)
-            wx.CallAfter(barra.atualizar, pct, "%s: %d%%" % (
-                texto or titulo, pct))
+            wx.CallAfter(barra.atualizar, pct, texto or titulo)
 
         def fechar():
             wx.CallAfter(barra.fechar)
@@ -5952,19 +5953,18 @@ class Janela(wx.Frame):
         espera = atualizador.pasta_de_espera(programa)
         self._atualizando = True
         cancelou = [False]
+        etapa_baixar = "Baixando a versão %s" % lanc.versao
         barra = JanelaDeProgresso(
-            self, "Atualizando o %s" % NOME,
-            "Baixando a versão %s: 0%%" % lanc.versao,
-            ao_cancelar=lambda: cancelou.__setitem__(0, True))
+            self, "Atualizando o %s" % NOME, etapa_baixar,
+            ao_cancelar=lambda: cancelou.__setitem__(0, True),
+            falar=lambda t: self.fala.falar(t, interromper=True))
         self._barra_atualizacao = barra
         barra.mostrar()
 
         def baixando(feito, total):
             if total:
                 pct = feito * 90 // total        # baixar vai ate 90%
-                wx.CallAfter(barra.atualizar, pct,
-                             "Baixando a versão %s: %d%%" % (
-                                 lanc.versao, feito * 100 // total))
+                wx.CallAfter(barra.atualizar, pct, etapa_baixar)
 
         def extraindo(feito, total):
             wx.CallAfter(barra.atualizar, 90 + feito * 10 // max(total, 1),

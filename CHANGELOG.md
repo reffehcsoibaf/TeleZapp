@@ -20,7 +20,11 @@ Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
   downloads pedidos e envios por arquivo (`_barra_de_transferencia`: só abre
   depois de 1 s e abaixo de 90%; fecha em `MidiaBaixada` e `_fim_do_envio`).
   Opção `barra_de_progresso` (Mídias, ligada) vale para as transferências;
-  com a barra aberta, não se fala "N por cento".
+  com a barra aberta, não se fala "N por cento". Nem a fala nem o rótulo
+  levam a porcentagem (o NVDA decide pela configuração dele, como no
+  WinZapp): `JanelaDeProgresso.atualizar` só troca o rótulo e só chama
+  `falar` quando a etapa muda; os callers passam etapas ("Baixando a versão
+  X", "Copiando as mídias"), sem número.
 
 ## 2026.10.20.0
 
