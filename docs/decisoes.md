@@ -366,9 +366,11 @@ automáticos): a lista do que falta testar fica na memória do projeto.
 - **Sons**: uma thread por vez no PortAudio (acessos simultâneos derrubavam o
   programa); sons de até 2 s pré-carregados na RAM; espera do Enter de 40 para
   10 ms. `falha-nativa.log` recebe também o stderr das DLLs.
-- **Visto no app real pelo responsável (21/10/2026)**: barras de progresso e a
-  espera de 10 ms. Não visto: M4A, som de envio mais rápido, atualização pela
-  janela.
+- **Visto no app real pelo responsável (21/10/2026)**: barras de progresso (envio
+  de arquivo grande), espera de 10 ms, M4A tocando e entrando na sequência, e o
+  exe novo abrindo normal. Não visto: som de envio mais rápido e atualização
+  pela janela (a barra de progresso da atualização só aparece quando a 21.0
+  atualizar para a versão seguinte).
 
 ### Registro e barras de progresso
 
