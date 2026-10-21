@@ -5,6 +5,7 @@ neonize==0.5.2
 pyzipper>=0.4
 segno>=1.6
 soundfile>=0.13
+av>=15
 sounddevice>=0.5
 soundcard>=0.4.6
 py-tgcalls>=3.0,<4

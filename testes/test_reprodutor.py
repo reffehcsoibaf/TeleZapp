@@ -7,6 +7,11 @@ sf = pytest.importorskip("soundfile")
 from telezapp.midia import reprodutor as r  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _dados_de_teste(tmp_path, monkeypatch):
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path / "dados"))
+
+
 class Saida:
     def __init__(self, taxa, canais, callback):
         self.taxa, self.canais, self.callback = taxa, canais, callback
@@ -126,3 +131,33 @@ def test_ir_para_com_velocidade(tmp_path):
     assert abs(p.posicao - 3.0) < 0.05
     saidas[0].puxar(4800)
     assert abs(p.posicao - 3.15) < 0.15
+
+
+def test_m4a_aac_e_decodificado_pelo_pyav_e_toca(tmp_path):
+    av = pytest.importorskip("av")
+    caminho = str(tmp_path / "estereo.ogg")      # extensao enganosa, como no WhatsApp
+    with av.open(caminho, "w", format="mp4") as saida:
+        fluxo = saida.add_stream("aac", rate=44100, layout="stereo")
+        onda = (0.2 * np.sin(np.linspace(0, 900, 44100))).astype("float32")
+        quadro = av.AudioFrame.from_ndarray(
+            np.stack([onda, onda]).reshape(1, -1, order="F"), format="flt",
+            layout="stereo")
+        quadro.sample_rate = 44100
+        for pacote in fluxo.encode(quadro):
+            saida.mux(pacote)
+        for pacote in fluxo.encode(None):
+            saida.mux(pacote)
+    saidas = []
+
+    def fabrica(taxa, canais, cb):
+        saidas.append(Saida(taxa, canais, cb))
+        return saidas[-1]
+    p = r.Reprodutor(caminho, fabrica)
+    assert p.canais == 2 and abs(p.duracao - 1.0) < 0.1
+    wav = p._wav
+    assert wav and wav.endswith(".wav")
+    p.tocar()
+    assert np.abs(saidas[0].puxar(4800)).max() > 0.01
+    p.fechar()
+    import os
+    assert not os.path.exists(wav)
