@@ -679,6 +679,21 @@ def test_previa_de_link_na_linha_e_nos_detalhes():
         m.definir_modo_previa("completa")
 
 
+def test_mensagem_so_com_link_fala_a_previa_antes_do_link():
+    x = m.Mensagem("c", "v", "1", autor="Ana", data=1760000000,
+                   texto="https://a.com/x")
+    m.guardar_extras(x, previa=m.previa_de_link(
+        "https://a.com/x", "Título", "Descrição", "A.com"))
+    linha = m.formatar(x, m.ESTILO_AUTOR_PRIMEIRO)
+    assert linha.index("prévia do link: Título") < linha.index("https://a.com/x")
+    # com texto junto do link, a previa continua depois do texto
+    y = m.Mensagem("c", "v", "2", autor="Ana", data=1760000000,
+                   texto="olha https://a.com/x")
+    m.guardar_extras(y, previa=m.previa_de_link("https://a.com/x", "Título"))
+    linha = m.formatar(y, m.ESTILO_AUTOR_PRIMEIRO)
+    assert linha.index("olha") < linha.index("prévia do link")
+
+
 def test_conferir_o_que_vai_ser_publicado_como_status(tmp_path):
     from telezapp.nucleo import publicar_status as ps
     foto = tmp_path / "f.jpg"

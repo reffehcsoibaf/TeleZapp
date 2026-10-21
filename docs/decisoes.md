@@ -356,6 +356,20 @@ automáticos): a lista do que falta testar fica na memória do projeto.
   - barras de progresso (atualizar, instalar, backup, transferências): ficaram como ele queria (confirmado em 20/10/2026, em outra conversa);
   - não verificado ao vivo: o quick_reply nativo de mensagens interativas pelo TeleZapp (só testes automáticos; no WinZapp foi visto).
 
+### Áudio, grupos, sons e quedas
+
+- **M4A/AAC no player do app**: decodificar com o PyAV para WAV temporário em
+  vez de mandar ao player do Windows, para entrar na sequência de áudios.
+- **Abrir grupo sem esperar as menções**: a releitura de nomes (rede, ~0,3 s
+  cada) vai para segundo plano; quem segue sem nome só é procurado após 10 min.
+  Mensagem editada passa a mostrar o nome.
+- **Sons**: uma thread por vez no PortAudio (acessos simultâneos derrubavam o
+  programa); sons de até 2 s pré-carregados na RAM; espera do Enter de 40 para
+  10 ms. `falha-nativa.log` recebe também o stderr das DLLs.
+- **Visto no app real pelo responsável (21/10/2026)**: barras de progresso e a
+  espera de 10 ms. Não visto: M4A, som de envio mais rápido, atualização pela
+  janela.
+
 ### Registro e barras de progresso
 
 - **Registro (log) que o usuário manda ao suporte**: o texto prometia nunca

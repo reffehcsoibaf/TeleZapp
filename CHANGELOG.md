@@ -49,6 +49,21 @@ eonize-0.5.2-teste`)
   `falar` quando a etapa muda; os callers passam etapas ("Baixando a versão
   X", "Copiando as mídias"), sem número.
 
+- Áudio M4A/AAC: a libsndfile não abre AAC; o `Reprodutor` decodifica com o
+  PyAV para um WAV temporário e toca normalmente (entra na sequência). Se nem
+  assim abrir, `FormatoNaoSuportado` e a janela usa o outro motor.
+- Abrir grupo: `_rever_mencoes_do_grupo` roda em segundo plano e avisa a tela
+  por `MensagemAtualizada` (motivo `mencao`); quem continua sem nome só é
+  procurado de novo após 10 min (`_mencoes_tentadas`). A edição lê as menções
+  do texto novo e a revisão corrige as guardadas com nome mas texto com número.
+- Sons: `sd.play` de várias threads corrompia o PortAudio; há `_trava_som`.
+  Sons de até 2 s são pré-carregados na RAM em segundo plano (`fala.py`,
+  `_pre_carregados`, conferidos por mtime). O stderr vai para o
+  `falha-nativa.log` (`os.dup2`) e a marca `sessao-aberta` avisa no log se a
+  vez anterior não fechou normalmente.
+- Mensagem só com link e prévia: a prévia vem antes do endereço (`_so_link`).
+- Opção `enter_chega_ao_leitor`: espera de 40 para 10 ms.
+
 ## 2026.10.20.0
 
 - Menus: o Menu único com submenus continua, em nova ordem (`_criar_menus`):
@@ -191,7 +206,7 @@ por quadros e IA automática.
   mensagens guardadas, sem consultar a rede (a lista pode ser grande).
 - Opção `enter_chega_ao_leitor` (desligada): no Enter da caixa o `_char_hook`
   faz `evt.Skip()` (o controle recebe o `WM_CHAR` que o NVDA usa para fechar
-  a palavra digitada) e `wx.CallLater(40, _enviar_depois_do_enter)` envia o
+  a palavra digitada) e `wx.CallLater(10, _enviar_depois_do_enter)` envia o
   texto (o `strip()` tira a quebra de linha) e limpa a caixa. Padrão: Enter
   tratado no hook, que engole o `WM_CHAR`.
 - Evento de som `mencao_ou_resposta` (18º). `extras["citou_voce"]`: o WhatsApp

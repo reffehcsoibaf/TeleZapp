@@ -2942,7 +2942,7 @@ class Janela(wx.Frame):
                         # ve e fecha a palavra digitada) e o envio espera
                         # ele ser tratado
                         evt.Skip()
-                        wx.CallLater(40, self._enviar_depois_do_enter)
+                        wx.CallLater(10, self._enviar_depois_do_enter)
                         return
                     self._enviar_texto()
                     return

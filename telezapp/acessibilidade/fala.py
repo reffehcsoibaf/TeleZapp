@@ -94,10 +94,58 @@ def tom_padrao(tipo):
     return tipo
 
 
+# Sons curtos ja lidos e decodificados, para tocar sem abrir o arquivo:
+# {caminho: (mtime, dados, taxa)}. Os longos (toques de chamada) ficam fora.
+LIMITE_SEGUNDOS_PRE_CARGA = 2
+_pre_carregados = {}
+_geracao_pre_carga = 0
+_thread_pre_carga = None
+
+
 def definir_sons(mapa):
     """Troca as escolhas de som: {evento: valor}."""
+    global _geracao_pre_carga, _thread_pre_carga
     _sons.clear()
     _sons.update(mapa)
+    _geracao_pre_carga += 1
+    caminhos = {c for c in (caminho_do_som(v) for v in mapa.values()) if c}
+    for velho in [c for c in _pre_carregados if c not in caminhos]:
+        _pre_carregados.pop(velho, None)
+    if caminhos:
+        _thread_pre_carga = threading.Thread(
+            target=_pre_carregar, args=(sorted(caminhos), _geracao_pre_carga),
+            daemon=True)
+        _thread_pre_carga.start()
+
+
+def _ler_som(caminho, limite_segundos):
+    import soundfile as sf
+    with sf.SoundFile(caminho) as f:
+        if limite_segundos < LIMITE_SEGUNDOS_ARQUIVO and \
+                f.frames > f.samplerate * limite_segundos:
+            return None       # comprido demais para ficar na memoria
+        dados = f.read(int(f.samplerate * LIMITE_SEGUNDOS_ARQUIVO),
+                       dtype="float32", always_2d=True)
+        return dados, f.samplerate
+
+
+def _pre_carregar(caminhos, geracao):
+    """Em segundo plano, deixa na memoria os sons curtos escolhidos. Se a
+    escolha mudar no meio, para; quem tocar antes disso le o arquivo."""
+    for caminho in caminhos:
+        if geracao != _geracao_pre_carga:
+            return
+        try:
+            mtime = os.path.getmtime(caminho)
+            guardado = _pre_carregados.get(caminho)
+            if guardado and guardado[0] == mtime:
+                continue
+            lido = _ler_som(caminho, LIMITE_SEGUNDOS_PRE_CARGA)
+            if lido is not None and geracao == _geracao_pre_carga:
+                _pre_carregados[caminho] = (mtime,) + lido
+        except Exception as e:
+            log.info("não pré-carreguei o som %s (%r)",
+                     os.path.basename(caminho), e)
 
 
 # Valor de "usar o bip do sistema" neste evento (o pacote Padrao, ou um
@@ -156,11 +204,11 @@ def _tocar_arquivo(tipo, caminho):
     der, cai no som padrao do evento."""
     try:
         import sounddevice as sd
-        import soundfile as sf
-        with sf.SoundFile(caminho) as f:
-            dados = f.read(int(f.samplerate * LIMITE_SEGUNDOS_ARQUIVO),
-                           dtype="float32", always_2d=True)
-            taxa = f.samplerate
+        guardado = _pre_carregados.get(caminho)
+        if guardado is not None and guardado[0] == os.path.getmtime(caminho):
+            _, dados, taxa = guardado
+        else:
+            dados, taxa = _ler_som(caminho, LIMITE_SEGUNDOS_ARQUIVO)
         # sd.play para o som anterior e abre o novo: duas threads juntas
         # mexem no mesmo fluxo do PortAudio e derrubam o programa
         with _trava_som:
