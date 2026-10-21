@@ -198,7 +198,8 @@ class CodigoPareamento:
 @dataclass
 class MensagemAtualizada:
     """Uma mensagem ja conhecida mudou: `motivo` e "reacao" (alguem reagiu ou
-    tirou a reacao), "editada" ou "apagada". `mensagem` ja vem atualizada;
+    tirou a reacao), "editada", "apagada" ou "mencao" (so o nome de quem foi
+    mencionado foi achado; a tela nao avisa). `mensagem` ja vem atualizada;
     `quem` e `emoji` so valem para reacao (emoji vazio: tirou)."""
     conta_id: str
     conversa_id: str

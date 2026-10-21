@@ -912,6 +912,7 @@ class ProvedorWhatsApp(Provedor):
         self._sem_nome_registrados = set()
         self._conectada = False
         self._cache_mencoes = {}   # jid mencionado -> nome, id, telefone
+        self._mencoes_tentadas = {}  # jid sem nome -> quando procurei por ultimo
         self._escrita_conferida = {}   # grupo -> quando conferi se posso escrever
         self._grupos_lidos = {}    # grupo -> quando os participantes foram lidos
         self._arquivada_vista = {}  # conversa -> arquivada, como o celular disse
@@ -2428,18 +2429,26 @@ class ProvedorWhatsApp(Provedor):
     def _reavaliar_mencoes(self, msgs, maximo=300):
         """Mensagens guardadas cuja mencao ficou so com o telefone: o nome
         pode ter sido aprendido depois (a pessoa falou, o grupo foi lido).
-        Tenta de novo e regrava o que mudou. Devolve quantas mudaram."""
+        Tenta de novo e regrava o que mudou. Devolve as que mudaram. Quem
+        continua sem nome so e procurado de novo depois de 10 minutos (cada
+        procura pode ir a rede)."""
         mudaram, tentativas = [], 0
+        agora = time.time()
         for x in msgs:
             extras = m.extras_de(x)
-            pendentes = [men for men in extras["mencoes"]
-                         if men.get("jid") and self._mencao_sem_nome(men)]
+            pendentes = [
+                men for men in extras["mencoes"] if men.get("jid") and (
+                    self._mencao_sem_nome(men) or re.search(
+                        r"@%s(?!\d)" % re.escape(jid_de_texto(men["jid"])[0]),
+                        x.texto))]
             if not pendentes:
                 continue
             texto, alterou = x.texto, False
             for men in pendentes:
                 if tentativas >= maximo:
                     break
+                if agora - self._mencoes_tentadas.get(men["jid"], 0) < 600:
+                    continue
                 tentativas += 1
                 antigo = men.get("nome") or ""
                 try:
@@ -2449,7 +2458,9 @@ class ProvedorWhatsApp(Provedor):
                     continue
                 novo = achado.get("nome") or ""
                 if not novo or self._mencao_sem_nome({**men, **achado}):
+                    self._mencoes_tentadas[men["jid"]] = agora
                     continue
+                self._mencoes_tentadas.pop(men["jid"], None)
                 men.update(achado)
                 usuario = jid_de_texto(men["jid"])[0]
                 for velho in {antigo, "+" + usuario, usuario}:
@@ -2465,7 +2476,21 @@ class ProvedorWhatsApp(Provedor):
                 mudaram.append(x)
         if mudaram:
             self.banco.salvar_mensagens(mudaram)
-        return len(mudaram)
+        return mudaram
+
+    def _rever_mencoes_do_grupo(self, conversa_id):
+        """Em segundo plano, depois de abrir um grupo: corrige as mencoes
+        que ficaram so com o telefone e avisa a tela de cada mensagem que
+        mudou."""
+        try:
+            if self.cliente is None or not self._conectada:
+                return
+            msgs = self.banco.mensagens(self.conta.id, conversa_id, 1000)
+            for x in self._reavaliar_mencoes(msgs):
+                self.barramento.publicar(ev.MensagemAtualizada(
+                    self.conta.id, conversa_id, x, "mencao"))
+        except Exception:
+            log.exception("erro ao rever as menções")
 
     def _conversa(self, conversa_id, chat, pushname, grupo, data):
         canal = chat.Server == "newsletter"
@@ -2982,8 +3007,14 @@ class ProvedorWhatsApp(Provedor):
                     return True
 
                 def editar(x):
+                    # o texto novo traz as suas proprias mencoes (@): sem
+                    # elas ficaria o numero no lugar do nome
                     x.texto = novo[1] or ""
-                    m.atualizar_extras(x, editada=True)
+                    editada = desembrulhar(p.editedMessage)
+                    m.atualizar_extras(
+                        x, editada=True,
+                        mencoes=mencoes_do_contexto(_contexto(editada)))
+                    self._enriquecer_mencoes(x)
                 self._alterar(cid, alvo, editar, "editada")
                 return True
         return False
@@ -3254,13 +3285,11 @@ class ProvedorWhatsApp(Provedor):
     def carregar_mensagens(self, conversa_id, limite=50):
         msgs = self.banco.mensagens(self.conta.id, conversa_id,
                                     max(limite, 100))
-        if conversa_id.endswith("@g.us"):
-            try:
-                self._reavaliar_mencoes(msgs)
-            except Exception:
-                log.exception("erro ao rever as menções")
         self.barramento.publicar(ev.MensagensCarregadas(
             self.conta.id, conversa_id, msgs))
+        if conversa_id.endswith("@g.us"):
+            # pode ir a rede: nunca na abertura da conversa
+            self._fila.put(lambda: self._rever_mencoes_do_grupo(conversa_id))
 
     def enviar_texto(self, conversa_id, texto, resposta_a=""):
         self._fila.put(lambda: self._enviar(conversa_id, texto, resposta_a))

@@ -2462,6 +2462,33 @@ def test_mencao_acha_o_nome_de_quem_falou_pelo_outro_endereco(amb):
     assert men["nome"] == "Ana Souza" and men["telefone"] == "+5551955550001"
 
 
+def test_mensagem_editada_com_mencao_mostra_o_nome_e_a_antiga_e_corrigida(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    _fala_no_grupo(amb, "H1", "5551955550004", pushname="Edu Ferreira")
+    amb.f["Message"](amb.c, evento(
+        "H2", E.Message(conversation="quando o ligou"), grupo=True,
+        chat="1203", remetente="5551988887777"))
+    esperar(amb.fila, ev.MensagemNova)
+    edicao = E.Message(protocolMessage=E.ProtocolMessage(
+        key=_chave("H2"), type=E.ProtocolMessage.MESSAGE_EDIT,
+        editedMessage=_com_mencoes(
+            "quando o @5551955550004 ligou",
+            "5551955550004@s.whatsapp.net")))
+    amb.f["Message"](amb.c, evento("H3", edicao, grupo=True, chat="1203",
+                                   remetente="5551988887777"))
+    a = esperar(amb.fila, ev.MensagemAtualizada)
+    assert a.motivo == "editada"
+    assert a.mensagem.texto == "quando o @Edu Ferreira ligou"
+    assert m.extras_de(a.mensagem)["mencoes"][0]["nome"] == "Edu Ferreira"
+    # mensagem editada antes desta correcao: nome achado, texto com numero
+    velha = amb.banco.mensagem("w1", "1203@g.us", "H2")
+    velha.texto = "quando o @5551955550004 ligou"
+    amb.banco.salvar_mensagens([velha])
+    corrigidas = amb.p._reavaliar_mencoes([velha])
+    assert corrigidas and corrigidas[0].texto == "quando o @Edu Ferreira ligou"
+
+
 def test_mencao_acha_o_nome_nas_mensagens_guardadas_pelo_lid(amb):
     amb.f["Connected"](amb.c, N.Connected())
     esperar(amb.fila, ev.ContaPronta)
@@ -2482,13 +2509,32 @@ def test_mencao_antiga_so_com_telefone_e_corrigida_ao_abrir_a_conversa(amb):
     _fala_no_grupo(amb, "G6", "5551955550002", pushname="Bia Lima")
     amb.p.carregar_mensagens("1203@g.us")
     carregadas = esperar(amb.fila, ev.MensagensCarregadas).mensagens
-    x = [y for y in carregadas if y.id == "G5"][0]
-    assert x.texto == "oi @Bia Lima"
+    # a abertura nao espera a correcao: ela vem depois, em segundo plano
+    x = esperar(amb.fila, ev.MensagemAtualizada)
+    assert x.motivo == "mencao"
+    x = x.mensagem
+    assert x.id == "G5" and x.texto == "oi @Bia Lima"
     assert m.extras_de(x)["mencoes"][0]["nome"] == "Bia Lima"
     assert amb.banco.mensagem("w1", "1203@g.us", "G5").texto == \
         "oi @Bia Lima"
     # sem novidade nenhuma, nada muda nem e regravado
-    assert amb.p._reavaliar_mencoes(carregadas) == 0
+    assert amb.p._reavaliar_mencoes(
+        amb.banco.mensagens("w1", "1203@g.us", 100)) == []
+
+
+def test_mencao_sem_nome_nao_e_procurada_de_novo_logo_em_seguida(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    _menciona(amb, "G7", "5551955550003")           # ninguem conhecido
+    msgs = amb.banco.mensagens("w1", "1203@g.us", 100)
+    chamadas = []
+    original = amb.p._dados_mencao
+    amb.p._dados_mencao = lambda *a, **k: (chamadas.append(a),
+                                           original(*a, **k))[1]
+    assert amb.p._reavaliar_mencoes(msgs) == []
+    assert len(chamadas) == 1
+    assert amb.p._reavaliar_mencoes(msgs) == []
+    assert len(chamadas) == 1                       # cache negativo
 
 
 def test_nome_de_quem_recebeu_ou_abriu_vem_do_perfil_visto_no_grupo(amb):
