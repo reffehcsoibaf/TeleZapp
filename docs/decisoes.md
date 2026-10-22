@@ -600,6 +600,11 @@ no fechamento, por assunto.
 
 - **Enter da caixa (22/10/2026):** a caixa passou a ter `TE_PROCESS_ENTER` e envia pelo `EVT_TEXT_ENTER`, como o WinZapp (o Enter chega ao controle e o leitor de tela fecha a última palavra). Sai a opção experimental `enter_chega_ao_leitor`. **Verificado ao vivo pelo responsável (22/10/2026):** parou de falar a última palavra colada com a primeira da mensagem seguinte. Foi o envio comum de mensagem, que era o principal. Shift+Enter, a edição (F2) e a resposta de status ficam só com teste automático.
 
+## Enquetes (22/10/2026)
+
+- Ver, votar e criar enquetes no WhatsApp e no Telegram (dados em `extras["enquete"]` da mensagem; janelas `interface/enquete.py` e `interface/nova_enquete.py`).
+- **Verificado ao vivo pelo responsável (22/10/2026), no WhatsApp:** depois de consertar o `decrypt_poll_vote` do neonize 0.5.2 (faltava o tratamento do retorno; antes dava TypeError), os resultados atualizam e **um voto dado com o TeleZapp fechado chegou** quando ele abriu. Não verificado: votar e ver quem votou no Telegram, criar enquete nos dois serviços e a contagem nas enquetes que o próprio TeleZapp cria (o responsável só tentou criar no Telegram).
+
 ## Próximos passos sugeridos
 
 1. ~~Grupo 1 do plano acima~~ (concluído).
