@@ -4430,3 +4430,9 @@ def test_restaurar_backup_aplica_o_mapa_de_atalhos_nos_menus(j):
     assert j.atalhos.efetivo("responder") == "Alt+R"
     assert j.itens["responder"].rotulo.endswith("\tAlt+R")
     assert j.cfg.get("atalhos") == {"responder": "Alt+R"}
+
+
+def test_enter_envia_vem_ligado_de_fabrica(tmp_path, monkeypatch):
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path))
+    assert config.Config().get("enter_envia") is True
+    assert config.PADROES["enter_envia"] is True

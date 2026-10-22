@@ -314,11 +314,12 @@ OPCOES = (
           "escondido na área de notificação, sem tirar o foco do que você "
           "está fazendo."),
     Opcao("enter_envia", "Enter na caixa de digitar envia a mensagem",
-          "Escrita", False,
-          "Desmarcada (o padrão), Control Enter envia e Enter quebra a "
-          "linha, como no Telegram Web e no Gmail. Marcada, Enter envia e "
-          "Shift Enter quebra a linha. A tecla de enviar também pode ser "
-          "mudada em Atalhos, na função \"Enviar a mensagem digitada\"."),
+          "Escrita", True,
+          "Marcada (o padrão), Enter envia e Shift Enter quebra a linha; "
+          "Control Enter também envia. Desmarcada, só Control Enter envia e "
+          "Enter quebra a linha, como no Telegram Web e no Gmail. A tecla "
+          "de enviar também pode ser mudada em Atalhos, na função \"Enviar "
+          "a mensagem digitada\"."),
     Opcao("estilo", "Como cada mensagem é lida", "Leitura", 1,
           "A ordem em que autor, hora e conteúdo aparecem na lista de "
           "mensagens.",

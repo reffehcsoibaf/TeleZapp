@@ -114,7 +114,7 @@ conversas que você escolher
 Control Shift C: copiar o texto da mensagem selecionada (o menu de contexto
 tem um item de cópia para cada tipo de conteúdo)
 Control V na caixa de digitar: colar arquivos ou imagens copiados, que
-são enviados com Control Enter; o texto da caixa vira a legenda
+são enviados com o Enter; o texto da caixa vira a legenda
 Alt Enter: ver os detalhes e o texto completo da mensagem selecionada
 Control Shift D: depurar a mensagem selecionada (menu Depurar)
 Control O: abrir a mídia da mensagem (baixa antes, se preciso), mesmo
@@ -160,8 +160,9 @@ voltar 5 segundos (com Shift, 30). Home: voltar ao início. + e -: mais
 rápido e mais lento. Esc: fechar.
 
 NA CAIXA DE DIGITAÇÃO
-Control Enter: envia (a tecla muda em Configurações, Atalhos; em Escrita dá
-para fazer o Enter enviar). Enter e Shift Enter: nova linha. Esc: cancela a
+Enter e Control Enter: enviam (a tecla de enviar muda em Configurações,
+Atalhos; em Escrita dá para o Enter só quebrar a linha). Shift Enter: nova
+linha. Esc: cancela a
 resposta, se houver, esconde a caixa e volta para as mensagens.
 Depois do botão Enviar há três botões: Anexar e enviar arquivo, Gravar do
 microfone e Gravar som do computador. O texto da caixa vai como legenda do arquivo.
@@ -3190,7 +3191,7 @@ class Janela(wx.Frame):
 
     def _enter_na_caixa(self):
         """O Enter chegou ao controle (o leitor de tela o viu). Por padrao
-        quebra a linha e o Control Enter envia; com a opcao, o Enter envia."""
+        envia; sem a opcao, quebra a linha e so o Control Enter envia."""
         if self.cfg.get("enter_envia"):
             self._enviar_texto()
         else:
