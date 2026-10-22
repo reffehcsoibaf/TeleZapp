@@ -16,8 +16,10 @@ ICON_WARNING = ICON_QUESTION = ICON_INFORMATION = 0
 DEFAULT_DIALOG_STYLE = RESIZE_BORDER = 0
 LB_SINGLE = LB_HSCROLL = TE_MULTILINE = TE_PASSWORD = TE_READONLY = 0
 VERTICAL = HORIZONTAL = EXPAND = ALL = BOTTOM = TOP = LEFT = RIGHT = 0
-ALIGN_RIGHT = ALIGN_CENTER = RA_SPECIFY_COLS = TE_PROCESS_ENTER = 0
-EVT_RADIOBOX = EVT_TEXT_ENTER = EVT_TEXT_PASTE = EVT_SIZE = object()
+ALIGN_RIGHT = ALIGN_CENTER = RA_SPECIFY_COLS = 0
+TE_PROCESS_ENTER = 1024
+EVT_RADIOBOX = EVT_SIZE = object()
+EVT_TEXT_ENTER, EVT_TEXT_PASTE = object(), object()
 TE_CENTER = 0
 WHITE = (255, 255, 255)
 escolha_lista = [0]       # o que o SingleChoiceDialog "escolhe"
@@ -370,6 +372,7 @@ class TextCtrl(Janela):
     def __init__(self, *a, value="", **k):
         super().__init__()
         self.valor = value
+        self.estilo = k.get("style", 0)
 
     def GetValue(self):
         return self.valor

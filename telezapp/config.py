@@ -297,16 +297,6 @@ OPCOES = (
           "prévia (o envio espera até 5 segundos). No Telegram, desmarcada, "
           "a mensagem sai sem a prévia de link. O site fica sabendo do IP "
           "deste computador.", ),
-    Opcao("enter_chega_ao_leitor", "Enter na caixa fecha a palavra digitada",
-          "Leitura", False,
-          "Com a fala das palavras digitadas ligada (no NVDA e em outros "
-          "leitores de tela), a última palavra de uma mensagem enviada com "
-          "Enter, "
-          "sem espaço depois, ficava guardada e saía junto da primeira "
-          "palavra da próxima. Marcada, o Enter da caixa de digitar é "
-          "entregue ao controle antes de enviar, e a palavra se fecha na "
-          "hora. Pode fazer o programa falar \"em branco\" a cada envio. "
-          "Experimental; desmarcada, o comportamento é o de sempre."),
     Opcao("ortografia_idioma", "Idioma do corretor ortográfico", "Escrita",
           "pt-BR",
           "O idioma do dicionário que Verificar ortografia (F7, menu "

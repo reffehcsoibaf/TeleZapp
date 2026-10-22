@@ -767,7 +767,10 @@ class Janela(wx.Frame):
                    seguro(lambda e, k=i: self._abrir_botao_mencao(k)))
             self.botoes_mencao.append(b)
         self.rot_caixa =wx.StaticText(painel, label="Digite sua mensagem")
-        self.caixa = wx.TextCtrl(painel, style=wx.TE_MULTILINE,
+        # TE_PROCESS_ENTER: o Enter chega ao controle (o leitor de tela o ve e
+        # fecha a palavra digitada) e o envio sai do EVT_TEXT_ENTER
+        self.caixa = wx.TextCtrl(painel,
+                                 style=wx.TE_MULTILINE | wx.TE_PROCESS_ENTER,
                                  name="Digite sua mensagem")
         self.botao_enviar = wx.Button(painel, label="&Enviar")
         # sem tecla de acesso: Alt abre o Menu e as letras ja estao em uso
@@ -821,6 +824,9 @@ class Janela(wx.Frame):
         self.lista_msgs.Bind(wx.EVT_LISTBOX,
                              seguro(lambda e: self._atualizar_botoes()))
         self.caixa.Bind(wx.EVT_TEXT_PASTE, self._ao_colar)
+        self.caixa.Bind(wx.EVT_TEXT_ENTER,
+                        seguro(lambda e: self._enviar_texto()))
+        self.caixa.Bind(wx.EVT_KEY_DOWN, self._tecla_caixa)
         self.botao_enviar.Bind(wx.EVT_BUTTON,
                                seguro(lambda e: self._enviar_texto()))
         self.botao_anexar.Bind(wx.EVT_BUTTON,
@@ -2943,27 +2949,21 @@ class Janela(wx.Frame):
                     self._detalhes_ou_marcador()
                     return
                 if foco is self.caixa:
-                    if self.cfg.get("enter_chega_ao_leitor"):
-                        # o Enter segue para o controle (o leitor de tela o
-                        # ve e fecha a palavra digitada) e o envio espera
-                        # ele ser tratado
-                        evt.Skip()
-                        wx.CallLater(10, self._enviar_depois_do_enter)
-                        return
-                    self._enviar_texto()
+                    # segue para a caixa, que envia pelo EVT_TEXT_ENTER
+                    evt.Skip()
                     return
         except Exception:
             log.error("erro no teclado:\n%s", traceback.format_exc())
             return
         evt.Skip()
 
-    @seguro
-    def _enviar_depois_do_enter(self):
-        """Envia o que estava na caixa antes do Enter e tira dela a quebra de
-        linha que o Enter deixou."""
-        self._enviar_texto()
-        if not self.caixa.GetValue().strip():
-            self.caixa.Clear()
+    def _tecla_caixa(self, evt):
+        """Shift+Enter e Control+Enter quebram a linha: com TE_PROCESS_ENTER
+        todo Enter viraria envio."""
+        if evt.GetKeyCode() in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) and                 (evt.ShiftDown() or evt.ControlDown()) and not evt.AltDown():
+            self.caixa.WriteText("\n")
+            return
+        evt.Skip()
 
     def _tecla_mensagens(self, evt):
         # a pessoa mexeu na lista: nao mover a selecao sozinho

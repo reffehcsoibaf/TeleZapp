@@ -150,6 +150,16 @@ def j(tmp_path, monkeypatch):
     janela.contas = ContasFalsas()
     janela.comecar()
     janela.lista_conv.SetFocus()      # o foco inicial e a caixa de conta
+    # no wx de verdade o Enter que a janela deixa passar chega a caixa, que
+    # envia pelo EVT_TEXT_ENTER; o falso faz o mesmo aqui
+    char_hook = janela._char_hook
+
+    def char_hook_com_caixa(evt):
+        char_hook(evt)
+        if evt.pulou and evt.GetKeyCode() == wx_falso.WXK_RETURN and                 janela.FindFocus() is janela.caixa and not (
+                    evt.ShiftDown() or evt.ControlDown()):
+            janela.caixa.ligacoes[wx_falso.EVT_TEXT_ENTER](None)
+    janela._char_hook = char_hook_com_caixa
     janela.b = b
     b.publicar(ev.EstadoConta("t1", ev.CONECTADA))
     b.publicar(ev.ConversasAtualizadas("t1", [
@@ -3676,41 +3686,32 @@ def test_mencao_ou_resposta_num_grupo_toca_o_som_proprio(j, monkeypatch):
     assert sons == []
 
 
-def test_enter_entregue_ao_leitor_antes_de_enviar_quando_a_opcao_esta_ligada(
-        j):
+def test_enter_chega_a_caixa_e_ela_envia_pelo_evento_de_enter(j):
     j._abrir_conversa(j.indice[("t1", "20")])
     j.b.publicar(ev.MensagensCarregadas("t1", "20", [msg("5", "oi",
                                                           conversa="20")]))
-    # padrao: o Enter e tratado aqui, na hora, e o controle nao o recebe
+    # a janela deixa o Enter passar (o leitor de tela o ve na caixa)
     j.caixa.SetValue("primeira")
     j.caixa.SetFocus()
     enter = Tecla(wx_falso.WXK_RETURN)
     j._char_hook(enter)
-    assert not enter.pulou and ("enviar", "20", "primeira", "") in \
-        j.contas.p.pedidos
-    # ligada: o Enter segue para o controle (o leitor de tela o ve) e o
-    # envio vem logo depois, com a quebra de linha que o Enter deixou
-    j.cfg.set("enter_chega_ao_leitor", True)
-    j.caixa.SetValue("segunda")
-    j.caixa.SetFocus()
-    enter = Tecla(wx_falso.WXK_RETURN)
-    j._char_hook(enter)
     assert enter.pulou
-    assert ("enviar", "20", "segunda", "") not in j.contas.p.pedidos
-    j.caixa.SetValue("segunda\n")                 # o que o controle faz
-    j._enviar_depois_do_enter()
-    assert ("enviar", "20", "segunda", "") in j.contas.p.pedidos
-    assert j.caixa.GetValue() == ""
-    # Enter sem nada escrito: nao envia, e a caixa nao fica com a quebra
-    j.caixa.SetValue("\n")
-    j._enviar_depois_do_enter()
-    assert j.caixa.GetValue() == ""
-    # Shift+Enter continua sendo a nova linha, em qualquer caso
-    j.caixa.SetValue("a")
-    j.caixa.SetFocus()
-    com_shift = Tecla(wx_falso.WXK_RETURN, shift=True)
-    j._char_hook(com_shift)
-    assert com_shift.pulou
+    assert ("enviar", "20", "primeira", "") in j.contas.p.pedidos
+    # a caixa e criada com TE_PROCESS_ENTER
+    assert j.caixa.estilo & wx_falso.TE_PROCESS_ENTER
+    # Shift+Enter e Control+Enter quebram a linha, sem enviar
+    for mod in ({"shift": True}, {"ctrl": True}):
+        j.caixa.SetValue("a")
+        j.caixa.SetFocus()
+        t = Tecla(wx_falso.WXK_RETURN, **mod)
+        j._tecla_caixa(t)
+        assert not t.pulou
+        assert j.caixa.GetValue() == "a\n"
+    assert ("enviar", "20", "a", "") not in j.contas.p.pedidos
+    # outra tecla segue para o controle
+    t = Tecla(ord("x"))
+    j._tecla_caixa(t)
+    assert t.pulou
 
 
 # ------------------------------------------------ mensagens temporarias

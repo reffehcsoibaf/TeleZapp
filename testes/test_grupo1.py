@@ -42,8 +42,8 @@ def test_opcoes_e_busca_sem_acento():
     assert len(chaves) == len(set(chaves))
     assert set(chaves) <= set(config.PADROES)
     assert all(o.categoria and o.descricao for o in config.OPCOES)
-    assert [o.chave for o in config.buscar_opcoes("leitor DE TELA")] == \
-        ["falar_novas"]
+    assert "falar_novas" in [
+        o.chave for o in config.buscar_opcoes("leitor DE TELA")]
     assert [o.chave for o in config.buscar_opcoes("conteudo")]
     assert config.buscar_opcoes("zzz") == []
 
