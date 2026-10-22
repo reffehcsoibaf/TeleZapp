@@ -596,7 +596,7 @@ no fechamento, por assunto.
 ## Corretor ortográfico (22/10/2026)
 
 - F7 na caixa de digitar (menu Mensagens): verificador do próprio Windows por ctypes, sem dependência nova; janela com palavra, frase, "Trocar por", sugestões e botões Trocar, Trocar todas, Ignorar, Ignorar todas e Adicionar ao dicionário (dicionário pessoal do Windows). Opções na categoria Escrita: idioma do corretor e aviso ao enviar (desligado por padrão).
-- **Verificado ao vivo pelo responsável (22/10/2026):** ele usou o corretor no TeleZapp do código e disse que gostou da função. Testado só em português do Brasil. Testado com o NVDA, sem dificuldade em nenhuma das telas. Não foram testados os outros idiomas nem a opção de aviso ao enviar.
+- **Verificado ao vivo pelo responsável (22/10/2026):** ele usou o corretor no TeleZapp do código e disse que gostou da função. Testado só em português do Brasil. Testado com o NVDA, sem dificuldade em nenhuma das telas. Também testado o aviso de ortografia incorreta ao enviar. Não foram testados os outros idiomas.
 
 ## Próximos passos sugeridos
 

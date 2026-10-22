@@ -299,8 +299,9 @@ OPCOES = (
           "deste computador.", ),
     Opcao("enter_chega_ao_leitor", "Enter na caixa fecha a palavra digitada",
           "Leitura", False,
-          "Com a fala das palavras digitadas ligada (no NVDA e em programas "
-          "parecidos), a última palavra de uma mensagem enviada com Enter, "
+          "Com a fala das palavras digitadas ligada (no NVDA e em outros "
+          "leitores de tela), a última palavra de uma mensagem enviada com "
+          "Enter, "
           "sem espaço depois, ficava guardada e saía junto da primeira "
           "palavra da próxima. Marcada, o Enter da caixa de digitar é "
           "entregue ao controle antes de enviar, e a palavra se fecha na "
@@ -344,11 +345,13 @@ OPCOES = (
           "Mídias", True,
           "Quando um download que você pediu, ou o envio de um arquivo "
           "grande, demora mais de um segundo, abre uma janela com uma barra "
-          "de progresso. O NVDA toca bipes que sobem do grave ao agudo "
-          "conforme a barra avança. O TeleZapp não fala nem escreve a "
+          "de progresso. O leitor de tela acompanha a "
+          "barra (o NVDA toca bipes que sobem do grave ao agudo conforme ela "
+          "avança). O TeleZapp não fala nem escreve a "
           "porcentagem: quem decide se a barra fala, bipa, os dois ou fica "
-          "quieta é a configuração de barras de progresso do próprio NVDA "
-          "(Configurações do NVDA, Apresentação de objetos). No download a "
+          "quieta é a configuração de barras de progresso do próprio leitor de "
+          "tela (no NVDA, Configurações, Apresentação de objetos). No "
+          "download a "
           "janela tem o botão Cancelar (Esc também cancela). Com a janela "
           "aberta, a fala do avanço (Porcentagem falada no download) fica "
           "quieta. "
