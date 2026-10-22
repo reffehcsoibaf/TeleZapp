@@ -425,7 +425,8 @@ class Janela(wx.Frame):
         self._gravacao_rapida = None  # {"gravador", "origem"} gravando por atalho
         self._bandeja = None          # icone da area de notificacao
         self._saindo = False          # True: fechar e sair de verdade
-        self._id_global = wx.NewIdRef() if hasattr(wx, "NewIdRef") else 9001
+        self._id_global = (wx.NewIdRef().GetId() if hasattr(wx, "NewIdRef")
+                           else 9001)
         # funcoes que aceitam atalho (os itens de menu e outras) e o que a
         # pessoa mudou; os rotulos sem atalho de cada item ficam em
         # _base_menu e o atalho entra na hora (ver _atualizar_atalhos)
