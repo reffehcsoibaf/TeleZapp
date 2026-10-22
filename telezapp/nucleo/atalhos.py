@@ -46,6 +46,8 @@ _RESERVADAS = {
     "Ctrl+Alt+Delete": "Control Alt Delete é do Windows",
     "Ctrl+Esc": "Control Esc abre o menu Iniciar",
     "Alt+Esc": "Alt Esc troca de programa no Windows",
+    "Alt+M": "Alt M abre o menu do TeleZapp",
+    "Alt+E": "Alt E aperta o botão Enviar",
     "Alt+Space": "Alt Espaço abre o menu da janela",
     "Delete": "Delete apaga",
     "Backspace": "Backspace apaga",
@@ -111,9 +113,6 @@ def problema(canon):
     if not (ctrl or alt):
         return ("Use Control ou Alt junto com a tecla (ou uma tecla de F1 a "
                 "F12), para não atrapalhar quem digita.")
-    if alt and not ctrl and (len(tecla) == 1 and tecla.isalpha()):
-        return ("Alt com uma letra abre os menus. Use Control junto, ou "
-                "outra tecla.")
     return ""
 
 

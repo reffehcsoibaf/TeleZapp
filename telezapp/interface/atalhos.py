@@ -13,7 +13,9 @@ REMOVER = "remover"
 
 class DialogoAtalho(wx.Dialog):
     """Foco no campo "Combinação": aperte as teclas. Tab sai do campo. OK
-    guarda, Remover deixa a funcao sem atalho e Cancelar nao muda nada."""
+    guarda, Remover deixa a funcao sem atalho e Cancelar nao muda nada.
+    Nenhum controle daqui tem letra de acesso (&): um Alt mais letra apertado
+    para escolher a combinacao acionaria o botao em vez de ser lido."""
 
     def __init__(self, pai, funcao, atual, falar=None):
         super().__init__(pai, title="Atalho de %s" % funcao,
@@ -27,7 +29,7 @@ class DialogoAtalho(wx.Dialog):
             "que você quer usar para %s. Tab sai do campo." % funcao)
         texto.Wrap(420)
         lay.Add(texto, 0, wx.ALL, 10)
-        lay.Add(wx.StaticText(self, label="&Combinação"), 0,
+        lay.Add(wx.StaticText(self, label="Combinação"), 0,
                 wx.LEFT | wx.RIGHT, 10)
         self.campo = wx.TextCtrl(self, value=at.exibir(self.escolhida),
                                  style=wx.TE_READONLY, name="Combinação",
@@ -37,7 +39,7 @@ class DialogoAtalho(wx.Dialog):
         lay.Add(self.aviso, 0, wx.ALL, 10)
         botoes = wx.BoxSizer(wx.HORIZONTAL)
         self.ok = wx.Button(self, wx.ID_OK, "OK")
-        self.remover = wx.Button(self, wx.ID_ANY, "&Remover o atalho")
+        self.remover = wx.Button(self, wx.ID_ANY, "Remover o atalho")
         cancelar = wx.Button(self, wx.ID_CANCEL, "Cancelar")
         self.ok.SetDefault()
         for b in (self.ok, self.remover, cancelar):

@@ -32,7 +32,9 @@ def test_o_que_nao_serve_de_atalho():
     assert at.problema("Alt+F4")
     assert at.problema("E")                 # letra solta atrapalha a digitacao
     assert at.problema("Shift+E")
-    assert at.problema("Alt+E")             # abre menu
+    assert at.problema("Alt+E")             # aperta o botao Enviar
+    assert at.problema("Alt+M")             # abre o menu
+    assert at.problema("Alt+R") == ""       # Alt com letra livre serve
     assert at.problema(None)
 
 
