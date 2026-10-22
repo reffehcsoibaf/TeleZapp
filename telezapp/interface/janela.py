@@ -4892,16 +4892,18 @@ class Janela(wx.Frame):
         pasta = config.pasta_temporaria()
         if origem == MICROFONE:
             titulo = "Gravar nota de voz do microfone"
-            instrucao = ("Fale perto do microfone. A gravação já começou. "
-                         "Aperte Enter para parar; depois você pode ouvir, "
-                         "gravar de novo ou enviar. Esc descarta.")
+            instrucao = ("Fale perto do microfone. Aperte Enter em Gravar "
+                         "para começar. Gravando, Enter para e Pausar faz "
+                         "uma pausa; depois você pode ouvir, gravar de novo "
+                         "ou enviar. Esc descarta.")
         else:
             titulo = "Gravar o som do computador"
             instrucao = ("Vai ser gravado tudo o que o computador tocar, "
                          "inclusive a voz do leitor de tela, se ele falar. "
-                         "A gravação já começou. Aperte Enter para parar; "
-                         "depois você pode ouvir, gravar de novo ou enviar. "
-                         "Esc descarta.")
+                         "Aperte Enter em Gravar para começar. Gravando, "
+                         "Enter para e Pausar faz uma pausa; depois você "
+                         "pode ouvir, gravar de novo ou enviar. Esc "
+                         "descarta.")
         gravacao = dialogos.gravar_voz(
             self, lambda: Gravador(pasta, origem, maximo_segundos=3600),
             titulo, instrucao, self.fala)

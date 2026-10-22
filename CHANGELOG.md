@@ -5,6 +5,8 @@ Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 
 ## Próxima versão (ainda sem número: segue o dia do lançamento)
 
+- Gravação de voz (`dialogos.gravar_voz`): a janela abre pronta, com o foco em "Gravar", e só começa a gravar quando a pessoa aperta o botão (antes começava sozinha). Gravando há "Pausar"/"Continuar" ao lado de "Parar de gravar"; `Gravador.pausar()`/`continuar()` mantêm a captura aberta e descartam o trecho da pausa. "Gravar de novo" volta ao início, sem começar sozinho. Só há teste automático do `Gravador`; a janela não foi vista no app real.
+
 - Enter na caixa de digitar passa pelo controle, como no WinZapp: a caixa ganha `TE_PROCESS_ENTER` e o envio sai do `EVT_TEXT_ENTER`; o `_char_hook` só deixa o Enter seguir (`Skip`). Shift+Enter e Control+Enter quebram a linha em `_tecla_caixa`. O leitor de tela vê o Enter e fecha a última palavra digitada. Saem a opção `enter_chega_ao_leitor` (era experimental), o atraso de 10 ms e a limpeza da quebra de linha (`_enviar_depois_do_enter`). A opção "Enter na caixa fecha a palavra digitada" some das Configurações.
 
 - Corretor ortográfico (F7, menu Mensagens, "Verificar ortografia da

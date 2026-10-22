@@ -166,6 +166,7 @@ class Gravador:
         self._taxa = TAXA
         self._pico = 0.0
         self._parar = threading.Event()
+        self._pausa = threading.Event()
         self._cancelado = False
         self._pronto = threading.Event()
         self._erro = None
@@ -187,7 +188,19 @@ class Gravador:
         return self._thread is not None and self._thread.is_alive() and \
             not self._parar.is_set()
 
+    @property
+    def pausado(self):
+        return self._pausa.is_set()
+
     # ----------------------------------------------------------- controle
+    def pausar(self):
+        """Deixa de gravar sem fechar a captura; `continuar()` retoma e o
+        trecho da pausa nao entra na gravacao."""
+        self._pausa.set()
+
+    def continuar(self):
+        self._pausa.clear()
+
     def iniciar(self):
         """Comeca a gravar. Levanta ErroGravacao se a fonte nao abrir."""
         if self._thread is not None:
@@ -269,8 +282,8 @@ class Gravador:
                 self._pronto.set()
                 while not self._parar.is_set():
                     bloco = fonte.ler()
-                    if len(bloco) == 0:
-                        continue
+                    if len(bloco) == 0 or self._pausa.is_set():
+                        continue      # na pausa a captura segue aberta
                     pico = float(abs(bloco).max())
                     if pico > self._pico:
                         self._pico = pico
