@@ -146,6 +146,7 @@ def j(tmp_path, monkeypatch):
         cfg.set(chave, True)
     banco = Banco(str(tmp_path / "t.db"))
     b = ev.Barramento()
+    cfg.set("enter_envia", True)      # os testes antigos enviam com o Enter
     janela = jm.Janela(cfg, banco, b)
     janela.contas = ContasFalsas()
     janela.comecar()
@@ -3697,14 +3698,13 @@ def test_enter_chega_a_caixa_e_ela_envia_pelo_evento_de_enter(j):
     assert ("enviar", "20", "primeira", "") in j.contas.p.pedidos
     # a caixa e criada com TE_PROCESS_ENTER
     assert j.caixa.estilo & wx_falso.TE_PROCESS_ENTER
-    # Shift+Enter e Control+Enter quebram a linha, sem enviar
-    for mod in ({"shift": True}, {"ctrl": True}):
-        j.caixa.SetValue("a")
-        j.caixa.SetFocus()
-        t = Tecla(wx_falso.WXK_RETURN, **mod)
-        j._tecla_caixa(t)
-        assert not t.pulou
-        assert j.caixa.GetValue() == "a\n"
+    # Shift+Enter quebra a linha, sem enviar
+    j.caixa.SetValue("a")
+    j.caixa.SetFocus()
+    t = Tecla(wx_falso.WXK_RETURN, shift=True)
+    j._tecla_caixa(t)
+    assert not t.pulou
+    assert j.caixa.GetValue() == "a\n"
     assert ("enviar", "20", "a", "") not in j.contas.p.pedidos
     # outra tecla segue para o controle
     t = Tecla(ord("x"))
@@ -4206,3 +4206,52 @@ def test_menu_midias_agrupa_as_escolhas_e_o_atalho_fala_portugues(j):
     assert j.itens["audio_voltar_mais"].rotulo.endswith(
         "	Ctrl+Shift+Page Up")
     assert "Left" not in j.itens["audio_voltar"].rotulo
+
+
+def test_por_padrao_enter_quebra_a_linha_e_control_enter_envia(j):
+    j.cfg.set("enter_envia", False)
+    j._abrir_conversa(j.indice[("t1", "20")])
+    j.estados["t1"] = ev.CONECTADA
+    j.caixa.SetValue("linha um")
+    j.caixa.SetFocus()
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert j.caixa.GetValue() == "linha um\n"
+    assert not [p for p in j.contas.p.pedidos if p[0] == "enviar"]
+    # o Control Enter e a funcao Enviar a mensagem digitada (do menu)
+    assert j.atalhos.efetivo("enviar_msg") == "Ctrl+Enter"
+    j._enviar_texto()
+    assert ("enviar", "20", "linha um", "") in j.contas.p.pedidos
+    j._rotular_controles()
+    assert j.botao_enviar.GetLabel() == "&Enviar (Ctrl+Enter)"
+
+
+def test_com_a_opcao_enter_envia_e_o_botao_diz_enter(j):
+    j.cfg.set("enter_envia", False)
+    j._rotular_controles()
+    assert j.botao_enviar.GetLabel() == "&Enviar (Ctrl+Enter)"
+    j._aplicar_opcao("enter_envia", True)
+    j._rotular_controles()
+    assert j.botao_enviar.GetLabel() == "&Enviar (Enter)"
+    assert j._tecla_de_enviar() == "Enter"
+    j.cfg.set("enter_envia", False)
+    assert j._tecla_de_enviar() == "Control Enter"
+    j._aplicar_opcao("atalhos", {"enviar_msg": "Ctrl+Shift+Enter"})
+    assert j._tecla_de_enviar() == "Control Shift Enter"
+
+
+def test_control_enter_na_caixa_envia_e_shift_enter_quebra_a_linha(j):
+    j.cfg.set("enter_envia", False)
+    j._abrir_conversa(j.indice[("t1", "20")])
+    j.estados["t1"] = ev.CONECTADA
+    j.caixa.SetValue("oi")
+    j.caixa.SetFocus()
+    j._tecla_caixa(Tecla(wx_falso.WXK_RETURN, shift=True))
+    assert j.caixa.GetValue() == "oi\n"
+    assert not [p for p in j.contas.p.pedidos if p[0] == "enviar"]
+    j._tecla_caixa(Tecla(wx_falso.WXK_RETURN, ctrl=True))
+    assert ("enviar", "20", "oi", "") in j.contas.p.pedidos
+    # se o Control Enter for de outra funcao, ele so quebra a linha
+    j._aplicar_opcao("atalhos", {"enviar_msg": "Ctrl+Shift+Enter"})
+    j.caixa.SetValue("de novo")
+    j._tecla_caixa(Tecla(wx_falso.WXK_RETURN, ctrl=True))
+    assert j.caixa.GetValue() == "de novo\n"

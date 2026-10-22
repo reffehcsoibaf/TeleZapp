@@ -112,7 +112,7 @@ conversas que você escolher
 Control Shift C: copiar o texto da mensagem selecionada (o menu de contexto
 tem um item de cópia para cada tipo de conteúdo)
 Control V na caixa de digitar: colar arquivos ou imagens copiados, que
-são enviados com o Enter; o texto da caixa vira a legenda
+são enviados com Control Enter; o texto da caixa vira a legenda
 Alt Enter: ver os detalhes e o texto completo da mensagem selecionada
 Control Shift D: depurar a mensagem selecionada (menu Depurar)
 Control O: abrir a mídia da mensagem (baixa antes, se preciso), mesmo
@@ -158,7 +158,8 @@ voltar 5 segundos (com Shift, 30). Home: voltar ao início. + e -: mais
 rápido e mais lento. Esc: fechar.
 
 NA CAIXA DE DIGITAÇÃO
-Enter: envia e esconde a caixa. Shift Enter: nova linha. Esc: cancela a
+Control Enter: envia (a tecla muda em Configurações, Atalhos; em Escrita dá
+para fazer o Enter enviar). Enter e Shift Enter: nova linha. Esc: cancela a
 resposta, se houver, esconde a caixa e volta para as mensagens.
 Depois do botão Enviar há três botões: Anexar e enviar arquivo, Gravar do
 microfone e Gravar som do computador. O texto da caixa vai como legenda do arquivo.
@@ -521,6 +522,7 @@ class Janela(wx.Frame):
 
         m_msg = wx.Menu()
         item(m_msg, "nova_msg", "&Nova mensagem...\tCtrl+N")
+        item(m_msg, "enviar_msg", "Enviar a mensagem digitada\tCtrl+Enter")
         m_msg.AppendSeparator()
         item(m_msg, "responder_particular", "Responder em &particular")
         item(m_msg, "responder", "&Responder\tCtrl+Shift+R")
@@ -648,7 +650,7 @@ class Janela(wx.Frame):
                                 (m_exib, "&Exibir"), (m_fer, "&Ferramentas"),
                                 (m_aj, "A&juda")):
             raiz.AppendSubMenu(submenu, rotulo)
-        barra.Append(raiz, "&Menu")
+        barra.Append(raiz, "Menu")        # Alt sozinho ja abre; Alt M fica livre
         self.SetMenuBar(barra)
         categorias = {m_msg: "Mensagens", m_conv: "Conversas",
                       m_ctt: "Contatos", m_cham: "Chamadas",
@@ -692,6 +694,7 @@ class Janela(wx.Frame):
             "ir_conv": lambda e: self._ir_para(self.lista_conv, "conversas"),
             "ir_msgs": lambda e: self._ir_para(self.lista_msgs, "mensagens"),
             "ir_caixa": lambda e: self._mostrar_caixa(),
+            "enviar_msg": lambda e: self._enviar_texto(),
             "nova_msg": lambda e: self._nova_mensagem(),
             "abrir_conv": lambda e: self._abrir_selecionada_na_lista(),
             "arquivar": lambda e: self._arquivar_conversa(),
@@ -814,6 +817,8 @@ class Janela(wx.Frame):
         for controle, base, chave, fixo in self._controles_atalho:
             canon = fixo or self.atalhos.efetivo(chave) if chave or fixo \
                 else ""
+            if chave == "enviar_msg" and self.cfg.get("enter_envia"):
+                canon = "Enter"
             controle.SetLabel(base + (
                 " (%s)" % nucleo_atalhos.exibir(canon) if mostrar and canon
                 else ""))
@@ -976,7 +981,7 @@ class Janela(wx.Frame):
             (rot_busca, "Buscar conversa", "buscar_conv", ""),
             (self.botao_sair, "Sair", "sair", ""),
             (rot_conv, "Conversas", "ir_conv", ""),
-            (self.botao_enviar, "&Enviar", "", "Enter"),
+            (self.botao_enviar, "&Enviar", "enviar_msg", ""),
             (self.botao_anexar, "Anexar e enviar arquivo", "anexar", ""),
             (self.botao_mic, "Gravar do microfone", "gravar_mic", ""),
             (self.botao_som, "Gravar som do computador", "gravar_som", ""),
@@ -1027,7 +1032,7 @@ class Janela(wx.Frame):
                              seguro(lambda e: self._atualizar_botoes()))
         self.caixa.Bind(wx.EVT_TEXT_PASTE, self._ao_colar)
         self.caixa.Bind(wx.EVT_TEXT_ENTER,
-                        seguro(lambda e: self._enviar_texto()))
+                        seguro(lambda e: self._enter_na_caixa()))
         self.caixa.Bind(wx.EVT_KEY_DOWN, self._tecla_caixa)
         self.botao_enviar.Bind(wx.EVT_BUTTON,
                                seguro(lambda e: self._enviar_texto()))
@@ -3161,12 +3166,36 @@ class Janela(wx.Frame):
             return
         evt.Skip()
 
+    def _enter_na_caixa(self):
+        """O Enter chegou ao controle (o leitor de tela o viu). Por padrao
+        quebra a linha e o Control Enter envia; com a opcao, o Enter envia."""
+        if self.cfg.get("enter_envia"):
+            self._enviar_texto()
+        else:
+            self.caixa.WriteText("\n")
+
+    def _tecla_de_enviar(self):
+        """Como dizer a pessoa qual tecla envia a mensagem."""
+        if self.cfg.get("enter_envia"):
+            return "Enter"
+        canon = self.atalhos.efetivo("enviar_msg")
+        return nucleo_atalhos.texto_falado(canon) if canon \
+            else "o botão Enviar"
+
     def _tecla_caixa(self, evt):
-        """Shift+Enter e Control+Enter quebram a linha: com TE_PROCESS_ENTER
-        todo Enter viraria envio."""
+        """Enter com modificador na caixa. Se a combinacao e a tecla de
+        enviar (Control Enter, de fabrica), envia: o campo de texto fica com
+        a tecla antes da tabela de aceleracao da janela. As outras
+        combinacoes com Shift ou Control quebram a linha, porque com
+        TE_PROCESS_ENTER todo Enter viraria envio."""
         if evt.GetKeyCode() in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) and \
                 (evt.ShiftDown() or evt.ControlDown()) and not evt.AltDown():
-            self.caixa.WriteText("\n")
+            canon = nucleo_atalhos.montar(evt.ControlDown(), False,
+                                          evt.ShiftDown(), "Enter")
+            if canon == self.atalhos.efetivo("enviar_msg"):
+                self._enviar_texto()
+            else:
+                self.caixa.WriteText("\n")
             return
         evt.Skip()
 
@@ -4162,7 +4191,8 @@ class Janela(wx.Frame):
         texto = ("Respondendo a %s. Digite sua resposta" % autor) \
             if autor else "Digite sua mensagem"
         if self.editando is not None:
-            texto = "Editando sua mensagem. Enter salva e Esc cancela"
+            texto = "Editando sua mensagem. %s salva e Esc cancela" % \
+                self._tecla_de_enviar()
         if self.anexos:
             texto += ". %s, o texto vira legenda" % colagem.descricao(
                 self.anexos)
@@ -4200,8 +4230,8 @@ class Janela(wx.Frame):
         self.editando = x
         self.caixa.SetValue(x.texto)
         self._rotular_caixa()
-        self.fala.falar("Editando a mensagem. Enter salva, Esc cancela.",
-                        interromper=True)
+        self.fala.falar("Editando a mensagem. %s salva, Esc cancela." %
+                        self._tecla_de_enviar(), interromper=True)
         self.caixa.SetFocus()
         self.caixa.SetInsertionPointEnd()
 
@@ -5227,7 +5257,8 @@ class Janela(wx.Frame):
         if self.atual is None:
             evt.Skip()
             return
-        colagem.colar(evt, self.fala, self.anexos, self._rotular_caixa)
+        colagem.colar(evt, self.fala, self.anexos, self._rotular_caixa,
+                      tecla=self._tecla_de_enviar())
 
     def _descartar_anexos(self, falar=False):
         if not self.anexos:

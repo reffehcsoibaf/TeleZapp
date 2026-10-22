@@ -104,7 +104,7 @@ def ler(fala):
     return anexos
 
 
-def colar(evt, fala, anexos, ao_mudar):
+def colar(evt, fala, anexos, ao_mudar, tecla="Enter"):
     """Tratador de EVT_TEXT_PASTE: midia colada vai para `anexos` (lista) e
     `ao_mudar()` e chamado; texto segue o caminho normal da colagem."""
     try:
@@ -121,8 +121,8 @@ def colar(evt, fala, anexos, ao_mudar):
     anexos.extend(novos)
     ao_mudar()
     nomes = ", ".join(m.NOMES_TIPOS[a.tipo] for a in novos)
-    fala.falar("%s colado. Escreva a legenda, se quiser, e aperte Enter "
-               "para enviar. Esc remove." % nomes.capitalize(),
+    fala.falar("%s colado. Escreva a legenda, se quiser, e aperte %s "
+               "para enviar. Esc remove." % (nomes.capitalize(), tecla),
                interromper=True)
 
 

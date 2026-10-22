@@ -25,7 +25,7 @@ partir dos experimentos, ainda a confirmar.
 - Tratar Enter e Esc na janela (`EVT_CHAR_HOOK`); o `ListBox` não entrega o Enter.
 - Ao abrir uma conversa: foco no item "Início das mensagens não lidas" ou, se
   não houver, na última mensagem. Esc volta para a lista de conversas.
-- Enter na caixa de digitação envia; Shift+Enter quebra a linha.
+- Na caixa de digitação, Control+Enter envia (22/10/2026: como no Telegram Web e no Gmail) e Enter e Shift+Enter quebram a linha; a opção `enter_envia` (Escrita) volta ao Enter que envia, e a tecla de enviar é a função `enviar_msg` dos atalhos. Antes: Enter enviava e Shift+Enter quebrava a linha.
 - Três estilos de leitura da mensagem (autor primeiro, conteúdo primeiro, autor
   só quando muda), escolhidos num menu.
 - Avisos de mensagem nova: fala pelo NVDA mais som, ambos desligáveis.
