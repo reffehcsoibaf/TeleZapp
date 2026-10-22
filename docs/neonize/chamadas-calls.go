@@ -287,7 +287,9 @@ func CallDial(id *C.char, target *C.char, buf *C.char, cap C.int) C.int {
 	defer cancelar()
 	numero := C.GoString(target)
 	destino := numero
-	if resp, err := cli.IsOnWhatsApp(ctx, variantesNumero(numero)); err == nil {
+	if strings.Contains(numero, "@") {
+		// ja e um endereco (ex.: 123@lid): nao ha o que resolver
+	} else if resp, err := cli.IsOnWhatsApp(ctx, variantesNumero(numero)); err == nil {
 		for _, r := range resp {
 			if !r.IsIn {
 				continue

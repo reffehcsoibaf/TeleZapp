@@ -3,6 +3,20 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## Em andamento (2026.10.21.1)
+
+- Chamadas de voz do WhatsApp (experimental, opção "Chamadas de voz do
+  WhatsApp (experimental)", desligada por padrão). `provedores/chamadas_whatsapp.py`
+  liga o meowcaller (MIT; protocolo por engenharia reversa) que vai dentro da
+  DLL de teste do neonize (`goneonize/calls.go`, receita em
+  `docs/neonize/COMO-CONSTRUIR.md`): o mesmo cliente e o mesmo login das
+  mensagens, sem segundo pareamento. A DLL expõe `CallsConfigure` (antes de
+  conectar), `CallsNextEvent`, `CallDial`, `CallAnswer`, `CallHangup`,
+  `CallReadAudio` e `CallWriteAudio` (quadros PCM s16le de 1920 bytes, 16 kHz);
+  o Python liga o microfone e a saída pelo sounddevice. O estado sai como
+  `EstadoChamada`, igual ao Telegram. Com a opção ligada, o aviso antigo ("só
+  avisa") não aparece. Visto ao vivo só no experimento, sem o app.
+
 ## 2026.10.21.0
 
 - Resposta a botões e listas de mensagens de empresa (erro 479). O whatsmeow

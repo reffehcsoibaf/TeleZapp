@@ -890,6 +890,7 @@ class ProvedorWhatsApp(Provedor):
         self._desligada = False     # desconectada pelo celular
         self._pareando = False      # QR ou codigo em andamento
         self._chamadas = {}         # id da chamada -> dados (so aviso)
+        self._voz = None            # ChamadasWhatsApp, se as chamadas estao ligadas
         self._disponivel = False    # presenca "disponivel" enviada
         self._observadas = {}       # JID da conversa observada -> conversa_id
         self._presenca_cid = None   # a conversa aberta com presenca
@@ -1006,6 +1007,7 @@ class ProvedorWhatsApp(Provedor):
         try:
             import neonize.events as nev
             self.cliente = self.fabrica_cliente()
+            self._preparar_chamadas()
             registros = {
                 "ConnectedEv": self._ao_conectar,
                 "PairStatusEv": self._ao_parear,
@@ -1084,6 +1086,8 @@ class ProvedorWhatsApp(Provedor):
 
     def parar(self):
         self._parar.set()
+        if self._voz is not None:
+            self._voz.parar()
         if self._ouvinte is not None:
             logging.getLogger("whatsmeow.Client").removeHandler(
                 self._ouvinte)
@@ -3753,6 +3757,85 @@ class ProvedorWhatsApp(Provedor):
         return self._id_da_conversa(jid)
 
     # ------------------------------------------------------------- recibos
+    # ------------------------------------------------- chamadas de voz
+    # Opcional e experimental (opcao "chamadas_whatsapp"): o meowcaller vai
+    # dentro da DLL de teste do neonize e usa este mesmo cliente.
+    @property
+    def suporta_chamadas(self):
+        return self._voz is not None and self._voz.pronta
+
+    def _preparar_chamadas(self):
+        """Antes de conectar: liga o meowcaller no cliente, se a pessoa
+        quiser e a DLL tiver."""
+        if self._voz is not None:
+            self._voz.parar()
+            self._voz = None
+        try:
+            from telezapp import config
+            from telezapp.provedores.chamadas_whatsapp import (
+                ChamadasWhatsApp, Ponte)
+            quer = bool(config.Config().get("chamadas_whatsapp"))
+            if not Ponte.disponivel():
+                if quer:
+                    log.info("chamadas do WhatsApp pedidas, mas a DLL do "
+                             "neonize não tem o meowcaller")
+                return
+            Ponte.configurar(quer)
+            if not quer:
+                return
+            self._voz = ChamadasWhatsApp(
+                Ponte(self.cliente.uuid), self.conta.id, self.barramento,
+                self._conversa_do_peer, self._nome_da_conversa,
+                self._destino_da_chamada)
+            self._voz.iniciar()
+            log.info("chamadas de voz do WhatsApp ligadas (experimental)")
+        except Exception:
+            log.exception("erro ao preparar as chamadas do WhatsApp")
+            self._voz = None
+
+    def _conversa_do_peer(self, peer):
+        usuario, servidor = jid_de_texto(peer)
+        return self._id_da_conversa(_jid_obj(usuario, servidor))
+
+    def _nome_da_conversa(self, cid):
+        conv = self._conversas.get(cid)
+        return conv.nome if conv is not None and conv.nome else ""
+
+    def _destino_da_chamada(self, cid):
+        """O texto que a DLL liga: o numero, ou o endereco LID."""
+        usuario, servidor = jid_de_texto(cid)
+        return usuario if servidor == "s.whatsapp.net" else             "%s@%s" % (usuario, servidor)
+
+    def _comando_de_chamada(self, metodo, conversa_id, *args):
+        if not self.suporta_chamadas or "@g.us" in conversa_id or                 "@newsletter" in conversa_id:
+            self._avisar("Chamadas de voz não estão disponíveis nesta "
+                         "conversa.")
+            return
+        threading.Thread(target=getattr(self._voz, metodo),
+                         args=(conversa_id,) + args, daemon=True,
+                         name="chamada-" + metodo).start()
+
+    def ligar(self, conversa_id, microfone="", saida=""):
+        self._comando_de_chamada("ligar", conversa_id, microfone, saida)
+
+    def atender_chamada(self, conversa_id, microfone="", saida=""):
+        self._comando_de_chamada("atender", conversa_id, microfone, saida)
+
+    def encerrar_chamada(self, conversa_id):
+        self._comando_de_chamada("encerrar", conversa_id)
+
+    def silenciar_chamada(self, conversa_id, silenciar):
+        self._comando_de_chamada("silenciar", conversa_id, silenciar)
+
+    def trocar_dispositivos(self, conversa_id, microfone="", saida=""):
+        self._comando_de_chamada("trocar_dispositivos", conversa_id,
+                                 microfone, saida)
+
+    def dispositivos_de_audio(self):
+        if self._voz is None:
+            return [], []
+        return self._voz.dispositivos()
+
     # ------------------------------------------------------------ chamadas
     def _tem_tag(self, no, tag):
         """A tag aparece em algum lugar da arvore do pacote da chamada?"""
@@ -3798,8 +3881,10 @@ class ProvedorWhatsApp(Provedor):
             # sem o aviso de mensagem nova: a janela da chamada avisa
             self.barramento.publicar(ev.MensagemNova(msg, conv,
                                                      silenciosa=True))
-            self.barramento.publicar(ev.ChamadaWhatsApp(
-                self.conta.id, cid, conv.nome, video, "tocando", chamada))
+            if not self.suporta_chamadas:
+                self.barramento.publicar(ev.ChamadaWhatsApp(
+                    self.conta.id, cid, conv.nome, video, "tocando",
+                    chamada))
         except Exception:
             log.exception("erro ao tratar chamada recebida")
 

@@ -71,10 +71,10 @@ index f9160df..8cf0cb3 100644
      repeated GroupParticipant participants = 2;
 diff --git a/goneonize/calls.go b/goneonize/calls.go
 new file mode 100644
-index 0000000..db282a0
+index 0000000..318dcb1
 --- /dev/null
 +++ b/goneonize/calls.go
-@@ -0,0 +1,391 @@
+@@ -0,0 +1,393 @@
 +package main
 +
 +/*
@@ -364,7 +364,9 @@ index 0000000..db282a0
 +	defer cancelar()
 +	numero := C.GoString(target)
 +	destino := numero
-+	if resp, err := cli.IsOnWhatsApp(ctx, variantesNumero(numero)); err == nil {
++	if strings.Contains(numero, "@") {
++		// ja e um endereco (ex.: 123@lid): nao ha o que resolver
++	} else if resp, err := cli.IsOnWhatsApp(ctx, variantesNumero(numero)); err == nil {
 +		for _, r := range resp {
 +			if !r.IsIn {
 +				continue

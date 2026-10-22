@@ -198,6 +198,15 @@ OPCOES = (
           "Conversar. O TeleZapp ainda não atende essas chamadas: atenda em "
           "outro dispositivo. Desmarcada, a chamada só fica registrada na "
           "lista de mensagens da conversa."),
+    Opcao("chamadas_whatsapp", "Chamadas de voz do WhatsApp (experimental)",
+          "Avisos", False,
+          "Liga e atende chamadas de voz do WhatsApp pelo próprio TeleZapp, "
+          "com o mesmo login das mensagens (nenhum pareamento extra). O "
+          "protocolo de chamadas do WhatsApp foi descoberto por engenharia "
+          "reversa: pode deixar de funcionar a qualquer momento e o "
+          "WhatsApp pode limitar a conta que o usa. Exige a DLL de teste do "
+          "neonize e reiniciar o TeleZapp. Desmarcada, o TeleZapp só avisa "
+          "quando alguém liga."),
     Opcao("falar_novas", "Falar mensagens novas na conversa aberta", "Avisos",
           False,
           "O leitor de tela fala o autor e o conteúdo de cada mensagem nova "
