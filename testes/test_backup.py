@@ -219,3 +219,43 @@ def test_backup_e_restauracao_informam_o_avanco(tmp_path):
                  str(tmp_path / "c"),
                  progresso=lambda pct, texto="": vistos.append(pct))
     assert vistos == sorted(vistos) and vistos[-1] >= 90
+
+
+def test_backup_leva_os_atalhos_personalizados():
+    mapa = {"responder": "Alt+R", "anexar": "", "enviar_msg": "Ctrl+Enter"}
+    levadas = bk.opcoes_do_backup({"atalhos": mapa})
+    assert levadas["atalhos"] == mapa
+    assert bk.opcoes_do_backup({})["atalhos"] == {}      # sem nada: vazio
+    assert bk.opcoes_validas({"atalhos": mapa})["atalhos"] == mapa
+
+
+def test_atalhos_do_backup_so_voltam_validos_e_sem_repeticao():
+    lidos = {"a": "ctrl+shift+e",       # volta na forma canonica
+             "b": "Ctrl+Shift+E",       # repete a combinacao de "a"
+             "c": "Enter",              # nao pode ser atalho
+             "d": "banana",             # nao e combinacao
+             "e": 5,                    # nao e texto
+             "f": "",                   # sem atalho de proposito
+             3: "Ctrl+1"}               # funcao que nao e texto
+    assert bk.opcoes_validas({"atalhos": lidos})["atalhos"] == {
+        "a": "Ctrl+Shift+E", "f": ""}
+    assert "atalhos" not in bk.opcoes_validas({"atalhos": "lixo"})
+
+
+def test_abrir_com_o_windows_nunca_vem_do_backup():
+    assert "iniciar_com_windows" not in bk.opcoes_do_backup({})
+    assert "iniciar_com_windows" not in bk.opcoes_validas(
+        {"iniciar_com_windows": True})
+
+
+def test_ida_e_volta_do_backup_leva_o_mapa_de_atalhos(tmp_path):
+    origem = tmp_path / "a"
+    cfg = preparar(origem)
+    cfg["atalhos"] = {"responder": "Alt+R", "anexar": ""}
+    arquivo = str(tmp_path / "b.zip")
+    bk.criar(arquivo, str(origem), cfg, ["configuracoes"])
+    destino = tmp_path / "b"
+    os.makedirs(destino)
+    opcoes, espera = bk.restaurar(arquivo, "", ["configuracoes"],
+                                  str(destino))
+    assert opcoes["atalhos"] == {"responder": "Alt+R", "anexar": ""}

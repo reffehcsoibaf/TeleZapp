@@ -4042,6 +4042,15 @@ class GravadorFalso:
         self.cancelado = False
         GravadorFalso.criados.append(self)
 
+    pausado = False
+    decorrido = 4.0
+
+    def pausar(self):
+        self.pausado = True
+
+    def continuar(self):
+        self.pausado = False
+
     def iniciar(self):
         pass
 
@@ -4325,3 +4334,99 @@ def test_criar_enquete_pelo_menu_vai_ao_servico(j, monkeypatch):
     j.fala.falar = lambda t, interromper=False: ditas.append(t)
     j._nova_enquete()
     assert "não cria enquetes" in ditas[-1]
+
+
+def _enquete_minha(j, id_="9"):
+    j._abrir_conversa(j.indice[("t1", "20")])
+    enquete = m.Mensagem("t1", "20", id_, minha=True, tipo=m.OUTRO,
+                         data=AGORA, texto="enquete: Q")
+    m.atualizar_extras(enquete, enquete={
+        "pergunta": "Q", "opcoes": ["A", "B"], "maximo": 1})
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", [enquete]))
+    return enquete
+
+
+def test_sons_dos_votos_em_enquete(j, monkeypatch):
+    sons = []
+    monkeypatch.setattr(jm, "bipe", lambda tipo, *a: sons.append(tipo))
+    enquete = _enquete_minha(j)
+    sons.clear()
+    j.b.publicar(ev.MensagemAtualizada("t1", "20", enquete, "enquete", "Bia"))
+    assert sons == ["voto_enquete"]
+    sons.clear()
+    j.b.publicar(ev.MensagemAtualizada("t1", "20", enquete, "enquete",
+                                       "Você"))
+    assert sons == ["voto_enviado"]
+    sons.clear()                                    # sem saber quem: mudo
+    j.b.publicar(ev.MensagemAtualizada("t1", "20", enquete, "enquete", ""))
+    assert sons == []
+    # enquete de outra pessoa: o voto de terceiros nao toca
+    alheia = m.Mensagem("t1", "20", "8", tipo=m.OUTRO, data=AGORA)
+    m.atualizar_extras(alheia, enquete={"pergunta": "Q", "opcoes": ["A", "B"]})
+    j.b.publicar(ev.MensagemAtualizada("t1", "20", alheia, "enquete", "Bia"))
+    assert sons == []
+
+
+def test_sons_de_esconder_e_voltar_da_bandeja(j, monkeypatch):
+    sons = []
+    monkeypatch.setattr(jm, "bipe", lambda tipo, *a: sons.append(tipo))
+    from testes.test_janela import BandejaFalsa
+    j._bandeja = BandejaFalsa()
+    j.Hide = lambda: None
+    j.IsShown = lambda: False
+    j.Show = lambda: None
+    j.IsIconized = lambda: False
+    j.Raise = lambda: None
+    j._esconder_na_bandeja()
+    j._mostrar_da_bandeja()
+    assert sons == ["escondido", "voltou"]
+
+
+def test_gravar_por_atalho_toca_o_som_de_gravando_e_o_de_parada(
+        j, monkeypatch, tmp_path):
+    from telezapp.midia.gravador import MICROFONE
+    sons = []
+    monkeypatch.setattr(jm, "bipe", lambda tipo, *a: sons.append(tipo))
+    _preparar_gravacao_rapida(j, monkeypatch, tmp_path)
+    j._gravar_rapido(MICROFONE)
+    j._gravar_rapido(MICROFONE)
+    assert sons[0] == "gravando" and "gravacao_parada" in sons
+    assert "nova" not in sons          # nao e o som de mensagem recebida
+
+
+def test_slots_de_atalho_das_funcoes_novas(j):
+    for chave in ("gravar_pausa", "gravar_descartar", "abrir_atalhos",
+                  "enviar_msg", "ver_enquete", "nova_enquete",
+                  "esconder_janela", "mostrar_janela", "ortografia",
+                  "gravar_mic", "gravar_som"):
+        assert chave in j.atalhos.acoes, chave
+    # as novas nascem sem atalho, prontas para receber um
+    assert j.atalhos.efetivo("gravar_pausa") == ""
+    j._aplicar_opcao("atalhos", {"gravar_pausa": "Ctrl+Alt+P"})
+    assert j.itens["gravar_pausa"].rotulo.endswith("	Ctrl+Alt+P")
+
+
+def test_pausar_e_descartar_a_gravacao_por_atalho(j, monkeypatch, tmp_path):
+    from telezapp.midia.gravador import MICROFONE
+    _preparar_gravacao_rapida(j, monkeypatch, tmp_path)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._pausar_gravacao_rapida()                      # sem gravar: avisa
+    assert "Nenhuma gravação" in ditas[-1]
+    j._gravar_rapido(MICROFONE)
+    g = GravadorFalso.criados[0]
+    j._pausar_gravacao_rapida()
+    assert g.pausado and "pausada em 0:04" in ditas[-1]
+    j._pausar_gravacao_rapida()
+    assert not g.pausado and "Gravando de novo" in ditas[-1]
+    j._descartar_gravacao_rapida()
+    assert g.cancelado and j._gravacao_rapida is None
+    assert not [p for p in j.contas.p.pedidos if p[0] == "arquivo"]
+
+
+def test_restaurar_backup_aplica_o_mapa_de_atalhos_nos_menus(j):
+    assert j.atalhos.efetivo("responder") == "Ctrl+Shift+R"
+    j._fim_da_restauracao({"atalhos": {"responder": "Alt+R"}}, [], "")
+    assert j.atalhos.efetivo("responder") == "Alt+R"
+    assert j.itens["responder"].rotulo.endswith("\tAlt+R")
+    assert j.cfg.get("atalhos") == {"responder": "Alt+R"}

@@ -114,6 +114,14 @@ SONS = {
     # um toque curto e brilhante, diferente do de mensagem nova
     "reacao_recebida": (sequencia(["E6", "G6"], 0.07, 0.26, 0.8, 0.3, True),
                         "sino"),
+    # a gravacao so comeca depois do bipe (0,3 s): este e curto
+    "gravando": (sequencia(["G5", "C6"], 0.05, 0.10, 0.9), "sino"),
+    "gravacao_parada": (sequencia(["C6", "G5"], 0.07, 0.20, 0.9), "sino"),
+    "voto_enquete": (sequencia(["G5", "C6", "E6"], 0.06, 0.24, 0.8, 0.2,
+                               True), "sino"),
+    "voto_enviado": (sequencia(["E5", "G5"], 0.06, 0.20, 0.9), "sino"),
+    "escondido": (sequencia(["E5", "C5"], 0.10, 0.30, 0.9), "sino"),
+    "voltou": (sequencia(["C5", "E5"], 0.10, 0.30, 0.9), "sino"),
 }
 
 

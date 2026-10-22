@@ -536,6 +536,26 @@ EVENTOS_SOM = (
      "em conversa arquivada, trancada ou silenciada, nem para a sua própria "
      "reação). A fala da reação continua sendo a opção Falar reações às "
      "minhas mensagens, em Avisos."),
+    ("gravando", "gravação de voz iniciada",
+     "Tocado quando começa a gravação de uma nota de voz ou do som do "
+     "computador, pelo atalho ou pela janela de gravação. É curto, para não "
+     "entrar na gravação."),
+    ("gravacao_parada", "gravação de voz parada",
+     "Tocado quando você para a gravação. Com o som padrão, toca o mesmo "
+     "som de mensagem enviada."),
+    ("voto_enquete", "voto numa enquete sua",
+     "Tocado quando alguém vota numa enquete que você criou (não toca para "
+     "o seu próprio voto, nem em conversa arquivada, trancada ou "
+     "silenciada)."),
+    ("voto_enviado", "voto seu enviado numa enquete",
+     "Tocado quando o seu voto numa enquete é enviado. Com o som padrão, "
+     "toca o mesmo som de mensagem enviada."),
+    ("escondido", "janela escondida em segundo plano",
+     "Tocado quando a janela some e o TeleZapp segue rodando em segundo "
+     "plano."),
+    ("voltou", "janela trazida de volta",
+     "Tocado quando a janela volta do segundo plano, pelo ícone ou pelo "
+     "atalho global."),
 )
 def _opcoes_de_ia():
     from telezapp.nucleo.ia import catalogo

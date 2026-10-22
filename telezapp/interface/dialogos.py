@@ -295,8 +295,8 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala):
 
     def comecar(_e=None):
         g = nova_gravacao()
-        bipe("nova")
-        time.sleep(0.3)     # o bipe nao pode entrar na gravacao
+        bipe("gravando")
+        time.sleep(0.4)     # o bipe nao pode entrar na gravacao
         try:
             g.iniciar()
         except ErroGravacao as e:
@@ -340,7 +340,7 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala):
             wx.MessageBox(str(e), titulo, wx.OK | wx.ICON_WARNING, dlg)
             dlg.EndModal(wx.ID_CANCEL)
             return
-        bipe("enviada")
+        bipe("gravacao_parada")
         r = est["gravacao"]
         texto = "Gravação pronta: %s." % formatar_tempo(r.segundos)
         if r.silenciosa:

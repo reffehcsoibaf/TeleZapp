@@ -570,6 +570,10 @@ class Janela(wx.Frame):
                                   "novo envia)\tCtrl+Shift+M")
         item(m_mid, "gravar_som", "Gravar o &som do computador (começa; "
                                   "apertar de novo envia)\tCtrl+Shift+S")
+        item(m_mid, "gravar_pausa",
+             "Pausar ou continuar a gravação por atalho")
+        item(m_mid, "gravar_descartar",
+             "Descartar a gravação por atalho (sem enviar)")
         item(m_mid, "gravar_mic_janela",
              "Gravar nota de voz em uma &janela...")
         item(m_mid, "gravar_som_janela",
@@ -644,6 +648,7 @@ class Janela(wx.Frame):
         item(m_fer, "criar_portatil", "Criar cópia &portátil...")
         item(m_fer, "desinstalar", "&Desinstalar o %s..." % NOME)
         m_fer.AppendSeparator()
+        item(m_fer, "abrir_atalhos", "Personalizar os &atalhos...")
         item(m_fer, "esconder_janela",
              "&Esconder a janela e continuar em segundo plano")
         item(m_fer, "sair", "&Sair\tCtrl+Q")
@@ -730,6 +735,9 @@ class Janela(wx.Frame):
             "anexar": lambda e: self._anexar_arquivo(),
             "gravar_mic": lambda e: self._gravar_rapido(MICROFONE),
             "gravar_som": lambda e: self._gravar_rapido(SOM_INTERNO),
+            "gravar_pausa": lambda e: self._pausar_gravacao_rapida(),
+            "gravar_descartar": lambda e: self._descartar_gravacao_rapida(),
+            "abrir_atalhos": lambda e: self._configuracoes("Atalhos"),
             "gravar_mic_janela": lambda e: self._gravar(MICROFONE),
             "gravar_som_janela": lambda e: self._gravar(SOM_INTERNO),
             "ligar": lambda e: self._ligar(),
@@ -888,6 +896,7 @@ class Janela(wx.Frame):
                             "para esconder a janela.", interromper=True)
             return
         atalho = self.atalhos.efetivo("mostrar_janela")
+        bipe("escondido")
         self.Hide()
         self.fala.falar(
             "O TeleZapp continua em segundo plano. Para voltar, %s." % (
@@ -903,6 +912,7 @@ class Janela(wx.Frame):
         if self.IsIconized():
             self.Iconize(False)
         self.Raise()
+        bipe("voltou")
         self.fala.falar("TeleZapp", interromper=True)
 
     def _sair(self):
@@ -2877,6 +2887,12 @@ class Janela(wx.Frame):
                 self.fala.falar("%s reagiu com %s à sua mensagem: %s" % (
                     e.quem, e.emoji, m.citacao(e.mensagem)))
                 self.SetStatusText("%s reagiu com %s" % (e.quem, e.emoji))
+        elif e.motivo == "enquete":
+            if e.quem == "Você":
+                bipe("voto_enviado")
+            elif e.mensagem.minha and e.quem:
+                bipe("voto_enquete")
+                self.SetStatusText("%s votou na sua enquete" % e.quem)
         elif aberta and e.motivo == "editada":
             self.fala.falar("%s editou uma mensagem." % autor)
         elif aberta and e.motivo == "apagada":
@@ -5186,8 +5202,8 @@ class Janela(wx.Frame):
         if self._destino_do_envio() is None:
             return
         g = Gravador(config.pasta_temporaria(), origem, maximo_segundos=3600)
-        bipe("nova")
-        time.sleep(0.3)     # o bipe nao pode entrar na gravacao
+        bipe("gravando")
+        time.sleep(0.4)     # o bipe nao pode entrar na gravacao
         try:
             g.iniciar()
         except ErroGravacao as e:
@@ -5203,6 +5219,35 @@ class Janela(wx.Frame):
                 "Aperte %s de novo para parar e enviar." %
                 nucleo_atalhos.texto_falado(atalho) if atalho else
                 "Pare pelo menu Mídias."), interromper=True)
+
+    def _pausar_gravacao_rapida(self):
+        """Pausa ou continua a gravacao feita por atalho. O trecho da pausa
+        nao entra na gravacao."""
+        est = self._gravacao_rapida
+        if est is None:
+            self.fala.falar("Nenhuma gravação em andamento.",
+                            interromper=True)
+            return
+        g = est["gravador"]
+        if g.pausado:
+            bipe("gravando")
+            time.sleep(0.4)         # o bipe nao pode entrar na gravacao
+            g.continuar()
+            self.SetStatusText("Gravando...")
+            self.fala.falar("Gravando de novo.", interromper=True)
+        else:
+            g.pausar()
+            bipe("gravacao_parada")
+            self.SetStatusText("Gravação pausada")
+            self.fala.falar("Gravação pausada em %s." % formatar_tempo(
+                g.decorrido), interromper=True)
+
+    def _descartar_gravacao_rapida(self):
+        if self._gravacao_rapida is None:
+            self.fala.falar("Nenhuma gravação em andamento.",
+                            interromper=True)
+            return
+        self._terminar_gravacao_rapida(enviar=False)
 
     def _terminar_gravacao_rapida(self, enviar):
         """Para a gravacao do atalho: envia como nota de voz ou descarta."""
@@ -5222,7 +5267,7 @@ class Janela(wx.Frame):
             bipe("erro")
             self.fala.falar(str(e), interromper=True)
             return
-        bipe("enviada")
+        bipe("gravacao_parada")
         log.info("gravação rápida (%s) de %.0fs pronta para enviar",
                  est["origem"], gravacao.segundos)
         if gravacao.silenciosa:

@@ -1198,7 +1198,7 @@ def test_voto_de_outra_pessoa_chega_pela_atualizacao_da_enquete(ambiente):
                                    results=atual.poll.results)
     asyncio.run(p._ao_enquete(evento))
     a = esperar(ambiente.fila, ev.MensagemAtualizada)
-    assert a.motivo == "enquete"
+    assert a.motivo == "enquete" and a.quem == "alguém"   # os votos subiram
     assert m.contagens_da_enquete(m.enquete_de(a.mensagem)) == [3, 1, 0]
     # enquete encerrada
     fechada = types.SimpleNamespace(
@@ -1207,6 +1207,7 @@ def test_voto_de_outra_pessoa_chega_pela_atualizacao_da_enquete(ambiente):
     asyncio.run(p._ao_enquete(fechada))
     b = esperar(ambiente.fila, ev.MensagemAtualizada)
     assert m.enquete_de(b.mensagem)["encerrada"] is True
+    assert b.quem == ""                              # nenhum voto novo
     # enquete que nao conhecemos: nada acontece
     asyncio.run(p._ao_enquete(types.SimpleNamespace(
         poll_id=1, poll=None, results=None)))

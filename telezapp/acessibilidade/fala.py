@@ -80,7 +80,8 @@ LIMITE_SEGUNDOS_ARQUIVO = 15
 # escolha dele): a pessoa so muda se quiser diferenciar
 HERDA = {"nova_aberta": "nova", "nova_grupo": "nova",
          "reconectada": "conectado", "falha_envio": "erro",
-         "tarefa_pronta": "enviada"}
+         "tarefa_pronta": "enviada", "gravacao_parada": "enviada",
+         "voto_enviado": "enviada"}
 
 
 # O tom de "chamando" (eu liguei e espero atender), em milissegundos
@@ -260,6 +261,18 @@ def _tocar(tipo):
         elif tipo == "desligada":
             for f in (494, 392, 330):
                 winsound.Beep(f, 120)
+        elif tipo == "gravando":
+            for f in (784, 1047):       # curto: nao pode entrar na gravacao
+                winsound.Beep(f, 60)
+        elif tipo == "voto_enquete":
+            for f in (1047, 1319):
+                winsound.Beep(f, 60)
+        elif tipo == "escondido":
+            for f in (784, 523):
+                winsound.Beep(f, 90)
+        elif tipo == "voltou":
+            for f in (523, 784):
+                winsound.Beep(f, 90)
         else:
             winsound.Beep(300, 200)
     except Exception:

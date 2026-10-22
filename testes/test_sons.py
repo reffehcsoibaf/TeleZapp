@@ -29,7 +29,9 @@ def test_todo_evento_tem_um_som_nos_pacotes_da_casa():
                        "nova_aberta", "nova_grupo", "desconectada",
                        "reconectada", "falha_envio", "download_pronto",
                        "tarefa_pronta", "reacao_recebida",
-                       "mencao_ou_resposta"}
+                       "mencao_ou_resposta", "gravando", "gravacao_parada",
+                       "voto_enquete", "voto_enviado", "escondido",
+                       "voltou"}
     assert {e for e, _ in pk.eventos()} == eventos
     assert not [o for o in config.OPCOES if getattr(o, "som", "")]
     for e in eventos:                            # o pacote TeleZapp e completo
@@ -207,3 +209,11 @@ def test_som_curto_fica_pre_carregado_e_o_longo_nao(tmp_path):
     assert longo not in fala._pre_carregados
     fala.definir_sons({})
     assert not fala._pre_carregados
+
+
+def test_eventos_novos_herdam_o_som_certo_e_tem_bip_proprio():
+    # parar a gravacao e enviar o voto usam, de fabrica, o som de enviada
+    assert fala.tom_padrao("gravacao_parada") == "enviada"
+    assert fala.tom_padrao("voto_enviado") == "enviada"
+    for evento in ("gravando", "voto_enquete", "escondido", "voltou"):
+        assert fala.tom_padrao(evento) == evento

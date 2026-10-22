@@ -1349,9 +1349,9 @@ class ProvedorTelegram(Provedor):
             self._avisar("Não consegui enviar o voto (%s)." %
                          type(e).__name__, False)
             return
-        await self._atualizar_enquete(msg, avisar=False)
+        await self._atualizar_enquete(msg, avisar=False, quem="Você")
 
-    async def _atualizar_enquete(self, msg, avisar=True):
+    async def _atualizar_enquete(self, msg, avisar=True, quem=""):
         """Busca de novo a mensagem da enquete para ter o resultado atual."""
         try:
             ent = await self._entidade(msg.conversa_id)
@@ -1365,16 +1365,16 @@ class ProvedorTelegram(Provedor):
                 self._avisar("Não consegui atualizar a enquete (%s)." %
                              type(e).__name__, False)
             return
-        self._guardar_enquete(msg.conversa_id, msg.id, novo)
+        self._guardar_enquete(msg.conversa_id, msg.id, novo, quem)
 
-    def _guardar_enquete(self, cid, mid, enquete):
+    def _guardar_enquete(self, cid, mid, enquete, quem=""):
         x = self.banco.mensagem(self.conta.id, cid, mid)
         if x is None:
             return
         m.atualizar_extras(x, enquete=enquete)
         self.banco.salvar_mensagens([x])
         self.barramento.publicar(ev.MensagemAtualizada(
-            self.conta.id, cid, x, "enquete"))
+            self.conta.id, cid, x, "enquete", quem))
 
     async def _ao_enquete(self, evento):
         """Alguem votou (ou a enquete foi encerrada)."""
@@ -1384,12 +1384,15 @@ class ProvedorTelegram(Provedor):
             if x is None:
                 return
             enq = m.enquete_de(x)
-            enq["anonima"] = enq["anonima"]
+            antes = m.votantes_da_enquete(enq)
             poll = getattr(evento, "poll", None)
             if poll is not None:
                 enq["encerrada"] = bool(getattr(poll, "closed", False))
             aplicar_resultados(enq, getattr(evento, "results", None))
-            self._guardar_enquete(x.conversa_id, x.id, enq)
+            # o Telegram nao diz quem votou: so avisa que alguem votou
+            self._guardar_enquete(
+                x.conversa_id, x.id, enq,
+                "alguém" if m.votantes_da_enquete(enq) > antes else "")
         except Exception:
             log.exception("erro ao tratar voto em enquete")
 
