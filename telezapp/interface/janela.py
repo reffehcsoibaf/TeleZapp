@@ -21,6 +21,7 @@ from telezapp.acessibilidade.fala import Fala, bipe, definir_sons
 from telezapp.interface import colagem, dialogos, visualizadores
 from telezapp.interface import emojis as ui_emojis
 from telezapp.interface import ortografia as ui_ortografia
+from telezapp.interface import teclas as ui_teclas
 from telezapp.interface.progresso import JanelaDeProgresso
 from telezapp.interface.publicar_status import DialogoPublicarStatus
 from telezapp.interface.detalhes import ControleDetalhes, ControleRecibos
@@ -35,6 +36,7 @@ from telezapp.nucleo import chamadas as ch
 from telezapp.provedores.base import ErroPrivacidade
 from telezapp.nucleo import atualizacao
 from telezapp.nucleo import atualizador
+from telezapp.nucleo import atalhos as nucleo_atalhos
 from telezapp.nucleo.ia import catalogo as cat_ia
 from telezapp.nucleo.ia import cofre as cofre_ia
 from telezapp.nucleo.ia import servico as servico_ia
@@ -416,8 +418,15 @@ class Janela(wx.Frame):
         self._seq_tocados = 0         # audios da sequencia atual, apos o 1o
         self.chamada = None           # nucleo.chamadas.Chamada em curso
         self.dlg_chamada = None       # DialogoChamada aberto
+        # funcoes que aceitam atalho (os itens de menu e outras) e o que a
+        # pessoa mudou; os rotulos sem atalho de cada item ficam em
+        # _base_menu e o atalho entra na hora (ver _atualizar_atalhos)
+        self.atalhos = nucleo_atalhos.Registro(cfg.get("atalhos") or {})
+        self._base_menu = {}
+        self._menu_do_item = {}
         self._criar_menus()
         self._criar_controles()
+        self._rotular_controles()
         self.CreateStatusBar()
         self.Bind(wx.EVT_CLOSE, self._ao_fechar)
         if hasattr(wx, "EVT_ICONIZE"):      # minimizar esconde as trancadas
@@ -433,14 +442,22 @@ class Janela(wx.Frame):
         self.itens = {}
 
         def item(menu, chave, rotulo, tipo="normal"):
+            # o atalho do rotulo e o padrao; o que vale (e aparece) e posto
+            # por _atualizar_atalhos, que le o que a pessoa escolheu
+            base, _, padrao = rotulo.partition("\t")
             if tipo == "check":
-                it = menu.AppendCheckItem(wx.ID_ANY, rotulo)
+                it = menu.AppendCheckItem(wx.ID_ANY, base)
             elif tipo == "radio":
-                it = menu.AppendRadioItem(wx.ID_ANY, rotulo)
+                it = menu.AppendRadioItem(wx.ID_ANY, base)
             else:
-                it = menu.Append(wx.ID_ANY, rotulo)
+                it = menu.Append(wx.ID_ANY, base)
             self.itens[chave] = it
+            self._base_menu[chave] = base
+            self._menu_do_item[chave] = menu
+            self._padrao_menu[chave] = padrao
             return it
+
+        self._padrao_menu = {}
 
         # Menu vertical: uma unica entrada na barra, aberta pelo Alt, com as
         # secoes como submenus (seta para a direita), na ordem: Mensagens,
@@ -525,9 +542,14 @@ class Janela(wx.Frame):
                       lambda e, v=valor: self._mudar_baixar(v), it)
         m_mid.AppendSeparator()
         item(m_mid, "anexar", "&Anexar e enviar arquivo...	Ctrl+Shift+A")
-        item(m_mid, "gravar_mic", "Gravar do &microfone...	Ctrl+Shift+M")
-        item(m_mid, "gravar_som",
-             "Gravar o &som do computador...	Ctrl+Shift+S")
+        item(m_mid, "gravar_mic", "Gravar do &microfone: iniciar e parar, "
+                                  "enviando ao parar\tCtrl+Shift+M")
+        item(m_mid, "gravar_som", "Gravar o &som do computador: iniciar e "
+                                  "parar, enviando ao parar\tCtrl+Shift+S")
+        item(m_mid, "gravar_mic_janela",
+             "Gravar do microfone em uma &janela...")
+        item(m_mid, "gravar_som_janela",
+             "Gravar o som do computador em uma ja&nela...")
         m_mid.AppendSeparator()
         item(m_mid, "audio_janela", "&Enter em áudio...")
         item(m_mid, "audio_sequencia", "Áudios em &sequência...")
@@ -600,6 +622,19 @@ class Janela(wx.Frame):
             raiz.AppendSubMenu(submenu, rotulo)
         barra.Append(raiz, "&Menu")
         self.SetMenuBar(barra)
+        categorias = {m_msg: "Mensagens", m_conv: "Conversas",
+                      m_ctt: "Contatos", m_cham: "Chamadas",
+                      m_contas: "Contas", m_mid: "Mídias", m_exib: "Exibir",
+                      m_fer: "Ferramentas", m_aj: "Ajuda", m_dep: "Ajuda"}
+        for chave, it in self.itens.items():
+            self.atalhos.registrar(
+                chave, self._base_menu[chave],
+                categorias.get(self._menu_do_item[chave], "Menu"),
+                self._padrao_menu[chave])
+        self.atalhos.registrar(
+            "mostrar_janela", "Chamar o TeleZapp quando ele está em segundo "
+            "plano (atalho global)", "Geral", "")
+        self._atualizar_atalhos()
 
         ligacoes = {
             "adicionar_conta": lambda e: self._adicionar_conta_pelo_menu(),
@@ -650,8 +685,10 @@ class Janela(wx.Frame):
             "ajuda": lambda e: dialogos.mostrar_texto(
                 self, "Teclas de atalho", AJUDA, "Teclas de atalho"),
             "anexar": lambda e: self._anexar_arquivo(),
-            "gravar_mic": lambda e: self._gravar(MICROFONE),
-            "gravar_som": lambda e: self._gravar(SOM_INTERNO),
+            "gravar_mic": lambda e: self._gravar_rapido(MICROFONE),
+            "gravar_som": lambda e: self._gravar_rapido(SOM_INTERNO),
+            "gravar_mic_janela": lambda e: self._gravar(MICROFONE),
+            "gravar_som_janela": lambda e: self._gravar(SOM_INTERNO),
             "ligar": lambda e: self._ligar(),
             "chamada_janela": lambda e: self._mostrar_chamada(),
             "chamada_mudo": lambda e: self._alternar_mudo(),
@@ -708,6 +745,51 @@ class Janela(wx.Frame):
         self.itens["estilo%d" % self.estilo].Check(True)
         self.itens.get("baixar_" + str(self.cfg.get("midias_baixar")),
                        self.itens["baixar_demanda"]).Check(True)
+
+    # --------------------------------------------------- atalhos na tela
+    def _mostrar_atalhos(self):
+        return bool(self.cfg.get("mostrar_atalhos"))
+
+    def _atualizar_atalhos(self):
+        """Poe em cada item de menu o atalho que vale. Com a opcao de mostrar
+        ligada o atalho vai no proprio nome do item (o Windows o le e o
+        leitor de tela o fala); desligada, o nome fica limpo e os atalhos
+        valem por uma tabela de aceleracao da janela."""
+        mostrar = self._mostrar_atalhos()
+        entradas = []
+        for chave, it in self.itens.items():
+            canon = self.atalhos.efetivo(chave)
+            base = self._base_menu[chave]
+            it.SetItemLabel(base + ("\t" + canon if mostrar and canon
+                                    else ""))
+            if canon and not mostrar and hasattr(wx, "AcceleratorEntry"):
+                entradas.append(ui_teclas.entrada_de_aceleracao(
+                    canon, it.GetId()))
+        if hasattr(wx, "AcceleratorTable"):
+            self.SetAcceleratorTable(wx.AcceleratorTable(entradas))
+
+    def _rotular_controles(self):
+        """Escreve o atalho no nome dos botoes e rotulos que tem uma funcao
+        com atalho (se a opcao estiver ligada)."""
+        mostrar = self._mostrar_atalhos()
+        for controle, base, chave, fixo in self._controles_atalho:
+            canon = fixo or self.atalhos.efetivo(chave) if chave or fixo \
+                else ""
+            controle.SetLabel(base + (" (%s)" % canon if mostrar and canon
+                                      else ""))
+
+    def _aplicar_atalhos(self, personalizados):
+        """Guarda o que a pessoa escolheu e poe nos menus e nos controles."""
+        self.cfg.set("atalhos", dict(personalizados))
+        self.atalhos.definir_personalizados(personalizados)
+        self._atualizar_atalhos()
+        self._rotular_controles()
+        self._registrar_atalho_global()
+
+    def _registrar_atalho_global(self):
+        """(Re)liga o atalho que chama o TeleZapp de qualquer lugar."""
+        # preenchido na etapa do segundo plano
+        return None
 
     def _criar_controles(self):
         painel = wx.Panel(self)
@@ -779,6 +861,18 @@ class Janela(wx.Frame):
         self.botao_som = wx.Button(painel, label="Gravar som do computador")
         self.botoes_envio = (self.botao_enviar, self.botao_anexar,
                              self.botao_mic, self.botao_som)
+        # (controle, nome sem atalho, funcao, atalho fixo)
+        self._controles_atalho = [
+            (rot_cx_conta, "Serviço ou conta", "ir_filtro_conta", ""),
+            (rot_cx_tipo, "Tipo de conversa", "ir_filtro_tipo", ""),
+            (rot_busca, "Buscar conversa", "buscar_conv", ""),
+            (self.botao_sair, "Sair", "sair", ""),
+            (rot_conv, "Conversas", "ir_conv", ""),
+            (self.botao_enviar, "&Enviar", "", "Enter"),
+            (self.botao_anexar, "Anexar e enviar arquivo", "anexar", ""),
+            (self.botao_mic, "Gravar do microfone", "gravar_mic", ""),
+            (self.botao_som, "Gravar som do computador", "gravar_som", ""),
+        ]
 
         esq = wx.BoxSizer(wx.VERTICAL)
         esq.Add(rot_cx_conta, 0, wx.BOTTOM, 2)
@@ -2960,7 +3054,8 @@ class Janela(wx.Frame):
     def _tecla_caixa(self, evt):
         """Shift+Enter e Control+Enter quebram a linha: com TE_PROCESS_ENTER
         todo Enter viraria envio."""
-        if evt.GetKeyCode() in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) and                 (evt.ShiftDown() or evt.ControlDown()) and not evt.AltDown():
+        if evt.GetKeyCode() in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) and \
+                (evt.ShiftDown() or evt.ControlDown()) and not evt.AltDown():
             self.caixa.WriteText("\n")
             return
         evt.Skip()
@@ -5496,7 +5591,8 @@ class Janela(wx.Frame):
                                    categoria_inicial=categoria,
                                    fala=self.fala,
                                    privacidade=_PrivacidadeParaConfig(self),
-                                   ia=_IaParaConfig(self))
+                                   ia=_IaParaConfig(self),
+                                   atalhos=self.atalhos)
         try:
             dlg.ShowModal()
         finally:
@@ -5532,6 +5628,12 @@ class Janela(wx.Frame):
             self._aplicar_filtros(falar=False)
         elif chave == "privacidade_conta":
             self._aplicar_privacidade_conta(valor)
+        elif chave == "atalhos":
+            self._aplicar_atalhos(valor)
+        elif chave == "mostrar_atalhos":
+            self.cfg.set(chave, valor)
+            self._atualizar_atalhos()
+            self._rotular_controles()
         elif chave == "sons_pacotes":
             self.cfg.set("pacote_de_sons", valor["ativo"])
             self.cfg.set("sons_desativados", valor["desativados"])

@@ -866,7 +866,7 @@ def test_lista_de_conversas_abre_no_topo_com_o_foco(j):
 
 
 def test_botao_sair_depois_da_busca_fecha_a_janela(j):
-    assert j.botao_sair.GetLabel() == "Sair"
+    assert j.botao_sair.GetLabel() == "Sair (Ctrl+Q)"
     fechou = []
     j.Close = lambda *a, **k: fechou.append(True) or True
     j.botao_sair.ligacoes[jm.wx.EVT_BUTTON](None)
@@ -4002,3 +4002,35 @@ def test_enviar_sem_a_opcao_nao_consulta_o_corretor(j, monkeypatch):
     j.caixa.SetValue("eu goistaria")
     j._enviar_texto()
     assert ("enviar", "20", "eu goistaria", "") in j.contas.p.pedidos
+
+
+def test_menus_mostram_o_atalho_e_a_opcao_esconde(j):
+    assert j.itens["ir_caixa"].rotulo.endswith("\tCtrl+E")
+    assert j.atalhos.efetivo("ir_caixa") == "Ctrl+E"
+    assert j.botao_enviar.GetLabel() == "&Enviar (Enter)"
+    assert j.botao_anexar.GetLabel() == "Anexar e enviar arquivo (Ctrl+Shift+A)"
+    j._aplicar_opcao("mostrar_atalhos", False)
+    assert "\t" not in j.itens["ir_caixa"].rotulo
+    assert j.botao_enviar.GetLabel() == "&Enviar"
+    # os atalhos seguem valendo, pela tabela de aceleracao
+    assert len(j.tabela_de_aceleracao.entradas) > 10
+    j._aplicar_opcao("mostrar_atalhos", True)
+    assert j.itens["ir_caixa"].rotulo.endswith("\tCtrl+E")
+    assert j.tabela_de_aceleracao.entradas == []
+
+
+def test_atalho_personalizado_vai_ao_menu_ao_controle_e_a_config(j):
+    j._aplicar_opcao("atalhos", {"ir_caixa": "Ctrl+Alt+W", "anexar": ""})
+    assert j.itens["ir_caixa"].rotulo.endswith("\tCtrl+Alt+W")
+    assert "\t" not in j.itens["anexar"].rotulo      # tirado de proposito
+    assert j.botao_anexar.GetLabel() == "Anexar e enviar arquivo"
+    assert j.cfg.get("atalhos") == {"ir_caixa": "Ctrl+Alt+W", "anexar": ""}
+    assert j.atalhos.dono("Ctrl+Alt+W").chave == "ir_caixa"
+
+
+def test_toda_funcao_de_menu_esta_no_registro_de_atalhos(j):
+    assert set(j.itens) <= set(j.atalhos.acoes)
+    assert "mostrar_janela" in j.atalhos.acoes
+    # nenhum padrao repetido entre as funcoes
+    usados = [c for _, c in j.atalhos.todos() if c]
+    assert len(usados) == len(set(usados))

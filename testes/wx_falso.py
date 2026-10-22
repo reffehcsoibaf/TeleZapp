@@ -104,6 +104,9 @@ class Frame(Janela):
     def GetMenuBar(self):
         return getattr(self, "barra_de_menus", None)
 
+    def SetAcceleratorTable(self, tabela):
+        self.tabela_de_aceleracao = tabela
+
     def SetMenuBar(self, b):
         self.barra_de_menus = b
         pass
@@ -436,6 +439,14 @@ class WrapSizer(BoxSizer):
 class MenuItem:
     def __init__(self):
         self.marcado = False
+        self.rotulo = ""
+        self.id = id(self)
+
+    def GetId(self):
+        return self.id
+
+    def SetItemLabel(self, rotulo):
+        self.rotulo = rotulo
 
     def Check(self, v=True):
         self.marcado = v
@@ -460,6 +471,21 @@ class Menu:
     def AppendSubMenu(self, submenu, rotulo):
         self.submenus.append((rotulo, submenu))
         return MenuItem()
+
+
+ACCEL_NORMAL, ACCEL_ALT, ACCEL_CTRL, ACCEL_SHIFT = 0, 1, 2, 4
+MOD_ALT, MOD_CONTROL, MOD_SHIFT = 1, 2, 4
+WXK_F1 = 340
+
+
+class AcceleratorEntry:
+    def __init__(self, marcas=0, tecla=0, id_=0):
+        self.marcas, self.tecla, self.id = marcas, tecla, id_
+
+
+class AcceleratorTable:
+    def __init__(self, entradas=()):
+        self.entradas = list(entradas)
 
 
 class MenuBar:

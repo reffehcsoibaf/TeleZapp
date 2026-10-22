@@ -312,6 +312,13 @@ OPCOES = (
           "com erro, pergunta se você quer corrigir antes ou enviar assim "
           "mesmo. Desmarcada, a mensagem sai direto e você corrige quando "
           "quiser com Verificar ortografia (F7)."),
+    Opcao("mostrar_atalhos", "Mostrar as teclas de atalho nos controles",
+          "Leitura", True,
+          "Escreve a tecla de atalho no nome dos botões e dos itens de menu "
+          "que têm uma, por exemplo \"Enviar (Enter)\" ou \"Escrever "
+          "mensagem, Control E\". Desmarcada, os nomes ficam sem o atalho "
+          "e os atalhos continuam funcionando. Os atalhos podem ser "
+          "mudados em Configurações, Atalhos."),
     Opcao("estilo", "Como cada mensagem é lida", "Leitura", 1,
           "A ordem em que autor, hora e conteúdo aparecem na lista de "
           "mensagens.",
@@ -579,6 +586,7 @@ def buscar_opcoes(texto):
 
 PADROES = {o.chave: o.padrao for o in OPCOES}
 PADROES.update({
+    "atalhos": {},           # funcao -> combinacao escolhida ("" = sem atalho)
     "ia_ordem": {},          # tarefa -> provedores ligados, na ordem de tentativa
     "ia_lista_modelos": {},  # provedor -> modelos que ele ofereceu
     "ia_modelos": {},        # provedor -> modelo escolhido ("" = o padrao)

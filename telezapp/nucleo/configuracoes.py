@@ -19,6 +19,8 @@ def categorias():
             vistas.append(o.categoria)
     if "Sons" not in vistas:
         vistas.append("Sons")       # tela propria: pacotes e eventos
+    if "Atalhos" not in vistas:
+        vistas.append("Atalhos")    # tela propria: funcoes e teclas
     # no fim da lista, nesta ordem: "Privacidade" (que consulta a conta),
     # "Avancado" (quase ninguem precisa) e "Atualizacoes"
     fim = {"Privacidade": 1, "Avançado": 2, "Atualizações": 3}
@@ -44,6 +46,8 @@ class ModeloConfiguracoes:
         self.ia_modelos = {}
         self.ia_ordens = {}       # tarefa -> provedores ligados, em ordem
         self.sons = EstadoDeSons(cfg)    # pacote, eventos e arquivos de som
+        self.registro = None      # nucleo.atalhos.Registro, dado pela janela
+        self.atalhos_pendentes = None    # personalizados ainda nao aplicados
 
     # ------------------------------------------------------------ consulta
     def lista_de_categorias(self):
@@ -204,9 +208,63 @@ class ModeloConfiguracoes:
                 "modelos": dict(self.ia_modelos),
                 "ordem": {t: list(v) for t, v in self.ia_ordens.items()}}
 
+    # ----------------------------------------------------------- atalhos
+    def atalhos_em_uso(self):
+        """Os personalizados com o que ainda nao foi aplicado."""
+        if self.atalhos_pendentes is not None:
+            return self.atalhos_pendentes
+        return self.registro.personalizados
+
+    def atalhos_lista(self, busca=""):
+        """[(Acao, combinacao)] das funcoes que casam com a busca."""
+        pers = self.atalhos_em_uso()
+        if busca.strip():
+            return self.registro.buscar(busca, pers)
+        return self.registro.todos(pers)
+
+    def atalho_de(self, chave):
+        return self.registro.efetivo(chave, self.atalhos_em_uso())
+
+    def atalho_dono(self, canon, ignorar):
+        """A Acao que ja usa a combinacao (fora `ignorar`), ou None."""
+        return self.registro.dono(canon, ignorar, self.atalhos_em_uso())
+
+    def atalho_definir(self, chave, canon, substituir=False):
+        """Poe `canon` (""= sem atalho) na funcao. Se outra funcao ja usa a
+        combinacao e `substituir` for falso, nada muda e devolve essa Acao;
+        com `substituir`, a outra fica sem atalho. Devolve None quando deu
+        certo."""
+        pers = self.atalhos_em_uso()
+        outro = self.atalho_dono(canon, chave)
+        if outro is not None and not substituir:
+            return outro
+        if outro is not None:
+            novos = self.registro.trocando(chave, canon, pers)
+        else:
+            novos = self.registro.com_atalho(chave, canon, pers)
+        self._atalhos_guardar(novos)
+        return None
+
+    def atalho_restaurar(self, chave):
+        """Volta ao padrao. Se outra funcao usa o padrao, devolve essa Acao e
+        nada muda."""
+        padrao = self.registro.acoes[chave].padrao
+        return self.atalho_definir(chave, padrao)
+
+    def atalhos_restaurar_todos(self):
+        self._atalhos_guardar({})
+
+    def _atalhos_guardar(self, novos):
+        if novos == self.registro.personalizados:
+            self.atalhos_pendentes = None
+        else:
+            self.atalhos_pendentes = dict(novos)
+
     def aplicar(self, aplicador):
         """Entrega cada mudanca ao aplicador(chave, valor) e zera."""
         feitas = self.mudancas()
+        atalhos = self.atalhos_pendentes
+        self.atalhos_pendentes = None
         ia = self.ia_mudancas()
         self.ia_chaves, self.ia_modelos, self.ia_ordens = {}, {}, {}
         acao = self.acao_codigo() if not self.erro_codigo() else None
@@ -229,4 +287,8 @@ class ModeloConfiguracoes:
         if sons is not None:
             aplicador("sons_pacotes", sons)
             feitas.append(("sons_pacotes", sons))
+        if atalhos is not None:
+            aplicador("atalhos", atalhos)
+            feitas.append(("atalhos", atalhos))
+            self.registro.definir_personalizados(atalhos)
         return [c for c, _ in feitas]

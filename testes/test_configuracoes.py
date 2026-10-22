@@ -176,3 +176,56 @@ def test_mudancas_de_privacidade_vao_ao_aplicador(tmp_path, monkeypatch):
     mod.aplicar(lambda c, v: recebidas.append((c, v)))
     assert recebidas == [("privacidade_conta", [("w1", "last", "none")])]
     assert mod.priv_mudancas() == []             # zerou
+
+
+def _registro():
+    from telezapp.nucleo import atalhos as at
+    r = at.Registro()
+    r.registrar("a", "&Alfa\tCtrl+1", "Mensagens", "Ctrl+1")
+    r.registrar("b", "&Beta", "Mensagens")
+    return r
+
+
+def test_categoria_atalhos_existe(mod):
+    assert "Atalhos" in categorias()
+
+
+def test_atalho_definir_avisa_do_conflito_e_substitui(mod):
+    mod.registro = _registro()
+    outro = mod.atalho_definir("b", "Ctrl+1")
+    assert outro.chave == "a"
+    assert mod.atalho_de("b") == "" and mod.atalho_de("a") == "Ctrl+1"
+    assert mod.atalhos_pendentes is None
+    assert mod.atalho_definir("b", "Ctrl+1", substituir=True) is None
+    assert mod.atalho_de("b") == "Ctrl+1" and mod.atalho_de("a") == ""
+
+
+def test_atalhos_so_valem_ao_aplicar_e_voltar_ao_padrao_desfaz(mod):
+    mod.registro = _registro()
+    assert mod.atalho_definir("b", "Ctrl+2") is None
+    assert mod.atalhos_pendentes == {"b": "Ctrl+2"}
+    assert mod.registro.efetivo("b") == ""           # ainda nao aplicado
+    assert mod.atalho_restaurar("b") is None
+    assert mod.atalhos_pendentes is None
+    mod.atalho_definir("a", "")                      # tirar o atalho
+    feitas = []
+    mod.aplicar(lambda k, v: feitas.append((k, v)))
+    assert feitas == [("atalhos", {"a": ""})]
+    assert mod.registro.efetivo("a") == ""
+    assert mod.atalhos_pendentes is None
+
+
+def test_atalhos_restaurar_todos(mod):
+    mod.registro = _registro()
+    mod.atalho_definir("b", "Ctrl+2")
+    mod.registro.definir_personalizados({"b": "Ctrl+2"})
+    mod.atalhos_pendentes = None
+    mod.atalhos_restaurar_todos()
+    assert mod.atalhos_pendentes == {}
+    assert mod.atalho_de("b") == ""
+
+
+def test_atalhos_lista_filtra_pela_busca(mod):
+    mod.registro = _registro()
+    assert [a.chave for a, _ in mod.atalhos_lista("beta")] == ["b"]
+    assert [a.chave for a, _ in mod.atalhos_lista("")] == ["a", "b"]
