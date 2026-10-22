@@ -593,6 +593,11 @@ no fechamento, por assunto.
 - **Verificado ao vivo pelo responsável (21/10/2026, à noite), no TeleZapp do código:** chamada de voz **feita** pelo app, com a opção "Chamadas de voz do WhatsApp (experimental)" ligada e a DLL com o meowcaller dentro (um só login), "com sucesso e qualidade". Também visto: **atender** uma chamada recebida (boa qualidade) e **recusar** (a pessoa viu "recusado"; antes da correção da DLL, que passou a usar `Reject` no lugar de `Hangup` para chamada de entrada ainda tocando, a chamada seguia tocando nos dois lados). O celular da conta seguiu tocando depois de recusar no TeleZapp, o que o responsável diz acontecer às vezes até no WhatsApp oficial: observar. Também visto: **silenciar** o microfone. Com a DLL reconstruída (a mesma das chamadas), **arquivar uma conversa no celular chegou ao vivo** ao TeleZapp. **Trancar** uma conversa no celular também chegou ao vivo; destrancar pelo TeleZapp não destrancou no celular (não se sabe se antes destrancava; o responsável aceitou assim). Não verificado no app: trocar microfone ou saída no meio (o responsável só tem um de cada, só há teste automático); trocar microfone ou saída no meio; chamada longa; vídeo e grupos.
 - **Não verificado:** receber chamada, vídeo, grupos, chamada longa, o reaproveitamento do mesmo cliente da DLL (o teste usou um cliente whatsmeow próprio, com sessão separada) e a troca automática de código de pareamento quando digitado errado.
 
+## Corretor ortográfico (22/10/2026)
+
+- F7 na caixa de digitar (menu Mensagens): verificador do próprio Windows por ctypes, sem dependência nova; janela com palavra, frase, "Trocar por", sugestões e botões Trocar, Trocar todas, Ignorar, Ignorar todas e Adicionar ao dicionário (dicionário pessoal do Windows). Opções na categoria Escrita: idioma do corretor e aviso ao enviar (desligado por padrão).
+- **Verificado ao vivo pelo responsável (22/10/2026):** ele usou o corretor no TeleZapp do código e disse que gostou da função. Não se sabe o que o NVDA falou em cada passo, nem foi dito se a opção de aviso ao enviar e os outros idiomas foram testados.
+
 ## Próximos passos sugeridos
 
 1. ~~Grupo 1 do plano acima~~ (concluído).
