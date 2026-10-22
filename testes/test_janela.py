@@ -4034,3 +4034,70 @@ def test_toda_funcao_de_menu_esta_no_registro_de_atalhos(j):
     # nenhum padrao repetido entre as funcoes
     usados = [c for _, c in j.atalhos.todos() if c]
     assert len(usados) == len(set(usados))
+
+
+class GravadorFalso:
+    criados = []
+
+    def __init__(self, pasta, origem=None, maximo_segundos=0):
+        self.pasta, self.origem = pasta, origem
+        self.cancelado = False
+        GravadorFalso.criados.append(self)
+
+    def iniciar(self):
+        pass
+
+    def parar(self):
+        from telezapp.midia.gravador import Gravacao
+        return Gravacao(self.arquivo, 3.0, -6.0)
+
+    def cancelar(self):
+        self.cancelado = True
+
+
+def _preparar_gravacao_rapida(j, monkeypatch, tmp_path):
+    import os
+    ogg = tmp_path / "voz-1.ogg"
+    with open(os.path.join(os.path.dirname(__file__), "amostras",
+                           "voz.ogg"), "rb") as f:
+        ogg.write_bytes(f.read())
+    GravadorFalso.criados = []
+    GravadorFalso.arquivo = str(ogg)
+    monkeypatch.setattr(jm, "Gravador", GravadorFalso)
+    monkeypatch.setattr(jm.time, "sleep", lambda s: None)
+    _abrir_com_caixa(j)
+
+
+def test_atalho_de_gravar_inicia_e_o_segundo_aperto_envia(j, monkeypatch,
+                                                           tmp_path):
+    from telezapp.midia.gravador import MICROFONE
+    _preparar_gravacao_rapida(j, monkeypatch, tmp_path)
+    j.caixa.SetValue("rascunho que fica")
+    j._gravar_rapido(MICROFONE)
+    assert len(GravadorFalso.criados) == 1 and j._gravacao_rapida
+    assert not [p for p in j.contas.p.pedidos if p[0] == "arquivo"]
+    j._gravar_rapido(MICROFONE)              # o mesmo atalho: para e envia
+    assert j._gravacao_rapida is None
+    pedido = [p for p in j.contas.p.pedidos if p[0] == "arquivo"][-1]
+    assert pedido[2] == m.VOZ and pedido[4] == ""
+    assert j.caixa.GetValue() == "rascunho que fica"
+
+
+def test_esc_descarta_a_gravacao_do_atalho(j, monkeypatch, tmp_path):
+    from telezapp.midia.gravador import MICROFONE
+    _preparar_gravacao_rapida(j, monkeypatch, tmp_path)
+    j._gravar_rapido(MICROFONE)
+    j.caixa.SetFocus()
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))
+    assert j._gravacao_rapida is None
+    assert GravadorFalso.criados[0].cancelado
+    assert not [p for p in j.contas.p.pedidos if p[0] == "arquivo"]
+
+
+def test_fechar_a_conversa_descarta_a_gravacao_do_atalho(j, monkeypatch,
+                                                          tmp_path):
+    from telezapp.midia.gravador import SOM_INTERNO
+    _preparar_gravacao_rapida(j, monkeypatch, tmp_path)
+    j._gravar_rapido(SOM_INTERNO)
+    j._fechar_conversa()
+    assert j._gravacao_rapida is None and GravadorFalso.criados[0].cancelado

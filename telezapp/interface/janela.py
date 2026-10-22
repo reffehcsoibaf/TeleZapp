@@ -29,7 +29,8 @@ from telezapp.interface.chamada import DialogoChamada
 from telezapp.midia import armazem
 from telezapp.midia import envio
 from telezapp.midia import velocidade as vel
-from telezapp.midia.gravador import MICROFONE, SOM_INTERNO, Gravador
+from telezapp.midia.gravador import (MICROFONE, SOM_INTERNO, ErroGravacao,
+                                     Gravador)
 from telezapp.midia.reprodutor import (FormatoNaoSuportado, Reprodutor,
                                        formatar_tempo)
 from telezapp.nucleo import chamadas as ch
@@ -418,6 +419,7 @@ class Janela(wx.Frame):
         self._seq_tocados = 0         # audios da sequencia atual, apos o 1o
         self.chamada = None           # nucleo.chamadas.Chamada em curso
         self.dlg_chamada = None       # DialogoChamada aberto
+        self._gravacao_rapida = None  # {"gravador", "origem"} gravando por atalho
         # funcoes que aceitam atalho (os itens de menu e outras) e o que a
         # pessoa mudou; os rotulos sem atalho de cada item ficam em
         # _base_menu e o atalho entra na hora (ver _atualizar_atalhos)
@@ -3012,6 +3014,10 @@ class Janela(wx.Frame):
                 if evt.ControlDown() or modo:
                     self._alternar_marca(foco)
                     return
+            if k == wx.WXK_ESCAPE and sem_mod and \
+                    self._gravacao_rapida is not None:
+                self._terminar_gravacao_rapida(enviar=False)
+                return
             if k == wx.WXK_ESCAPE and sem_mod:
                 if foco is self.lista_conv and self.modo_conv:
                     self._sair_selecao(self.lista_conv)
@@ -3151,6 +3157,8 @@ class Janela(wx.Frame):
     def _fechar_conversa(self):
         """Esc na lista de mensagens: fecha a conversa e volta para a lista
         de conversas. Mensagens que chegarem depois contam como novas."""
+        if self._gravacao_rapida is not None:
+            self._terminar_gravacao_rapida(enviar=False)
         if self.atual in self._chaves_conv:
             self.lista_conv.SetSelection(self._chaves_conv.index(self.atual))
         if self.resposta_a is not None:
@@ -4979,6 +4987,61 @@ class Janela(wx.Frame):
         self.cfg.set("pasta_anexos", os.path.dirname(caminho))
         self._enviar_arquivo(caminho)
 
+    def _gravar_rapido(self, origem):
+        """O atalho de gravar: o primeiro aperto comeca a gravar e o
+        seguinte para e ja envia a nota de voz, sem janela. Esc descarta."""
+        if self._gravacao_rapida is not None:
+            self._terminar_gravacao_rapida(enviar=True)
+            return
+        if self._so_texto_no_status():
+            return
+        if self._destino_do_envio() is None:
+            return
+        g = Gravador(config.pasta_temporaria(), origem, maximo_segundos=3600)
+        bipe("nova")
+        time.sleep(0.3)     # o bipe nao pode entrar na gravacao
+        try:
+            g.iniciar()
+        except ErroGravacao as e:
+            bipe("erro")
+            self.fala.falar(str(e), interromper=True)
+            return
+        self._gravacao_rapida = {"gravador": g, "origem": origem}
+        chave = "gravar_mic" if origem == MICROFONE else "gravar_som"
+        atalho = self.atalhos.efetivo(chave)
+        self.SetStatusText("Gravando...")
+        self.fala.falar(
+            "Gravando. %s Esc descarta." % (
+                "Aperte %s de novo para parar e enviar." %
+                nucleo_atalhos.texto_falado(atalho) if atalho else
+                "Pare pelo menu Mídias."), interromper=True)
+
+    def _terminar_gravacao_rapida(self, enviar):
+        """Para a gravacao do atalho: envia como nota de voz ou descarta."""
+        est, self._gravacao_rapida = self._gravacao_rapida, None
+        if est is None:
+            return
+        g = est["gravador"]
+        self.SetStatusText("")
+        if not enviar:
+            g.cancelar()
+            bipe("erro")
+            self.fala.falar("Gravação descartada.", interromper=True)
+            return
+        try:
+            gravacao = g.parar()
+        except ErroGravacao as e:
+            bipe("erro")
+            self.fala.falar(str(e), interromper=True)
+            return
+        bipe("enviada")
+        log.info("gravação rápida (%s) de %.0fs pronta para enviar",
+                 est["origem"], gravacao.segundos)
+        if gravacao.silenciosa:
+            self.fala.falar("Atenção: a gravação saiu quase em silêncio.",
+                            interromper=True)
+        self._enviar_arquivo(gravacao.caminho, voz=True, temporario=True)
+
     def _gravar(self, origem):
         if self._so_texto_no_status():
             return
@@ -6216,6 +6279,8 @@ class Janela(wx.Frame):
                     evt.Veto()
                 return
         log.info("fechando a janela")
+        if self._gravacao_rapida is not None:
+            self._terminar_gravacao_rapida(enviar=False)
         self.Hide()
         self._guardar_posicao()
         self._parar_audio(falar=False)
