@@ -598,6 +598,8 @@ no fechamento, por assunto.
 - F7 na caixa de digitar (menu Mensagens): verificador do próprio Windows por ctypes, sem dependência nova; janela com palavra, frase, "Trocar por", sugestões e botões Trocar, Trocar todas, Ignorar, Ignorar todas e Adicionar ao dicionário (dicionário pessoal do Windows). Opções na categoria Escrita: idioma do corretor e aviso ao enviar (desligado por padrão).
 - **Verificado ao vivo pelo responsável (22/10/2026):** ele usou o corretor no TeleZapp do código e disse que gostou da função. Testado só em português do Brasil. Testado com o NVDA, sem dificuldade em nenhuma das telas. Também testado o aviso de ortografia incorreta ao enviar. Não foram testados os outros idiomas.
 
+- **Enter da caixa (22/10/2026):** a caixa passou a ter `TE_PROCESS_ENTER` e envia pelo `EVT_TEXT_ENTER`, como o WinZapp (o Enter chega ao controle e o leitor de tela fecha a última palavra). Sai a opção experimental `enter_chega_ao_leitor`. **Verificado ao vivo pelo responsável (22/10/2026):** parou de falar a última palavra colada com a primeira da mensagem seguinte. Não foi dito se Shift+Enter, a edição (F2) e a resposta de status foram testados.
+
 ## Próximos passos sugeridos
 
 1. ~~Grupo 1 do plano acima~~ (concluído).
