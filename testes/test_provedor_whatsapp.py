@@ -2890,3 +2890,25 @@ def test_criar_enquete_sem_conexao_avisa(amb):
     amb.p.criar_enquete("5551@s.whatsapp.net", "Q?", ["A", "B"], False)
     aviso = esperar(amb.fila, ev.Aviso)
     assert "Não consegui criar a enquete" in aviso.texto
+
+
+def test_consertar_decifrar_voto_poe_o_tratamento_que_faltava():
+    class Funcao:
+        errcheck = None
+
+    class Go:
+        DecryptPollVote = Funcao()
+        liberados = []
+
+        def FreeBytesStruct(self, ponteiro):
+            self.liberados.append(ponteiro)
+
+    class Cliente:
+        _NewClient__client = Go()
+    assert wa.consertar_decifrar_voto(Cliente()) is True
+    assert Go.DecryptPollVote.errcheck is not None
+    assert wa.consertar_decifrar_voto(Cliente()) is False     # so uma vez
+    # sem resultado: bytes vazios, e nada a liberar
+    assert Go.DecryptPollVote.errcheck(None, None, ()) == b""
+    # um cliente sem a biblioteca (os testes) nao quebra
+    assert wa.consertar_decifrar_voto(object()) is False

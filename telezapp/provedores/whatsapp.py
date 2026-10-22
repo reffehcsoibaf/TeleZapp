@@ -607,6 +607,32 @@ def enquete_do_whatsapp(interna):
     return {}
 
 
+def consertar_decifrar_voto(cliente):
+    """O neonize 0.5.2 esqueceu `DecryptPollVote` na lista das funcoes cujo
+    retorno (um ponteiro de bytes do Go) vira `bytes`: sem isso, decifrar um
+    voto levanta TypeError (\"expected bytes, LP_Bytes found\"). Poe o mesmo
+    tratamento que as outras funcoes ja tem. Roda uma vez por biblioteca."""
+    import ctypes
+    go = next((getattr(cliente, a) for a in dir(cliente)
+               if a.endswith("__client")), None)
+    funcao = getattr(go, "DecryptPollVote", None)
+    if funcao is None or getattr(funcao, "errcheck", None) is not None:
+        return False
+
+    def consumir(resultado, func, argumentos):
+        if not resultado:
+            return b""
+        try:
+            conteudo = resultado.contents
+            if not conteudo.ptr or conteudo.size == 0:
+                return b""
+            return ctypes.string_at(conteudo.ptr, conteudo.size)
+        finally:
+            go.FreeBytesStruct(resultado)
+    funcao.errcheck = consumir
+    return True
+
+
 def indices_do_voto(opcoes, selecionados):
     """Posicoes das opcoes escolhidas num voto: o WhatsApp manda o SHA-256 do
     texto de cada opcao marcada."""
@@ -3120,10 +3146,11 @@ class ProvedorWhatsApp(Provedor):
         enquetes de antes do TeleZapp (sem o segredo) nao dá para ler."""
         alvo = interna.pollUpdateMessage.pollCreationMessageKey.ID
         try:
+            consertar_decifrar_voto(self.cliente)
             voto = self.cliente.decrypt_poll_vote(evento)
         except Exception as e:
-            log.info("voto em enquete que não consegui decifrar (%s)",
-                     type(e).__name__)
+            log.info("voto em enquete que não consegui decifrar (%s: %s)",
+                     type(e).__name__, str(e)[:120])
             return
         quem_id = jid_texto(origem.Sender)
         quem = "Você" if origem.IsFromMe else self._nome_contato(
