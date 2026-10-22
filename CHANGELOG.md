@@ -3,7 +3,7 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
-## Em andamento (2026.10.21.1)
+## Próxima versão (ainda sem número: segue o dia do lançamento)
 
 - Chamadas de voz do WhatsApp (experimental, opção "Chamadas de voz do
   WhatsApp (experimental)", desligada por padrão). `provedores/chamadas_whatsapp.py`
