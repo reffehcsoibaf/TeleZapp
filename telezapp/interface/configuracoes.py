@@ -168,6 +168,8 @@ class DialogoConfiguracoes(wx.Dialog):
         """Busca, lista de funcoes com a tecla de cada uma (Enter ou duplo
         clique altera) e os botoes Alterar, Remover e Restaurar."""
         p, lay = self.painel, self.lay_painel
+        for o in self.modelo.opcoes("Atalhos"):
+            self._criar_opcao(o)         # Mostrar as teclas nos controles
         lay.Add(wx.StaticText(p, label="Buscar função ou atalho:"), 0,
                 wx.LEFT | wx.RIGHT | wx.TOP, 8)
         self.busca_atalhos = wx.TextCtrl(p, name="Buscar função ou atalho")

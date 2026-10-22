@@ -313,7 +313,7 @@ OPCOES = (
           "mesmo. Desmarcada, a mensagem sai direto e você corrige quando "
           "quiser com Verificar ortografia (F7)."),
     Opcao("mostrar_atalhos", "Mostrar as teclas de atalho nos controles",
-          "Leitura", True,
+          "Atalhos", True,
           "Escreve a tecla de atalho no nome dos botões e dos itens de menu "
           "que têm uma, por exemplo \"Enviar (Enter)\" ou \"Escrever "
           "mensagem, Control E\". Desmarcada, os nomes ficam sem o atalho "
