@@ -1309,6 +1309,19 @@ def _abrir_com_caixa(j):
                                                           conversa="20")]))
 
 
+def test_anexar_pelo_botao_envia_foto_e_audio_como_documento(
+        j, tmp_path, monkeypatch):
+    _abrir_com_caixa(j)
+    for nome in ("foto.jpg", "som.mp3"):
+        arq = tmp_path / nome
+        arq.write_bytes(b"x" * 10)
+        monkeypatch.setattr(jm.dialogos, "escolher_arquivo",
+                            lambda pai, pasta="", a=str(arq): a)
+        j._anexar_arquivo()
+        assert ("arquivo", "20", m.DOCUMENTO, nome, "") in \
+            j.contas.p.pedidos
+
+
 def test_anexar_arquivo_usa_a_caixa_como_legenda(j, tmp_path, monkeypatch):
     _abrir_com_caixa(j)
     pdf = tmp_path / "relatorio.pdf"

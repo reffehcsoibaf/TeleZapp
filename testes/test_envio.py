@@ -83,3 +83,42 @@ def test_arquivo_ausente_vazio_ou_grande_demais(tmp_path, monkeypatch):
     monkeypatch.setattr(envio, "LIMITE_BYTES", 50)
     with pytest.raises(envio.ErroEnvio, match="limite"):
         envio.preparar(str(grande))
+
+
+def test_pelo_botao_tudo_vai_como_documento(tmp_path):
+    jpg = tmp_path / "a.jpg"
+    jpg.write_bytes(b"\xff\xd8\xff")
+    mp3 = tmp_path / "som.mp3"
+    mp3.write_bytes(b"ID3")
+    mp4 = amostra("video.mp4", tmp_path) if os.path.exists(
+        os.path.join(AMOSTRAS, "video.mp4")) else None
+    for caminho in [str(jpg), str(mp3)] + ([mp4] if mp4 else []):
+        d = envio.preparar(caminho, como_documento=True)
+        assert d.tipo == m.DOCUMENTO and d.nome == os.path.basename(caminho)
+        assert not d.colado and not d.sem_conversao
+
+
+def test_colado_marca_o_que_parece_midia_e_nao_deu_para_converter(tmp_path):
+    ok = tmp_path / "a.jpg"
+    ok.write_bytes(b"\xff\xd8\xff")
+    heic = tmp_path / "foto.heic"
+    heic.write_bytes(b"x" * 10)
+    mkv = tmp_path / "filme.mkv"
+    mkv.write_bytes(b"x" * 10)
+    pdf = tmp_path / "r.pdf"
+    pdf.write_bytes(b"%PDF")
+    a = envio.preparar(str(ok), colado=True)
+    assert a.tipo == m.FOTO and a.colado and not a.sem_conversao
+    for ruim in (heic, mkv):
+        d = envio.preparar(str(ruim), colado=True)
+        assert d.tipo == m.DOCUMENTO and d.sem_conversao
+    # um documento de verdade nao e "midia sem conversao": nao avisa
+    d = envio.preparar(str(pdf), colado=True)
+    assert d.tipo == m.DOCUMENTO and not d.sem_conversao
+
+
+def test_wav_colado_continua_audio_para_converter_no_envio(tmp_path):
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(b"RIFF" + b"\0" * 40)
+    a = envio.preparar(str(wav), colado=True)
+    assert a.tipo == m.AUDIO and a.colado and not a.sem_conversao

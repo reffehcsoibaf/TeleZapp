@@ -18,6 +18,30 @@ from telezapp.nucleo import modelos as m
 log = logging.getLogger(__name__)
 
 
+def _converter_imagem(caminho):
+    """PNG temporario de um BMP ou GIF parado (formatos que os servicos nao
+    tratam como foto); None se nao for o caso ou nao der (GIF animado,
+    arquivo ilegivel)."""
+    ext = os.path.splitext(caminho)[1].lower()
+    if ext not in (".bmp", ".gif"):
+        return None
+    try:
+        if ext == ".gif" and wx.Image.GetImageCount(
+                caminho, wx.BITMAP_TYPE_GIF) > 1:
+            return None
+        imagem = wx.Image()
+        if not imagem.LoadFile(caminho):
+            return None
+        destino = os.path.join(config.pasta_temporaria(), "%s-%d.png" % (
+            os.path.splitext(os.path.basename(caminho))[0],
+            int(time.time() * 1000)))
+        return destino if imagem.SaveFile(destino, wx.BITMAP_TYPE_PNG) \
+            else None
+    except Exception:
+        log.warning("nao consegui converter a imagem colada", exc_info=True)
+        return None
+
+
 def ler(fala):
     """Anexos preparados do que esta na area de transferencia; None se for so
     texto (ou nada que o TeleZapp envie); lista vazia se havia midia mas
@@ -53,12 +77,24 @@ def ler(fala):
         if os.path.isdir(caminho):
             avisos.append("Pastas não podem ser enviadas.")
             continue
+        convertido = _converter_imagem(caminho)
+        if convertido:
+            caminho, temporario = convertido, True
         try:
-            anexo = envio.preparar(caminho, temporario=temporario)
-            anexo.colado = True
-            anexos.append(anexo)
+            anexos.append(envio.preparar(caminho, temporario=temporario,
+                                         colado=True))
         except envio.ErroEnvio as e:
             avisos.append("%s: %s" % (os.path.basename(caminho), e))
+    sem_conversao = [a.nome for a in anexos if a.sem_conversao]
+    if sem_conversao:
+        wx.MessageBox(
+            "O TeleZapp não consegue converter %s para um formato que o "
+            "WhatsApp e o Telegram tocam. %s será enviado como documento "
+            "(a pessoa baixa e abre o arquivo)." % (
+                ", ".join(sem_conversao),
+                "Esse arquivo" if len(sem_conversao) == 1
+                else "Esses arquivos"),
+            "Enviado como documento", wx.OK | wx.ICON_INFORMATION)
     if not anexos:
         bipe("erro")
         fala.falar(" ".join(avisos), interromper=True)

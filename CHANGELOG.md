@@ -5,6 +5,7 @@ Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 
 ## Próxima versão (ainda sem número: segue o dia do lançamento)
 
+- Regra fixa de envio de arquivos: o botão e o menu de anexar mandam sempre como documento (`envio.preparar(..., como_documento=True)`), nos dois serviços; o colado com Control V (`colado=True`) segue como mídia, convertendo o que dá (BMP e GIF parado viram PNG em `colagem._converter_imagem`; WAV e FLAC viram Ogg/Opus na hora do envio no WhatsApp) e, para foto, vídeo e áudio que não dá (HEIC, GIF animado, MKV, AVI, WEBM, WMV), mostra uma janela dizendo que vai como documento (`Anexo.sem_conversao`). Encaminhar e postar status não mudaram.
 - WAV e FLAC no WhatsApp: o arquivo ia como mensagem de áudio (`audio/x-wav`), que o WhatsApp não toca, e o envio aparecia como feito sem chegar ao destino. Agora, pelo botão ou menu de anexar, o arquivo vai como documento; colado na caixa (Control V, `Anexo.colado`), é convertido para Ogg/Opus e vai como áudio comum (`envio.converter_para_opus`, que junta os canais do estéreo). Os tipos MIME de M4A (antes `audio/mpeg`) e AAC (antes `audio/vnd.dlna.adts`) também foram corrigidos. No Telegram nada mudou. Não verificado com um destinatário de verdade.
 
 - Atalhos personalizáveis (`nucleo/atalhos.py`, `interface/atalhos.py`,

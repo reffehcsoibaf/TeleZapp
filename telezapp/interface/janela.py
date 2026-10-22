@@ -5068,7 +5068,7 @@ class Janela(wx.Frame):
         if not caminho:
             return
         self.cfg.set("pasta_anexos", os.path.dirname(caminho))
-        self._enviar_arquivo(caminho)
+        self._enviar_arquivo(caminho, como_documento=True)
 
     def _gravar_rapido(self, origem):
         """O atalho de gravar: o primeiro aperto comeca a gravar e o
@@ -5154,11 +5154,13 @@ class Janela(wx.Frame):
                  gravacao.segundos)
         self._enviar_arquivo(gravacao.caminho, voz=True, temporario=True)
 
-    def _enviar_arquivo(self, caminho, voz=False, temporario=False):
+    def _enviar_arquivo(self, caminho, voz=False, temporario=False,
+                        como_documento=False):
         if self._destino_do_envio() is None:
             return
         try:
-            anexo = envio.preparar(caminho, voz=voz, temporario=temporario)
+            anexo = envio.preparar(caminho, voz=voz, temporario=temporario,
+                                   como_documento=como_documento)
         except envio.ErroEnvio as e:
             bipe("erro")
             self.fala.falar(str(e), interromper=True)

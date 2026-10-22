@@ -41,8 +41,10 @@ class Anexo:
     altura: int = 0
     aviso: str = ""            # algo que a pessoa deve saber antes
     temporario: bool = False   # gravado pelo app: pode ser movido, nao copiado
-    colado: bool = False       # veio do Control V (a legenda e a conversao
-    #                            de audio dependem de como foi escolhido)
+    colado: bool = False       # veio do Control V (audio WAV/FLAC e
+    #                            convertido na hora de enviar)
+    sem_conversao: bool = False   # colado: parece midia, mas nao deu para
+    #                               converter; vai como documento
 
     @property
     def voz(self):
@@ -96,8 +98,30 @@ def _duracao_audio(caminho):
         return 0
 
 
-def preparar(caminho, voz=False, temporario=False):
-    """Anexo pronto para um provedor enviar; ErroEnvio se nao der."""
+def parece_midia(caminho):
+    """True se a extensao e de foto, video ou audio (mesmo os formatos que
+    os servicos nao tratam como midia)."""
+    return os.path.splitext(caminho)[1].lower() in (
+        m.EXT_FOTO | m.EXT_VIDEO | m.EXT_AUDIO)
+
+
+def preparar(caminho, voz=False, temporario=False, como_documento=False,
+             colado=False):
+    """Anexo pronto para um provedor enviar; ErroEnvio se nao der.
+
+    `como_documento`: o arquivo escolhido pelo botao de anexar vai sempre como
+    documento, do jeito que esta. `colado`: veio do Control V; foto, video e
+    audio seguem como midia quando o formato serve ou foi convertido, e os
+    que nao deram vao como documento, marcados em `sem_conversao`."""
+    anexo = _preparar(caminho, voz, temporario, como_documento)
+    if colado:
+        anexo.colado = True
+        anexo.sem_conversao = anexo.tipo == m.DOCUMENTO and \
+            parece_midia(caminho)
+    return anexo
+
+
+def _preparar(caminho, voz, temporario, como_documento):
     if not caminho or not os.path.isfile(caminho):
         raise ErroEnvio("O arquivo não foi encontrado.")
     tamanho = os.path.getsize(caminho)
@@ -108,6 +132,10 @@ def preparar(caminho, voz=False, temporario=False):
                         m.tamanho_legivel(tamanho))
     nome = os.path.basename(caminho)
     ext = os.path.splitext(nome)[1].lower()
+
+    if como_documento and not voz:
+        return Anexo(caminho, m.DOCUMENTO, nome, _mime(caminho), tamanho,
+                     temporario=temporario)
 
     if voz:
         try:
