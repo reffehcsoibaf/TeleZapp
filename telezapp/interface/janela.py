@@ -572,7 +572,7 @@ class Janela(wx.Frame):
         item(m_mid, "audio_janela",
              "Ao tocar um áudio: só tocar ou abrir o &player...")
         item(m_mid, "audio_sequencia",
-             "Depois de um áudio, tocar o &próximo...")
+             "&Sequência de áudios...")
         item(m_mid, "audio_voltar", "Voltar &5 segundos no áudio\t"
                                     "Ctrl+Shift+Left")
         item(m_mid, "audio_avancar", "Avançar 5 s&egundos no áudio\t"

@@ -3776,37 +3776,31 @@ class ProvedorWhatsApp(Provedor):
 
     # ------------------------------------------------------------- recibos
     # ------------------------------------------------- chamadas de voz
-    # Opcional e experimental (opcao "chamadas_whatsapp"): o meowcaller vai
-    # dentro da DLL de teste do neonize e usa este mesmo cliente.
+    # O meowcaller vai dentro da DLL de teste do neonize e usa este mesmo
+    # cliente; sem essa DLL as chamadas ficam indisponiveis.
     @property
     def suporta_chamadas(self):
         return self._voz is not None and self._voz.pronta
 
     def _preparar_chamadas(self):
-        """Antes de conectar: liga o meowcaller no cliente, se a pessoa
-        quiser e a DLL tiver."""
+        """Antes de conectar: liga o meowcaller no cliente, se a DLL tiver."""
         if self._voz is not None:
             self._voz.parar()
             self._voz = None
         try:
-            from telezapp import config
             from telezapp.provedores.chamadas_whatsapp import (
                 ChamadasWhatsApp, Ponte)
-            quer = bool(config.Config().get("chamadas_whatsapp"))
             if not Ponte.disponivel():
-                if quer:
-                    log.info("chamadas do WhatsApp pedidas, mas a DLL do "
-                             "neonize não tem o meowcaller")
+                log.info("a DLL do neonize não tem o meowcaller: sem "
+                         "chamadas de voz do WhatsApp")
                 return
-            Ponte.configurar(quer)
-            if not quer:
-                return
+            Ponte.configurar(True)
             self._voz = ChamadasWhatsApp(
                 Ponte(self.cliente.uuid), self.conta.id, self.barramento,
                 self._conversa_do_peer, self._nome_da_conversa,
                 self._destino_da_chamada)
             self._voz.iniciar()
-            log.info("chamadas de voz do WhatsApp ligadas (experimental)")
+            log.info("chamadas de voz do WhatsApp ligadas")
         except Exception:
             log.exception("erro ao preparar as chamadas do WhatsApp")
             self._voz = None

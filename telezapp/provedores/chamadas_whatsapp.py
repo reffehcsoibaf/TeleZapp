@@ -13,9 +13,8 @@ chamadas. Aqui ficam:
 - `ChamadasWhatsApp`: o estado das chamadas, publicado como `EstadoChamada`
   (nucleo.chamadas), igual ao Telegram.
 
-E experimental: o protocolo vem de engenharia reversa e pode quebrar ou
-levar o WhatsApp a limitar a conta. Por isso a opcao "chamadas_whatsapp"
-nasce desligada. Sem a DLL de teste, as chamadas ficam indisponiveis e o
+O protocolo vem de engenharia reversa e pode quebrar ou levar o WhatsApp a
+limitar a conta. Sem a DLL de teste, as chamadas ficam indisponiveis e o
 resto do aplicativo segue igual.
 """
 import ctypes
