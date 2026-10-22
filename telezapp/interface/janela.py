@@ -37,6 +37,7 @@ from telezapp.nucleo import chamadas as ch
 from telezapp.provedores.base import ErroPrivacidade
 from telezapp.nucleo import atualizacao
 from telezapp.nucleo import atualizador
+from telezapp.nucleo import inicializacao
 from telezapp.nucleo import atalhos as nucleo_atalhos
 from telezapp.nucleo.ia import catalogo as cat_ia
 from telezapp.nucleo.ia import cofre as cofre_ia
@@ -122,8 +123,10 @@ de endereço e pessoas mencionadas; Espaço ou Enter abre
 F7: verificar a ortografia do texto da caixa de digitar (palavra, sugestões
 e botões para trocar, ignorar ou adicionar ao dicionário do Windows)
 Control Shift A: anexar e enviar um arquivo (foto, vídeo, áudio, documento)
-Control Shift M: gravar uma nota de voz pelo microfone
-Control Shift S: gravar o som do computador e enviar como nota de voz
+Control Shift M: começar a gravar uma nota de voz pelo microfone; apertar de
+novo para e envia (Esc descarta). Os botões de gravar abrem uma janela
+Control Shift S: o mesmo, gravando o som do computador
+Todos os atalhos do menu podem ser mudados em Configurações, Atalhos
 Control Shift Seta para cima e para baixo: áudio mais rápido e mais lento
 (0,25x a 3x); Control Shift 0: velocidade normal
 Control Shift Seta para a esquerda e para a direita: voltar e avançar 5
@@ -420,6 +423,9 @@ class Janela(wx.Frame):
         self.chamada = None           # nucleo.chamadas.Chamada em curso
         self.dlg_chamada = None       # DialogoChamada aberto
         self._gravacao_rapida = None  # {"gravador", "origem"} gravando por atalho
+        self._bandeja = None          # icone da area de notificacao
+        self._saindo = False          # True: fechar e sair de verdade
+        self._id_global = wx.NewIdRef() if hasattr(wx, "NewIdRef") else 9001
         # funcoes que aceitam atalho (os itens de menu e outras) e o que a
         # pessoa mudou; os rotulos sem atalho de cada item ficam em
         # _base_menu e o atalho entra na hora (ver _atualizar_atalhos)
@@ -431,6 +437,11 @@ class Janela(wx.Frame):
         self._rotular_controles()
         self.CreateStatusBar()
         self.Bind(wx.EVT_CLOSE, self._ao_fechar)
+        if hasattr(wx, "EVT_HOTKEY"):
+            self.Bind(wx.EVT_HOTKEY,
+                      lambda e: self._mostrar_da_bandeja())
+        self._atualizar_bandeja()
+        self._registrar_atalho_global()
         if hasattr(wx, "EVT_ICONIZE"):      # minimizar esconde as trancadas
             self.Bind(wx.EVT_ICONIZE, self._ao_minimizar)
         self.Bind(wx.EVT_CHAR_HOOK, self._char_hook)
@@ -614,6 +625,8 @@ class Janela(wx.Frame):
         item(m_fer, "criar_portatil", "Criar cópia &portátil...")
         item(m_fer, "desinstalar", "&Desinstalar o %s..." % NOME)
         m_fer.AppendSeparator()
+        item(m_fer, "esconder_janela",
+             "&Esconder a janela e continuar em segundo plano")
         item(m_fer, "sair", "&Sair\tCtrl+Q")
 
         for submenu, rotulo in ((m_msg, "&Mensagens"), (m_conv, "C&onversas"),
@@ -653,7 +666,8 @@ class Janela(wx.Frame):
             "salvar_autor": lambda e: self._salvar_autor(),
             "logs": lambda e: self._abrir_logs(),
             "pasta_sons": lambda e: self._abrir_pasta("sons"),
-            "sair": lambda e: self.Close(),
+            "sair": lambda e: self._sair(),
+            "esconder_janela": lambda e: self._esconder_na_bandeja(),
             "configuracoes": lambda e: self._configuracoes(),
             "backup": lambda e: self._fazer_backup(),
             "restaurar_backup": lambda e: self._restaurar_backup(),
@@ -790,8 +804,76 @@ class Janela(wx.Frame):
 
     def _registrar_atalho_global(self):
         """(Re)liga o atalho que chama o TeleZapp de qualquer lugar."""
-        # preenchido na etapa do segundo plano
-        return None
+        if not hasattr(self, "RegisterHotKey"):
+            return
+        try:
+            self.UnregisterHotKey(self._id_global)
+        except Exception:
+            pass
+        canon = self.atalhos.efetivo("mostrar_janela")
+        if not canon:
+            return
+        par = ui_teclas.para_atalho_global(canon)
+        if par is None or not self.RegisterHotKey(self._id_global, *par):
+            log.warning("atalho global %s nao registrado", canon)
+            bipe("erro")
+            self.fala.falar(
+                "Não consegui reservar o atalho %s para chamar o TeleZapp: "
+                "outro programa já o usa. Escolha outro em Configurações, "
+                "Atalhos." % nucleo_atalhos.texto_falado(canon),
+                interromper=True)
+
+    def _atualizar_bandeja(self):
+        """Cria ou tira o icone da area de notificacao conforme a opcao de
+        continuar em segundo plano."""
+        quer = bool(self.cfg.get("segundo_plano"))
+        if quer and self._bandeja is None:
+            from telezapp.interface import bandeja
+            self._bandeja = bandeja.criar(self)
+        elif not quer and self._bandeja is not None and self.IsShown():
+            self._tirar_bandeja()
+
+    def _tirar_bandeja(self):
+        b, self._bandeja = self._bandeja, None
+        if b is not None:
+            try:
+                b.RemoveIcon()
+                b.Destroy()
+            except Exception:
+                pass
+
+    def _esconder_na_bandeja(self):
+        """Esconde a janela; o programa segue rodando. Cria o icone se for
+        preciso, para sempre haver um jeito de voltar."""
+        if self._bandeja is None:
+            from telezapp.interface import bandeja
+            self._bandeja = bandeja.criar(self)
+        if self._bandeja is None:
+            self.fala.falar("Este Windows não tem a área de notificação "
+                            "para esconder a janela.", interromper=True)
+            return
+        atalho = self.atalhos.efetivo("mostrar_janela")
+        self.Hide()
+        self.fala.falar(
+            "O TeleZapp continua em segundo plano. Para voltar, %s." % (
+                "aperte %s" % nucleo_atalhos.texto_falado(atalho) if atalho
+                else "use o ícone da área de notificação"),
+            interromper=True)
+
+    def _mostrar_da_bandeja(self):
+        """Traz a janela de volta, de onde ela estiver (escondida,
+        minimizada ou atras de outras)."""
+        if not self.IsShown():
+            self.Show()
+        if self.IsIconized():
+            self.Iconize(False)
+        self.Raise()
+        self.fala.falar("TeleZapp", interromper=True)
+
+    def _sair(self):
+        """Encerra de verdade, mesmo com a opcao de segundo plano ligada."""
+        self._saindo = True
+        self.Close()
 
     def _criar_controles(self):
         painel = wx.Panel(self)
@@ -814,7 +896,7 @@ class Janela(wx.Frame):
         # na maioria dos programas; sem tecla de acesso, porque Alt abre o
         # Menu. O item Sair de Ferramentas e Control Q continuam valendo.
         self.botao_sair = wx.Button(painel, label="Sair")
-        self.botao_sair.Bind(wx.EVT_BUTTON, seguro(lambda e: self.Close()))
+        self.botao_sair.Bind(wx.EVT_BUTTON, seguro(lambda e: self._sair()))
         self.cx_conta.Bind(wx.EVT_CHOICE, seguro(self._ao_filtro_conta))
         self.cx_tipo.Bind(wx.EVT_CHOICE, seguro(self._ao_filtro_tipo))
         rot_conv = wx.StaticText(painel, label="Conversas")
@@ -5693,6 +5775,14 @@ class Janela(wx.Frame):
             self._aplicar_privacidade_conta(valor)
         elif chave == "atalhos":
             self._aplicar_atalhos(valor)
+        elif chave == "segundo_plano":
+            self.cfg.set(chave, valor)
+            self._atualizar_bandeja()
+        elif chave == "iniciar_com_windows":
+            self.cfg.set(chave, valor)
+            if not inicializacao.definir(valor):
+                self.fala.falar("O Windows não deixou mudar a abertura "
+                                "automática.", interromper=True)
         elif chave == "mostrar_atalhos":
             self.cfg.set(chave, valor)
             self._atualizar_atalhos()
@@ -6269,6 +6359,11 @@ class Janela(wx.Frame):
 
     # ================================================================ saida
     def _ao_fechar(self, evt):
+        if self.cfg.get("segundo_plano") and not self._saindo and \
+                hasattr(evt, "CanVeto") and evt.CanVeto():
+            evt.Veto()
+            self._esconder_na_bandeja()
+            return
         if self.chamada is not None and self.chamada.ativa:
             r = wx.MessageBox(
                 "Há uma chamada em andamento. Fechar o TeleZapp encerra a "
@@ -6279,6 +6374,13 @@ class Janela(wx.Frame):
                     evt.Veto()
                 return
         log.info("fechando a janela")
+        self._saindo = True
+        self._tirar_bandeja()
+        if hasattr(self, "UnregisterHotKey"):
+            try:
+                self.UnregisterHotKey(self._id_global)
+            except Exception:
+                pass
         if self._gravacao_rapida is not None:
             self._terminar_gravacao_rapida(enviar=False)
         self.Hide()

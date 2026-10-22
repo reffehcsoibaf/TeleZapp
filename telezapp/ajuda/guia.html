@@ -22,6 +22,7 @@
 <li><a href="#atalhos">Teclas de atalho</a></li>
 <li><a href="#mensagens">Ler e enviar mensagens</a></li>
 <li><a href="#midias">Fotos, vídeos, áudios e documentos</a></li>
+<li><a href="#segundo-plano">Segundo plano e abrir com o Windows</a></li>
 <li><a href="#enviar-midias">Enviar arquivos e gravar voz</a></li>
 <li><a href="#chamadas">Chamadas de voz</a></li>
 <li><a href="#configuracoes">Configurações</a></li>
@@ -52,6 +53,7 @@
 <p>Ao abrir o TeleZapp, o foco vai para o início da lista de Conversas. A lista sempre começa no topo, mas dentro de cada conversa o TeleZapp lembra onde você parou. Sem conversa aberta, só a lista de Conversas aparece. Enter abre a conversa e leva você à lista de Mensagens, e Esc fecha a conversa. Com a conversa aberta, a caixa para escrever fica logo abaixo das mensagens, e Esc fecha a conversa e esconde as duas. Se a conversa tem mensagens não lidas, ela abre com o foco no marcador, mesmo que seja só uma. Sem não lidas, reabre no ponto em que você parou (na última mensagem, se parou no fim). Alt 2 leva ao marcador de não lidas.</p>
 
 <h2 id="atalhos">Teclas de atalho</h2>
+<p>Quase toda função do menu tem uma tecla de atalho, e você pode mudar todas em Configurações, categoria Atalhos: há uma busca por função ou por tecla e uma lista com a tecla de cada função. Enter na função abre a janela em que você aperta a combinação nova; se ela já for de outra função, o programa avisa e pergunta se você quer substituir (a outra fica sem atalho). Também dá para remover o atalho de uma função e voltar ao padrão (uma função ou todas). Em Configurações, "Mostrar as teclas de atalho nos controles" põe a tecla no nome dos botões e dos itens de menu; desmarcada, os nomes ficam limpos e os atalhos continuam valendo. A lista abaixo mostra os atalhos de fábrica.</p>
 <ul>
 <li>Alt 1: lista de conversas.</li>
 <li>Alt 2: na lista de conversas, vai para a próxima conversa com mensagens não lidas; dentro da conversa, vai para o marcador de mensagens não lidas.</li>
@@ -110,6 +112,7 @@
 <h2 id="enviar-midias">Enviar arquivos e gravar voz</h2>
 <p>Com uma conversa aberta, depois do botão Enviar há três botões: Anexar e enviar arquivo, Gravar do microfone e Gravar som do computador. Os mesmos comandos estão em Mídias, com os atalhos Control Shift A, Control Shift M e Control Shift S.</p>
 <p>Anexar e enviar arquivo abre a janela de arquivos do Windows e envia o arquivo escolhido na hora (para anexar sem enviar ainda, cole o arquivo com Control V na caixa de digitação). Fotos JPG, PNG e WEBP vão como foto; vídeos MP4, MOV, M4V e 3GP vão como vídeo; MP3, WAV, M4A e semelhantes vão como áudio; todo o resto, e os formatos que os serviços não tocam como mídia (MKV, AVI, BMP, HEIC, GIF), vão como documento. O limite é 2 GB. Se a caixa de digitação tem texto, ele vai como legenda de foto, vídeo e documento. Vídeos em HEVC (H.265) são enviados, mas o TeleZapp avisa que podem não tocar em todos os celulares.</p>
+<p>Há dois jeitos de gravar. Pelo atalho (Control Shift M para o microfone, Control Shift S para o som do computador), um aperto começa a gravar, depois de um bipe, e o aperto seguinte para e já envia a nota de voz, sem janela; Esc descarta. Pelo botão (Enter ou Espaço em Gravar do microfone ou Gravar som do computador) ou pelos itens "em uma janela" do menu Mídias, abre uma janela para controlar a gravação, descrita abaixo.</p>
 <p>Gravar do microfone usa o microfone padrão do Windows; Gravar som do computador captura tudo o que a saída de som padrão está tocando (um vídeo, uma chamada, e também a fala do leitor de tela). A janela abre pronta, com o foco em Gravar: a gravação só começa quando você aperta Enter nele, depois de um bipe. Gravando, o foco fica em Parar de gravar (Enter para) e há o botão Pausar, que vira Continuar; o trecho da pausa não entra na gravação. Depois de parar, os botões são Enviar, Ouvir, Gravar de novo (volta ao início, sem começar sozinho) e Descartar. Esc descarta em qualquer momento. Se a gravação sair quase em silêncio, o TeleZapp avisa antes de você enviar. Ela vai como mensagem de voz, em Ogg/Opus.</p>
 <p>Enquanto envia, a mensagem aparece como "enviando" na lista; ao terminar, o TeleZapp toca o som de enviada, e se falhar fala o motivo. A mídia enviada fica guardada no programa e abre sem baixar. Por enquanto, mídia enviada não cita a mensagem respondida.</p>
 
@@ -123,6 +126,10 @@
 <p>A janela tem os botões Silenciar o microfone (vira Ativar o microfone), Tempo de chamada (fala há quanto tempo vocês falam) e Desligar, e duas listas: Microfone e Saída de som, que valem na hora. Esc não desliga uma chamada que já começou, para não encerrar sem querer: ele só lembra do botão Desligar.</p>
 <p>Com a janela principal em foco, os mesmos comandos estão em Chamadas: Mostrar a janela da chamada (Control Shift J), Silenciar ou ativar o microfone (Control Shift K), Tempo de chamada e Desligar (Control Shift H). Fechar o TeleZapp com uma chamada aberta pede confirmação.</p>
 <p>O som de chamada (toque e espera) pode ser desligado em Configurações, categoria Avisos: a fala continua avisando.</p>
+
+<h2 id="segundo-plano">Segundo plano e abrir com o Windows</h2>
+<p>Em Configurações, categoria Sistema: "Continuar em segundo plano ao fechar a janela" faz o botão de fechar (e Alt F4) só esconder a janela. O TeleZapp segue conectado, dando os avisos de mensagens, com um ícone na área de notificação do Windows. Para voltar, use o ícone, abra o TeleZapp de novo ou aperte a tecla global definida em Configurações, Atalhos, função "Chamar o TeleZapp quando ele está em segundo plano" (vem sem tecla: escolha uma, por exemplo Control Alt Z). Para encerrar de verdade, use Sair (Control Q, o botão Sair ou o menu do ícone). O item "Esconder a janela e continuar em segundo plano", em Ferramentas, esconde a janela na hora, mesmo com a opção desligada.</p>
+<p>"Abrir o TeleZapp ao entrar no Windows" abre o programa sozinho quando você entra na sua conta; com o segundo plano ligado, ele abre escondido, sem tirar o foco do que você faz.</p>
 
 <h2 id="configuracoes">Configurações</h2>
 <p>Ferramentas, Configurações (Control vírgula) abre uma janela com todas as opções do TeleZapp num só lugar. O primeiro campo é a busca: digite uma palavra (por exemplo, velocidade) e aparece, no alto da lista de categorias, Resultados da busca, com as opções que combinam. Tab vai da busca para a lista de categorias, depois para as opções da categoria escolhida e, por fim, para os botões OK, Cancelar e Aplicar.</p>

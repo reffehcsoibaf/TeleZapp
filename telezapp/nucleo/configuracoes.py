@@ -23,7 +23,8 @@ def categorias():
         vistas.append("Atalhos")    # tela propria: funcoes e teclas
     # no fim da lista, nesta ordem: "Privacidade" (que consulta a conta),
     # "Avancado" (quase ninguem precisa) e "Atualizacoes"
-    fim = {"Privacidade": 1, "Avançado": 2, "Atualizações": 3}
+    fim = {"Sistema": 1, "Privacidade": 2, "Avançado": 3,
+           "Atualizações": 4}
     return sorted(vistas, key=lambda c: fim.get(c, 0))
 
 

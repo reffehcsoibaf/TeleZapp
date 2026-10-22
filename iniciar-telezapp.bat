@@ -66,7 +66,7 @@ if errorlevel 1 (
 
 >>"%LOG%" 2>&1 "%VPY%" -m pip list --disable-pip-version-check
 >>"%LOG%" echo Abrindo o TeleZapp: %DATE% %TIME%
-start "" "%VENV%\Scripts\pythonw.exe" -m telezapp
+start "" "%VENV%\Scripts\pythonw.exe" -m telezapp %*
 
 :fim
 endlocal

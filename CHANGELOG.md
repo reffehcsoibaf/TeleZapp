@@ -5,6 +5,34 @@ Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 
 ## Próxima versão (ainda sem número: segue o dia do lançamento)
 
+- Atalhos personalizáveis (`nucleo/atalhos.py`, `interface/atalhos.py`,
+  `interface/teclas.py`). Todo item de menu entra num `Registro` (padrão tirado
+  do rótulo) e aceita outra combinação, guardada em `config["atalhos"]` só
+  quando difere do padrão. Configurações ganha a categoria Atalhos: busca por
+  função ou tecla, lista no estilo da lista de eventos de som, Alterar (janela
+  em que se aperta a combinação), Remover e Restaurar o padrão/todos. Tecla
+  repetida é recusada com aviso e a opção de substituir (a outra função fica
+  sem atalho); Enter, Esc, Tab, Control C/V/X/A/Z/Y, Alt F4 e letras soltas não
+  servem. A opção `mostrar_atalhos` (ligada) escreve o atalho no nome dos itens
+  de menu e dos botões; desligada, o nome fica limpo e uma
+  `wx.AcceleratorTable` mantém os atalhos valendo.
+- Gravar por atalho: Control Shift M (microfone) e Control Shift S (som do
+  computador) iniciam a gravação e o segundo aperto para e envia a nota de voz
+  na hora, sem janela; Esc, fechar a conversa ou fechar o programa descartam.
+  Os botões e os novos itens "em uma janela" do menu Mídias continuam abrindo
+  a janela de gravação.
+- Segundo plano: a opção `segundo_plano` faz o botão de fechar esconder a
+  janela e deixa um ícone na área de notificação (`interface/bandeja.py`,
+  `wx.adv.TaskBarIcon`; menu Abrir e Sair). Sair de verdade é `_sair()`
+  (menu, Control Q, botão Sair, menu do ícone). A função de atalho global
+  "mostrar_janela" (sem tecla de fábrica) usa `RegisterHotKey`; se outro
+  programa já a usa, o TeleZapp avisa. Uma segunda abertura do programa
+  aciona um evento nomeado (`nucleo/instancia.py`) em vez de dizer que já está
+  aberto, e a primeira mostra a janela.
+- Abrir ao entrar no Windows: a opção `iniciar_com_windows` grava a chave
+  `Run` do usuário (`nucleo/inicializacao.py`) com `--segundo-plano`; com o
+  segundo plano ligado a janela nem aparece. Pelo código-fonte a entrada chama
+  o `iniciar-telezapp.bat`, que agora repassa os argumentos.
 - Gravação de voz (`dialogos.gravar_voz`): a janela abre pronta, com o foco em "Gravar", e só começa a gravar quando a pessoa aperta o botão (antes começava sozinha). Gravando há "Pausar"/"Continuar" ao lado de "Parar de gravar"; `Gravador.pausar()`/`continuar()` mantêm a captura aberta e descartam o trecho da pausa. "Gravar de novo" volta ao início, sem começar sozinho. Só há teste automático do `Gravador`; a janela não foi vista no app real.
 
 - Enter na caixa de digitar passa pelo controle, como no WinZapp: a caixa ganha `TE_PROCESS_ENTER` e o envio sai do `EVT_TEXT_ENTER`; o `_char_hook` só deixa o Enter seguir (`Skip`). Shift+Enter e Control+Enter quebram a linha em `_tecla_caixa`. O leitor de tela vê o Enter e fecha a última palavra digitada. Saem a opção `enter_chega_ao_leitor` (era experimental), o atraso de 10 ms e a limpeza da quebra de linha (`_enviar_depois_do_enter`). A opção "Enter na caixa fecha a palavra digitada" some das Configurações.

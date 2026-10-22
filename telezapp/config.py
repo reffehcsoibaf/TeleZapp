@@ -319,6 +319,20 @@ OPCOES = (
           "mensagem, Control E\". Desmarcada, os nomes ficam sem o atalho "
           "e os atalhos continuam funcionando. Os atalhos podem ser "
           "mudados em Configurações, Atalhos."),
+    Opcao("segundo_plano", "Continuar em segundo plano ao fechar a janela",
+          "Sistema", False,
+          "Fechar a janela (o botão de fechar ou Alt F4) só a esconde: o "
+          "TeleZapp segue conectado, dando os avisos de mensagens, e um "
+          "ícone fica na área de notificação do Windows. Para voltar, use o "
+          "ícone ou o atalho de chamar o TeleZapp (Configurações, Atalhos, "
+          "\"Chamar o TeleZapp\"). Para encerrar de verdade, use Sair, em "
+          "Ferramentas (Control Q), o botão Sair ou o menu do ícone."),
+    Opcao("iniciar_com_windows", "Abrir o TeleZapp ao entrar no Windows",
+          "Sistema", False,
+          "Abre o TeleZapp sozinho quando você entra na sua conta do "
+          "Windows. Com \"Continuar em segundo plano\" ligado, ele abre "
+          "escondido na área de notificação, sem tirar o foco do que você "
+          "está fazendo."),
     Opcao("estilo", "Como cada mensagem é lida", "Leitura", 1,
           "A ordem em que autor, hora e conteúdo aparecem na lista de "
           "mensagens.",

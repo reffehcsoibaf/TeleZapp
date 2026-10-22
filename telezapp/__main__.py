@@ -22,6 +22,16 @@ def caixa_de_erro(texto):
         print(texto, file=sys.stderr)
 
 
+def _vigiar_aviso(sinal, janela, instancia):
+    """Espera uma segunda abertura pedir que a janela apareca."""
+    import wx
+    while True:
+        if instancia.esperar(sinal, 500):
+            wx.CallAfter(janela._mostrar_da_bandeja)
+        if getattr(janela, "_saindo", False):
+            return
+
+
 def main():
     # Sem terminal (pythonw), stdout e stderr nao existem: bibliotecas que
     # escrevem neles nao podem falhar por isso.
@@ -96,9 +106,15 @@ def main():
     unico = wx.SingleInstanceChecker("TeleZapp-" + os.environ.get(
         "USERNAME", ""), config.pasta())
     if unico.IsAnotherRunning():
-        wx.MessageBox("O %s já está aberto." % NOME, NOME,
-                      wx.OK | wx.ICON_INFORMATION)
+        # a outra abertura pode estar escondida na bandeja: pede a ela que
+        # mostre a janela, em vez de dizer que ja esta aberto
+        from telezapp.nucleo import instancia
+        if not instancia.acionar():
+            wx.MessageBox("O %s já está aberto." % NOME, NOME,
+                          wx.OK | wx.ICON_INFORMATION)
         return 0
+    from telezapp.nucleo import instancia
+    sinal = instancia.criar_sinal()
     config.limpar_temporarios()   # sobras de uma abertura anterior
     try:
         from telezapp.nucleo import backup
@@ -120,7 +136,21 @@ def main():
                            janela.obter_credenciais_telegram)
     janela.midias = GerenteMidias(cfg, banco, barramento,
                                   janela.contas.provedor)
-    janela.Show()
+    # aberto pelo Windows ao entrar na conta (--segundo-plano): com a opcao
+    # de segundo plano ligada, fica so no icone da bandeja
+    escondida = ("--segundo-plano" in sys.argv[1:]
+                 and bool(cfg.get("segundo_plano")))
+    if not escondida:
+        janela.Show()
+    if cfg.get("iniciar_com_windows"):
+        from telezapp.nucleo import inicializacao
+        inicializacao.definir(True)      # mantem o caminho em dia
+    if sinal:
+        import threading
+
+        threading.Thread(target=_vigiar_aviso,
+                         args=(sinal, janela, instancia),
+                         daemon=True, name="aviso-de-abertura").start()
     wx.CallAfter(janela.comecar)
     app.MainLoop()
     janela.midias.parar()

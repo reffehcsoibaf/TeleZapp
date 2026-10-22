@@ -156,7 +156,8 @@ def j(tmp_path, monkeypatch):
 
     def char_hook_com_caixa(evt):
         char_hook(evt)
-        if evt.pulou and evt.GetKeyCode() == wx_falso.WXK_RETURN and                 janela.FindFocus() is janela.caixa and not (
+        if evt.pulou and evt.GetKeyCode() == wx_falso.WXK_RETURN and \
+                janela.FindFocus() is janela.caixa and not (
                     evt.ShiftDown() or evt.ControlDown()):
             janela.caixa.ligacoes[wx_falso.EVT_TEXT_ENTER](None)
     janela._char_hook = char_hook_com_caixa
@@ -4101,3 +4102,95 @@ def test_fechar_a_conversa_descarta_a_gravacao_do_atalho(j, monkeypatch,
     j._gravar_rapido(SOM_INTERNO)
     j._fechar_conversa()
     assert j._gravacao_rapida is None and GravadorFalso.criados[0].cancelado
+
+
+class EventoDeFechar:
+    def __init__(self, pode_vetar=True):
+        self.vetado = False
+        self.pode = pode_vetar
+
+    def CanVeto(self):
+        return self.pode
+
+    def Veto(self):
+        self.vetado = True
+
+
+class BandejaFalsa:
+    removida = False
+
+    def RemoveIcon(self):
+        self.removida = True
+
+    def Destroy(self):
+        pass
+
+
+def test_fechar_com_segundo_plano_so_esconde_a_janela(j, monkeypatch):
+    from telezapp.interface import bandeja
+    monkeypatch.setattr(bandeja, "criar", lambda janela: BandejaFalsa())
+    j._aplicar_opcao("segundo_plano", True)
+    assert isinstance(j._bandeja, BandejaFalsa)
+    escondida = []
+    j.Hide = lambda: escondida.append(True)
+    j.fala.falar = lambda t, interromper=False: escondida.append(t)
+    evento = EventoDeFechar()
+    j._ao_fechar(evento)
+    assert evento.vetado and escondida[0] is True
+    assert "segundo plano" in escondida[1]
+    assert j.vivo is not False                 # a janela nao foi destruida
+
+
+def test_sair_encerra_mesmo_com_segundo_plano(j, monkeypatch):
+    from telezapp.interface import bandeja
+    monkeypatch.setattr(bandeja, "criar", lambda janela: BandejaFalsa())
+    j._aplicar_opcao("segundo_plano", True)
+    j._sair()
+    assert j._saindo and j.vivo is False       # Close() foi chamado
+    evento = EventoDeFechar()
+    j.Hide = lambda: None
+    j.Destroy = lambda: None
+    j._ao_fechar(evento)
+    assert not evento.vetado
+
+
+def test_fechar_sem_a_opcao_encerra(j):
+    j.Hide = lambda: None
+    j.Destroy = lambda: None
+    evento = EventoDeFechar()
+    j._ao_fechar(evento)
+    assert not evento.vetado
+
+
+def test_fechamento_do_windows_nao_pode_ser_vetado(j, monkeypatch):
+    from telezapp.interface import bandeja
+    monkeypatch.setattr(bandeja, "criar", lambda janela: BandejaFalsa())
+    j._aplicar_opcao("segundo_plano", True)
+    j.Hide = lambda: None
+    j.Destroy = lambda: None
+    evento = EventoDeFechar(pode_vetar=False)
+    j._ao_fechar(evento)
+    assert not evento.vetado
+
+
+def test_iniciar_com_windows_liga_a_entrada(j, monkeypatch):
+    chamadas = []
+    monkeypatch.setattr(jm.inicializacao, "definir",
+                        lambda ligado, *a, **k: chamadas.append(ligado) or True)
+    j._aplicar_opcao("iniciar_com_windows", True)
+    j._aplicar_opcao("iniciar_com_windows", False)
+    assert chamadas == [True, False]
+    assert j.cfg.get("iniciar_com_windows") is False
+
+
+def test_atalho_global_e_registrado_e_avisa_se_estiver_ocupado(j):
+    registros, ditas = [], []
+    j.RegisterHotKey = lambda id_, mods, tecla: registros.append(
+        (mods, tecla)) or True
+    j.UnregisterHotKey = lambda id_: None
+    j._aplicar_opcao("atalhos", {"mostrar_janela": "Ctrl+Alt+Z"})
+    assert registros == [(wx_falso.MOD_CONTROL | wx_falso.MOD_ALT, ord("Z"))]
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.RegisterHotKey = lambda *a: False          # outro programa usa
+    j._aplicar_opcao("atalhos", {"mostrar_janela": "Ctrl+Alt+Y"})
+    assert "outro programa" in ditas[-1]
