@@ -230,6 +230,17 @@ class Provedor(ABC):
         na hora; o resultado chega como ev.MensagemAtualizada (motivo
         "reacao") ou ev.Aviso."""
 
+    # True nos servicos em que da para votar numa enquete
+    PODE_VOTAR = False
+
+    def votar_enquete(self, mensagem, escolhas):
+        """Vota na enquete com as opcoes (posicoes); lista vazia tira o meu
+        voto. Volta na hora; o resultado chega como ev.MensagemAtualizada
+        (motivo "enquete") ou ev.Aviso."""
+
+    def atualizar_enquete(self, mensagem):
+        """Pede ao servico o resultado atual (onde ele nao manda sozinho)."""
+
     # True nos servicos em que da para ligar e desligar as mensagens
     # temporarias de uma conversa
     PODE_TEMPORARIAS = False

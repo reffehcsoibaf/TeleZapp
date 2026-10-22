@@ -195,6 +195,8 @@ def extras_de(msg):
             "ouvida": bool(dados.get("ouvida")),
             "favorita": bool(dados.get("favorita")),
             "reacoes": list(dados.get("reacoes") or []),
+            "enquete": dados.get("enquete")
+            if isinstance(dados.get("enquete"), dict) else {},
             "citou_voce": bool(dados.get("citou_voce")),
             "previa": dados.get("previa")
             if isinstance(dados.get("previa"), dict) else {},
@@ -212,6 +214,8 @@ def guardar_extras(msg, links=(), botoes=(), mencoes=(), acoes=(),
     previa = previa or extras_de(msg)["previa"]
     if previa:
         dados["previa"] = dict(previa)
+    if extras_de(msg)["enquete"]:
+        dados["enquete"] = dict(extras_de(msg)["enquete"])
     if extras_de(msg)["citou_voce"]:
         dados["citou_voce"] = True
     if links:
@@ -244,6 +248,91 @@ def atualizar_extras(msg, **campos):
             dados[chave] = valor
     msg.extras = json.dumps(dados, ensure_ascii=False) if dados else ""
     return msg
+
+
+# --------------------------------------------------------------- enquetes
+def enquete_de(msg):
+    """A enquete da mensagem, ja arrumada, ou {} se nao e uma enquete:
+    pergunta, opcoes (textos), maximo (quantas opcoes dá para marcar), votos
+    ({quem: {"nome", "escolhas": [posicoes]}}, quando o servico diz quem
+    votou), contagem e total (quando o servico ja manda as contagens), meus
+    (posicoes em que eu votei), encerrada, anonima, ids (Telegram) e poll_id."""
+    bruta = extras_de(msg)["enquete"]
+    opcoes = [str(o) for o in bruta.get("opcoes") or []]
+    if not opcoes:
+        return {}
+    votos = {}
+    for quem, v in (bruta.get("votos") or {}).items():
+        escolhas = [i for i in v.get("escolhas") or []
+                    if isinstance(i, int) and 0 <= i < len(opcoes)]
+        votos[quem] = {"nome": v.get("nome") or "", "escolhas": escolhas}
+    contagem = bruta.get("contagem")
+    if not (isinstance(contagem, list) and len(contagem) == len(opcoes)):
+        contagem = None
+    try:
+        maximo = max(1, int(bruta.get("maximo") or 1))
+    except (TypeError, ValueError):
+        maximo = 1
+    return {"pergunta": str(bruta.get("pergunta") or ""), "opcoes": opcoes,
+            "maximo": min(maximo, len(opcoes)), "votos": votos,
+            "contagem": contagem, "total": bruta.get("total"),
+            "meus": [i for i in bruta.get("meus") or []
+                     if isinstance(i, int) and 0 <= i < len(opcoes)],
+            "encerrada": bool(bruta.get("encerrada")),
+            "anonima": bool(bruta.get("anonima")),
+            "ids": list(bruta.get("ids") or []),
+            "poll_id": str(bruta.get("poll_id") or "")}
+
+
+def contagens_da_enquete(enq):
+    """Votos de cada opcao: a contagem que o servico mandou ou, sem ela, a
+    soma dos votos de quem se sabe que votou."""
+    if enq["contagem"] is not None:
+        return [int(n or 0) for n in enq["contagem"]]
+    soma = [0] * len(enq["opcoes"])
+    for v in enq["votos"].values():
+        for i in v["escolhas"]:
+            soma[i] += 1
+    return soma
+
+
+def votantes_da_enquete(enq):
+    """Quantas pessoas votaram."""
+    if enq["total"] is not None:
+        try:
+            return int(enq["total"])
+        except (TypeError, ValueError):
+            pass
+    return sum(1 for v in enq["votos"].values() if v["escolhas"])
+
+
+def quem_votou_em(enq, posicao):
+    """Nomes de quem votou na opcao (vazio nas enquetes anonimas)."""
+    return [v["nome"] or quem for quem, v in enq["votos"].items()
+            if posicao in v["escolhas"]]
+
+
+def resumo_enquete(msg):
+    """'enquete: Pergunta, 3 opções, 5 votos' (+ 'seu voto: A, B')."""
+    enq = enquete_de(msg)
+    if not enq:
+        return ""
+    n = len(enq["opcoes"])
+    votantes = votantes_da_enquete(enq)
+    partes = ["enquete" + (" encerrada" if enq["encerrada"] else "") + ": " +
+              enq["pergunta"],
+              "%d opções" % n,
+              "nenhum voto" if votantes == 0 else
+              "1 voto" if votantes == 1 else "%d votos" % votantes]
+    if enq["meus"]:
+        partes.append("seu voto: " + ", ".join(
+            enq["opcoes"][i] for i in enq["meus"]))
+    return ", ".join(partes)
+
+
+def pode_marcar_mais(enq, escolhidas):
+    """False se ja ha tantas opcoes marcadas quanto a enquete permite."""
+    return len(escolhidas) < enq["maximo"]
 
 
 def minha_reacao(msg):
@@ -577,6 +666,8 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None,
     o autor (ver quem_enviou).
     """
     cont = conteudo(m).replace("\r", " ").replace("\n", " ")
+    if enquete_de(m):
+        cont = resumo_enquete(m) + " (Enter para ver e votar)"
     so_link = _so_link(m)
     if so_link:
         # mensagem so com o link: a previa vem antes, para saber do que se

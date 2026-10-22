@@ -414,6 +414,17 @@ class Banco:
                 (conta_id, conversa_id, mensagem_id)).fetchone()
         return _msg(linha) if linha else None
 
+    def mensagem_da_enquete(self, conta_id, poll_id):
+        """A mensagem guardada que tem a enquete com esse numero (Telegram:
+        as atualizacoes de voto citam so o numero da enquete)."""
+        with self._trava:
+            linha = self._con.execute(
+                "SELECT conversa_id, id FROM mensagens WHERE conta_id=? AND "
+                "extras LIKE ?", (conta_id, '%"poll_id": "' +
+                                  str(poll_id).replace('"', "") + '"%')
+            ).fetchone()
+        return self.mensagem(conta_id, linha[0], linha[1]) if linha else None
+
     def mudar_estado(self, conta_id, conversa_id, ids, estado):
         """WhatsApp: muda o estado das minhas mensagens com esses ids, sem
         voltar atras (lida nao vira entregue). Devolve os ids que mudaram."""

@@ -13,6 +13,7 @@
 
 O registro nunca grava texto de mensagens, telefones completos ou codigos.
 """
+import hashlib
 import json
 import logging
 import os
@@ -588,6 +589,32 @@ def previa_do_whatsapp(interna):
                             x.description)
 
 
+def enquete_do_whatsapp(interna):
+    """Pergunta, opcoes e quantas dá para marcar de uma enquete criada ({} se
+    a mensagem nao e uma enquete)."""
+    presentes = set(campos(interna))
+    for nome in ("pollCreationMessage", "pollCreationMessageV2",
+                 "pollCreationMessageV3"):
+        if nome in presentes:
+            p = getattr(interna, nome)
+            opcoes = [o.optionName for o in p.options]
+            if not opcoes:
+                return {}
+            return {"pergunta": p.name, "opcoes": opcoes,
+                    "maximo": int(p.selectableOptionsCount or 0) or
+                    len(opcoes)}
+    return {}
+
+
+def indices_do_voto(opcoes, selecionados):
+    """Posicoes das opcoes escolhidas num voto: o WhatsApp manda o SHA-256 do
+    texto de cada opcao marcada."""
+    por_hash = {hashlib.sha256(o.encode()).digest(): i
+                for i, o in enumerate(opcoes)}
+    return sorted({por_hash[bytes(h)] for h in selecionados
+                   if bytes(h) in por_hash})
+
+
 def conteudo_de(interna):
     """(tipo, texto, segundos, nome_arquivo, tamanho) ou None se a mensagem
     nao tem nada para mostrar (chaves, reacoes, controle)."""
@@ -698,6 +725,9 @@ def converter(evento, conta_id, conversa_id, autor=""):
                      acoes=acoes_ + entradas_de_grupo(interna_, msg.texto),
                      original=original_com_acoes(interna_, acoes_),
                      previa=previa_do_whatsapp(interna_))
+    enquete_ = enquete_do_whatsapp(interna_)
+    if enquete_:
+        m.atualizar_extras(msg, enquete=enquete_)
     return msg, msg.remetente
 
 
@@ -823,6 +853,9 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
                      acoes=acoes_ + entradas_de_grupo(interna_, msg.texto),
                      original=original_com_acoes(interna_, acoes_),
                      previa=previa_do_whatsapp(interna_))
+    enquete_ = enquete_do_whatsapp(interna_)
+    if enquete_:
+        m.atualizar_extras(msg, enquete=enquete_)
     if wmi.starred:
         m.atualizar_extras(msg, favorita=True)
     return msg, remetente
@@ -2989,6 +3022,9 @@ class ProvedorWhatsApp(Provedor):
                 m.atualizar_extras(x, reacoes=reacoes)
             self._alterar(cid, alvo, aplicar, "reacao", quem, emoji)
             return True
+        if "pollUpdateMessage" in presentes:
+            self._tratar_voto(evento, cid, info, origem, interna)
+            return True
         if "protocolMessage" in presentes:
             p = interna.protocolMessage
             if p.HasField("type") and p.type == p.EPHEMERAL_SETTING:
@@ -3076,6 +3112,83 @@ class ProvedorWhatsApp(Provedor):
                                 "emoji": emoji, "minha": True})
             m.atualizar_extras(x, reacoes=reacoes)
         self._alterar(cid, msg.id, aplicar, "reacao", "Você", emoji)
+
+    def _tratar_voto(self, evento, cid, info, origem, interna):
+        """Voto numa enquete: o WhatsApp o manda cifrado com o segredo da
+        enquete, que o neonize guarda quando recebe a pergunta. Votos de
+        enquetes de antes do TeleZapp (sem o segredo) nao dá para ler."""
+        alvo = interna.pollUpdateMessage.pollCreationMessageKey.ID
+        try:
+            voto = self.cliente.decrypt_poll_vote(evento)
+        except Exception as e:
+            log.info("voto em enquete que não consegui decifrar (%s)",
+                     type(e).__name__)
+            return
+        quem_id = jid_texto(origem.Sender)
+        quem = "Você" if origem.IsFromMe else self._nome_contato(
+            origem.Sender, info.Pushname or nome_verificado(info))
+
+        def aplicar(x):
+            enq = m.enquete_de(x)
+            if not enq:
+                return
+            escolhas = indices_do_voto(enq["opcoes"], voto.selectedOptions)
+            votos = dict(enq["votos"])
+            votos[quem_id] = {"nome": quem, "escolhas": escolhas}
+            atual = dict(m.extras_de(x)["enquete"])
+            atual["votos"] = votos
+            if origem.IsFromMe:
+                atual["meus"] = escolhas
+            m.atualizar_extras(x, enquete=atual)
+        self._alterar(cid, alvo, aplicar, "enquete", quem)
+
+    PODE_VOTAR = True
+
+    def votar_enquete(self, mensagem, escolhas):
+        self._fila.put(lambda: self._votar_enquete(mensagem, escolhas))
+
+    def _votar_enquete(self, msg, escolhas):
+        cid = msg.conversa_id
+        enq = m.enquete_de(msg)
+        try:
+            if not self._conectada or self.cliente is None:
+                raise ConnectionError("sem conexão")
+            if not enq:
+                raise ValueError("não é uma enquete")
+            from neonize.proto.Neonize_pb2 import MessageInfo, MessageSource
+            eu = self.cliente.get_me().JID
+            if msg.minha:
+                autor = eu
+            else:
+                individual = not cid.endswith("@g.us")
+                rem = msg.remetente or (cid if individual else "")
+                if not rem:
+                    raise ValueError("sem o remetente da enquete")
+                autor = _jid_obj(*jid_de_texto(rem))
+            chat = self._jid(cid)
+            origem = MessageSource(Chat=chat, Sender=autor,
+                                   IsFromMe=bool(msg.minha),
+                                   IsGroup=cid.endswith("@g.us"))
+            enquete_info = MessageInfo(MessageSource=origem, ID=msg.id)
+            nomes = [enq["opcoes"][i] for i in escolhas]
+            self.cliente.send_message(
+                chat, self.cliente.build_poll_vote(enquete_info, nomes))
+        except Exception as e:
+            log.warning("voto em enquete falhou: %s: %s", type(e).__name__,
+                        str(e)[:200])
+            self._avisar("Não consegui enviar o voto (%s)." %
+                         type(e).__name__, False)
+            return
+        quem_id = jid_texto(eu)
+
+        def aplicar(x):
+            atual = dict(m.extras_de(x)["enquete"])
+            votos = dict(m.enquete_de(x)["votos"])
+            votos[quem_id] = {"nome": "Você", "escolhas": list(escolhas)}
+            atual["votos"] = votos
+            atual["meus"] = list(escolhas)
+            m.atualizar_extras(x, enquete=atual)
+        self._alterar(cid, msg.id, aplicar, "enquete", "Você")
 
     def _alterar(self, cid, alvo, aplicar, motivo, quem="", emoji=""):
         """Aplica `aplicar` a mensagem guardada, grava e avisa a interface.

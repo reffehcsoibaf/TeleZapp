@@ -281,7 +281,7 @@ def test_sessao_salva_conecta_e_lista_conversas(ambiente):
         assert len(ambiente.banco.conversas("t1")) == 3
         assert [c.arquivada for c in ambiente.banco.conversas("t1")
                 if c.nome == "Velha"] == [True]
-        assert len(cliente.handlers) == 8
+        assert len(cliente.handlers) == 9
 
         p.carregar_mensagens("10")
         msgs = esperar(ambiente.fila, ev.MensagensCarregadas).mensagens
@@ -358,7 +358,7 @@ def test_mensagem_recebida_e_leitura(ambiente):
     p.iniciar()
     try:
         esperar(ambiente.fila, ev.ConversasAtualizadas)
-        receber, ler, _, _, _, _, _, _ = cliente.handlers
+        receber, ler, _, _, _, _, _, _, _ = cliente.handlers
 
         async def chegar():
             async def get_chat():
@@ -1110,3 +1110,93 @@ def test_prazo_ao_vivo_aviso_de_servico_e_definir(ambiente):
         assert p._conversas["88"].temporaria_s == 2678400
     finally:
         p.parar()
+
+
+def _enquete_falsa(votos=None, fechada=False, multipla=False, publica=False):
+    from telethon.tl import types as tipos
+    respostas = [types.SimpleNamespace(text=types.SimpleNamespace(text=t),
+                                       option=bytes([i]))
+                 for i, t in enumerate(("Sexta", "Sábado", "Domingo"))]
+    poll = types.SimpleNamespace(
+        id=777, question=types.SimpleNamespace(text="Qual dia?"),
+        answers=respostas, multiple_choice=multipla, closed=fechada,
+        public_voters=publica)
+    resultados = None
+    if votos is not None:
+        resultados = types.SimpleNamespace(
+            results=[types.SimpleNamespace(option=bytes([i]), voters=n,
+                                           chosen=i in votos.get("meus", ()))
+                     for i, n in enumerate(votos["contagem"])],
+            total_voters=sum(votos["contagem"]))
+    return types.SimpleNamespace(
+        id=5, message="", out=False, date=DATA, action=None,
+        poll=types.SimpleNamespace(poll=poll, results=resultados),
+        media=object(), sender=None, post_author="Ana")
+
+
+def test_enquete_do_telegram_vira_dados_da_mensagem():
+    from telezapp.provedores import telegram as tg
+    nova = tg.converter(_enquete_falsa({"contagem": [2, 0, 1],
+                                         "meus": [2]}), "t1", "10")
+    e = m.enquete_de(nova)
+    assert e["pergunta"] == "Qual dia?"
+    assert e["opcoes"] == ["Sexta", "Sábado", "Domingo"]
+    assert e["maximo"] == 1 and e["anonima"] and not e["encerrada"]
+    assert m.contagens_da_enquete(e) == [2, 0, 1] and e["meus"] == [2]
+    assert m.votantes_da_enquete(e) == 3
+    assert e["poll_id"] == "777" and e["ids"] == ["00", "01", "02"]
+    assert nova.texto == "enquete: Qual dia?"
+    # sem resultados (ainda nao votei) nem multipla escolha
+    sem = m.enquete_de(tg.converter(_enquete_falsa(None, multipla=True),
+                                    "t1", "10"))
+    assert sem["contagem"] is None and sem["maximo"] == 3
+
+
+def test_votar_no_telegram_manda_a_opcao_e_atualiza(ambiente):
+    import asyncio
+    cliente = ClienteFalso()
+    from telezapp.provedores import telegram as tg
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    nova = tg.converter(_enquete_falsa(), "t1", "10")
+    ambiente.banco.salvar_mensagens([nova])
+
+    async def get_messages(entidade, ids=None):
+        return _enquete_falsa({"contagem": [0, 1, 0], "meus": [1]})
+    cliente.get_messages = get_messages
+    asyncio.run(p._votar_enquete(nova, [1]))
+    pedido = [r for r in cliente.requisicoes
+              if type(r).__name__ == "SendVoteRequest"][-1]
+    assert pedido.msg_id == 5 and pedido.options == [b"\x01"]
+    a = esperar(ambiente.fila, ev.MensagemAtualizada)
+    assert a.motivo == "enquete"
+    assert m.enquete_de(a.mensagem)["meus"] == [1]
+    assert m.contagens_da_enquete(m.enquete_de(a.mensagem)) == [0, 1, 0]
+
+
+def test_voto_de_outra_pessoa_chega_pela_atualizacao_da_enquete(ambiente):
+    import asyncio
+    cliente = ClienteFalso()
+    from telezapp.provedores import telegram as tg
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    nova = tg.converter(_enquete_falsa({"contagem": [0, 0, 0]}), "t1", "10")
+    ambiente.banco.salvar_mensagens([nova])
+    atual = _enquete_falsa({"contagem": [3, 1, 0]})
+    evento = types.SimpleNamespace(poll_id=777, poll=None,
+                                   results=atual.poll.results)
+    asyncio.run(p._ao_enquete(evento))
+    a = esperar(ambiente.fila, ev.MensagemAtualizada)
+    assert a.motivo == "enquete"
+    assert m.contagens_da_enquete(m.enquete_de(a.mensagem)) == [3, 1, 0]
+    # enquete encerrada
+    fechada = types.SimpleNamespace(
+        poll_id=777, poll=types.SimpleNamespace(closed=True),
+        results=atual.poll.results)
+    asyncio.run(p._ao_enquete(fechada))
+    b = esperar(ambiente.fila, ev.MensagemAtualizada)
+    assert m.enquete_de(b.mensagem)["encerrada"] is True
+    # enquete que nao conhecemos: nada acontece
+    asyncio.run(p._ao_enquete(types.SimpleNamespace(
+        poll_id=1, poll=None, results=None)))
+    assert ambiente.fila.empty()

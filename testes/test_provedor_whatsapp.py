@@ -202,6 +202,20 @@ class ClienteFalso:
         return E.Message(reactionMessage=E.ReactionMessage(
             key=_chave(id_), text=emoji))
 
+    voto_decifrado = None
+    votos_montados = ()
+
+    def decrypt_poll_vote(self, evento):
+        if self.voto_decifrado is None:
+            raise RuntimeError("sem o segredo da enquete")
+        return self.voto_decifrado
+
+    def build_poll_vote(self, info, nomes):
+        self.votos_montados = list(self.votos_montados) + [
+            (info.ID, list(nomes), info.MessageSource.IsFromMe)]
+        return E.Message(pollUpdateMessage=E.PollUpdateMessage(
+            pollCreationMessageKey=_chave(info.ID)))
+
     def send_message(self, para, mensagem, **kw):
         if mensagem.conversation == "falhar":
             raise RuntimeError("erro")
@@ -2778,3 +2792,67 @@ def test_mimes_dos_audios_que_o_whatsapp_toca(tmp_path):
         arq = tmp_path / ("a" + ext)
         arq.write_bytes(b"x" * 100)
         assert envio.preparar(str(arq)).mime == mime
+
+
+def _enquete_chegou(amb, id="M1", maximo=1):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    criacao = E.Message(pollCreationMessage=E.PollCreationMessage(
+        name="Qual dia?", selectableOptionsCount=maximo,
+        options=[E.PollCreationMessage.Option(optionName=o)
+                 for o in ("Sexta", "Sábado", "Domingo")]))
+    amb.f["Message"](amb.c, evento(id, criacao))
+    return esperar(amb.fila, ev.MensagemNova).mensagem
+
+
+def test_enquete_recebida_guarda_pergunta_e_opcoes(amb):
+    msg = _enquete_chegou(amb, maximo=2)
+    e = m.enquete_de(msg)
+    assert e["pergunta"] == "Qual dia?"
+    assert e["opcoes"] == ["Sexta", "Sábado", "Domingo"] and e["maximo"] == 2
+    assert msg.tipo == m.OUTRO and msg.texto == "enquete: Qual dia?"
+    assert "3 opções" in m.formatar(msg, m.ESTILO_AUTOR_PRIMEIRO)
+
+
+def test_voto_de_outra_pessoa_entra_na_contagem(amb):
+    import hashlib
+    _enquete_chegou(amb)
+    amb.c.voto_decifrado = E.PollVoteMessage(selectedOptions=[
+        hashlib.sha256("Sábado".encode()).digest()])
+    voto = E.Message(pollUpdateMessage=E.PollUpdateMessage(
+        pollCreationMessageKey=_chave("M1")))
+    amb.f["Message"](amb.c, evento("V1", voto, pushname="Bruno"))
+    a = esperar(amb.fila, ev.MensagemAtualizada)
+    assert a.motivo == "enquete"
+    e = m.enquete_de(a.mensagem)
+    assert m.contagens_da_enquete(e) == [0, 1, 0]
+    assert m.quem_votou_em(e, 1) and e["meus"] == []
+    # a mesma pessoa muda o voto: continua um voto so
+    amb.c.voto_decifrado = E.PollVoteMessage(selectedOptions=[
+        hashlib.sha256("Sexta".encode()).digest()])
+    amb.f["Message"](amb.c, evento("V2", voto, pushname="Bruno"))
+    b = esperar(amb.fila, ev.MensagemAtualizada)
+    assert m.contagens_da_enquete(m.enquete_de(b.mensagem)) == [1, 0, 0]
+
+
+def test_voto_que_nao_da_para_decifrar_e_ignorado(amb):
+    _enquete_chegou(amb)
+    voto = E.Message(pollUpdateMessage=E.PollUpdateMessage(
+        pollCreationMessageKey=_chave("M1")))
+    amb.f["Message"](amb.c, evento("V1", voto, pushname="Bruno"))
+    assert amb.fila.empty() or not isinstance(
+        amb.fila.get_nowait(), ev.MensagemAtualizada)
+
+
+def test_votar_envia_o_voto_e_guarda_o_meu(amb):
+    msg = _enquete_chegou(amb)
+    amb.p.votar_enquete(msg, [0, 2])
+    a = esperar(amb.fila, ev.MensagemAtualizada)
+    assert a.motivo == "enquete" and a.quem == "Você"
+    assert m.enquete_de(a.mensagem)["meus"] == [0, 2]
+    assert amb.c.votos_montados[-1][:2] == ("M1", ["Sexta", "Domingo"])
+    assert amb.c.enviadas[-1][1].HasField("pollUpdateMessage")
+    # tirar o voto
+    amb.p.votar_enquete(a.mensagem, [])
+    b = esperar(amb.fila, ev.MensagemAtualizada)
+    assert m.enquete_de(b.mensagem)["meus"] == []

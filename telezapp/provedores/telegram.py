@@ -303,6 +303,52 @@ def prazo_da_mensagem(msg):
         return 0
 
 
+def _texto_de(x):
+    """O texto de um campo que pode ser str ou TextWithEntities."""
+    return str(getattr(x, "text", x) or "")
+
+
+def aplicar_resultados(enq, results):
+    """Poe em `enq` (dict da enquete) as contagens e as opcoes em que eu votei,
+    a partir dos PollResults do Telegram. Sem os numeros (o Telegram esconde
+    ate a pessoa votar), so o total, se vier."""
+    if results is None:
+        return enq
+    lista = getattr(results, "results", None) or []
+    if lista:
+        por_opcao = {bytes(r.option).hex(): r for r in lista}
+        enq["contagem"] = [int(getattr(por_opcao.get(i), "voters", 0) or 0)
+                           for i in enq["ids"]]
+        enq["meus"] = [n for n, i in enumerate(enq["ids"])
+                       if getattr(por_opcao.get(i), "chosen", False)]
+    elif getattr(results, "results", None) is not None:
+        enq["meus"] = []
+    total = getattr(results, "total_voters", None)
+    if total is not None:
+        enq["total"] = int(total)
+    return enq
+
+
+def enquete_do_telegram(msg):
+    """Dados da enquete de uma mensagem do Telethon ({} se nao e enquete)."""
+    media = getattr(msg, "poll", None)
+    poll = getattr(media, "poll", None)
+    if poll is None:
+        return {}
+    respostas = list(getattr(poll, "answers", None) or [])
+    if not respostas:
+        return {}
+    enq = {"pergunta": _texto_de(poll.question),
+           "opcoes": [_texto_de(a.text) for a in respostas],
+           "ids": [bytes(a.option).hex() for a in respostas],
+           "maximo": len(respostas) if getattr(poll, "multiple_choice",
+                                               False) else 1,
+           "encerrada": bool(getattr(poll, "closed", False)),
+           "anonima": not bool(getattr(poll, "public_voters", False)),
+           "poll_id": str(getattr(poll, "id", "") or "")}
+    return aplicar_resultados(enq, getattr(media, "results", None))
+
+
 def converter(msg, conta_id, conversa_id, lidas_ate=0, nome_padrao=""):
     """Mensagem do Telethon -> modelos.Mensagem (None para mensagens de
     servico, como 'fulano entrou no grupo')."""
@@ -342,6 +388,9 @@ def converter(msg, conta_id, conversa_id, lidas_ate=0, nome_padrao=""):
     m.guardar_extras(nova, links, botoes, mencoes,
                      acoes=entradas_do_telegram(links),
                      previa=previa_do_telegram(msg))
+    enquete = enquete_do_telegram(msg)
+    if enquete:
+        m.atualizar_extras(nova, enquete=enquete)
     # o Telegram marca as mensagens que citam esta conta (@ ou nome)
     if not minha and getattr(msg, "mentioned", False) is True:
         m.atualizar_extras(nova, citou_voce=True)
@@ -644,6 +693,8 @@ class ProvedorTelegram(Provedor):
         self.cliente.add_event_handler(self._ao_usuario, events.UserUpdate())
         self.cliente.add_event_handler(
             self._ao_reacoes, events.Raw(tipos.UpdateMessageReactions))
+        self.cliente.add_event_handler(
+            self._ao_enquete, events.Raw(tipos.UpdateMessagePoll))
         self.cliente.add_event_handler(
             self._ao_historia, events.Raw(tipos.UpdateStory))
         self._estado(ev.CONECTADA)
@@ -1245,6 +1296,73 @@ class ProvedorTelegram(Provedor):
             self.barramento.publicar(ev.EnvioFalhou(
                 self.conta.id, msg.conversa_id, texto, _motivo(e),
                 devolver_texto=True))
+
+    PODE_VOTAR = True
+
+    def votar_enquete(self, mensagem, escolhas):
+        self._agendar(self._votar_enquete(mensagem, escolhas))
+
+    def atualizar_enquete(self, mensagem):
+        self._agendar(self._atualizar_enquete(mensagem))
+
+    async def _votar_enquete(self, msg, escolhas):
+        from telethon.tl import functions
+        enq = m.enquete_de(msg)
+        try:
+            if not enq or not enq["ids"]:
+                raise ValueError("enquete sem opções")
+            ent = await self._entidade(msg.conversa_id)
+            await self.cliente(functions.messages.SendVoteRequest(
+                peer=ent, msg_id=int(msg.id),
+                options=[bytes.fromhex(enq["ids"][i]) for i in escolhas]))
+        except Exception as e:
+            log.warning("voto em enquete falhou: %s", type(e).__name__)
+            self._avisar("Não consegui enviar o voto (%s)." %
+                         type(e).__name__, False)
+            return
+        await self._atualizar_enquete(msg, avisar=False)
+
+    async def _atualizar_enquete(self, msg, avisar=True):
+        """Busca de novo a mensagem da enquete para ter o resultado atual."""
+        try:
+            ent = await self._entidade(msg.conversa_id)
+            atual = await self.cliente.get_messages(ent, ids=int(msg.id))
+            novo = enquete_do_telegram(atual)
+            if not novo:
+                return
+        except Exception as e:
+            log.warning("atualizar enquete falhou: %s", type(e).__name__)
+            if avisar:
+                self._avisar("Não consegui atualizar a enquete (%s)." %
+                             type(e).__name__, False)
+            return
+        self._guardar_enquete(msg.conversa_id, msg.id, novo)
+
+    def _guardar_enquete(self, cid, mid, enquete):
+        x = self.banco.mensagem(self.conta.id, cid, mid)
+        if x is None:
+            return
+        m.atualizar_extras(x, enquete=enquete)
+        self.banco.salvar_mensagens([x])
+        self.barramento.publicar(ev.MensagemAtualizada(
+            self.conta.id, cid, x, "enquete"))
+
+    async def _ao_enquete(self, evento):
+        """Alguem votou (ou a enquete foi encerrada)."""
+        try:
+            x = self.banco.mensagem_da_enquete(self.conta.id,
+                                               evento.poll_id)
+            if x is None:
+                return
+            enq = m.enquete_de(x)
+            enq["anonima"] = enq["anonima"]
+            poll = getattr(evento, "poll", None)
+            if poll is not None:
+                enq["encerrada"] = bool(getattr(poll, "closed", False))
+            aplicar_resultados(enq, getattr(evento, "results", None))
+            self._guardar_enquete(x.conversa_id, x.id, enq)
+        except Exception:
+            log.exception("erro ao tratar voto em enquete")
 
     PODE_REAGIR = True
 
