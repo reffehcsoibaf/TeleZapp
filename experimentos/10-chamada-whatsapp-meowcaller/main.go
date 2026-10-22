@@ -3,7 +3,7 @@
 
 // Fase 0 das chamadas do WhatsApp: um programa separado do TeleZapp que testa
 // o meowcaller (https://github.com/purpshell/meowcaller). A versao atual do
-// meowcaller recebe o cliente do fork hypermeow
+// meowcaller recebia o cliente do fork hypermeow
 // (github.com/polymorfa/hypermeow) e nao o whatsmeow oficial; por isso este
 // programa usa o hypermeow.
 //
@@ -44,10 +44,10 @@ import (
 	"sync"
 	"time"
 
-	whatsmeow "github.com/polymorfa/hypermeow"
-	"github.com/polymorfa/hypermeow/store/sqlstore"
-	"github.com/polymorfa/hypermeow/types/events"
-	waLog "github.com/polymorfa/hypermeow/util/log"
+	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/store/sqlstore"
+	"go.mau.fi/whatsmeow/types/events"
+	waLog "go.mau.fi/whatsmeow/util/log"
 	"github.com/purpshell/meowcaller"
 	"github.com/rs/zerolog"
 	_ "modernc.org/sqlite"
