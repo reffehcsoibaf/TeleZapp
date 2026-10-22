@@ -605,7 +605,7 @@ class Janela(wx.Frame):
         m_exib.AppendSeparator()
         rotulos = {o.chave: o.rotulo for o in config.OPCOES}
         for chave in ("falar_novas", "falar_novas_outras_conversas",
-                      "falar_novas_fora_do_telezapp", "confirmar_envio", "falar_quem_toca",
+                      "falar_novas_fora_do_telezapp", "confirmar_envio",
                       "falar_reacoes"):
             item(m_exib, chave, rotulos[chave], "check")
 
@@ -770,7 +770,7 @@ class Janela(wx.Frame):
                   lambda e: self._log_detalhado(e.IsChecked()),
                   self.itens["log_detalhado"])
         for chave in ("falar_novas", "falar_novas_outras_conversas",
-                      "falar_novas_fora_do_telezapp", "confirmar_envio", "falar_quem_toca",
+                      "falar_novas_fora_do_telezapp", "confirmar_envio",
                       "falar_reacoes"):
             self.itens[chave].Check(bool(self.cfg.get(chave)))
             self.Bind(wx.EVT_MENU,
@@ -5841,7 +5841,7 @@ class Janela(wx.Frame):
                 self.cache[k] = self.cache[k][-limite:]
             self._preencher_mensagens()
         elif chave in ("falar_novas", "falar_novas_outras_conversas",
-                      "falar_novas_fora_do_telezapp", "confirmar_envio", "falar_quem_toca",
+                      "falar_novas_fora_do_telezapp", "confirmar_envio",
                       "falar_reacoes"):
             self._opcao(chave, valor)
             self.itens[chave].Check(bool(valor))

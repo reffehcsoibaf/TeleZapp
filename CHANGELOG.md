@@ -5,6 +5,7 @@ Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 
 ## Próxima versão (ainda sem número: segue o dia do lançamento)
 
+- "Falar de quem é o áudio que toca" (`falar_quem_toca`) saiu de Avisos e do menu Exibir e foi para Configurações, Mídias, logo antes das opções "Na sequência de áudios", com o nome "Ao tocar o primeiro áudio, falar de quem é e a duração". O comportamento é o mesmo.
 - Chamadas de voz do WhatsApp deixam de ser uma opção experimental: saiu a caixa `chamadas_whatsapp` e o meowcaller liga sozinho antes de conectar sempre que a DLL do neonize o tiver (`WhatsApp._preparar_chamadas`). Sem a DLL de teste nada muda. A opção "Avisar chamadas do WhatsApp" passa a valer só quando o TeleZapp não consegue atender. "Depois de um áudio, tocar o próximo" voltou a se chamar "Sequência de áudios" (opção e item do menu Mídias).
 - Saem de Avisos as opções "Som ao receber mensagem" (`som`) e "Som de chamada" (`toque_chamada`): cada som já se liga e desliga na tela de Sons. Quem as tinha desligadas fica com os eventos correspondentes (nova, nova_aberta, nova_grupo, toque, chamando) desativados nos pacotes (`pacotes_de_som.migrar_liga_desliga`, roda uma vez). O item "Som ao receber mensagem" do menu Exibir saiu junto.
 - A caixa "Mostrar as teclas de atalho nos controles" passou da categoria Leitura para o topo de Configurações, Atalhos.

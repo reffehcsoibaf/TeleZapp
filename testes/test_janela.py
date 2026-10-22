@@ -1944,10 +1944,12 @@ def test_o_que_falar_na_sequencia_e_configuravel(jm_midia, monkeypatch):
 
 
 def test_opcoes_de_fala_estao_no_menu_exibicao(j):
-    for chave in ("falar_quem_toca", "falar_reacoes"):
+    for chave in ("falar_reacoes",):
         assert chave in j.itens
         assert j.itens[chave].IsChecked() if hasattr(
             j.itens[chave], "IsChecked") else True
+    # a fala do primeiro audio mora em Configuracoes, Midias
+    assert "falar_quem_toca" not in j.itens
     j._aplicar_opcao("falar_quem_toca", False)
     assert j.cfg.get("falar_quem_toca") is False
 

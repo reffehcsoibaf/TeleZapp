@@ -215,12 +215,6 @@ OPCOES = (
           "conversa. Não depende dos sons."),
     Opcao("confirmar_envio", "Falar mensagem enviada", "Avisos", False,
           "Fala Enviada depois que uma mensagem sai."),
-    Opcao("falar_quem_toca", "Falar de quem é o áudio que toca", "Avisos",
-          False,
-          "Quando um áudio ou mensagem de voz começa a tocar, fala o que é, "
-          "de quem e quanto dura. Desmarcada, só diz Tocando. Vale para o "
-          "primeiro áudio; dentro da sequência valem as opções da categoria "
-          "Mídias."),
     Opcao("falar_reacoes", "Falar reações às minhas mensagens", "Avisos",
           False,
           "Fala quem reagiu e com qual emoji quando alguém reage a uma "
@@ -414,11 +408,19 @@ OPCOES = (
           tuple((v, ("%g" % v).replace(".", ",") + "x") for v in (
               0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75,
               3.0))),
+    Opcao("falar_quem_toca",
+          "Ao tocar o primeiro áudio, falar de quem é e a duração",
+          "Mídias", False,
+          "Quando um áudio ou mensagem de voz começa a tocar, fala o que é, "
+          "de quem e quanto dura. Desmarcada, só diz Tocando. Vale para o "
+          "primeiro áudio; os que tocam depois dele, na sequência, seguem as "
+          "opções \"Na sequência de áudios\" logo abaixo."),
     Opcao("seq_falar_proximo", "Na sequência de áudios, falar Próximo áudio",
           "Mídias", False,
           "A cada áudio que começa na sequência, fala Próximo áudio antes "
           "do resto. Só vale quando um áudio toca depois do outro; o "
-          "primeiro segue a opção Falar de quem é o áudio que toca."),
+          "primeiro segue a opção Ao tocar o primeiro áudio, falar de "
+          "quem é e a duração."),
     Opcao("seq_falar_tipo",
           "Na sequência de áudios, falar se é mensagem de voz ou áudio",
           "Mídias", False,
