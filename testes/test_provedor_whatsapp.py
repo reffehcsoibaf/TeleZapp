@@ -2725,3 +2725,56 @@ def test_registro_da_mensagem_interativa_nao_leva_o_texto():
     assert "hydratedContentText" in dump and "<texto 60>" in dump
     assert "QUICK_REPLY" in dump and "'n': '<n>'" in dump
     assert len(wa.forma_sem_textos(list(range(20)))) == 5
+
+
+def _wav_estereo(caminho, segundos=1.0, taxa=44100):
+    import numpy as np
+    import soundfile as sf
+    t = np.arange(int(segundos * taxa)) / taxa
+    onda = 0.3 * np.sin(2 * np.pi * 440 * t).astype("float32")
+    sf.write(str(caminho), np.stack([onda, onda], axis=1), taxa)
+
+
+def test_wav_pelo_botao_de_anexar_vai_como_documento(amb, dados_midia,
+                                                      tmp_path):
+    from telezapp.midia import envio
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    cid = "5551988887777@s.whatsapp.net"
+    wav = tmp_path / "som.wav"
+    _wav_estereo(wav)
+    anexo = envio.preparar(str(wav))
+    assert anexo.tipo == m.AUDIO              # o programa ainda o ve como audio
+    amb.p.enviar_arquivo(cid, anexo)
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.mensagem.tipo == m.DOCUMENTO
+    enviada = amb.c.enviadas[-1][1]
+    assert enviada[0] == "documento" and enviada[3] == "som.wav"
+    assert wav.exists()
+
+
+def test_wav_colado_vira_audio_ogg_opus_comum(amb, dados_midia, tmp_path):
+    from telezapp.midia import envio
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    cid = "5551988887777@s.whatsapp.net"
+    wav = tmp_path / "som.wav"
+    _wav_estereo(wav, segundos=1.0)
+    anexo = envio.preparar(str(wav))
+    anexo.colado = True
+    amb.p.enviar_arquivo(cid, anexo)
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.mensagem.tipo == m.AUDIO
+    audio = amb.c.enviadas[-1][1].audioMessage
+    assert not audio.PTT and audio.mimetype == "audio/ogg"
+    assert audio.seconds == 1
+    assert wav.exists()                        # o original fica onde estava
+
+
+def test_mimes_dos_audios_que_o_whatsapp_toca(tmp_path):
+    from telezapp.midia import envio
+    for ext, mime in ((".m4a", "audio/mp4"), (".aac", "audio/aac"),
+                      (".mp3", "audio/mpeg")):
+        arq = tmp_path / ("a" + ext)
+        arq.write_bytes(b"x" * 100)
+        assert envio.preparar(str(arq)).mime == mime

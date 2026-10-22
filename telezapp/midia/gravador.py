@@ -305,6 +305,11 @@ class Gravador:
             self._pronto.set()
 
 
+def _mono(bloco):
+    """Junta os canais de um bloco (estereo vira a media dos dois)."""
+    return bloco if bloco.ndim == 1 else bloco.mean(axis=1)
+
+
 def converter(wav, destino):
     """WAV mono (qualquer taxa) -> Ogg/Opus mono de 48 kHz, em blocos, com
     interpolacao linear quando a taxa nao e 48 kHz (suficiente para voz)."""
@@ -316,13 +321,13 @@ def converter(wav, destino):
         taxa = entrada.samplerate
         if taxa == TAXA:
             for bloco in entrada.blocks(blocksize=TAXA, dtype="float32"):
-                saida.write(bloco)
+                saida.write(_mono(bloco))
             return
         passo = taxa / float(TAXA)   # amostras de entrada por amostra de saida
         pos = 0.0                    # posicao da proxima saida no buffer
         resto = np.empty(0, dtype="float32")
         for bloco in entrada.blocks(blocksize=taxa, dtype="float32"):
-            buf = np.concatenate([resto, bloco])
+            buf = np.concatenate([resto, _mono(bloco)])
             n = len(buf)
             if n < 2:
                 resto = buf

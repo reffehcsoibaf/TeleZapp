@@ -23,7 +23,7 @@ import time
 import uuid
 
 from telezapp import config
-from telezapp.midia import armazem
+from telezapp.midia import armazem, envio
 from telezapp.nucleo import chamadas as ch
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import modelos as m
@@ -3637,11 +3637,29 @@ class ProvedorWhatsApp(Provedor):
             mimetype="audio/ogg; codecs=opus" if voz else
             (anexo.mime or "audio/mpeg"), **comum))
 
+    def _anexo_que_o_whatsapp_toca(self, anexo):
+        """WAV e FLAC nao tocam no WhatsApp: pelo botao de anexar vao como
+        documento (o arquivo original); colados na caixa viram um audio
+        Ogg/Opus comum."""
+        if not envio.audio_que_o_whatsapp_nao_toca(anexo):
+            return anexo
+        if anexo.colado:
+            try:
+                novo = envio.converter_para_opus(anexo, config.pasta_temporaria())
+                log.info("audio %s convertido para Ogg/Opus (%d bytes)",
+                         os.path.splitext(anexo.nome)[1], novo.tamanho)
+                return novo
+            except envio.ErroEnvio:
+                log.warning("conversao do audio falhou; vai como documento",
+                            exc_info=True)
+        return envio.como_documento(anexo)
+
     def _enviar_arquivo(self, conversa_id, anexo, legenda):
         inicio = time.perf_counter()
         try:
             if not self._conectada or self.cliente is None:
                 raise ConnectionError("sem conexão")
+            anexo = self._anexo_que_o_whatsapp_toca(anexo)
             jid = self._jid(conversa_id)
             prazo = self._prazo_da_conversa(conversa_id)
             if anexo.tamanho >= LIMITE_ENVIO_POR_ARQUIVO and \

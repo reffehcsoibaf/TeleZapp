@@ -5,6 +5,8 @@ Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 
 ## Próxima versão (ainda sem número: segue o dia do lançamento)
 
+- WAV e FLAC no WhatsApp: o arquivo ia como mensagem de áudio (`audio/x-wav`), que o WhatsApp não toca, e o envio aparecia como feito sem chegar ao destino. Agora, pelo botão ou menu de anexar, o arquivo vai como documento; colado na caixa (Control V, `Anexo.colado`), é convertido para Ogg/Opus e vai como áudio comum (`envio.converter_para_opus`, que junta os canais do estéreo). Os tipos MIME de M4A (antes `audio/mpeg`) e AAC (antes `audio/vnd.dlna.adts`) também foram corrigidos. No Telegram nada mudou. Não verificado com um destinatário de verdade.
+
 - Atalhos personalizáveis (`nucleo/atalhos.py`, `interface/atalhos.py`,
   `interface/teclas.py`). Todo item de menu entra num `Registro` (padrão tirado
   do rótulo) e aceita outra combinação, guardada em `config["atalhos"]` só

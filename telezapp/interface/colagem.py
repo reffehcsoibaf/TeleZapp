@@ -54,7 +54,9 @@ def ler(fala):
             avisos.append("Pastas não podem ser enviadas.")
             continue
         try:
-            anexos.append(envio.preparar(caminho, temporario=temporario))
+            anexo = envio.preparar(caminho, temporario=temporario)
+            anexo.colado = True
+            anexos.append(anexo)
         except envio.ErroEnvio as e:
             avisos.append("%s: %s" % (os.path.basename(caminho), e))
     if not anexos:

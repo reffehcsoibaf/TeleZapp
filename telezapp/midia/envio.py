@@ -9,7 +9,7 @@ AVI, HEIC...) seguem como documento, sem recodificar.
 """
 import mimetypes
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from telezapp.midia import mp4, opus
 from telezapp.nucleo import modelos as m
@@ -17,6 +17,12 @@ from telezapp.nucleo import modelos as m
 LIMITE_BYTES = 2000 * 1048576      # 2 GB: o teto dos dois servicos
 EXT_FOTO_ENVIAVEL = {".jpg", ".jpeg", ".png", ".webp"}
 MIME_VOZ = "audio/ogg; codecs=opus"
+# o WhatsApp so toca como audio AAC, AMR, MP3, MP4 e Ogg/Opus: um WAV ou FLAC
+# enviado como audio aparece como enviado e nao chega ao destino
+EXT_AUDIO_QUE_O_WHATSAPP_NAO_TOCA = {".wav", ".flac"}
+MIMES_DE_AUDIO = {".m4a": "audio/mp4", ".aac": "audio/aac",
+                  ".mp3": "audio/mpeg", ".ogg": "audio/ogg",
+                  ".opus": "audio/ogg"}
 
 
 class ErroEnvio(Exception):
@@ -35,6 +41,8 @@ class Anexo:
     altura: int = 0
     aviso: str = ""            # algo que a pessoa deve saber antes
     temporario: bool = False   # gravado pelo app: pode ser movido, nao copiado
+    colado: bool = False       # veio do Control V (a legenda e a conversao
+    #                            de audio dependem de como foi escolhido)
 
     @property
     def voz(self):
@@ -42,7 +50,41 @@ class Anexo:
 
 
 def _mime(caminho, padrao="application/octet-stream"):
-    return mimetypes.guess_type(caminho)[0] or padrao
+    ext = os.path.splitext(caminho)[1].lower()
+    return MIMES_DE_AUDIO.get(ext) or mimetypes.guess_type(caminho)[0] \
+        or padrao
+
+
+def audio_que_o_whatsapp_nao_toca(anexo):
+    return anexo.tipo == m.AUDIO and os.path.splitext(
+        anexo.nome)[1].lower() in EXT_AUDIO_QUE_O_WHATSAPP_NAO_TOCA
+
+
+def como_documento(anexo):
+    """O mesmo arquivo, enviado como documento."""
+    return replace(anexo, tipo=m.DOCUMENTO, segundos=0)
+
+
+def converter_para_opus(anexo, pasta):
+    """Anexo de audio comum (nao nota de voz) em Ogg/Opus, feito a partir de
+    um WAV ou FLAC. Levanta ErroEnvio se nao der para ler o arquivo."""
+    from telezapp.midia import gravador
+    os.makedirs(pasta, exist_ok=True)
+    nome = os.path.splitext(anexo.nome)[0] + ".ogg"
+    destino = os.path.join(pasta, "conv-%d-%s" % (
+        int(os.times()[4] * 1000), nome))
+    try:
+        gravador.converter(anexo.caminho, destino)
+        segundos = int(round(opus.duracao_arquivo(destino)))
+    except Exception as erro:
+        try:
+            os.remove(destino)
+        except OSError:
+            pass
+        raise ErroEnvio("Não consegui converter %s para enviar como áudio "
+                        "(%s)." % (anexo.nome, type(erro).__name__))
+    return Anexo(destino, m.AUDIO, nome, "audio/ogg", os.path.getsize(destino),
+                 segundos, temporario=True)
 
 
 def _duracao_audio(caminho):
