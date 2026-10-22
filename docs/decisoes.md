@@ -603,7 +603,7 @@ no fechamento, por assunto.
 ## Enquetes (22/10/2026)
 
 - Ver, votar e criar enquetes no WhatsApp e no Telegram (dados em `extras["enquete"]` da mensagem; janelas `interface/enquete.py` e `interface/nova_enquete.py`).
-- **Verificado ao vivo pelo responsável (22/10/2026), no WhatsApp:** criou uma enquete pelo TeleZapp, outras pessoas votaram e os resultados atualizaram na enquete criada por ele (depois de consertar o `decrypt_poll_vote` do neonize 0.5.2, que dava TypeError); um voto dado **com o TeleZapp fechado** chegou quando ele abriu. No Telegram só tentou criar. Não verificado: votar e ver quem votou no Telegram, e o resultado em enquetes criadas por outras pessoas no WhatsApp.
+- **Verificado ao vivo pelo responsável (22/10/2026), no WhatsApp:** criou uma enquete pelo TeleZapp, outras pessoas votaram e os resultados atualizaram na enquete criada por ele (depois de consertar o `decrypt_poll_vote` do neonize 0.5.2, que dava TypeError); um voto dado **com o TeleZapp fechado** chegou quando ele abriu. Entrou também com outra conta no TeleZapp e a enquete chegou e funcionou como enquete recebida. No Telegram só tentou criar. Não verificado: votar e ver quem votou no Telegram.
 
 ## Próximos passos sugeridos
 
