@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -54,6 +55,10 @@ var (
 // chamadaAtiva liga uma chamada do meowcaller as filas de audio do Python.
 type chamadaAtiva struct {
 	call *meowcaller.Call
+	// entrante: a chamada veio de fora; atendida: ja atendemos. Recusar uma
+	// chamada que ainda toca usa Reject (o terminate do Hangup nao a derruba).
+	entrante bool
+	atendida atomic.Bool
 	// entrada: o que chega do outro lado (rumo ao alto-falante).
 	entrada chan []byte
 	// saida: o que o microfone manda (rumo ao outro lado).
@@ -134,12 +139,13 @@ func emitirEvento(cliente string, ev map[string]any) {
 }
 
 // ligarChamada anexa o audio e os avisos a uma chamada nova (de entrada ou de saida).
-func ligarChamada(cliente string, c *meowcaller.Call) *chamadaAtiva {
+func ligarChamada(cliente string, c *meowcaller.Call, entrante bool) *chamadaAtiva {
 	a := &chamadaAtiva{
-		call:    c,
-		entrada: make(chan []byte, quadrosNaFila),
-		saida:   make(chan []byte, quadrosNaFila),
-		fim:     make(chan struct{}),
+		call:     c,
+		entrante: entrante,
+		entrada:  make(chan []byte, quadrosNaFila),
+		saida:    make(chan []byte, quadrosNaFila),
+		fim:      make(chan struct{}),
 	}
 	id := c.ID()
 	chamadasMu.Lock()
@@ -179,7 +185,7 @@ func instalarChamadas(id string) {
 	chamadasEventos[id] = make(chan string, eventosNaFila)
 	chamadasMu.Unlock()
 	mc.OnIncomingCall(func(c *meowcaller.Call) {
-		ligarChamada(id, c)
+		ligarChamada(id, c, true)
 		emitirEvento(id, map[string]any{"ev": "incoming", "call": c.ID(), "peer": c.Peer()})
 	})
 }
@@ -306,7 +312,7 @@ func CallDial(id *C.char, target *C.char, buf *C.char, cap C.int) C.int {
 	if err != nil {
 		return erro(err)
 	}
-	ligarChamada(cliente, c)
+	ligarChamada(cliente, c, false)
 	b, _ := json.Marshal(map[string]any{"call": c.ID(), "peer": c.Peer()})
 	return escreverTexto(string(b), buf, cap)
 }
@@ -322,6 +328,7 @@ func CallAnswer(id *C.char, call *C.char) C.int {
 	if err := a.call.Answer(); err != nil {
 		return -1
 	}
+	a.atendida.Store(true)
 	return 0
 }
 
@@ -333,7 +340,13 @@ func CallHangup(id *C.char, call *C.char) C.int {
 	if a == nil {
 		return erroSemChamada
 	}
-	if err := a.call.Hangup(); err != nil {
+	var err error
+	if a.entrante && !a.atendida.Load() {
+		err = a.call.Reject()
+	} else {
+		err = a.call.Hangup()
+	}
+	if err != nil {
 		return -1
 	}
 	return 0
