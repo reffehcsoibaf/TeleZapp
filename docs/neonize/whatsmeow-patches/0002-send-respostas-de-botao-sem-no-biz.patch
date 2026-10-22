@@ -1,0 +1,35 @@
+From 5f8a154a5bb517daad6f93d1fbd0b5be5bbda3fd Mon Sep 17 00:00:00 2001
+From: t <t@t>
+Date: Wed, 21 Oct 2026 21:31:20 -0300
+Subject: [PATCH 2/2] send: respostas de botao sem no biz
+
+---
+ send.go | 10 ++++------
+ 1 file changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/send.go b/send.go
+index 33f2174..be8bf3b 100644
+--- a/send.go
++++ b/send.go
+@@ -1004,14 +1004,12 @@ func getButtonTypeFromMessage(msg *waE2E.Message) string {
+ 		return getButtonTypeFromMessage(msg.EphemeralMessage.Message)
+ 	case msg.ButtonsMessage != nil:
+ 		return "buttons"
+-	case msg.ButtonsResponseMessage != nil:
+-		return "buttons_response"
+ 	case msg.ListMessage != nil:
+ 		return "list"
+-	case msg.ListResponseMessage != nil:
+-		return "list_response"
+-	case msg.InteractiveResponseMessage != nil:
+-		return "interactive_response"
++	// Respostas de botao e de lista (buttons_response, list_response,
++	// interactive_response) nao levam o no <biz>: o WhatsApp Web nao o manda
++	// (WAWebSendMsgCreateFanoutStanza) e o servidor recusa com 479. O tipo de
++	// midia do "enc" (getMediaTypeFromMessage) continua dizendo o que e.
+ 	default:
+ 		return ""
+ 	}
+-- 
+2.55.0.windows.2
+
