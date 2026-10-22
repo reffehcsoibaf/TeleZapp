@@ -4255,3 +4255,48 @@ def test_control_enter_na_caixa_envia_e_shift_enter_quebra_a_linha(j):
     j.caixa.SetValue("de novo")
     j._tecla_caixa(Tecla(wx_falso.WXK_RETURN, ctrl=True))
     assert j.caixa.GetValue() == "de novo\n"
+
+
+def test_enter_numa_enquete_abre_a_janela_e_o_voto_vai_ao_servico(
+        j, monkeypatch):
+    j._abrir_conversa(j.indice[("t1", "20")])
+    enquete = m.Mensagem("t1", "20", "9", tipo=m.OUTRO, data=AGORA,
+                         texto="enquete: Qual dia?")
+    m.atualizar_extras(enquete, enquete={
+        "pergunta": "Qual dia?", "opcoes": ["Sexta", "Sábado"], "maximo": 1})
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", [enquete]))
+    j.lista_msgs.SetSelection(j.mapa.index("9"))
+    assert "enquete: Qual dia?, 2 opções" in j.lista_msgs.itens[
+        j.mapa.index("9")]
+    abertas = []
+    monkeypatch.setattr(jm.ui_enquete, "abrir",
+                        lambda *a: abertas.append(a))
+    votos, atualizacoes = [], []
+    j.contas.p.PODE_VOTAR = True
+    j.contas.p.votar_enquete = lambda msg, esc: votos.append(
+        (msg.id, list(esc)))
+    j.contas.p.atualizar_enquete = lambda msg: atualizacoes.append(msg.id)
+    j.estados["t1"] = ev.CONECTADA
+    j._detalhes_ou_marcador()                       # Enter na enquete
+    assert len(abertas) == 1 and atualizacoes == ["9"]
+    pai, obter, pode, votar, atualizar, fala = abertas[0]
+    assert pode is True and obter().id == "9"
+    votar([1])
+    assert votos == [("9", [1])]
+    atualizar()
+    assert atualizacoes == ["9", "9"]
+    # sem conexao: so leitura
+    j.estados["t1"] = ev.DESCONECTADA
+    j._abrir_enquete()
+    assert abertas[-1][2] is False
+
+
+def test_ver_enquete_numa_mensagem_comum_avisa(j):
+    j._abrir_conversa(j.indice[("t1", "20")])
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", [
+        msg("1", "oi", conversa="20")]))
+    j.lista_msgs.SetSelection(j.mapa.index("1"))
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._abrir_enquete()
+    assert "não é uma enquete" in ditas[-1]

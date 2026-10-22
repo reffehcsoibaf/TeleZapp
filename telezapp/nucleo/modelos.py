@@ -330,6 +330,21 @@ def resumo_enquete(msg):
     return ", ".join(partes)
 
 
+def linhas_da_enquete(enq):
+    """Uma linha por opcao para a lista da janela: 'Sexta: 2 votos (67%)'."""
+    cont = contagens_da_enquete(enq)
+    votantes = votantes_da_enquete(enq)
+    linhas = []
+    for i, opcao in enumerate(enq["opcoes"]):
+        n = cont[i]
+        pct = int(round(100.0 * n / votantes)) if votantes else 0
+        extra = ", seu voto" if i in enq["meus"] else ""
+        linhas.append("%s: %s (%d%%)%s" % (
+            opcao, "nenhum voto" if n == 0 else "1 voto" if n == 1
+            else "%d votos" % n, pct, extra))
+    return linhas
+
+
 def pode_marcar_mais(enq, escolhidas):
     """False se ja ha tantas opcoes marcadas quanto a enquete permite."""
     return len(escolhidas) < enq["maximo"]

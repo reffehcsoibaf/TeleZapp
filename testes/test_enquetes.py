@@ -72,3 +72,13 @@ def test_guardar_extras_nao_perde_a_enquete():
 def test_pode_marcar_mais_respeita_o_maximo():
     e = m.enquete_de(mensagem(maximo=2))
     assert m.pode_marcar_mais(e, [0]) and not m.pode_marcar_mais(e, [0, 1])
+
+
+def test_linhas_da_enquete_mostram_contagem_percentual_e_meu_voto():
+    msg = mensagem(contagem=[2, 1, 0], total=3, meus=[1])
+    assert m.linhas_da_enquete(m.enquete_de(msg)) == [
+        "Sexta: 2 votos (67%)",
+        "Sábado: 1 voto (33%), seu voto",
+        "Domingo: nenhum voto (0%)"]
+    assert m.linhas_da_enquete(m.enquete_de(mensagem()))[0] == \
+        "Sexta: nenhum voto (0%)"

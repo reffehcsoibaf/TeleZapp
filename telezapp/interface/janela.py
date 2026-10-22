@@ -20,6 +20,7 @@ from telezapp import NOME, VERSAO, config
 from telezapp.acessibilidade.fala import Fala, bipe, definir_sons
 from telezapp.interface import colagem, dialogos, visualizadores
 from telezapp.interface import emojis as ui_emojis
+from telezapp.interface import enquete as ui_enquete
 from telezapp.interface import ortografia as ui_ortografia
 from telezapp.interface import teclas as ui_teclas
 from telezapp.interface.progresso import JanelaDeProgresso
@@ -522,6 +523,7 @@ class Janela(wx.Frame):
 
         m_msg = wx.Menu()
         item(m_msg, "nova_msg", "&Nova mensagem...\tCtrl+N")
+        item(m_msg, "ver_enquete", "Ver e votar na enquete...")
         item(m_msg, "enviar_msg", "Enviar a mensagem digitada\tCtrl+Enter")
         m_msg.AppendSeparator()
         item(m_msg, "responder_particular", "Responder em &particular")
@@ -696,6 +698,7 @@ class Janela(wx.Frame):
             "ir_caixa": lambda e: self._mostrar_caixa(),
             "enviar_msg": lambda e: self._enviar_texto(),
             "nova_msg": lambda e: self._nova_mensagem(),
+            "ver_enquete": lambda e: self._abrir_enquete(),
             "abrir_conv": lambda e: self._abrir_selecionada_na_lista(),
             "arquivar": lambda e: self._arquivar_conversa(),
             "trancar": lambda e: self._trancar_conversa(),
@@ -3574,10 +3577,36 @@ class Janela(wx.Frame):
         """Enter numa mensagem so de texto: o texto numa caixa somente
         leitura, com Copiar texto e Fechar (Esc fecha). Os detalhes seguem em
         Alt Enter."""
+        if m.enquete_de(x):
+            self._abrir_enquete(x)
+            return
         autor = "você" if x.minha else (x.autor or "mensagem")
         dialogos.mostrar_mensagem(
             self, "Mensagem de %s" % autor, x.texto or m.conteudo(x),
             self._copiar_texto)
+
+    def _abrir_enquete(self, x=None):
+        """A janela da enquete: as opcoes com a contagem e, se o servico
+        deixa e a conta esta conectada, o voto."""
+        x = x or self._mensagem_selecionada()
+        if x is None or not m.enquete_de(x):
+            self.fala.falar("Esta mensagem não é uma enquete.",
+                            interromper=True)
+            return
+        prov = self.contas.provedor(x.conta_id) if self.contas else None
+        pode = bool(prov is not None and getattr(prov, "PODE_VOTAR", False)
+                    and self.estados.get(x.conta_id) == ev.CONECTADA)
+
+        def obter():
+            return self.banco.mensagem(x.conta_id, x.conversa_id, x.id) or x
+        if pode:
+            prov.atualizar_enquete(x)         # o Telegram traz o resultado
+        ui_enquete.abrir(
+            self, obter, pode,
+            (lambda escolhas: prov.votar_enquete(obter(), escolhas))
+            if prov is not None else (lambda escolhas: None),
+            (lambda: prov.atualizar_enquete(obter()))
+            if prov is not None else (lambda: None), self.fala)
 
     def _copiar_texto(self, texto):
         if wx.TheClipboard.Open():
