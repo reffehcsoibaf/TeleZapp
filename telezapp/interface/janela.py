@@ -20,6 +20,7 @@ from telezapp import NOME, VERSAO, config
 from telezapp.acessibilidade.fala import Fala, bipe, definir_sons
 from telezapp.interface import colagem, dialogos, visualizadores
 from telezapp.interface import emojis as ui_emojis
+from telezapp.interface import ortografia as ui_ortografia
 from telezapp.interface.progresso import JanelaDeProgresso
 from telezapp.interface.publicar_status import DialogoPublicarStatus
 from telezapp.interface.detalhes import ControleDetalhes, ControleRecibos
@@ -47,6 +48,7 @@ from telezapp.nucleo import exportar
 from telezapp.nucleo import instalacao
 from telezapp.nucleo import limpeza
 from telezapp.nucleo import modelos as m
+from telezapp.nucleo import ortografia
 from telezapp.nucleo import pacotes_de_som
 from telezapp.nucleo import previa_links
 from telezapp.nucleo import paginas
@@ -114,6 +116,8 @@ quando a legenda tem link
 Control B: baixar a mídia sem abrir
 Tab (na mensagem): vai aos botões de resposta e depois aos links, botões
 de endereço e pessoas mencionadas; Espaço ou Enter abre
+F7: verificar a ortografia do texto da caixa de digitar (palavra, sugestões
+e botões para trocar, ignorar ou adicionar ao dicionário do Windows)
 Control Shift A: anexar e enviar um arquivo (foto, vídeo, áudio, documento)
 Control Shift M: gravar uma nota de voz pelo microfone
 Control Shift S: gravar o som do computador e enviar como nota de voz
@@ -493,6 +497,7 @@ class Janela(wx.Frame):
         item(m_msg, "editar_msg", "Edi&tar mensagem	F2")
         item(m_msg, "reagir", "Re&agir à mensagem...\tCtrl+Shift+G")
         item(m_msg, "inserir_emoji", "Inserir e&moji...\tCtrl+.")
+        item(m_msg, "ortografia", "&Verificar ortografia da mensagem\tF7")
         item(m_msg, "encaminhar", "&Encaminhar...	Ctrl+Shift+E")
         item(m_msg, "ir_respondida", "Ir para a mensagem respondi&da")
         item(m_msg, "favoritar_msg",
@@ -635,6 +640,7 @@ class Janela(wx.Frame):
             "reagir": lambda e: self._reagir(),
             "postar_status": lambda e: self._postar_status(),
             "inserir_emoji": lambda e: self._inserir_emoji(),
+            "ortografia": lambda e: self._verificar_ortografia(),
             "ir_respondida": lambda e: self._ir_para_respondida(),
             "detalhes": lambda e: self._detalhes(),
             "apagar_msg": lambda e: self._apagar_mensagem(),
@@ -4044,6 +4050,79 @@ class Janela(wx.Frame):
         self.fala.falar("Emoji inserido: %s." % emoji_falado(simbolo),
                         interromper=True)
 
+    def _corretor(self):
+        """O corretor do idioma escolhido; None (com aviso) se o Windows
+        nao tiver o dicionario."""
+        idioma = self.cfg.get("ortografia_idioma") or "pt-BR"
+        if getattr(self, "_corretor_ort", None) is None or                 self._corretor_ort.idioma != idioma:
+            self._corretor_ort = ortografia.Corretor(idioma)
+        if not self._corretor_ort.disponivel:
+            bipe("erro")
+            self.fala.falar(
+                "O Windows não tem o dicionário %s. Instale o idioma em "
+                "Configurações do Windows, Hora e idioma, ou escolha outro "
+                "idioma do corretor nas configurações do TeleZapp." % idioma,
+                interromper=True)
+            return None
+        return self._corretor_ort
+
+    def _verificar_ortografia(self, ao_enviar=False):
+        """Percorre os erros do texto da caixa. Devolve True se terminou a
+        revisao (sem erro sobrando ou com todos tratados)."""
+        if self.atual is None:
+            self.fala.falar(TEXTO_SEM_CONVERSA)
+            return False
+        texto = self.caixa.GetValue()
+        if not texto.strip():
+            self.fala.falar("A caixa de digitar está vazia.",
+                            interromper=True)
+            return False
+        corretor = self._corretor()
+        if corretor is None:
+            return False
+        novo, mudou, fim = ui_ortografia.revisar(
+            self, corretor, texto, self.fala.falar)
+        if mudou:
+            self.caixa.SetValue(novo)
+            self.caixa.SetInsertionPointEnd()
+        self.caixa.SetFocus()
+        if fim and not ao_enviar:
+            self.fala.falar("Ortografia verificada." if mudou or novo != texto
+                            else "Nenhum erro de ortografia.",
+                            interromper=True)
+        return fim
+
+    def _checar_antes_de_enviar(self, texto):
+        """True se pode enviar. Com a opcao ligada e palavras com erro,
+        pergunta se corrige antes ou envia assim mesmo."""
+        if not self.cfg.get("ortografia_ao_enviar"):
+            return True
+        corretor = getattr(self, "_corretor_ort", None)
+        idioma = self.cfg.get("ortografia_idioma") or "pt-BR"
+        if corretor is None or corretor.idioma != idioma:
+            corretor = self._corretor_ort = ortografia.Corretor(idioma)
+        erros = corretor.verificar(texto) if corretor.disponivel else []
+        if not erros:
+            return True
+        dlg = wx.MessageDialog(
+            self, "O corretor achou %d palavra%s que pode estar errada: %s. "
+            "Corrigir antes de enviar?" % (
+                len(erros), "" if len(erros) == 1 else "s",
+                ", ".join(e.palavra for e in erros[:5])),
+            "Ortografia", wx.YES_NO | wx.CANCEL | wx.ICON_QUESTION)
+        dlg.SetYesNoCancelLabels("&Corrigir", "&Enviar assim mesmo",
+                                 "Ca&ncelar")
+        try:
+            r = dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+        if r == wx.ID_NO:
+            return True
+        if r == wx.ID_YES:
+            self._verificar_ortografia(ao_enviar=True)
+        self.caixa.SetFocus()
+        return False
+
     def _cancelar_edicao(self, falar=True):
         if self.editando is None:
             return
@@ -4705,6 +4784,9 @@ class Janela(wx.Frame):
         if not texto:
             bipe("erro")
             return
+        if not self._checar_antes_de_enviar(texto):
+            return
+        texto = self.caixa.GetValue().strip()
         conta_id, conversa_id = self.atual
         p = self.contas.provedor(conta_id)
         if p is None or self.estados.get(conta_id) != ev.CONECTADA:

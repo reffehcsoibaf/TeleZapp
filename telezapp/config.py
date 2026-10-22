@@ -306,6 +306,21 @@ OPCOES = (
           "entregue ao controle antes de enviar, e a palavra se fecha na "
           "hora. Pode fazer o programa falar \"em branco\" a cada envio. "
           "Experimental; desmarcada, o comportamento é o de sempre."),
+    Opcao("ortografia_idioma", "Idioma do corretor ortográfico", "Escrita",
+          "pt-BR",
+          "O idioma do dicionário que Verificar ortografia (F7, menu "
+          "Mensagens) usa na caixa de digitar. Os dicionários são os do "
+          "Windows: se o idioma não estiver instalado, o corretor avisa. "
+          "Em Configurações do Windows, Hora e idioma, Idioma e região, "
+          "adicione o idioma para instalar o dicionário.",
+          (("pt-BR", "Português do Brasil"), ("pt-PT", "Português de Portugal"),
+           ("en-US", "Inglês dos Estados Unidos"), ("es-ES", "Espanhol"))),
+    Opcao("ortografia_ao_enviar", "Avisar de erros de ortografia ao enviar",
+          "Escrita", False,
+          "Ao enviar uma mensagem de texto, se o corretor achar palavras "
+          "com erro, pergunta se você quer corrigir antes ou enviar assim "
+          "mesmo. Desmarcada, a mensagem sai direto e você corrige quando "
+          "quiser com Verificar ortografia (F7)."),
     Opcao("estilo", "Como cada mensagem é lida", "Leitura", 1,
           "A ordem em que autor, hora e conteúdo aparecem na lista de "
           "mensagens.",

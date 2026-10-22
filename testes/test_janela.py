@@ -3948,3 +3948,56 @@ def test_envio_grande_abre_a_barra_e_fecha_no_fim_ou_na_falha(j, monkeypatch):
     j.b.publicar(ev.EnvioFalhou("t1", "20", "arquivo", "sem conexão",
                                 devolver_texto=False, tipo=m.DOCUMENTO))
     assert segunda.fechada and j._barras == {}
+
+
+class _DialogoFalso:
+    resposta = None
+
+    def __init__(self, *a, **k):
+        pass
+
+    def SetYesNoCancelLabels(self, *a):
+        pass
+
+    def ShowModal(self):
+        return self.resposta
+
+    def Destroy(self):
+        pass
+
+
+def _ortografia_pronta(j, monkeypatch, resposta):
+    from telezapp.interface import janela as modulo
+    from testes.test_ortografia import CorretorFalso
+    _DialogoFalso.resposta = resposta
+    monkeypatch.setattr(modulo.wx, "MessageDialog", _DialogoFalso,
+                        raising=False)
+    j._corretor_ort = CorretorFalso({"goistaria": ["gostaria"]})
+    j.cfg.set("ortografia_ao_enviar", True)
+    j._abrir_conversa(j.indice[("t1", "20")])
+    j.estados["t1"] = ev.CONECTADA
+
+
+def test_enviar_com_aviso_de_ortografia_pode_enviar_assim_mesmo(
+        j, monkeypatch):
+    _ortografia_pronta(j, monkeypatch, wx_falso.ID_NO)
+    j.caixa.SetValue("eu goistaria")
+    j._enviar_texto()
+    assert ("enviar", "20", "eu goistaria", "") in j.contas.p.pedidos
+
+
+def test_enviar_com_aviso_de_ortografia_cancelar_mantem_a_caixa(
+        j, monkeypatch):
+    _ortografia_pronta(j, monkeypatch, wx_falso.ID_CANCEL)
+    j.caixa.SetValue("eu goistaria")
+    j._enviar_texto()
+    assert j.caixa.GetValue() == "eu goistaria"
+    assert not any(p[0] == "enviar" for p in j.contas.p.pedidos)
+
+
+def test_enviar_sem_a_opcao_nao_consulta_o_corretor(j, monkeypatch):
+    _ortografia_pronta(j, monkeypatch, wx_falso.ID_CANCEL)
+    j.cfg.set("ortografia_ao_enviar", False)
+    j.caixa.SetValue("eu goistaria")
+    j._enviar_texto()
+    assert ("enviar", "20", "eu goistaria", "") in j.contas.p.pedidos

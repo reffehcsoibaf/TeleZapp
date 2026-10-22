@@ -8,6 +8,7 @@ import types
 
 _foco = [None]
 ID_ANY, ID_OK, ID_CANCEL = -1, 5100, 5101
+ID_YES, ID_NO = 5103, 5104
 YES, NO, OK, CANCEL = 2, 8, 4, 16
 YES_NO = YES | NO
 NO_DEFAULT = 0

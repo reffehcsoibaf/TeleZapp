@@ -5,6 +5,17 @@ Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 
 ## Próxima versão (ainda sem número: segue o dia do lançamento)
 
+- Corretor ortográfico (F7, menu Mensagens, "Verificar ortografia da
+  mensagem"). `nucleo/ortografia.py` usa o verificador do Windows
+  (ISpellChecker, por ctypes, sem dependência nova): dicionários dos idiomas
+  instalados e "Adicionar ao dicionário" grava no dicionário pessoal do
+  Windows. `Revisao` percorre os erros um a um, verificando o texto de novo a
+  cada troca; `interface/ortografia.py` mostra palavra, frase, campo "Trocar
+  por", sugestões e os botões Trocar, Trocar todas, Ignorar, Ignorar todas e
+  Adicionar. Opções (categoria Escrita): idioma do corretor e "Avisar de
+  erros de ortografia ao enviar" (desligada: pergunta Corrigir, Enviar assim
+  mesmo ou Cancelar). Sem o dicionário no Windows, o corretor avisa.
+
 - Chamadas de voz do WhatsApp (experimental, opção "Chamadas de voz do
   WhatsApp (experimental)", desligada por padrão). `provedores/chamadas_whatsapp.py`
   liga o meowcaller (MIT; protocolo por engenharia reversa) que vai dentro da
