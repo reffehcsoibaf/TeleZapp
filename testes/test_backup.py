@@ -22,23 +22,23 @@ def preparar(pasta):
                 (str(pasta / "midias" / "w1" / "a.jpg"),))
     con.commit()
     con.close()
-    return {"som": False, "estilo": 3, "contas": [{"id": "w1"}],
+    return {"status_no_titulo": False, "estilo": 3, "contas": [{"id": "w1"}],
             "telegram_api_id": 7, "codigo_trancadas": "hash",
             "trancadas_exigir_codigo": True, "depuracao": True,
             "pasta_anexos": "C:\nao-leva"}
 
 
 def test_so_as_opcoes_seguras_vao_no_backup():
-    dados = bk.opcoes_do_backup({"som": False, "depuracao": True,
+    dados = bk.opcoes_do_backup({"status_no_titulo": False, "depuracao": True,
                                  "trancadas_exigir_codigo": False,
                                  "contas": [1], "pasta_anexos": "x"})
-    assert dados["som"] is False
+    assert dados["status_no_titulo"] is False
     assert "depuracao" not in dados and "trancadas_exigir_codigo" not in dados
     assert "contas" not in dados and "pasta_anexos" not in dados
 
 
 def test_opcoes_validas_descarta_lixo_e_valores_fora_da_faixa():
-    boas = bk.opcoes_validas({"som": "sim", "estilo": 2, "inexistente": 1,
+    boas = bk.opcoes_validas({"status_no_titulo": "sim", "estilo": 2, "inexistente": 1,
                               "mensagens_por_conversa": 10 ** 9,
                               "depuracao": True, "audio_velocidade": 1.5})
     assert boas == {"estilo": 2, "audio_velocidade": 1.5}
@@ -66,11 +66,11 @@ def test_backup_com_senha_restaura_configuracoes_e_deixa_o_resto_em_espera(
     os.makedirs(destino / "sessoes")
     (destino / "sessoes" / "velha.db").write_bytes(b"v")
     (destino / "config.json").write_text(json.dumps(
-        {"contas": [], "som": True}), encoding="utf-8")
+        {"contas": [], "status_no_titulo": True}), encoding="utf-8")
     opcoes, espera = bk.restaurar(arquivo, "segredo",
                                   ["configuracoes", "contas", "conversas",
                                    "midias"], str(destino))
-    assert opcoes["som"] is False and opcoes["estilo"] == 3
+    assert opcoes["status_no_titulo"] is False and opcoes["estilo"] == 3
     assert "depuracao" not in opcoes
     assert espera == ["contas", "conversas", "midias"]
     assert bk.ha_pendente(str(destino))
@@ -79,7 +79,7 @@ def test_backup_com_senha_restaura_configuracoes_e_deixa_o_resto_em_espera(
     assert not bk.ha_pendente(str(destino))
     novo = json.loads((destino / "config.json").read_text(encoding="utf-8"))
     assert novo["contas"] == [{"id": "w1"}] and novo["codigo_trancadas"] == "hash"
-    assert novo["som"] is True            # as opcoes se aplicam a parte
+    assert novo["status_no_titulo"] is True            # as opcoes se aplicam a parte
     assert (destino / "sessoes" / "whatsapp-1.db").exists()
     assert not (destino / "sessoes" / "velha.db").exists()
     assert (destino / "midias" / "w1" / "a.jpg").read_bytes() == b"JPG"

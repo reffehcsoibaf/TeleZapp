@@ -354,6 +354,7 @@ class Janela(wx.Frame):
         self.midias = None            # gerente de downloads (idem)
         self.fala = Fala()
         pacotes_de_som.migrar_antigos(cfg)
+        pacotes_de_som.migrar_liga_desliga(cfg)
         self._carregar_sons()
         self._carregar_limites_ia()
         m.definir_modo_previa(cfg.get("previa_links"))
@@ -603,7 +604,7 @@ class Janela(wx.Frame):
         m_exib.AppendSubMenu(m_estilo, "Como cada &mensagem é lida")
         m_exib.AppendSeparator()
         rotulos = {o.chave: o.rotulo for o in config.OPCOES}
-        for chave in ("som", "falar_novas", "falar_novas_outras_conversas",
+        for chave in ("falar_novas", "falar_novas_outras_conversas",
                       "falar_novas_fora_do_telezapp", "confirmar_envio", "falar_quem_toca",
                       "falar_reacoes"):
             item(m_exib, chave, rotulos[chave], "check")
@@ -768,7 +769,7 @@ class Janela(wx.Frame):
         self.Bind(wx.EVT_MENU,
                   lambda e: self._log_detalhado(e.IsChecked()),
                   self.itens["log_detalhado"])
-        for chave in ("som", "falar_novas", "falar_novas_outras_conversas",
+        for chave in ("falar_novas", "falar_novas_outras_conversas",
                       "falar_novas_fora_do_telezapp", "confirmar_envio", "falar_quem_toca",
                       "falar_reacoes"):
             self.itens[chave].Check(bool(self.cfg.get(chave)))
@@ -2744,7 +2745,7 @@ class Janela(wx.Frame):
             "Nova mensagem em %s. %s" % (conv.nome, resumo)
         if conv.tipo == "grupo" and self._cita_voce(msg):
             bipe("mencao_ou_resposta")          # no lugar do som comum
-        elif self.cfg.get("som"):
+        else:
             bipe("nova_aberta" if aberta else
                  "nova_grupo" if conv.tipo == "grupo" else "nova")
         if self._deve_falar_nova(aberta):
@@ -2783,8 +2784,7 @@ class Janela(wx.Frame):
                  "%d mensagens novas chegaram" % e.quantas) + \
             " no WhatsApp enquanto o TeleZapp estava fechado."
         log.info("sincronia: %d mensagens novas", e.quantas)
-        if self.cfg.get("som"):
-            bipe("nova")
+        bipe("nova")
         if self._deve_falar_nova(False):
             self.fala.falar(texto)
         self.SetStatusText(texto)
@@ -2980,7 +2980,7 @@ class Janela(wx.Frame):
         self.SetStatusText(a.situacao)
         self.fala.falar(a.fala, interromper=True)
         toque = a.som in ("toque", "chamando")
-        if a.som and (not toque or self.cfg.get("toque_chamada")):
+        if a.som:
             bipe(a.som)
             if toque:
                 self._repetir_toque(c, c.estado, a.som)
@@ -2991,8 +2991,7 @@ class Janela(wx.Frame):
     def _repetir_toque(self, c, estado, som):
         """Repete o som enquanto a chamada continua no mesmo estado."""
         def de_novo():
-            if self.chamada is c and c.estado == estado and \
-                    self.cfg.get("toque_chamada"):
+            if self.chamada is c and c.estado == estado:
                 bipe(som)
                 self._repetir_toque(c, estado, som)
         wx.CallLater(3000, de_novo)
@@ -5841,7 +5840,7 @@ class Janela(wx.Frame):
             for k in self.cache:
                 self.cache[k] = self.cache[k][-limite:]
             self._preencher_mensagens()
-        elif chave in ("som", "falar_novas", "falar_novas_outras_conversas",
+        elif chave in ("falar_novas", "falar_novas_outras_conversas",
                       "falar_novas_fora_do_telezapp", "confirmar_envio", "falar_quem_toca",
                       "falar_reacoes"):
             self._opcao(chave, valor)

@@ -181,8 +181,6 @@ class Opcao:
 
 
 OPCOES = (
-    Opcao("som", "Som ao receber mensagem", "Avisos", True,
-          "Toca um som curto quando chega uma mensagem nova."),
     Opcao("status_no_titulo", "Mostrar o status no título da janela",
           "Avisos", True,
           "Com uma conversa aberta, o título da janela mostra, depois do "
@@ -211,18 +209,18 @@ OPCOES = (
           False,
           "O leitor de tela fala o autor e o conteúdo de cada mensagem nova "
           "da conversa que está aberta, com o TeleZapp em uso. Não depende "
-          "do som ao receber mensagem."),
+          "dos sons."),
     Opcao("falar_novas_outras_conversas",
           "Falar mensagens novas de outras conversas", "Avisos", False,
           "Com o TeleZapp em uso, fala o nome da conversa, o autor e o "
           "conteúdo das mensagens que chegam em outra conversa que não é a "
-          "aberta (ou quando nenhuma está aberta). Não depende do som ao "
-          "receber mensagem."),
+          "aberta (ou quando nenhuma está aberta). Não depende dos "
+          "sons."),
     Opcao("falar_novas_fora_do_telezapp",
           "Falar mensagens novas fora do TeleZapp", "Avisos", False,
           "Fala as mensagens novas também quando você está em outro "
           "programa ou com a janela do TeleZapp minimizada, de qualquer "
-          "conversa. Não depende do som ao receber mensagem."),
+          "conversa. Não depende dos sons."),
     Opcao("confirmar_envio", "Falar mensagem enviada", "Avisos", False,
           "Fala Enviada depois que uma mensagem sai."),
     Opcao("falar_quem_toca", "Falar de quem é o áudio que toca", "Avisos",
@@ -235,10 +233,6 @@ OPCOES = (
           False,
           "Fala quem reagiu e com qual emoji quando alguém reage a uma "
           "mensagem sua. Desmarcada, a reação só aparece na mensagem."),
-    Opcao("toque_chamada", "Som de chamada", "Avisos", True,
-          "Toca um som enquanto uma chamada de voz está tocando para você "
-          "ou esperando a outra pessoa atender. Desmarcada, só a fala "
-          "avisa."),
     Opcao("trancadas_exigir_codigo",
           "Esconder as conversas trancadas atrás de um código secreto",
           "Privacidade", True,
@@ -490,8 +484,8 @@ OPCOES = (
 # um arquivo de som (WAV, Ogg, MP3, FLAC...).
 EVENTOS_SOM = (
     ("nova", "mensagem recebida",
-     "Tocado quando chega uma mensagem nova. A opção Som ao receber "
-     "mensagem, em Avisos, continua ligando e desligando este aviso."),
+     "Tocado quando chega uma mensagem nova numa conversa que não é a "
+     "aberta nem um grupo."),
     ("enviada", "mensagem enviada",
      "Tocado quando uma mensagem, um arquivo ou uma tarefa em segundo plano "
      "(salvar a conversa, fazer o backup) termina bem."),
@@ -504,11 +498,9 @@ EVENTOS_SOM = (
     ("atualizado", "QR Code atualizado",
      "Tocado quando o QR Code do pareamento é trocado por um novo."),
     ("toque", "toque de chamada recebida",
-     "Repetido enquanto uma chamada está tocando para você. A opção Som de "
-     "chamada, em Avisos, continua ligando e desligando este toque."),
+     "Repetido enquanto uma chamada está tocando para você."),
     ("chamando", "tom de chamada feita",
-     "Repetido enquanto você espera a outra pessoa atender. A opção Som de "
-     "chamada, em Avisos, continua ligando e desligando este tom."),
+     "Repetido enquanto você espera a outra pessoa atender."),
     ("desligada", "chamada encerrada",
      "Tocado quando uma chamada termina."),
     ("nova_aberta", "mensagem recebida na conversa aberta",
@@ -536,8 +528,8 @@ EVENTOS_SOM = (
     ("mencao_ou_resposta", "menção ou resposta a você num grupo",
      "Tocado quando chega, num grupo, uma mensagem que cita você com @ ou "
      "que responde a uma mensagem sua. Substitui o som de mensagem recebida "
-     "num grupo para essa mensagem e não depende da opção Som ao receber "
-     "mensagem (desative o evento se não quiser). Não toca em grupo "
+     "num grupo para essa mensagem e não depende do som de mensagem "
+     "recebida (desative este evento se não quiser). Não toca em grupo "
      "arquivado, trancado ou silenciado que não esteja aberto."),
     ("reacao_recebida", "reação a uma mensagem sua",
      "Tocado quando alguém reage com um emoji a uma mensagem sua (não toca "

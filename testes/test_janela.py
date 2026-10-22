@@ -1544,8 +1544,8 @@ def test_configuracoes_aplicam_com_os_efeitos_dos_menus(j):
     assert j.estilo == 2 and j.cfg.get("estilo") == 2
     j._aplicar_opcao("midias_baixar", "automatico")
     assert j.cfg.get("midias_baixar") == "automatico"
-    j._aplicar_opcao("som", False)
-    assert j.cfg.get("som") is False
+    j._aplicar_opcao("status_no_titulo", False)
+    assert j.cfg.get("status_no_titulo") is False
     j._aplicar_opcao("depuracao", True)
     assert j.banco.depuracao is True
     j._aplicar_opcao("audio_passo_velocidade", 1.0)
@@ -1653,14 +1653,6 @@ def test_chamada_recebida_abre_a_janela_toca_e_fala(chamadas):
     assert chamadas.falas[-1].startswith("Chamada de Ana")
     assert "toque" in chamadas.sons
     assert j.chamada is not None and j.chamada.entrante
-
-
-def test_sem_som_de_chamada_so_fala(chamadas):
-    j, ch = chamadas.j, chamadas.ch
-    j.cfg.set("toque_chamada", False)
-    estado(j, ch.TOCANDO, entrante=True)
-    assert "toque" not in chamadas.sons
-    assert chamadas.falas
 
 
 def test_atender_pede_ao_provedor_com_os_dispositivos(chamadas):
@@ -2705,7 +2697,6 @@ def test_sons_de_conta_caiu_e_voltou(j, monkeypatch):
 def test_som_da_mensagem_nova_depende_de_onde_ela_chegou(j, monkeypatch):
     sons = []
     monkeypatch.setattr(jm, "bipe", lambda tipo, valor=None: sons.append(tipo))
-    j.cfg.set("som", True)
     j.indice[("t1", "20")].tipo = "grupo"
     nova = lambda i: m.Mensagem("t1", "20", i, autor="Bia", texto="oi",
                                 data=AGORA + 50)
@@ -3384,7 +3375,6 @@ def test_falar_mensagens_novas_por_lugar_e_sem_depender_do_som(j, monkeypatch):
     j.fala.falar = lambda t, interromper=False: ditas.append(t)
     sons = []
     monkeypatch.setattr(jm, "bipe", lambda t, *a: sons.append(t))
-    j.cfg.set("som", False)                  # som desligado: a fala segue
     c = j.indice[("t1", "20")]
     j._abrir_conversa(c)
     ativa = [True]
@@ -3416,7 +3406,6 @@ def test_falar_mensagens_novas_por_lugar_e_sem_depender_do_som(j, monkeypatch):
     j.cfg.set("falar_novas", False)
     j.cfg.set("falar_novas_outras_conversas", False)
     assert falou("a7", "20", AGORA + 406) and falou("a8", "10", AGORA + 407)
-    assert sons == []                                  # som segue desligado
 
 
 def test_porcentagem_falada_no_download_segue_a_opcao(j):
@@ -3682,13 +3671,6 @@ def test_mencao_ou_resposta_num_grupo_toca_o_som_proprio(j, monkeypatch):
     sons.clear()
     chega("45", resposta_a="42")                  # resposta a mensagem alheia
     assert sons == ["nova_grupo"]
-    # com o som de mensagem desligado, a mencao ainda avisa; o comum nao
-    sons.clear()
-    j.cfg.set("som", False)
-    chega("46")
-    chega("47", citou=True)
-    assert sons == ["mencao_ou_resposta"]
-    j.cfg.set("som", True)
     # conversa com uma pessoa: nunca
     sons.clear()
     chega("48", citou=True, conv=j.indice[("t1", "20")])

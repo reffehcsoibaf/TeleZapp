@@ -162,9 +162,9 @@ def test_config_e_contas(tmp_path, monkeypatch):
     c = config.Config()
     assert c.get("estilo") == 1 and c.contas() == []
     c.salvar_conta({"id": "t1", "servico": "telegram", "telefone": "+55"})
-    c.set("som", False)
+    c.set("estilo", 3)
     c2 = config.Config()
-    assert c2.get("som") is False and c2.contas()[0]["id"] == "t1"
+    assert c2.get("estilo") == 3 and c2.contas()[0]["id"] == "t1"
     c2.remover_conta("t1")
     assert config.Config().contas() == []
 
@@ -173,7 +173,7 @@ def test_config_corrompida_usa_padroes(tmp_path, monkeypatch):
     monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path))
     (tmp_path / "config.json").write_text("{nao e json", encoding="utf-8")
     assert config.Config().get("falar_novas") is False
-    assert config.Config().get("som") is True
+    assert config.Config().get("status_no_titulo") is True
 
 
 def test_credenciais_do_arquivo_de_testes(tmp_path, monkeypatch):

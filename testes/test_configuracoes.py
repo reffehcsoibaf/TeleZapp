@@ -42,10 +42,10 @@ def test_pendentes_so_valem_ao_aplicar_e_voltar_ao_atual_desfaz(mod):
 def test_aplicar_na_ordem_das_opcoes_e_zera(mod):
     mod.definir("audio_velocidade", 2.0)
     mod.definir("audio_passo_velocidade", 0.5)
-    mod.definir("som", False)
+    mod.definir("status_no_titulo", False)
     feitas = []
     quais = mod.aplicar(lambda c, v: feitas.append((c, v)))
-    assert [c for c, _ in feitas] == ["som", "audio_passo_velocidade",
+    assert [c for c, _ in feitas] == ["status_no_titulo", "audio_passo_velocidade",
                                       "audio_velocidade"]
     assert quais == [c for c, _ in feitas]
     assert mod.pendentes == {}
@@ -148,11 +148,11 @@ def test_mudar_ou_desligar_pede_o_codigo_atual(tmp_path, monkeypatch):
 
 def test_nada_a_fazer_com_codigo_existente_nao_bloqueia(tmp_path, monkeypatch):
     mod = _modelo(tmp_path, monkeypatch, codigo="2468")
-    mod.definir("som", False)                         # outra opcao qualquer
+    mod.definir("status_no_titulo", False)                         # outra opcao qualquer
     assert mod.erro_codigo() == ""
     aplicadas = []
     mod.aplicar(lambda c, v: aplicadas.append(c))
-    assert aplicadas == ["som"]
+    assert aplicadas == ["status_no_titulo"]
 
 
 def test_falas_automaticas_do_audio_vem_desmarcadas():
