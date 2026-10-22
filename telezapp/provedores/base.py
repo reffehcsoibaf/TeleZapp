@@ -230,6 +230,14 @@ class Provedor(ABC):
         na hora; o resultado chega como ev.MensagemAtualizada (motivo
         "reacao") ou ev.Aviso."""
 
+    # True nos servicos em que da para criar uma enquete
+    PODE_CRIAR_ENQUETE = False
+
+    def criar_enquete(self, conversa_id, pergunta, opcoes, multipla,
+                      anonima=True):
+        """Cria a enquete na conversa. Volta na hora; a mensagem criada chega
+        como ev.MensagemNova(enviada_daqui=True) ou o erro como ev.Aviso."""
+
     # True nos servicos em que da para votar numa enquete
     PODE_VOTAR = False
 

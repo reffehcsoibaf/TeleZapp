@@ -345,6 +345,30 @@ def linhas_da_enquete(enq):
     return linhas
 
 
+LIMITE_OPCOES_ENQUETE = {"whatsapp": (2, 12), "telegram": (2, 10)}
+MAX_PERGUNTA_ENQUETE = 255
+MAX_OPCAO_ENQUETE = 100
+
+
+def erro_da_enquete(servico, pergunta, opcoes):
+    """O que falta ou esta errado numa enquete a criar ("" se esta boa)."""
+    minimo, maximo = LIMITE_OPCOES_ENQUETE.get(servico, (2, 10))
+    pergunta = (pergunta or "").strip()
+    if not pergunta:
+        return "Escreva a pergunta."
+    if len(pergunta) > MAX_PERGUNTA_ENQUETE:
+        return "A pergunta pode ter até %d letras." % MAX_PERGUNTA_ENQUETE
+    if len(opcoes) < minimo:
+        return "Acrescente pelo menos %d opções." % minimo
+    if len(opcoes) > maximo:
+        return "O limite é de %d opções." % maximo
+    if len({o.strip().lower() for o in opcoes}) != len(opcoes):
+        return "As opções não podem se repetir."
+    if any(not o.strip() or len(o) > MAX_OPCAO_ENQUETE for o in opcoes):
+        return "Cada opção deve ter de 1 a %d letras." % MAX_OPCAO_ENQUETE
+    return ""
+
+
 def pode_marcar_mais(enq, escolhidas):
     """False se ja ha tantas opcoes marcadas quanto a enquete permite."""
     return len(escolhidas) < enq["maximo"]

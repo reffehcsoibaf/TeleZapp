@@ -82,3 +82,17 @@ def test_linhas_da_enquete_mostram_contagem_percentual_e_meu_voto():
         "Domingo: nenhum voto (0%)"]
     assert m.linhas_da_enquete(m.enquete_de(mensagem()))[0] == \
         "Sexta: nenhum voto (0%)"
+
+
+def test_erro_da_enquete_a_criar():
+    ok = ["Sexta", "Sábado"]
+    assert m.erro_da_enquete("whatsapp", "Qual dia?", ok) == ""
+    assert "pergunta" in m.erro_da_enquete("whatsapp", "  ", ok)
+    assert "pelo menos 2" in m.erro_da_enquete("whatsapp", "Q?", ["A"])
+    assert "limite" in m.erro_da_enquete("telegram", "Q?",
+                                         [str(i) for i in range(11)])
+    assert m.erro_da_enquete("whatsapp", "Q?",
+                             [str(i) for i in range(12)]) == ""
+    assert "repetir" in m.erro_da_enquete("whatsapp", "Q?", ["A", "a"])
+    assert "100" in m.erro_da_enquete("whatsapp", "Q?", ["A", "x" * 101])
+    assert "255" in m.erro_da_enquete("whatsapp", "x" * 256, ok)

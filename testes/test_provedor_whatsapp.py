@@ -204,6 +204,15 @@ class ClienteFalso:
 
     voto_decifrado = None
     votos_montados = ()
+    enquetes_montadas = ()
+
+    def build_poll_vote_creation(self, nome, opcoes, tipo, quoted=None):
+        self.enquetes_montadas = list(self.enquetes_montadas) + [
+            (nome, list(opcoes), tipo.name)]
+        return E.Message(pollCreationMessage=E.PollCreationMessage(
+            name=nome, selectableOptionsCount=1 if tipo.name == "SINGLE"
+            else 0, options=[E.PollCreationMessage.Option(optionName=o)
+                             for o in opcoes]))
 
     def decrypt_poll_vote(self, evento):
         if self.voto_decifrado is None:
@@ -2856,3 +2865,28 @@ def test_votar_envia_o_voto_e_guarda_o_meu(amb):
     amb.p.votar_enquete(a.mensagem, [])
     b = esperar(amb.fila, ev.MensagemAtualizada)
     assert m.enquete_de(b.mensagem)["meus"] == []
+
+
+def test_criar_enquete_no_whatsapp_envia_e_guarda_a_mensagem(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    cid = "5551988887777@s.whatsapp.net"
+    amb.p.criar_enquete(cid, "Qual dia?", ["Sexta", "Sábado"], True)
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.enviada_daqui and nova.mensagem.tipo == m.OUTRO
+    e = m.enquete_de(nova.mensagem)
+    assert e["pergunta"] == "Qual dia?" and e["opcoes"] == ["Sexta", "Sábado"]
+    assert e["maximo"] == 2
+    assert amb.c.enquetes_montadas[-1] == ("Qual dia?", ["Sexta", "Sábado"],
+                                           "MULTIPLE")
+    assert amb.c.enviadas[-1][1].HasField("pollCreationMessage")
+    amb.p.criar_enquete(cid, "Sim ou não?", ["Sim", "Não"], False)
+    outra = esperar(amb.fila, ev.MensagemNova)
+    assert m.enquete_de(outra.mensagem)["maximo"] == 1
+    assert amb.c.enquetes_montadas[-1][2] == "SINGLE"
+
+
+def test_criar_enquete_sem_conexao_avisa(amb):
+    amb.p.criar_enquete("5551@s.whatsapp.net", "Q?", ["A", "B"], False)
+    aviso = esperar(amb.fila, ev.Aviso)
+    assert "Não consegui criar a enquete" in aviso.texto

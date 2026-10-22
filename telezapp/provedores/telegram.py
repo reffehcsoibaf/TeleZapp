@@ -1297,6 +1297,35 @@ class ProvedorTelegram(Provedor):
                 self.conta.id, msg.conversa_id, texto, _motivo(e),
                 devolver_texto=True))
 
+    PODE_CRIAR_ENQUETE = True
+
+    def criar_enquete(self, conversa_id, pergunta, opcoes, multipla,
+                      anonima=True):
+        self._agendar(self._criar_enquete(
+            conversa_id, pergunta, list(opcoes), multipla, anonima))
+
+    async def _criar_enquete(self, cid, pergunta, opcoes, multipla, anonima):
+        from telethon.tl import types as tipos
+
+        def texto(t):
+            return tipos.TextWithEntities(text=t, entities=[])
+        try:
+            ent = await self._entidade(cid)
+            poll = tipos.Poll(
+                id=0, question=texto(pergunta), hash=0,
+                answers=[tipos.PollAnswer(text=texto(o), option=bytes([i]))
+                         for i, o in enumerate(opcoes)],
+                multiple_choice=bool(multipla),
+                public_voters=not anonima)
+            enviada = await self.cliente.send_message(
+                ent, file=tipos.InputMediaPoll(poll=poll))
+        except Exception as e:
+            log.warning("criar enquete falhou: %s", type(e).__name__)
+            self._avisar("Não consegui criar a enquete (%s)." % _motivo(e),
+                         False)
+            return
+        await self._registrar_enviada(enviada, cid)
+
     PODE_VOTAR = True
 
     def votar_enquete(self, mensagem, escolhas):

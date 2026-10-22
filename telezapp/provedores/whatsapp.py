@@ -176,7 +176,8 @@ def com_expiracao(mensagem, segundos):
             text=texto, contextInfo=ContextInfo(expiration=segundos)))
         return mensagem
     for nome in ("extendedTextMessage", "imageMessage", "videoMessage",
-                 "audioMessage", "documentMessage", "stickerMessage"):
+                 "audioMessage", "documentMessage", "stickerMessage",
+                 "pollCreationMessage"):
         if mensagem.HasField(nome):
             getattr(mensagem, nome).contextInfo.expiration = segundos
             return mensagem
@@ -3142,6 +3143,36 @@ class ProvedorWhatsApp(Provedor):
             m.atualizar_extras(x, enquete=atual)
         self._alterar(cid, alvo, aplicar, "enquete", quem)
 
+    PODE_CRIAR_ENQUETE = True
+
+    def criar_enquete(self, conversa_id, pergunta, opcoes, multipla,
+                      anonima=True):
+        self._fila.put(lambda: self._criar_enquete(
+            conversa_id, pergunta, list(opcoes), multipla))
+
+    def _criar_enquete(self, cid, pergunta, opcoes, multipla):
+        try:
+            if not self._conectada or self.cliente is None:
+                raise ConnectionError("sem conexão")
+            from neonize.utils.enum import VoteType
+            jid = self._jid(cid)
+            criada = self.cliente.build_poll_vote_creation(
+                pergunta, opcoes,
+                VoteType.MULTIPLE if multipla else VoteType.SINGLE)
+            resp = self.cliente.send_message(
+                jid, com_expiracao(criada, self._prazo_da_conversa(cid)))
+        except Exception as e:
+            log.warning("criar enquete falhou: %s: %s", type(e).__name__,
+                        str(e)[:200])
+            self._avisar("Não consegui criar a enquete (%s)." %
+                         ("sem conexão" if isinstance(e, ConnectionError)
+                          else type(e).__name__), False)
+            return
+        self._registrar_enviada(
+            resp, cid, "enquete: " + pergunta, tipo=m.OUTRO,
+            enquete={"pergunta": pergunta, "opcoes": opcoes,
+                     "maximo": len(opcoes) if multipla else 1})
+
     PODE_VOTAR = True
 
     def votar_enquete(self, mensagem, escolhas):
@@ -3636,7 +3667,8 @@ class ProvedorWhatsApp(Provedor):
         return previa_links.buscar(url) if url else {}
 
     def _registrar_enviada(self, resp, conversa_id, texto, resposta_a="",
-                           arquivo=None, previa=None, **campos):
+                           arquivo=None, previa=None, enquete=None,
+                           **campos):
         """Guarda e publica a mensagem que o servidor confirmou. `arquivo`
         (origem, mover): copia a midia enviada para o armazem do app."""
         msg = m.Mensagem(self.conta.id, conversa_id, resp.ID, minha=True,
@@ -3647,6 +3679,8 @@ class ProvedorWhatsApp(Provedor):
                                  self._prazo_da_conversa(conversa_id))
         if previa:
             m.guardar_extras(msg, previa=previa)
+        if enquete:
+            m.atualizar_extras(msg, enquete=enquete)
         if arquivo is not None:
             try:
                 destino = armazem.guardar_enviada(msg, *arquivo)

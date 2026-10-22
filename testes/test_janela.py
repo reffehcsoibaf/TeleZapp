@@ -4300,3 +4300,28 @@ def test_ver_enquete_numa_mensagem_comum_avisa(j):
     j.fala.falar = lambda t, interromper=False: ditas.append(t)
     j._abrir_enquete()
     assert "não é uma enquete" in ditas[-1]
+
+
+def test_criar_enquete_pelo_menu_vai_ao_servico(j, monkeypatch):
+    _abrir_com_caixa(j)
+    pedidos = []
+    j.contas.p.PODE_CRIAR_ENQUETE = True
+    j.contas.p.criar_enquete = lambda *a: pedidos.append(a)
+    j.estados["t1"] = ev.CONECTADA
+    monkeypatch.setattr(jm.ui_nova_enquete, "pedir_enquete",
+                        lambda pai, servico, fala: (
+                            "Qual dia?", ["Sexta", "Sábado"], False, True))
+    j._nova_enquete()
+    assert pedidos == [("20", "Qual dia?", ["Sexta", "Sábado"], False, True)]
+    # cancelou: nada vai
+    pedidos.clear()
+    monkeypatch.setattr(jm.ui_nova_enquete, "pedir_enquete",
+                        lambda pai, servico, fala: None)
+    j._nova_enquete()
+    assert pedidos == []
+    # servico que nao cria enquete
+    j.contas.p.PODE_CRIAR_ENQUETE = False
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._nova_enquete()
+    assert "não cria enquetes" in ditas[-1]

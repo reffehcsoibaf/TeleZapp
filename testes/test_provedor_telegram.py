@@ -167,9 +167,20 @@ class ClienteFalso:
         return types.SimpleNamespace(id=777, first_name="Bia", last_name="",
                                      username=usuario, title=None)
 
-    async def send_message(self, ent, texto, reply_to=None, link_preview=True):
+    async def send_message(self, ent, texto="", reply_to=None,
+                           link_preview=True, file=None):
         if texto == "falhar":
             raise errors.ChatWriteForbiddenError(None)
+        if file is not None:
+            self.enquetes = getattr(self, "enquetes", []) + [file]
+            poll = file.poll
+            return types.SimpleNamespace(
+                id=98, message="", out=True, date=DATA, action=None,
+                poll=types.SimpleNamespace(poll=types.SimpleNamespace(
+                    id=555, question=poll.question, answers=poll.answers,
+                    multiple_choice=poll.multiple_choice, closed=False,
+                    public_voters=poll.public_voters), results=None),
+                media=object(), sender=None, post_author="")
         self.enviadas.append((ent, texto, reply_to))
         return mensagem(99, texto, out=True)
 
@@ -1200,3 +1211,22 @@ def test_voto_de_outra_pessoa_chega_pela_atualizacao_da_enquete(ambiente):
     asyncio.run(p._ao_enquete(types.SimpleNamespace(
         poll_id=1, poll=None, results=None)))
     assert ambiente.fila.empty()
+
+
+def test_criar_enquete_no_telegram_manda_a_pergunta_e_as_opcoes(ambiente):
+    import asyncio
+    cliente = ClienteFalso()
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    asyncio.run(p._criar_enquete("10", "Qual dia?", ["Sexta", "Sábado"],
+                                 True, False))
+    media = cliente.enquetes[-1]
+    poll = media.poll
+    assert poll.question.text == "Qual dia?"
+    assert [a.text.text for a in poll.answers] == ["Sexta", "Sábado"]
+    assert [a.option for a in poll.answers] == [b"\x00", b"\x01"]
+    assert poll.multiple_choice is True and poll.public_voters is True
+    nova = esperar(ambiente.fila, ev.MensagemNova)
+    e = m.enquete_de(nova.mensagem)
+    assert nova.enviada_daqui and e["opcoes"] == ["Sexta", "Sábado"]
+    assert e["maximo"] == 2 and e["poll_id"] == "555"
