@@ -128,9 +128,7 @@ def test_script_troca_a_pasta_e_mantem_os_dados(tmp_path):
     # o "executavel" da nova grava um sinal para provar que foi aberto
     # (o `start` abre o .cmd num cmd /K: sem o exit a janela ficaria aberta)
     (nova / "TeleZapp.cmd").write_text(
-        '@echo aberto> "%s"
-@exit
-' % (tmp_path / "sinal.txt"))
+        '@echo aberto> "%s"\r\n@exit\r\n' % (tmp_path / "sinal.txt"))
     script = au.aplicar(str(prog), str(nova), executavel="TeleZapp.cmd")
     assert os.path.isfile(script)
     for _ in range(100):
