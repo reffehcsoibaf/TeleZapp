@@ -369,14 +369,14 @@ OPCOES = (
           "Desmarcada, o avanço só aparece no título, na barra de situação "
           "e na fala. Atualizar, instalar e fazer backup sempre mostram a "
           "barra."),
-    Opcao("audio_janela", "Ao reproduzir áudio e mensagem de voz", "Mídias",
+    Opcao("audio_janela", "Ao tocar um áudio ou mensagem de voz", "Mídias",
           "sem",
           "Só tocar começa a tocar sem abrir janela: Enter de novo pausa e "
           "continua, e Esc para. O player em janela tem avançar, voltar e "
           "posição.",
           (("sem", "Só tocar, sem janela"),
            ("janela", "Abrir a janela do player"))),
-    Opcao("enter_audio", "Enter numa mensagem de voz ou áudio", "Mídias",
+    Opcao("enter_audio", "O que o Enter faz numa mensagem de voz ou áudio", "Mídias",
           "abrir", "O que o Enter faz numa mensagem de voz ou áudio. "
           "Transcrever usa os provedores de Inteligência artificial e, se a "
           "transcrição já existe, só a mostra. Control O sempre reproduz e "
@@ -384,27 +384,27 @@ OPCOES = (
           (("abrir", "Reproduzir (baixa antes, se preciso)"),
            ("baixar", "Só baixar"),
            ("ia", "Transcrever (ou mostrar a transcrição)"))),
-    Opcao("enter_imagem", "Enter numa foto ou figurinha", "Mídias", "abrir",
+    Opcao("enter_imagem", "O que o Enter faz numa foto ou figurinha", "Mídias", "abrir",
           "O que o Enter faz numa foto ou figurinha. Descrever usa os "
           "provedores de Inteligência artificial e, se a descrição já "
           "existe, só a mostra.",
           (("abrir", "Abrir (baixa antes, se preciso)"),
            ("baixar", "Só baixar"),
            ("ia", "Descrever (ou mostrar a descrição)"))),
-    Opcao("enter_video", "Enter num vídeo", "Mídias", "abrir",
+    Opcao("enter_video", "O que o Enter faz num vídeo", "Mídias", "abrir",
           "O que o Enter faz num vídeo. Descrever usa o provedor de "
           "Inteligência artificial que aceita vídeo e, se a descrição já "
           "existe, só a mostra.",
           (("abrir", "Abrir (baixa antes, se preciso)"),
            ("baixar", "Só baixar"),
            ("ia", "Descrever (ou mostrar a descrição)"))),
-    Opcao("enter_pdf", "Enter num PDF", "Mídias", "abrir",
+    Opcao("enter_pdf", "O que o Enter faz num PDF", "Mídias", "abrir",
           "O que o Enter faz num documento PDF. Converter usa os provedores "
           "de Inteligência artificial e, se o texto já existe, só o mostra.",
           (("abrir", "Abrir (baixa antes, se preciso)"),
            ("baixar", "Só baixar"),
            ("ia", "Converter em texto acessível (ou mostrar o texto)"))),
-    Opcao("audio_sequencia", "Áudios em sequência", "Mídias", "sim",
+    Opcao("audio_sequencia", "Depois de um áudio, tocar o próximo", "Mídias", "sim",
           "O que acontece quando um áudio ou mensagem de voz termina (sem "
           "janela). Todos da conversa: toca o próximo áudio, pulando as "
           "mensagens que não são áudio. Só os seguidos: toca os áudios um "
@@ -414,7 +414,7 @@ OPCOES = (
            ("bloco", "Tocar só os áudios seguidos, até uma mensagem que "
                      "não seja áudio"),
            ("nao", "Parar quando o áudio terminar"))),
-    Opcao("audio_passo_velocidade", "Passo da velocidade do áudio", "Mídias",
+    Opcao("audio_passo_velocidade", "Quanto a velocidade do áudio muda a cada vez", "Mídias",
           0.25,
           "De quanto em quanto a velocidade de reprodução do áudio muda "
           "quando você a aumenta ou diminui.",
@@ -463,11 +463,11 @@ OPCOES = (
           "ao receber, até o limite escolhido.",
           (("demanda", "Só quando eu abrir"),
            ("automatico", "Automaticamente ao receber"))),
-    Opcao("midias_limite_auto_mb", "Limite do download automático", "Mídias",
+    Opcao("midias_limite_auto_mb", "Tamanho máximo do download automático", "Mídias",
           20, "Mídias maiores que isto (em MB) não baixam sozinhas.",
           ((5, "5 MB"), (10, "10 MB"), (20, "20 MB"), (50, "50 MB"),
            (100, "100 MB"))),
-    Opcao("midias_passo_progresso", "Porcentagem falada no download",
+    Opcao("midias_passo_progresso", "Falar o avanço do download",
           "Mídias", 25,
           "De quanto em quanto o avanço de um download pedido por você, ou "
           "de um arquivo que você envia, é falado (por exemplo, 10 por "
@@ -477,7 +477,7 @@ OPCOES = (
           "e o título da janela mostram o avanço mesmo com a fala desligada.",
           ((25, "A cada 25%"), (20, "A cada 20%"), (10, "A cada 10%"),
            (5, "A cada 5%"), (1, "A cada 1%"), (0, "Não falar o avanço"))),
-    Opcao("midias_confirmar_mb", "Confirmar downloads grandes", "Mídias", 100,
+    Opcao("midias_confirmar_mb", "Perguntar antes de baixar arquivos a partir de", "Mídias", 100,
           "Pergunta antes de baixar, a seu pedido, uma mídia maior que isto "
           "(em MB).",
           ((50, "50 MB"), (100, "100 MB"), (500, "500 MB"),

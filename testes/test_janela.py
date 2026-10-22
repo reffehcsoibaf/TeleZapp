@@ -4030,7 +4030,7 @@ def test_menus_mostram_o_atalho_e_a_opcao_esconde(j):
     assert len(j.tabela_de_aceleracao.entradas) > 10
     j._aplicar_opcao("mostrar_atalhos", True)
     assert j.itens["ir_caixa"].rotulo.endswith("\tCtrl+E")
-    assert j.tabela_de_aceleracao.entradas == []
+    assert len(j.tabela_de_aceleracao.entradas) > 10     # vale sempre
 
 
 def test_atalho_personalizado_vai_ao_menu_ao_controle_e_a_config(j):
@@ -4207,3 +4207,18 @@ def test_atalho_global_e_registrado_e_avisa_se_estiver_ocupado(j):
     j.RegisterHotKey = lambda *a: False          # outro programa usa
     j._aplicar_opcao("atalhos", {"mostrar_janela": "Ctrl+Alt+Y"})
     assert "outro programa" in ditas[-1]
+
+
+def test_menu_midias_agrupa_as_escolhas_e_o_atalho_fala_portugues(j):
+    # as escolhas soltas (Só quando eu abrir...) ficam sob um titulo claro
+    assert j.atalhos.acoes["baixar_demanda"].rotulo == (
+        "Quando baixar as mídias: Só quando eu abrir")
+    assert j.atalhos.acoes["estilo1"].rotulo.startswith(
+        "Como cada mensagem é lida: ")
+    assert j.itens["audio_voltar"].rotulo.endswith(
+        " (Ctrl+Shift+Seta para a esquerda)")
+    assert j.itens["vel_mais"].rotulo.endswith(
+        " (Ctrl+Shift+Seta para cima)")
+    assert j.itens["audio_voltar_mais"].rotulo.endswith(
+        "	Ctrl+Shift+Page Up")
+    assert "Left" not in j.itens["audio_voltar"].rotulo

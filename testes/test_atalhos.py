@@ -96,3 +96,23 @@ def test_texto_falado():
     assert at.texto_falado("Ctrl+Shift+PgUp") == "Control Shift Page Up"
     assert at.texto_falado("Ctrl+,") == "Control vírgula"
     assert at.texto_falado("") == "sem atalho"
+
+
+def test_exibir_usa_nomes_em_portugues():
+    assert at.exibir("Ctrl+Shift+Left") == "Ctrl+Shift+Seta para a esquerda"
+    assert at.exibir("Ctrl+Shift+Right") == "Ctrl+Shift+Seta para a direita"
+    assert at.exibir("Ctrl+Shift+Up") == "Ctrl+Shift+Seta para cima"
+    assert at.exibir("Ctrl+Shift+Down") == "Ctrl+Shift+Seta para baixo"
+    assert at.exibir("Ctrl+Shift+PgUp") == "Ctrl+Shift+Page Up"
+    assert at.exibir("Ctrl+Space") == "Ctrl+Espaço"
+    assert at.exibir("Ctrl+,") == "Ctrl+,"
+    assert at.exibir("F7") == "F7"
+    assert at.exibir("") == ""
+
+
+def test_falado_nao_traz_nomes_em_ingles():
+    falado = at.texto_falado("Ctrl+Shift+Left")
+    assert falado == "Control Shift Seta para a esquerda"
+    for ingles in ("Left", "Right", "Up", "Down"):
+        for c in (ingles,):
+            assert ingles not in at.texto_falado("Ctrl+" + c).split()

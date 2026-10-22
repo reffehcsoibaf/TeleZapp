@@ -29,7 +29,7 @@ class DialogoAtalho(wx.Dialog):
         lay.Add(texto, 0, wx.ALL, 10)
         lay.Add(wx.StaticText(self, label="&Combinação"), 0,
                 wx.LEFT | wx.RIGHT, 10)
-        self.campo = wx.TextCtrl(self, value=self.escolhida,
+        self.campo = wx.TextCtrl(self, value=at.exibir(self.escolhida),
                                  style=wx.TE_READONLY, name="Combinação",
                                  size=(420, -1))
         lay.Add(self.campo, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
@@ -76,7 +76,7 @@ class DialogoAtalho(wx.Dialog):
             self._dizer("%s não serve. %s" % (at.texto_falado(canon), motivo))
             return
         self.escolhida = canon
-        self.campo.SetValue(canon)
+        self.campo.SetValue(at.exibir(canon))
         self.aviso.SetLabel("")
         self._atualizar_ok()
         self._dizer(at.texto_falado(canon))

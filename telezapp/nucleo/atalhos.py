@@ -214,15 +214,66 @@ def _sem_acento(texto):
                    if unicodedata.category(c) != "Mn")
 
 
+# como cada tecla aparece e e falada em portugues (a combinacao guardada e a
+# forma canonica, em ingles, que o wx entende)
+NOMES_DAS_TECLAS = {
+    "Up": "Seta para cima", "Down": "Seta para baixo",
+    "Left": "Seta para a esquerda", "Right": "Seta para a direita",
+    "PgUp": "Page Up", "PgDn": "Page Down", "Space": "Espaço",
+    "Esc": "Esc", "Backspace": "Backspace", "Delete": "Delete",
+    "Insert": "Insert", ",": "vírgula", ".": "ponto", ";": "ponto e vírgula",
+    "/": "barra", "\\": "barra invertida", "-": "menos", "=": "igual",
+    "`": "crase", "'": "apóstrofo", "[": "abre colchete",
+    "]": "fecha colchete"}
+SIMBOLOS_NA_TELA = {",": ",", ".": ".", ";": ";", "/": "/", "\\": "\\",
+                    "-": "-", "=": "=", "`": "`", "'": "'", "[": "[",
+                    "]": "]"}
+
+
+def exibir(canon):
+    """A combinacao como aparece na tela: "Ctrl+Shift+Seta para a esquerda".
+    Simbolos ficam como sao ("Ctrl+,")."""
+    if not canon:
+        return ""
+    partes_ = canon.split("+")
+    return "+".join(
+        SIMBOLOS_NA_TELA.get(p, NOMES_DAS_TECLAS.get(p, p))
+        for p in partes_)
+
+
+# teclas cujo nome em portugues o wx nao entende depois do Tab do menu: o
+# nome vai entre parenteses, no fim do texto do item
+NOMES_FORA_DO_ACELERADOR = ("Up", "Down", "Left", "Right", "Space")
+
+
+def no_fim_do_texto(canon):
+    """True se o nome da combinacao nao pode ir depois do Tab do menu."""
+    return bool(canon) and canon.split("+")[-1] in NOMES_FORA_DO_ACELERADOR
+
+
+# teclas cujo nome em portugues o wx nao entende depois do Tab do menu: o
+# nome vai entre parenteses, no fim do texto do item
+NOMES_FORA_DO_ACELERADOR = ("Up", "Down", "Left", "Right", "Space")
+
+
+def no_fim_do_texto(canon):
+    """True se o nome da combinacao nao pode ir depois do Tab do menu."""
+    return bool(canon) and canon.split("+")[-1] in NOMES_FORA_DO_ACELERADOR
+
+
+# teclas cujo nome em portugues o wx nao entende depois do Tab do menu: o
+# nome vai entre parenteses, no fim do texto do item
+NOMES_FORA_DO_ACELERADOR = ("Up", "Down", "Left", "Right", "Space")
+
+
+def no_fim_do_texto(canon):
+    """True se o nome da combinacao nao pode ir depois do Tab do menu."""
+    return bool(canon) and canon.split("+")[-1] in NOMES_FORA_DO_ACELERADOR
+
+
 def texto_falado(canon):
     """Como o leitor de tela deve dizer a combinacao."""
     if not canon:
         return "sem atalho"
-    nomes = {"Ctrl": "Control", "PgUp": "Page Up", "PgDn": "Page Down",
-             "Esc": "Escape", ",": "vírgula", ".": "ponto", ";": "ponto e "
-             "vírgula", "/": "barra", "\\": "barra invertida", "-": "menos",
-             "=": "igual", "`": "crase", "'": "apóstrofo",
-             "[": "abre colchete", "]": "fecha colchete"}
-    return " ".join(nomes.get(p, p) for p in canon.split("+") if p) \
-        if not canon.endswith("++") else \
-        " ".join(nomes.get(p, p) for p in canon[:-2].split("+")) + " mais"
+    nomes = dict(NOMES_DAS_TECLAS, Ctrl="Control")
+    return " ".join(nomes.get(p, p) for p in canon.split("+"))

@@ -511,9 +511,9 @@ class Janela(wx.Frame):
         item(m_conv, "ler_ultima", "&Ouvir a última mensagem\tCtrl+R")
         item(m_conv, "atualizar", "A&tualizar a lista de conversas\tF5")
         item(m_conv, "ir_filtro_conta",
-             "Filtro de &serviço ou conta\tAlt+4")
+             "Ir para o filtro de &serviço ou conta\tAlt+4")
         item(m_conv, "ir_filtro_tipo",
-             "F&iltro de tipo de conversa\tAlt+5")
+             "Ir para o f&iltro de tipo de conversa\tAlt+5")
         item(m_conv, "buscar_conv", "Bus&car conversa\tCtrl+F")
         item(m_conv, "esconder_trancadas",
              "Esconder as conversas tr&ancadas\tCtrl+Shift+T")
@@ -545,28 +545,33 @@ class Janela(wx.Frame):
              "Mostrar a &janela da chamada\tCtrl+Shift+J")
         item(m_cham, "chamada_mudo",
              "&Silenciar ou ativar o microfone\tCtrl+Shift+K")
-        item(m_cham, "chamada_tempo", "&Tempo de chamada")
+        item(m_cham, "chamada_tempo", "&Falar há quanto tempo a chamada dura")
         item(m_cham, "chamada_desligar", "&Desligar\tCtrl+Shift+H")
 
         m_mid = wx.Menu()
+        m_baixar = wx.Menu()
         for valor, nome in next(o for o in config.OPCOES
                                 if o.chave == "midias_baixar").escolhas:
-            it = item(m_mid, "baixar_" + valor, nome, "radio")
+            it = item(m_baixar, "baixar_" + valor, nome, "radio")
             self.Bind(wx.EVT_MENU,
                       lambda e, v=valor: self._mudar_baixar(v), it)
+        m_mid.AppendSubMenu(m_baixar, "&Quando baixar as mídias")
         m_mid.AppendSeparator()
-        item(m_mid, "anexar", "&Anexar e enviar arquivo...	Ctrl+Shift+A")
-        item(m_mid, "gravar_mic", "Gravar do &microfone: iniciar e parar, "
-                                  "enviando ao parar\tCtrl+Shift+M")
-        item(m_mid, "gravar_som", "Gravar o &som do computador: iniciar e "
-                                  "parar, enviando ao parar\tCtrl+Shift+S")
+        item(m_mid, "anexar", "&Anexar e enviar arquivo como "
+                              "documento...\tCtrl+Shift+A")
+        item(m_mid, "gravar_mic", "Gravar nota de voz (começa; apertar de "
+                                  "novo envia)\tCtrl+Shift+M")
+        item(m_mid, "gravar_som", "Gravar o &som do computador (começa; "
+                                  "apertar de novo envia)\tCtrl+Shift+S")
         item(m_mid, "gravar_mic_janela",
-             "Gravar do microfone em uma &janela...")
+             "Gravar nota de voz em uma &janela...")
         item(m_mid, "gravar_som_janela",
              "Gravar o som do computador em uma ja&nela...")
         m_mid.AppendSeparator()
-        item(m_mid, "audio_janela", "&Enter em áudio...")
-        item(m_mid, "audio_sequencia", "Áudios em &sequência...")
+        item(m_mid, "audio_janela",
+             "Ao tocar um áudio: só tocar ou abrir o &player...")
+        item(m_mid, "audio_sequencia",
+             "Depois de um áudio, tocar o &próximo...")
         item(m_mid, "audio_voltar", "Voltar &5 segundos no áudio\t"
                                     "Ctrl+Shift+Left")
         item(m_mid, "audio_avancar", "Avançar 5 s&egundos no áudio\t"
@@ -578,18 +583,24 @@ class Janela(wx.Frame):
         item(m_mid, "vel_mais", "Áudio mais &rápido\tCtrl+Shift+Up")
         item(m_mid, "vel_menos", "Áudio mais le&nto\tCtrl+Shift+Down")
         item(m_mid, "vel_normal", "&Velocidade normal do áudio\tCtrl+Shift+0")
-        item(m_mid, "vel_escolher", "Velocidade do áu&dio...")
-        item(m_mid, "vel_passo", "&Passo da velocidade do áudio...")
-        item(m_mid, "midias_limite", "&Limite do download automático...")
-        item(m_mid, "midias_confirmar", "&Confirmar downloads grandes...")
-        item(m_mid, "midias_espaco", "&Espaço usado pelas mídias")
-        item(m_mid, "midias_limpar", "L&impar mídias baixadas...")
+        item(m_mid, "vel_escolher", "&Escolher a velocidade do áudio...")
+        item(m_mid, "vel_passo",
+             "Quanto a velocidade muda a cada &vez...")
+        item(m_mid, "midias_limite",
+             "&Tamanho máximo do download automático...")
+        item(m_mid, "midias_confirmar",
+             "Perguntar antes de baixar arquivos &grandes...")
+        item(m_mid, "midias_espaco", "Ver quanto &espaço as mídias ocupam")
+        item(m_mid, "midias_limpar",
+             "Apagar as mídias já bai&xadas do computador...")
 
         m_exib = wx.Menu()
+        m_estilo = wx.Menu()
         for est, nome in m.NOMES_ESTILOS.items():
-            it = item(m_exib, "estilo%d" % est, nome, "radio")
+            it = item(m_estilo, "estilo%d" % est, nome, "radio")
             self.Bind(wx.EVT_MENU,
                       lambda e, est=est: self._mudar_estilo(est), it)
+        m_exib.AppendSubMenu(m_estilo, "Como cada &mensagem é lida")
         m_exib.AppendSeparator()
         rotulos = {o.chave: o.rotulo for o in config.OPCOES}
         for chave in ("som", "falar_novas", "falar_novas_outras_conversas",
@@ -641,10 +652,15 @@ class Janela(wx.Frame):
         categorias = {m_msg: "Mensagens", m_conv: "Conversas",
                       m_ctt: "Contatos", m_cham: "Chamadas",
                       m_contas: "Contas", m_mid: "Mídias", m_exib: "Exibir",
-                      m_fer: "Ferramentas", m_aj: "Ajuda", m_dep: "Ajuda"}
+                      m_fer: "Ferramentas", m_aj: "Ajuda", m_dep: "Ajuda",
+                      m_baixar: "Mídias", m_estilo: "Exibir"}
+        # nos grupos de opcoes o nome do item sozinho nao diz do que se trata
+        grupos = {m_baixar: "Quando baixar as mídias",
+                  m_estilo: "Como cada mensagem é lida"}
         for chave, it in self.itens.items():
+            grupo = grupos.get(self._menu_do_item[chave])
             self.atalhos.registrar(
-                chave, self._base_menu[chave],
+                chave, (grupo + ": " if grupo else "") + self._base_menu[chave],
                 categorias.get(self._menu_do_item[chave], "Menu"),
                 self._padrao_menu[chave])
         self.atalhos.registrar(
@@ -768,18 +784,23 @@ class Janela(wx.Frame):
         return bool(self.cfg.get("mostrar_atalhos"))
 
     def _atualizar_atalhos(self):
-        """Poe em cada item de menu o atalho que vale. Com a opcao de mostrar
-        ligada o atalho vai no proprio nome do item (o Windows o le e o
-        leitor de tela o fala); desligada, o nome fica limpo e os atalhos
-        valem por uma tabela de aceleracao da janela."""
+        """Poe em cada item de menu o atalho que vale. Os atalhos sempre valem
+        por uma tabela de aceleracao da janela; com a opcao de mostrar ligada
+        o nome do atalho, em portugues, tambem vai no nome do item."""
         mostrar = self._mostrar_atalhos()
         entradas = []
         for chave, it in self.itens.items():
             canon = self.atalhos.efetivo(chave)
             base = self._base_menu[chave]
-            it.SetItemLabel(base + ("\t" + canon if mostrar and canon
-                                    else ""))
-            if canon and not mostrar and hasattr(wx, "AcceleratorEntry"):
+            nome = nucleo_atalhos.exibir(canon)
+            if not (mostrar and canon):
+                sufixo = ""
+            elif nucleo_atalhos.no_fim_do_texto(canon):
+                sufixo = " (%s)" % nome      # o wx nao entende "Seta para..."
+            else:
+                sufixo = "\t" + nome
+            it.SetItemLabel(base + sufixo)
+            if canon and hasattr(wx, "AcceleratorEntry"):
                 entradas.append(ui_teclas.entrada_de_aceleracao(
                     canon, it.GetId()))
         if hasattr(wx, "AcceleratorTable"):
@@ -792,8 +813,9 @@ class Janela(wx.Frame):
         for controle, base, chave, fixo in self._controles_atalho:
             canon = fixo or self.atalhos.efetivo(chave) if chave or fixo \
                 else ""
-            controle.SetLabel(base + (" (%s)" % canon if mostrar and canon
-                                      else ""))
+            controle.SetLabel(base + (
+                " (%s)" % nucleo_atalhos.exibir(canon) if mostrar and canon
+                else ""))
 
     def _aplicar_atalhos(self, personalizados):
         """Guarda o que a pessoa escolheu e poe nos menus e nos controles."""

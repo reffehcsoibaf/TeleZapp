@@ -16,6 +16,7 @@ import wx
 from telezapp import config
 from telezapp.acessibilidade.fala import bipe
 
+from telezapp.nucleo import atalhos as nucleo_atalhos
 from telezapp.nucleo import pacotes_de_som
 from telezapp.nucleo.configuracoes import (CATEGORIA_BUSCA,
                                            ModeloConfiguracoes)
@@ -202,7 +203,7 @@ class DialogoConfiguracoes(wx.Dialog):
 
     def _atalhos_texto(self, acao, canon):
         return "%s, %s: %s" % (acao.rotulo, acao.categoria,
-                               canon or "sem atalho")
+                               nucleo_atalhos.exibir(canon) or "sem atalho")
 
     def _atalhos_preencher(self, manter=None):
         """Mostra as funcoes que casam com a busca; `manter` e a chave da
@@ -259,7 +260,8 @@ class DialogoConfiguracoes(wx.Dialog):
         if outro is not None:
             r = wx.MessageBox(
                 "O atalho %s já é usado por \"%s\" (%s). Substituir? \"%s\" "
-                "ficará sem atalho." % (canon, outro.rotulo, outro.categoria,
+                "ficará sem atalho." % (nucleo_atalhos.exibir(canon),
+                                       outro.rotulo, outro.categoria,
                                        outro.rotulo),
                 "Atalho em uso", wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
                 self)
@@ -269,7 +271,7 @@ class DialogoConfiguracoes(wx.Dialog):
             self.modelo.atalho_definir(chave, canon, substituir=True)
         self._atalhos_preencher(chave)
         self._atalhos_dizer("Atalho %s. Aplique para valer." % (
-            canon or "removido"))
+            nucleo_atalhos.texto_falado(canon) if canon else "removido"))
 
     def _atalhos_remover(self):
         chave = self._atalhos_chave()
