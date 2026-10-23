@@ -85,7 +85,7 @@ def converter_para_opus(anexo, pasta):
             pass
         raise ErroEnvio("Não consegui converter %s para enviar como áudio "
                         "(%s)." % (anexo.nome, type(erro).__name__))
-    return Anexo(destino, m.AUDIO, nome, "audio/ogg", os.path.getsize(destino),
+    return Anexo(destino, m.AUDIO, nome, MIME_VOZ, os.path.getsize(destino),
                  segundos, temporario=True)
 
 
@@ -95,7 +95,28 @@ def _duracao_audio(caminho):
         info = sf.info(caminho)
         return int(round(info.frames / float(info.samplerate)))
     except Exception:
-        return 0
+        pass
+    if os.path.splitext(caminho)[1].lower() in (".m4a", ".mp4"):
+        try:                         # M4A tem a mesma estrutura do MP4
+            return int(round(mp4.ler(caminho).segundos))
+        except (mp4.NaoEMp4, OSError, ValueError):
+            pass
+    return 0
+
+
+EXT_OGG = {".ogg", ".opus", ".oga"}
+
+
+def _segundos_opus(caminho):
+    """Duracao de um Ogg/Opus, ou None se o arquivo nao e Ogg/Opus (por
+    exemplo Ogg Vorbis, que o WhatsApp nao toca)."""
+    try:
+        with open(caminho, "rb") as f:
+            if b"OpusHead" not in f.read(512):
+                return None
+        return int(round(opus.duracao_arquivo(caminho)))
+    except (ValueError, OSError):
+        return None
 
 
 def parece_midia(caminho):
@@ -163,6 +184,14 @@ def _preparar(caminho, voz, temporario, como_documento):
             return Anexo(caminho, m.VIDEO, nome, "video/mp4", tamanho,
                          int(round(info.segundos)), info.largura,
                          info.altura, aviso, temporario)
+    elif tipo == m.AUDIO and ext in EXT_OGG:
+        # o WhatsApp so aceita como audio o Ogg com Opus, e com o tipo
+        # "audio/ogg; codecs=opus": com "audio/ogg" so, ou com Vorbis, o envio
+        # aparece como feito e nunca chega. Vorbis vai como documento.
+        segundos = _segundos_opus(caminho)
+        if segundos is not None:
+            return Anexo(caminho, m.AUDIO, nome, MIME_VOZ, tamanho, segundos,
+                         temporario=temporario)
     elif tipo == m.AUDIO:
         return Anexo(caminho, m.AUDIO, nome, _mime(caminho, "audio/mpeg"),
                      tamanho, _duracao_audio(caminho),

@@ -3918,8 +3918,9 @@ class ProvedorWhatsApp(Provedor):
                 self.conta.id, conversa_id, legenda, motivo,
                 devolver_texto=False, tipo=anexo.tipo))
             return
-        log.info("%s enviado em %.2fs (%d bytes)", anexo.tipo,
-                 time.perf_counter() - inicio, anexo.tamanho)
+        log.info("%s enviado em %.2fs (%d bytes, %s, %ds)", anexo.tipo,
+                 time.perf_counter() - inicio, anexo.tamanho, anexo.mime,
+                 anexo.segundos)
         self._registrar_enviada(
             resp, conversa_id, legenda, tipo=anexo.tipo,
             segundos=anexo.segundos, nome_arquivo=anexo.nome,

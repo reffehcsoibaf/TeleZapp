@@ -122,3 +122,17 @@ def test_wav_colado_continua_audio_para_converter_no_envio(tmp_path):
     wav.write_bytes(b"RIFF" + b"\0" * 40)
     a = envio.preparar(str(wav), colado=True)
     assert a.tipo == m.AUDIO and a.colado and not a.sem_conversao
+
+
+def test_audio_ogg_opus_vai_como_audio_com_o_tipo_que_o_whatsapp_aceita(
+        tmp_path):
+    a = envio.preparar(amostra("voz.ogg", tmp_path))
+    assert a.tipo == m.AUDIO and not a.voz
+    assert a.mime == "audio/ogg; codecs=opus" and a.segundos >= 0
+
+
+def test_audio_ogg_que_nao_e_opus_vai_como_documento(tmp_path):
+    f = tmp_path / "vorbis.ogg"
+    f.write_bytes(b"OggS" + bytes(60))        # Ogg que nao e Opus
+    a = envio.preparar(str(f))
+    assert a.tipo == m.DOCUMENTO and a.nome == "vorbis.ogg"

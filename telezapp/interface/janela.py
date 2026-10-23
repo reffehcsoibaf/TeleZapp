@@ -2475,8 +2475,14 @@ class Janela(wx.Frame):
                     if item.tipo == "texto":
                         prov.enviar_texto(conversa_id, item.texto)
                     else:
-                        anexo = envio.preparar(
-                            item.caminho, voz=item.tipo_midia == m.VOZ)
+                        try:
+                            anexo = envio.preparar(
+                                item.caminho, voz=item.tipo_midia == m.VOZ)
+                        except envio.ErroEnvio:
+                            if item.tipo_midia != m.VOZ:
+                                raise
+                            # voz que nao e Ogg/Opus: segue como arquivo
+                            anexo = envio.preparar(item.caminho)
                         prov.enviar_arquivo(conversa_id, anexo, item.texto)
                     enviadas += 1
                 except Exception as e:

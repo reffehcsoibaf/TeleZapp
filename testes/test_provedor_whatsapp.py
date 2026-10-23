@@ -2789,7 +2789,7 @@ def test_wav_colado_vira_audio_ogg_opus_comum(amb, dados_midia, tmp_path):
     nova = esperar(amb.fila, ev.MensagemNova)
     assert nova.mensagem.tipo == m.AUDIO
     audio = amb.c.enviadas[-1][1].audioMessage
-    assert not audio.PTT and audio.mimetype == "audio/ogg"
+    assert not audio.PTT and audio.mimetype == "audio/ogg; codecs=opus"
     assert audio.seconds == 1
     assert wav.exists()                        # o original fica onde estava
 
