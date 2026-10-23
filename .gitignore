@@ -43,3 +43,7 @@ experimentos/alvo-chamada.txt
 # Copia local do neonize de teste (DLL de uns 18 MB): ver Backup/restaurar_neonize_teste.py
 Backup/neonize-0.5.2-teste/
 Backup/neonize-0.5.2-chamadas/
+
+# Cloudflare Worker de relatos
+relatos/.wrangler/
+relatos/node_modules/
