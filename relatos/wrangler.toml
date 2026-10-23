@@ -1,0 +1,12 @@
+name = "telezapp-relatos"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+# Troque o id pelo que `npx wrangler kv namespace create RELATOS` mostrar.
+[[kv_namespaces]]
+binding = "RELATOS"
+id = "TROQUE_PELO_ID_DO_KV"
+
+[vars]
+# Endereço do próprio Worker, usado no aviso opcional pelo Telegram.
+ENDERECO_ADMIN = "https://telezapp-relatos.SEU-USUARIO.workers.dev"
