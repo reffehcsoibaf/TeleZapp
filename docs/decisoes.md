@@ -609,6 +609,8 @@ no fechamento, por assunto.
 
 - **Verificado ao vivo pelo responsável (23/10/2026):** navegou pelo menu reorganizado (Novo, Ir para, Ferramentas) e pela janela de configurações nova (Interface, Mensagens e o botão Conteúdo falado), sem relatar problema. O arquivo de áudio que não chegava em 22/10 foi reenviado e **chegou ao destino como áudio**. Outros formatos (Ogg Vorbis, M4A, MP3) ele só vai testar numa oportunidade ou se um usuário relatar. **Não verificado:** criar grupo, canal e comunidade (WhatsApp e Telegram), tópicos de grupo do Telegram, Nova chamada, Novo contato e as credenciais do Telegram embutidas no executável (ainda não empacotado).
 
+- **Formulário de relatos (23/10/2026):** `site/relatar.html` envia para o Worker `telezapp-relatos` (pasta `relatos/`, KV, relatos guardados 90 dias, leitura em `/admin` com senha, aviso por notificação do ntfy). **Verificado ao vivo pelo responsável (23/10/2026):** um relato de teste mandado direto ao Worker apareceu na lista do `/admin` e a notificação chegou ao celular. **Não verificado:** o envio pela própria página (ela só vai ao ar com a `main`) e o envio de logs pelo navegador.
+
 ## Próximos passos sugeridos
 
 1. ~~Grupo 1 do plano acima~~ (concluído).
