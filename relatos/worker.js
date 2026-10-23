@@ -135,8 +135,20 @@ async function relato(req, env) {
   return json({ ok: true, id });
 }
 
-// aviso opcional pelo Telegram (segredos TG_TOKEN e TG_CHAT)
+// avisos opcionais: notificacao do ntfy.sh (segredo NTFY_TOPIC) e mensagem no
+// Telegram (segredos TG_TOKEN e TG_CHAT). O ntfy leva so o tipo e o nome, sem
+// a descricao nem o endereco do /admin.
 async function avisar(env, id, r) {
+  if (env.NTFY_TOPIC) {
+    try {
+      await fetch("https://ntfy.sh/" + encodeURIComponent(env.NTFY_TOPIC), {
+        method: "POST",
+        headers: { "Title": "Novo relato no TeleZapp", "Tags": "speech_balloon" },
+        body: TIPOS[r.tipo] + " de " + (r.nome || "alguém sem nome") +
+          (r.logs.length ? ", com log" : ""),
+      });
+    } catch { /* o aviso e um extra */ }
+  }
   if (!env.TG_TOKEN || !env.TG_CHAT) return;
   try {
     const texto = "Novo relato no TeleZapp (" + TIPOS[r.tipo] + ")\n" +
