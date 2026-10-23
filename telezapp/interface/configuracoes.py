@@ -154,6 +154,9 @@ class DialogoConfiguracoes(wx.Dialog):
                 0, wx.ALL, 8)
         for o in opcoes:
             self._criar_opcao(o)
+        if categoria != CATEGORIA_BUSCA:
+            for grupo in self.modelo.grupos(categoria):
+                self._criar_botao_grupo(categoria, grupo)
         if categoria == "Privacidade" and self.privacidade is not None \
                 and not self.modelo.busca.strip():
             self._criar_privacidade_conta()
@@ -476,6 +479,22 @@ class DialogoConfiguracoes(wx.Dialog):
         self.controles[o.chave] = c
         if o.chave == "trancadas_exigir_codigo":
             self._criar_campos_codigo()
+
+    def _criar_botao_grupo(self, categoria, grupo):
+        """Um botao que abre, numa janela, as opcoes que ficam juntas."""
+        b = wx.Button(self.painel, label=grupo)
+        b.Bind(wx.EVT_BUTTON, lambda e: self._abrir_grupo(categoria, grupo))
+        self.lay_painel.Add(b, 0, wx.ALL, 8)
+        self.controles["grupo:" + grupo] = b
+
+    def _abrir_grupo(self, categoria, grupo):
+        dlg = DialogoGrupoOpcoes(
+            self, grupo, self.modelo.opcoes_do_grupo(categoria, grupo))
+        dlg.ShowModal()
+        dlg.Destroy()
+        b = self.controles.get("grupo:" + grupo)
+        if b:
+            b.SetFocus()
 
     # ------------------------------------ provedores de IA
     def _criar_ia(self):
@@ -825,6 +844,50 @@ class DialogoConfiguracoes(wx.Dialog):
     def _ao_ok(self, evento):
         if self._aplicar():
             self.EndModal(wx.ID_OK)
+
+
+class DialogoGrupoOpcoes(wx.Dialog):
+    """As opcoes de um grupo (caixas de marcar), numa janela propria. O que
+    for marcado vale como pendente na janela de configuracoes: so entra ao
+    apertar OK ou Aplicar la."""
+
+    def __init__(self, pai, titulo, opcoes):
+        super().__init__(pai, title=titulo, style=wx.DEFAULT_DIALOG_STYLE)
+        self.pai = pai
+        self._em_foco = None
+        self.caixas = {}
+        lay = wx.BoxSizer(wx.VERTICAL)
+        for o in opcoes:
+            c = wx.CheckBox(self, label=o.rotulo, name=o.rotulo)
+            c.SetValue(bool(pai.modelo.valor(o.chave)))
+            c.Bind(wx.EVT_CHECKBOX, lambda e, o=o, c=c:
+                   pai.modelo.definir(o.chave, c.GetValue()))
+            c.Bind(wx.EVT_SET_FOCUS, lambda e, o=o: self._ao_focar(e, o))
+            lay.Add(c, 0, wx.ALL, 8)
+            self.caixas[o.chave] = c
+        fechar = wx.Button(self, wx.ID_OK, "Fechar")
+        fechar.SetDefault()
+        lay.Add(fechar, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+        self.SetEscapeId(wx.ID_OK)
+        self.SetSizerAndFit(lay)
+        self.Bind(wx.EVT_CHAR_HOOK, self._ao_tecla)
+        self.CentreOnParent()
+
+    def _ao_focar(self, evento, opcao):
+        evento.Skip()
+        self._em_foco = opcao
+        pai = self.pai
+        if pai._espera is not None:
+            pai._espera.Stop()
+        if pai.fala is not None and pai.modelo.valor("falar_descricoes"):
+            pai._espera = wx.CallLater(400, pai.fala.falar, opcao.descricao)
+
+    def _ao_tecla(self, evento):
+        if evento.GetKeyCode() == wx.WXK_F1 and self.pai.fala is not None \
+                and self._em_foco is not None:
+            self.pai.fala.falar(self._em_foco.descricao, interromper=True)
+            return
+        evento.Skip()
 
 
 class DialogoProvedorIA(wx.Dialog):

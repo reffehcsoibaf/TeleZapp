@@ -208,6 +208,17 @@ class Provedor(ABC):
         """Ferramentas do canal (silenciar, deixar_de_seguir). (ok, texto)."""
         return False, "Esta conta não gerencia canais por aqui."
 
+    # tipos que o servico deixa criar: "grupo", "canal" e/ou "comunidade"
+    CRIA = ()
+
+    def criar_conversa(self, tipo, nome, descricao="", participantes=(),
+                       topicos=False):
+        """Cria um grupo, canal ou comunidade. `participantes`: telefones ou
+        @usuarios para ja pôr no grupo; `topicos`: grupo dividido em topicos
+        (onde o servico tem). Espera o servico (thread propria). Devolve
+        (ok, texto, conversa_id); o id e "" quando nao se sabe."""
+        return False, "Esta conta não cria grupos, canais ou comunidades.", ""
+
     def previa_do_convite(self, msg, acao):
         """Dados do grupo ou canal de um convite (acao do tipo "entrar"):
         {'nome', 'membros', 'descricao', 'ja_participa', 'erro'}; so 'erro'

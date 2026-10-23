@@ -16,7 +16,9 @@ def mod(tmp_path, monkeypatch):
 def test_categorias_sem_repeticao_e_com_todas_as_opcoes(mod):
     cats = categorias()
     assert len(cats) == len(set(cats))
-    todas = [o for c in cats for o in mod.opcoes(c)]
+    todas = [o for c in cats for o in mod.opcoes(c)] + [
+        o for c in cats for g in mod.grupos(c)
+        for o in mod.opcoes_do_grupo(c, g)]
     assert sorted(todas, key=config.OPCOES.index) ==         sorted(config.OPCOES, key=config.OPCOES.index)
     assert len(todas) == len(config.OPCOES)
     assert cats[-3:] == ["Privacidade", "Avançado", "Atualizações"]
@@ -72,7 +74,7 @@ def test_velocidades_seguem_o_passo_pendente(mod):
 
 def test_falar_descricoes_e_opcao_de_leitura_ligada_por_padrao(mod):
     o = next(o for o in config.OPCOES if o.chave == "falar_descricoes")
-    assert o.categoria == "Leitura" and o.padrao is True
+    assert o.categoria == "Interface" and o.padrao is True
     assert mod.valor("falar_descricoes") is True
     mod.definir("falar_descricoes", False)
     assert mod.valor("falar_descricoes") is False   # vale ja na janela
@@ -229,3 +231,25 @@ def test_atalhos_lista_filtra_pela_busca(mod):
     mod.registro = _registro()
     assert [a.chave for a, _ in mod.atalhos_lista("beta")] == ["b"]
     assert [a.chave for a, _ in mod.atalhos_lista("")] == ["a", "b"]
+
+
+def test_interface_e_mensagens_reunem_as_categorias_antigas(mod):
+    cats = categorias()
+    assert "Avisos" not in cats and "Leitura" not in cats
+    assert "Escrita" not in cats
+    assert "Interface" in cats and "Mensagens" in cats
+    assert mod.grupos("Interface") == ["Conteúdo falado"]
+    falado = {o.chave for o in mod.opcoes_do_grupo("Interface",
+                                                   "Conteúdo falado")}
+    assert falado == {"falar_novas", "falar_novas_outras_conversas",
+                      "falar_novas_fora_do_telezapp", "confirmar_envio",
+                      "falar_reacoes", "falar_descricoes"}
+    soltas = {o.chave for o in mod.opcoes("Interface")}
+    assert soltas == {"status_no_titulo", "avisar_chamadas_whatsapp"}
+    assert {"ortografia_idioma", "enter_envia", "estilo",
+            "previa_links"} <= {o.chave for o in mod.opcoes("Mensagens")}
+
+
+def test_busca_acha_opcao_dentro_de_um_grupo(mod):
+    mod.busca = "reacoes"
+    assert "falar_reacoes" in [o.chave for o in mod.opcoes(CATEGORIA_BUSCA)]

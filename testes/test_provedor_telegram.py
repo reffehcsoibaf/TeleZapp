@@ -1231,3 +1231,150 @@ def test_criar_enquete_no_telegram_manda_a_pergunta_e_as_opcoes(ambiente):
     e = m.enquete_de(nova.mensagem)
     assert nova.enviada_daqui and e["opcoes"] == ["Sexta", "Sábado"]
     assert e["maximo"] == 2 and e["poll_id"] == "555"
+
+
+# ------------------------------------------------ grupos com topicos
+def test_ids_e_topicos_de_um_grupo_com_topicos():
+    assert tg.id_do_topico("-100", 7) == "-100#7"
+    assert tg.separar_topico("-100#7") == ("-100", 7)
+    assert tg.separar_topico("-100") == ("-100", 0)
+    assert tg.separar_topico("status:5") == ("status:5", 0)
+    assert tg.nome_do_topico("Equipe", "Avisos") == "Equipe › Avisos"
+    assert tg.topico_da_mensagem(mensagem(1)) == tg.TOPICO_GERAL
+    direta = mensagem(2, reply_to=types.SimpleNamespace(
+        forum_topic=True, reply_to_msg_id=9, reply_to_top_id=None))
+    assert tg.topico_da_mensagem(direta) == 9
+    resposta = mensagem(3, reply_to=types.SimpleNamespace(
+        forum_topic=True, reply_to_msg_id=20, reply_to_top_id=9))
+    assert tg.topico_da_mensagem(resposta) == 9
+    resp_geral = mensagem(4, reply_to=types.SimpleNamespace(
+        forum_topic=False, reply_to_msg_id=2, reply_to_top_id=None))
+    assert tg.topico_da_mensagem(resp_geral) == tg.TOPICO_GERAL
+
+
+class ClienteComForum(ClienteFalso):
+    """Um grupo com topicos (Geral e Avisos) e uma conversa comum."""
+
+    async def iter_dialogs(self, limit=None, folder=None, archived=None):
+        if folder == 1:
+            return
+        yield types.SimpleNamespace(
+            id=10, name="Ana", unread_count=0, date=DATA,
+            input_entity="peer10", is_group=False, is_channel=False,
+            dialog=types.SimpleNamespace(read_outbox_max_id=0))
+        yield types.SimpleNamespace(
+            id=-100, name="Equipe", unread_count=5, date=DATA,
+            input_entity="peer-100", is_group=True, is_channel=True,
+            entity=types.SimpleNamespace(forum=True),
+            dialog=types.SimpleNamespace(read_outbox_max_id=0))
+
+    async def iter_messages(self, ent, limit=None, reply_to=None):
+        self.filtros = getattr(self, "filtros", []) + [reply_to]
+        topico = types.SimpleNamespace(forum_topic=True, reply_to_msg_id=9,
+                                       reply_to_top_id=None)
+        if reply_to == 9:
+            yield mensagem(21, "no topico", reply_to=topico, sender=ANA)
+            return
+        yield mensagem(30, "no geral", sender=ANA)
+        yield mensagem(21, "no topico", reply_to=topico, sender=ANA)
+        yield mensagem(10, "antiga do geral", sender=ANA)
+
+    async def __call__(self, requisicao):
+        await super().__call__(requisicao)
+        nome = type(requisicao).__name__
+        if nome == "GetForumTopicsRequest":
+            def topico(id, titulo, nao_lidas, mensagem_id, fechado=False):
+                return types.SimpleNamespace(
+                    id=id, title=titulo, unread_count=nao_lidas,
+                    top_message=mensagem_id, pinned=False, closed=fechado)
+            return types.SimpleNamespace(
+                topics=[topico(1, "Geral", 2, 30),
+                        topico(9, "Avisos", 3, 21, fechado=True),
+                        types.SimpleNamespace(id=4)],     # apagado
+                messages=[mensagem(30), mensagem(21)])
+        return types.SimpleNamespace(chats=[types.SimpleNamespace(id=555)])
+
+
+def test_grupo_com_topicos_vira_uma_conversa_por_topico(ambiente):
+    cliente = ClienteComForum()
+    p = ambiente.criar(cliente)
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ContaPronta)
+        convs = esperar(ambiente.fila, ev.ConversasAtualizadas).conversas
+        por_id = {c.id: c for c in convs}
+        assert sorted(por_id) == ["-100#1", "-100#9", "10"]   # sem o grupo
+        assert por_id["-100#9"].nome == "Equipe › Avisos"
+        assert por_id["-100#9"].nao_lidas == 3
+        assert por_id["-100#9"].somente_leitura        # topico fechado
+        assert not por_id["-100#1"].somente_leitura
+        assert por_id["-100#1"].tipo == "grupo"
+
+        p.carregar_mensagens("-100#9")
+        msgs = esperar(ambiente.fila, ev.MensagensCarregadas).mensagens
+        assert [x.id for x in msgs] == ["21"]
+        assert cliente.filtros[-1] == 9
+        assert msgs[0].conversa_id == "-100#9"
+        p.carregar_mensagens("-100#1")                  # o Geral
+        msgs = esperar(ambiente.fila, ev.MensagensCarregadas).mensagens
+        assert [x.id for x in msgs] == ["10", "30"]     # sem a do topico
+
+        p.enviar_texto("-100#9", "oi")
+        esperar(ambiente.fila, ev.MensagemNova)
+        p.enviar_texto("-100#1", "geral")
+        esperar(ambiente.fila, ev.MensagemNova)
+        p.enviar_texto("-100#9", "resp", resposta_a="21")
+        esperar(ambiente.fila, ev.MensagemNova)
+        # no topico responde ao topico; no Geral e na resposta, como antes
+        assert [(e[0], e[2]) for e in cliente.enviadas] == [
+            ("peer-100", 9), ("peer-100", None), ("peer-100", 21)]
+    finally:
+        p.parar()
+
+
+def test_marcar_topico_como_lido_le_so_aquele_topico(ambiente):
+    cliente = ClienteComForum()
+    p = ambiente.criar(cliente)
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ContaPronta)
+        esperar(ambiente.fila, ev.ConversasAtualizadas)
+        p.carregar_mensagens("-100#9")
+        esperar(ambiente.fila, ev.MensagensCarregadas)
+        p.marcar_como_lida("-100#9")
+        p.carregar_mensagens("10")       # garante que a anterior terminou
+        esperar(ambiente.fila, ev.MensagensCarregadas)
+        leitura = [r for r in cliente.requisicoes
+                   if type(r).__name__ == "ReadDiscussionRequest"]
+        assert leitura and leitura[0].msg_id == 9 and \
+            leitura[0].read_max_id == 21
+        assert cliente.lidas == []        # nao leu o grupo inteiro
+    finally:
+        p.parar()
+
+
+def test_criar_grupo_e_canal_no_telegram_monta_os_pedidos(ambiente,
+                                                          monkeypatch):
+    from telethon import utils
+    cliente = ClienteComForum()
+    p = ambiente.criar(cliente)
+    monkeypatch.setattr(utils, "get_peer_id", lambda c: -1000000000555)
+    monkeypatch.setattr(utils, "get_input_peer", lambda c: "peerNovo")
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ContaPronta)
+        assert p.CRIA == ("grupo", "canal")
+        ok, aviso, cid = p.criar_conversa("grupo", "Equipe", "Sobre", [],
+                                          topicos=True)
+        pedido = next(r for r in cliente.requisicoes
+                      if type(r).__name__ == "CreateChannelRequest")
+        assert ok and cid == "-1000000000555#1"
+        assert pedido.megagroup and pedido.forum and not pedido.broadcast
+        assert (pedido.title, pedido.about) == ("Equipe", "Sobre")
+        ok, aviso, cid = p.criar_conversa("canal", "Notícias", "")
+        pedido = [r for r in cliente.requisicoes
+                  if type(r).__name__ == "CreateChannelRequest"][-1]
+        assert ok and cid == "-1000000000555"
+        assert pedido.broadcast and not pedido.megagroup and not pedido.forum
+    finally:
+        p.parar()

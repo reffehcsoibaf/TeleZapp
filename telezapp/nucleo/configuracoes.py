@@ -59,9 +59,26 @@ class ModeloConfiguracoes:
         return cats
 
     def opcoes(self, categoria):
+        """Opcoes mostradas direto na categoria; as de um grupo ficam atras
+        do botao dele (ver `grupos`). A busca mostra todas, achadas onde
+        estiverem."""
         if categoria == CATEGORIA_BUSCA:
             return config.buscar_opcoes(self.busca)
-        return [o for o in config.OPCOES if o.categoria == categoria]
+        return [o for o in config.OPCOES
+                if o.categoria == categoria and not o.grupo]
+
+    def grupos(self, categoria):
+        """Nomes dos botoes da categoria, cada um com um grupo de opcoes."""
+        vistos = []
+        for o in config.OPCOES:
+            if o.categoria == categoria and o.grupo and \
+                    o.grupo not in vistos:
+                vistos.append(o.grupo)
+        return vistos
+
+    def opcoes_do_grupo(self, categoria, grupo):
+        return [o for o in config.OPCOES
+                if o.categoria == categoria and o.grupo == grupo]
 
     def valor(self, chave):
         if chave in self.pendentes:

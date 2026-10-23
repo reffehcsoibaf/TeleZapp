@@ -178,11 +178,13 @@ class Opcao:
     escolhas: tuple = ()     # vazio: sim ou nao; senao (valor, rotulo)
     numero: tuple = ()       # (minimo, maximo): numero digitado, sem lista
     som: str = ""            # evento de som (ver EVENTOS_SOM): "" = outra opcao
+    grupo: str = ""          # botao da categoria que abre estas opcoes juntas
 
 
 OPCOES = (
-    Opcao("status_no_titulo", "Mostrar o status no título da janela",
-          "Avisos", True,
+    Opcao("status_no_titulo",
+          "Mostrar status de presença no título da janela",
+          "Interface", True,
           "Com uma conversa aberta, o título da janela mostra, depois do "
           "nome, se a pessoa está online, quando foi vista por último ou se "
           "está digitando. No WhatsApp isso exige que a sua conta fique "
@@ -190,35 +192,40 @@ OPCOES = (
           "deixar de tocar nesse tempo) e, como no próprio WhatsApp, quem "
           "esconde o seu status também não vê o dos outros."),
     Opcao("avisar_chamadas_whatsapp", "Avisar chamadas do WhatsApp",
-          "Avisos", True,
+          "Interface", True,
           "Quando alguém liga pelo WhatsApp, abre uma janela dizendo quem "
           "está chamando e se é por voz ou por vídeo, com os botões OK e "
           "Conversar. Vale quando o TeleZapp não consegue atender a chamada "
           "(sem o componente de chamadas): atenda em outro dispositivo. "
           "Desmarcada, a chamada só fica registrada na lista de mensagens "
           "da conversa."),
-    Opcao("falar_novas", "Falar mensagens novas na conversa aberta", "Avisos",
-          False,
+    Opcao("falar_novas", "Falar mensagens novas na conversa aberta",
+          "Interface", False,
           "O leitor de tela fala o autor e o conteúdo de cada mensagem nova "
           "da conversa que está aberta, com o TeleZapp em uso. Não depende "
-          "dos sons."),
+          "dos sons.",
+          grupo="Conteúdo falado"),
     Opcao("falar_novas_outras_conversas",
-          "Falar mensagens novas de outras conversas", "Avisos", False,
+          "Falar mensagens novas de outras conversas", "Interface", False,
           "Com o TeleZapp em uso, fala o nome da conversa, o autor e o "
           "conteúdo das mensagens que chegam em outra conversa que não é a "
           "aberta (ou quando nenhuma está aberta). Não depende dos "
-          "sons."),
+          "sons.",
+          grupo="Conteúdo falado"),
     Opcao("falar_novas_fora_do_telezapp",
-          "Falar mensagens novas fora do TeleZapp", "Avisos", False,
+          "Falar mensagens novas fora do TeleZapp", "Interface", False,
           "Fala as mensagens novas também quando você está em outro "
           "programa ou com a janela do TeleZapp minimizada, de qualquer "
-          "conversa. Não depende dos sons."),
-    Opcao("confirmar_envio", "Falar mensagem enviada", "Avisos", False,
-          "Fala Enviada depois que uma mensagem sai."),
-    Opcao("falar_reacoes", "Falar reações às minhas mensagens", "Avisos",
+          "conversa. Não depende dos sons.",
+          grupo="Conteúdo falado"),
+    Opcao("confirmar_envio", "Falar mensagem enviada", "Interface", False,
+          "Fala Enviada depois que uma mensagem sai.",
+          grupo="Conteúdo falado"),
+    Opcao("falar_reacoes", "Falar reações às minhas mensagens", "Interface",
           False,
           "Fala quem reagiu e com qual emoji quando alguém reage a uma "
-          "mensagem sua. Desmarcada, a reação só aparece na mensagem."),
+          "mensagem sua. Desmarcada, a reação só aparece na mensagem.",
+          grupo="Conteúdo falado"),
     Opcao("trancadas_exigir_codigo",
           "Esconder as conversas trancadas atrás de um código secreto",
           "Privacidade", True,
@@ -255,7 +262,7 @@ OPCOES = (
           "(sem o texto das mensagens, que vai criptografado). Serve para "
           "investigar erros de envio; deixa o log grande. Vale na próxima "
           "abertura do TeleZapp."),
-    Opcao("previa_links", "Prévia dos links nas mensagens", "Leitura",
+    Opcao("previa_links", "Prévia dos links nas mensagens", "Mensagens",
           "completa",
           "Quando quem enviou mandou junto a prévia de um link (título e "
           "descrição), ela é lida na linha da mensagem. O TeleZapp não abre "
@@ -264,20 +271,20 @@ OPCOES = (
           (("completa", "Título e descrição"), ("titulo", "Só o título"),
            ("nenhuma", "Não ler a prévia"))),
     Opcao("previa_receber", "Buscar a prévia dos links recebidos",
-          "Leitura", False,
+          "Mensagens", False,
           "Quando chega uma mensagem com um link sem prévia, o TeleZapp abre "
           "a página para ler o título e a descrição. O site fica sabendo do "
           "IP deste computador e de que o link foi aberto. Só vale para "
           "mensagens que chegam com o programa aberto; endereços da rede "
           "local nunca são abertos."),
     Opcao("previa_enviar", "Gerar a prévia dos links que eu envio",
-          "Leitura", False,
+          "Mensagens", False,
           "No WhatsApp, o TeleZapp abre o primeiro link da mensagem que você "
           "envia e manda junto o título e a descrição, para quem recebe ver a "
           "prévia (o envio espera até 5 segundos). No Telegram, desmarcada, "
           "a mensagem sai sem a prévia de link. O site fica sabendo do IP "
           "deste computador.", ),
-    Opcao("ortografia_idioma", "Idioma do corretor ortográfico", "Escrita",
+    Opcao("ortografia_idioma", "Idioma do corretor ortográfico", "Mensagens",
           "pt-BR",
           "O idioma do dicionário que Verificar ortografia (F7, menu "
           "Mensagens) usa na caixa de digitar. Os dicionários são os do "
@@ -287,7 +294,7 @@ OPCOES = (
           (("pt-BR", "Português do Brasil"), ("pt-PT", "Português de Portugal"),
            ("en-US", "Inglês dos Estados Unidos"), ("es-ES", "Espanhol"))),
     Opcao("ortografia_ao_enviar", "Avisar de erros de ortografia ao enviar",
-          "Escrita", False,
+          "Mensagens", False,
           "Ao enviar uma mensagem de texto, se o corretor achar palavras "
           "com erro, pergunta se você quer corrigir antes ou enviar assim "
           "mesmo. Desmarcada, a mensagem sai direto e você corrige quando "
@@ -314,19 +321,19 @@ OPCOES = (
           "escondido na área de notificação, sem tirar o foco do que você "
           "está fazendo."),
     Opcao("enter_envia", "Enter na caixa de digitar envia a mensagem",
-          "Escrita", True,
+          "Mensagens", True,
           "Marcada (o padrão), Enter envia e Shift Enter quebra a linha; "
           "Control Enter também envia. Desmarcada, só Control Enter envia e "
           "Enter quebra a linha, como no Telegram Web e no Gmail. A tecla "
           "de enviar também pode ser mudada em Atalhos, na função \"Enviar "
           "a mensagem digitada\"."),
-    Opcao("estilo", "Como cada mensagem é lida", "Leitura", 1,
+    Opcao("estilo", "Como cada mensagem é lida", "Mensagens", 1,
           "A ordem em que autor, hora e conteúdo aparecem na lista de "
           "mensagens.",
           ((1, "Autor e hora primeiro"), (2, "Conteúdo primeiro"),
            (3, "Autor só quando muda"))),
     Opcao("mensagens_por_conversa", "Mensagens carregadas por conversa",
-          "Leitura", 1200,
+          "Mensagens", 1200,
           "Quantas mensagens, no máximo, o TeleZapp mantém na lista ao abrir "
           "uma conversa. Valores menores abrem a conversa mais depressa; as "
           "mensagens mais antigas continuam guardadas, mas não aparecem na "
@@ -334,10 +341,11 @@ OPCOES = (
           "marcador de não lidas pode ficar de fora. De 50 a 5000.",
           numero=(50, 5000)),
     Opcao("falar_descricoes", "Falar a descrição de cada opção",
-          "Leitura", True,
+          "Interface", True,
           "Na janela de configurações, o TeleZapp fala a explicação de cada "
           "opção logo depois que você chega nela. Desmarcada, a explicação "
-          "só é falada com F1."),
+          "só é falada com F1.",
+          grupo="Conteúdo falado"),
     Opcao("barra_de_progresso",
           "Janela com barra de progresso em downloads e envios longos",
           "Mídias", True,
@@ -536,7 +544,7 @@ EVENTOS_SOM = (
      "Tocado quando alguém reage com um emoji a uma mensagem sua (não toca "
      "em conversa arquivada, trancada ou silenciada, nem para a sua própria "
      "reação). A fala da reação continua sendo a opção Falar reações às "
-     "minhas mensagens, em Avisos."),
+     "minhas mensagens, em Interface, Conteúdo falado."),
     ("gravando", "gravação de voz iniciada",
      "Tocado quando começa a gravação de uma nota de voz ou do som do "
      "computador, pelo atalho ou pela janela de gravação. É curto, para não "

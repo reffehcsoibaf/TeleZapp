@@ -2225,20 +2225,32 @@ def test_menu_unico_com_submenus_na_ordem_pedida(j):
     assert [r.replace("&", "") for r, _ in barra] == ["Menu"]
     raiz = barra[0][1]
     rotulos = [r.replace("&", "") for r, _ in raiz.submenus]
-    assert rotulos == ["Mensagens", "Conversas", "Contatos", "Chamadas",
-                       "Contas", "Mídias", "Exibir", "Ferramentas", "Ajuda"]
+    assert rotulos == ["Novo", "Ir para", "Mensagens", "Conversas",
+                       "Contatos", "Chamadas", "Mídias", "Exibir",
+                       "Ferramentas", "Ajuda"]
     menus = {r.replace("&", ""): mn for r, mn in raiz.submenus}
 
     def nomes(menu):
-        return [i.rotulo.split("\t")[0].replace("&", "")
+        return [i.rotulo.split("	")[0].replace("&", "")
                 for i in menu.itens]
-    # Nova mensagem e o primeiro item de Mensagens, e saiu de Conversas
-    assert nomes(menus["Mensagens"])[0] == "Nova mensagem..."
-    assert "Nova mensagem..." not in nomes(menus["Conversas"])
-    # Contas: adicionar (uma entrada so), gerenciar e reconectar
-    assert nomes(menus["Contas"]) == [
-        "Adicionar conta...", "Gerenciar contas...",
-        "Conectar as contas de novo"]
+    # Novo e o primeiro menu e junta tudo o que se cria
+    assert nomes(menus["Novo"]) == [
+        "Nova mensagem...", "Nova chamada...", "Nova enquete...",
+        "Novo contato...", "Novo status ou história...", "Nova conta...",
+        "Novo grupo...", "Novo canal...", "Nova comunidade..."]
+    for antigo in ("Mensagens", "Conversas"):
+        assert "Nova mensagem..." not in nomes(menus[antigo])
+    # Ir para junta as idas a um lugar da janela
+    assert nomes(menus["Ir para"]) == [
+        "Ir para a lista de conversas", "Ir para a lista de mensagens",
+        "Ir para o campo editável", "Ir para o filtro de serviço ou conta",
+        "Ir para o filtro de tipo de conversa",
+        "Ir para a mensagem respondida"]
+    assert "Escrever mensagem" not in nomes(menus["Conversas"])
+    # Contas deixou de ser um menu: o que sobrou foi para Ferramentas
+    assert "Contas" not in menus
+    assert nomes(menus["Ferramentas"])[:2] == [
+        "Gerenciar contas...", "Reconectar as contas"]
     # o que ficava solto no Menu foi para Ferramentas
     ferramentas = nomes(menus["Ferramentas"])
     for esperado in ("Fazer backup...", "Restaurar backup...",
@@ -4436,3 +4448,120 @@ def test_enter_envia_vem_ligado_de_fabrica(tmp_path, monkeypatch):
     monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path))
     assert config.Config().get("enter_envia") is True
     assert config.PADROES["enter_envia"] is True
+
+
+# --------------------------------------- novo grupo, canal, chamada, contato
+def test_novo_grupo_cria_na_conta_e_abre_a_conversa(j, monkeypatch):
+    from telezapp.interface import criar_conversa as ui
+    criados = []
+    j.contas.p.CRIA = ("grupo", "canal")
+    j.contas.p.criar_conversa = lambda tipo, nome, desc, gente, topicos: \
+        criados.append((tipo, nome, desc, gente, topicos)) or (
+            True, "", "20")
+    j.estados["t1"] = ev.CONECTADA
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+
+    class Dialogo:
+        def __init__(self, pai, tipo, contas):
+            Dialogo.vistos = (tipo, contas)
+
+        def ShowModal(self):
+            return jm.wx.ID_OK
+
+        def escolhido(self):
+            return "t1", "Equipe", "Sobre", ["@bia"], True
+
+        def Destroy(self):
+            pass
+
+    class SemThread:
+        def __init__(self, target=None, args=(), **k):
+            self.alvo, self.args = target, args
+
+        def start(self):
+            self.alvo(*self.args)
+    monkeypatch.setattr(ui, "DialogoCriarConversa", Dialogo)
+    monkeypatch.setattr(jm.threading, "Thread", SemThread)
+    j._nova_conversa("grupo")
+    assert criados == [("grupo", "Equipe", "Sobre", ["@bia"], True)]
+    assert Dialogo.vistos[0] == "grupo" and Dialogo.vistos[1][0][0] == "t1"
+    assert any("Grupo Equipe criado" in t for t in ditas)
+    assert j.atual == ("t1", "20")            # abriu a conversa criada
+    # a conta nao cria comunidades: avisa e nao abre a janela
+    j._nova_conversa("comunidade")
+    assert ditas[-1] == "Nenhuma conta conectada cria comunidades."
+    assert len(criados) == 1
+
+
+def test_novo_grupo_que_falha_avisa_o_motivo(j, monkeypatch):
+    from telezapp.interface import criar_conversa as ui
+    j.contas.p.CRIA = ("grupo",)
+    j.contas.p.criar_conversa = lambda *a: (False, "O Telegram recusou.", "")
+    j.estados["t1"] = ev.CONECTADA
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+
+    class Dialogo:
+        def __init__(self, *a):
+            pass
+
+        def ShowModal(self):
+            return jm.wx.ID_OK
+
+        def escolhido(self):
+            return "t1", "Equipe", "", [], False
+
+        def Destroy(self):
+            pass
+
+    class SemThread:
+        def __init__(self, target=None, args=(), **k):
+            self.alvo, self.args = target, args
+
+        def start(self):
+            self.alvo(*self.args)
+    monkeypatch.setattr(ui, "DialogoCriarConversa", Dialogo)
+    monkeypatch.setattr(jm.threading, "Thread", SemThread)
+    j._nova_conversa("grupo")
+    assert ditas[-1] == "O Telegram recusou."
+    assert j.atual is None
+
+
+def test_nova_chamada_escolhe_a_pessoa_e_liga(j, monkeypatch):
+    from telezapp.interface import contatos
+    vistas = []
+    ligou = []
+    j._provedor_de_chamada = lambda conta_id: j.contas.p
+    j.estados["t1"] = ev.CONECTADA
+    monkeypatch.setattr(contatos, "dialogo_nova_chamada",
+                        lambda pai, contas, buscar: vistas.append(contas) or
+                        ("t1", "bruno", None))
+    j._ligar_para = lambda conv: ligou.append(conv.id)
+    j._nova_chamada()
+    assert [c for c, _ in vistas[0]] == ["t1"]
+    assert ligou == ["20"]                         # Bruno ja existia
+    # ninguem faz chamadas: avisa
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._provedor_de_chamada = lambda conta_id: None
+    j._nova_chamada()
+    assert ditas[-1] == "Nenhuma conta conectada faz chamadas."
+
+
+def test_novo_contato_guarda_e_avisa(j, monkeypatch):
+    from telezapp.interface import contatos
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    monkeypatch.setattr(contatos, "adicionar_contato",
+                        lambda pai, banco, contas, falar: (
+                            ("t1", "99@s.whatsapp.net"),
+                            "Contato Bia adicionado."))
+    renomeou = []
+    j._renomear_pelos_contatos = lambda: renomeou.append(True)
+    j._novo_contato()
+    assert renomeou == [True] and ditas[-1] == "Contato Bia adicionado."
+    monkeypatch.setattr(contatos, "adicionar_contato",
+                        lambda *a: None)
+    j._novo_contato()
+    assert renomeou == [True]                      # cancelou: nada muda

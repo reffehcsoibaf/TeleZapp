@@ -69,7 +69,7 @@ TEXTO_SOMENTE_LEITURA = ("Esta conversa é somente leitura: você não pode "
                          "escrever nela.")
 TEXTO_CARREGANDO = "Carregando mensagens..."
 TEXTO_FILTRO_VAZIO = "Nenhuma conversa neste filtro."
-TEXTO_SEM_CONTAS ="Nenhuma conversa ainda. Aperte Alt e use Contas, no " \
+TEXTO_SEM_CONTAS ="Nenhuma conversa ainda. Aperte Alt e use Novo, Nova conta, no " \
                    "menu, para adicionar uma conta do Telegram ou do WhatsApp."
 MAX_BOTOES_ACAO = 12     # botoes de resposta que cabem na ordem de Tab
 MAX_BOTOES_LINK = 12     # links e botoes de endereco, tambem na ordem de Tab
@@ -161,16 +161,16 @@ rápido e mais lento. Esc: fechar.
 
 NA CAIXA DE DIGITAÇÃO
 Enter e Control Enter: enviam (a tecla de enviar muda em Configurações,
-Atalhos; em Escrita dá para o Enter só quebrar a linha). Shift Enter: nova
+Atalhos; em Mensagens dá para o Enter só quebrar a linha). Shift Enter: nova
 linha. Esc: cancela a
 resposta, se houver, esconde a caixa e volta para as mensagens.
 Depois do botão Enviar há três botões: Anexar e enviar arquivo, Gravar do
 microfone e Gravar som do computador. O texto da caixa vai como legenda do arquivo.
 
 MENU
-Aperte Alt para abrir o Menu. Ele tem submenus (Contas, Contatos, Conversa,
-Mensagem, Exibição e Ajuda): use a seta para a direita para entrar e a seta para a
-esquerda para voltar. F1 abre o guia de uso completo.
+Aperte Alt para abrir o Menu. Ele tem submenus (Novo, Ir para, Mensagens,
+Conversas, Contatos, Chamadas, Mídias, Exibir, Ferramentas e Ajuda): use a seta
+para a direita para entrar e a seta para a esquerda para voltar. F1 abre o guia de uso completo.
 
 EXIBIÇÃO
 Escolha como cada mensagem é lida (autor e hora primeiro, conteúdo primeiro
@@ -479,15 +479,32 @@ class Janela(wx.Frame):
         self._padrao_menu = {}
 
         # Menu vertical: uma unica entrada na barra, aberta pelo Alt, com as
-        # secoes como submenus (seta para a direita), na ordem: Mensagens,
-        # Conversas, Contatos, Chamadas, Contas, Midias, Exibir, Ferramentas
-        # e Ajuda. E um menu nativo: o NVDA le como qualquer outro.
+        # secoes como submenus (seta para a direita), na ordem: Novo, Ir para,
+        # Mensagens, Conversas, Contatos, Chamadas, Midias, Exibir,
+        # Ferramentas e Ajuda. E um menu nativo: o NVDA le como qualquer outro.
         raiz = wx.Menu()
 
-        m_contas = wx.Menu()
-        item(m_contas, "adicionar_conta", "&Adicionar conta...")
-        item(m_contas, "gerenciar_contas", "&Gerenciar contas...")
-        item(m_contas, "reconectar", "&Conectar as contas de novo")
+        m_novo = wx.Menu()
+        item(m_novo, "nova_msg", "Nova &mensagem...\tCtrl+N")
+        item(m_novo, "nova_chamada", "Nova &chamada...")
+        item(m_novo, "nova_enquete", "Nova &enquete...")
+        item(m_novo, "novo_contato", "Novo c&ontato...")
+        item(m_novo, "postar_status", "Novo &status ou história...\t"
+                                      "Ctrl+Shift+U")
+        item(m_novo, "adicionar_conta", "Nova co&nta...")
+        item(m_novo, "novo_grupo", "Novo &grupo...")
+        item(m_novo, "novo_canal", "Novo c&anal...")
+        item(m_novo, "nova_comunidade", "Nova comuni&dade...")
+
+        m_ir = wx.Menu()
+        item(m_ir, "ir_conv", "Ir para a lista de &conversas\tAlt+1")
+        item(m_ir, "ir_msgs", "Ir para a lista de &mensagens\tAlt+3")
+        item(m_ir, "ir_caixa", "Ir para o campo &editável\tCtrl+E")
+        item(m_ir, "ir_filtro_conta",
+             "Ir para o filtro de &serviço ou conta\tAlt+4")
+        item(m_ir, "ir_filtro_tipo",
+             "Ir para o f&iltro de tipo de conversa\tAlt+5")
+        item(m_ir, "ir_respondida", "Ir para a mensagem respondi&da")
 
         m_ctt = wx.Menu()
         item(m_ctt, "contatos", "&Gerenciar contatos...")
@@ -497,14 +514,9 @@ class Janela(wx.Frame):
              "Salvar quem enviou a &mensagem como contato...")
 
         m_conv = wx.Menu()
-        item(m_conv, "ir_conv", "Ir para a lista de &conversas\tAlt+1")
         item(m_conv, "nao_lidas", "Mensagens &não lidas (marcador ou próxima "
                                   "conversa)\tAlt+2")
-        item(m_conv, "ir_msgs", "Ir para a lista de &mensagens\tAlt+3")
-        item(m_conv, "ir_caixa", "&Escrever mensagem\tCtrl+E")
         m_conv.AppendSeparator()
-        item(m_conv, "postar_status", "Postar &status ou história...\t"
-                                      "Ctrl+Shift+U")
         item(m_conv, "abrir_conv", "&Abrir a conversa selecionada")
         item(m_conv, "arquivar", "Ar&quivar ou desarquivar a conversa")
         item(m_conv, "salvar_conv", "Sal&var o conteúdo da conversa...")
@@ -515,18 +527,12 @@ class Janela(wx.Frame):
         item(m_conv, "silenciar", "Sile&nciar ou reativar o som da conversa")
         item(m_conv, "ler_ultima", "&Ouvir a última mensagem\tCtrl+R")
         item(m_conv, "atualizar", "A&tualizar a lista de conversas\tF5")
-        item(m_conv, "ir_filtro_conta",
-             "Ir para o filtro de &serviço ou conta\tAlt+4")
-        item(m_conv, "ir_filtro_tipo",
-             "Ir para o f&iltro de tipo de conversa\tAlt+5")
         item(m_conv, "buscar_conv", "Bus&car conversa\tCtrl+F")
         item(m_conv, "esconder_trancadas",
              "Esconder as conversas tr&ancadas\tCtrl+Shift+T")
 
         m_msg = wx.Menu()
-        item(m_msg, "nova_msg", "&Nova mensagem...\tCtrl+N")
         item(m_msg, "ver_enquete", "Ver e votar na enquete...")
-        item(m_msg, "nova_enquete", "Criar uma enquete...")
         item(m_msg, "enviar_msg", "Enviar a mensagem digitada\tCtrl+Enter")
         m_msg.AppendSeparator()
         item(m_msg, "responder_particular", "Responder em &particular")
@@ -538,7 +544,6 @@ class Janela(wx.Frame):
         item(m_msg, "inserir_emoji", "Inserir e&moji...\tCtrl+.")
         item(m_msg, "ortografia", "&Verificar ortografia da mensagem\tF7")
         item(m_msg, "encaminhar", "&Encaminhar...	Ctrl+Shift+E")
-        item(m_msg, "ir_respondida", "Ir para a mensagem respondi&da")
         item(m_msg, "favoritar_msg",
              "&Favoritar ou desfavoritar a mensagem\tCtrl+Shift+F")
         item(m_msg, "apagar_msg", "&Apagar mensagem...")
@@ -641,6 +646,9 @@ class Janela(wx.Frame):
         item(m_aj, "sobre", "&Sobre o %s" % NOME)
 
         m_fer = wx.Menu()
+        item(m_fer, "gerenciar_contas", "&Gerenciar contas...")
+        item(m_fer, "reconectar", "Reco&nectar as contas")
+        m_fer.AppendSeparator()
         item(m_fer, "backup", "Fazer &backup...")
         item(m_fer, "restaurar_backup", "&Restaurar backup...")
         item(m_fer, "configuracoes", "C&onfigurações...\tCtrl+,")
@@ -654,17 +662,18 @@ class Janela(wx.Frame):
              "&Esconder a janela e continuar em segundo plano")
         item(m_fer, "sair", "&Sair\tCtrl+Q")
 
-        for submenu, rotulo in ((m_msg, "&Mensagens"), (m_conv, "C&onversas"),
+        for submenu, rotulo in ((m_novo, "&Novo"), (m_ir, "&Ir para"),
+                                (m_msg, "&Mensagens"), (m_conv, "C&onversas"),
                                 (m_ctt, "Conta&tos"), (m_cham, "C&hamadas"),
-                                (m_contas, "Co&ntas"), (m_mid, "Mí&dias"),
-                                (m_exib, "&Exibir"), (m_fer, "&Ferramentas"),
-                                (m_aj, "A&juda")):
+                                (m_mid, "Mí&dias"), (m_exib, "&Exibir"),
+                                (m_fer, "&Ferramentas"), (m_aj, "A&juda")):
             raiz.AppendSubMenu(submenu, rotulo)
         barra.Append(raiz, "Menu")        # Alt sozinho ja abre; Alt M fica livre
         self.SetMenuBar(barra)
-        categorias = {m_msg: "Mensagens", m_conv: "Conversas",
+        categorias = {m_novo: "Novo", m_ir: "Ir para",
+                      m_msg: "Mensagens", m_conv: "Conversas",
                       m_ctt: "Contatos", m_cham: "Chamadas",
-                      m_contas: "Contas", m_mid: "Mídias", m_exib: "Exibir",
+                      m_mid: "Mídias", m_exib: "Exibir",
                       m_fer: "Ferramentas", m_aj: "Ajuda", m_dep: "Ajuda",
                       m_baixar: "Mídias", m_estilo: "Exibir"}
         # nos grupos de opcoes o nome do item sozinho nao diz do que se trata
@@ -706,6 +715,11 @@ class Janela(wx.Frame):
             "ir_caixa": lambda e: self._mostrar_caixa(),
             "enviar_msg": lambda e: self._enviar_texto(),
             "nova_msg": lambda e: self._nova_mensagem(),
+            "nova_chamada": lambda e: self._nova_chamada(),
+            "novo_contato": lambda e: self._novo_contato(),
+            "novo_grupo": lambda e: self._nova_conversa("grupo"),
+            "novo_canal": lambda e: self._nova_conversa("canal"),
+            "nova_comunidade": lambda e: self._nova_conversa("comunidade"),
             "ver_enquete": lambda e: self._abrir_enquete(),
             "nova_enquete": lambda e: self._nova_enquete(),
             "abrir_conv": lambda e: self._abrir_selecionada_na_lista(),
@@ -1254,7 +1268,7 @@ class Janela(wx.Frame):
         self._escolher_servico_e_adicionar(
             "Bem-vindo ao %s. Ainda não há nenhuma conta. Escolha qual "
             "adicionar agora, ou cancele para fazer isso depois pelo menu "
-            "(tecla Alt), em Contas, Adicionar conta." % NOME)
+            "(tecla Alt), em Novo, Nova conta." % NOME)
 
     @seguro
     def _adicionar_conta_pelo_menu(self):
@@ -1330,7 +1344,7 @@ class Janela(wx.Frame):
         """Lista de contas com caixa de marcar (ativada ou desativada) e,
         com a conta em foco, os botoes Excluir e Renomear."""
         if not self.cfg.contas():
-            self.fala.falar("Não há contas. Use Contas, Adicionar conta.")
+            self.fala.falar("Não há contas. Use Novo, Nova conta.")
             return
         from telezapp.interface.gerenciar_contas import DialogoContas
         dlg = DialogoContas(self, self._itens_de_contas, self._marcar_conta,
@@ -2928,6 +2942,10 @@ class Janela(wx.Frame):
             self.fala.falar("Abra ou selecione uma conversa para ligar.",
                             interromper=True)
             return
+        self._ligar_para(conv)
+
+    def _ligar_para(self, conv):
+        """Liga para a conversa com uma pessoa, se a conta puder."""
         if conv.tipo != "privada":
             bipe("erro")
             self.fala.falar("Só dá para ligar para uma conversa com uma "
@@ -4163,6 +4181,117 @@ class Janela(wx.Frame):
         self.anexos = list(anexos)
         self._enviar_texto()
 
+    @seguro
+    def _nova_chamada(self):
+        """Liga para alguem sem abrir uma conversa antes: escolhe a conta
+        (so se houver mais de uma que ligue) e a pessoa."""
+        from telezapp.interface import contatos
+        from telezapp.nucleo import nova_mensagem as nm
+        if self.chamada is not None and self.chamada.ativa:
+            self.fala.falar("Já há uma chamada em andamento.",
+                            interromper=True)
+            self._mostrar_chamada()
+            return
+        contas = [(d["id"], "%s, %s" % (
+            d.get("nome") or d.get("telefone") or d["id"],
+            m.SERVICOS.get(d.get("servico"), "")))
+            for d in self.cfg.contas()
+            if self.estados.get(d["id"]) == ev.CONECTADA
+            and self._provedor_de_chamada(d["id"]) is not None]
+        if not contas:
+            bipe("erro")
+            self.fala.falar("Nenhuma conta conectada faz chamadas.",
+                            interromper=True)
+            return
+
+        def buscar(conta_id, texto):
+            return nm.candidatos(
+                texto, self.banco.contatos(conta_id),
+                [c for c in self.indice.values()
+                 if c.conta_id == conta_id])
+        escolha = contatos.dialogo_nova_chamada(self, contas, buscar)
+        if escolha is None:
+            return
+        conta_id, destino, pessoa = escolha
+        achado = pessoa or self._resolver_destino(conta_id, destino, nm)
+        if achado is None:
+            bipe("erro")
+            self.fala.falar("Não encontrei %s. Use o nome de um contato ou "
+                            "conversa, um número com DDD ou um @usuário."
+                            % destino, interromper=True)
+            return
+        conversa_id, nome = achado
+        self._ligar_para(self._garantir_conversa(conta_id, conversa_id, nome))
+
+    @seguro
+    def _novo_contato(self):
+        from telezapp.interface import contatos
+        achado = contatos.adicionar_contato(
+            self, self.banco, _ContasParaContatos(self),
+            lambda t: self.fala.falar(t, interromper=True))
+        if achado is not None:
+            self._renomear_pelos_contatos()
+            self.fala.falar(achado[1], interromper=True)
+
+    @seguro
+    def _nova_conversa(self, tipo):
+        """Novo grupo, canal ou comunidade: pergunta os dados e cria na conta
+        escolhida; o servico responde fora da janela."""
+        from telezapp.interface.criar_conversa import DialogoCriarConversa
+        from telezapp.nucleo import criar_conversa as cc
+        contas = []
+        for dados in self.cfg.contas():
+            p = self.contas.provedor(dados["id"]) if self.contas else None
+            if p is not None and tipo in getattr(p, "CRIA", ()) and \
+                    self.estados.get(dados["id"]) == ev.CONECTADA:
+                servico = self.contas.servico(dados["id"])
+                contas.append((dados["id"], "%s, %s" % (
+                    dados.get("nome") or dados.get("telefone") or dados["id"],
+                    m.SERVICOS.get(servico, servico)), servico))
+        if not contas:
+            bipe("erro")
+            self.fala.falar("Nenhuma conta conectada cria %s." %
+                            cc.NOMES[tipo][1], interromper=True)
+            return
+        dlg = DialogoCriarConversa(self, tipo, contas)
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            conta_id, nome, descricao, gente, topicos = dlg.escolhido()
+        finally:
+            dlg.Destroy()
+        prov = self.contas.provedor(conta_id)
+        if prov is None:
+            return
+        self.fala.falar("Criando. Aviso quando terminar.", interromper=True)
+
+        def trabalho():
+            try:
+                ok, texto, cid = prov.criar_conversa(
+                    tipo, nome, descricao, gente, topicos)
+            except Exception:
+                log.exception("criar %s", tipo)
+                ok, texto, cid = False, "Não consegui criar.", ""
+            wx.CallAfter(self._conversa_criada, conta_id, tipo, nome, ok,
+                         texto, cid)
+        threading.Thread(target=trabalho, daemon=True,
+                         name="criar-conversa").start()
+
+    @seguro
+    def _conversa_criada(self, conta_id, tipo, nome, ok, texto, cid):
+        from telezapp.nucleo import criar_conversa as cc
+        if not ok:
+            bipe("erro")
+            self.fala.falar(texto, interromper=True)
+            wx.MessageBox(texto, NOME, wx.OK | wx.ICON_WARNING, self)
+            return
+        bipe("tarefa_pronta")
+        self.fala.falar(" ".join((cc.texto_pronto(tipo, nome), texto)).strip(),
+                        interromper=True)
+        conv = self.indice.get((conta_id, cid)) if cid else None
+        if conv is not None:
+            self._abrir_conversa_de(conv)
+
     def _resolver_destino(self, conta_id, destino, nm):
         """(conversa_id, nome) do destino digitado, pela agenda e pelas
         conversas da conta ou, para telefone e @usuario, pelo servico."""
@@ -5103,7 +5232,7 @@ class Janela(wx.Frame):
                 not self.contas.esta_ativa(conta_id)
             self.fala.falar(
                 "A conta está desativada. A mensagem não foi enviada. Ative "
-                "a conta em Contas." if desativada else
+                "a conta em Ferramentas, Gerenciar contas." if desativada else
                 "A conta não está conectada. A mensagem não foi enviada.",
                 interromper=True)
             return

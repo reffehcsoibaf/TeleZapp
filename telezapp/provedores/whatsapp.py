@@ -1907,6 +1907,58 @@ class ProvedorWhatsApp(Provedor):
             return False, "O WhatsApp não aceitou (%s)." % type(e).__name__
         return False, "Ação desconhecida."
 
+    CRIA = ("grupo", "canal", "comunidade")
+
+    def criar_conversa(self, tipo, nome, descricao="", participantes=(),
+                       topicos=False):
+        if self.cliente is None or not self._conectada:
+            return False, "Sem conexão com o WhatsApp.", ""
+        try:
+            if tipo == "canal":
+                meta = self.cliente.create_newsletter(nome, descricao, b"")
+                cid, conv_tipo = jid_texto(meta.ID), "canal"
+            else:
+                cid = self._criar_grupo(tipo, nome, descricao, participantes)
+                conv_tipo = "grupo"
+        except Exception as e:
+            log.warning("criar %s falhou: %s: %s", tipo, type(e).__name__,
+                        str(e)[:200])
+            return False, ("O WhatsApp não deixou criar (%s)." %
+                           (str(e)[:120] or type(e).__name__)), ""
+        with self._trava:
+            conv = self._conversas.get(cid)
+            if conv is None:
+                conv = m.Conversa(self.conta.id, cid, nome, self.servico,
+                                  conv_tipo, data=time.time())
+                self._conversas[cid] = conv
+        self.banco.salvar_conversas([conv])
+        self._publicar_conversas()
+        log.info("%s criado pelo TeleZapp", tipo)
+        return True, "", cid
+
+    def _criar_grupo(self, tipo, nome, descricao, participantes):
+        """Cria o grupo (ou a comunidade) e devolve o endereco dele."""
+        from neonize.proto.Neonize_pb2 import GroupParent
+        alvos = []
+        for texto in participantes:
+            digitos = "".join(c for c in str(texto) if c.isdigit())
+            if len(digitos) >= 8:
+                alvos.append(_jid_obj(digitos, "s.whatsapp.net"))
+        pai = GroupParent(
+            IsParent=True,
+            DefaultMembershipApprovalMode="request_required") \
+            if tipo == "comunidade" else None
+        info = self.cliente.create_group(
+            nome, [] if pai else alvos, group_parent=pai)
+        jid = info.JID
+        if descricao:
+            try:
+                self.cliente.set_group_topic(
+                    jid, "", uuid.uuid4().hex.upper(), descricao)
+            except Exception:
+                log.info("grupo criado, mas sem a descrição")
+        return jid_texto(jid)
+
     JANELA_EDICAO = 15 * 60       # o WhatsApp deixa editar por 15 minutos
 
     def editar_mensagem(self, msg, texto):

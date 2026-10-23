@@ -2912,3 +2912,41 @@ def test_consertar_decifrar_voto_poe_o_tratamento_que_faltava():
     assert Go.DecryptPollVote.errcheck(None, None, ()) == b""
     # um cliente sem a biblioteca (os testes) nao quebra
     assert wa.consertar_decifrar_voto(object()) is False
+
+
+def test_criar_grupo_comunidade_e_canal_no_whatsapp(tmp_path):
+    chamadas = []
+
+    def criar_grupo(nome, participantes=(), group_parent=None, **kw):
+        chamadas.append((nome, [j_.User for j_ in participantes],
+                         bool(group_parent and group_parent.IsParent)))
+        return N.GroupInfo(JID=jid("999", "g.us"),
+                           GroupName=N.GroupName(Name=nome))
+    cliente = types.SimpleNamespace(
+        create_group=criar_grupo,
+        set_group_topic=lambda j_, ant, novo, t: chamadas.append(
+            ("descricao", t)),
+        create_newsletter=lambda nome, desc, foto: N.NewsletterMetadata(
+            ID=jid("55", "newsletter")))
+    p, banco = _provedor_com_cliente(tmp_path, cliente)
+    assert p.CRIA == ("grupo", "canal", "comunidade")
+    ok, texto, cid = p.criar_conversa(
+        "grupo", "Turma", "Sobre", ["+55 51 99999-1111", "12", "@x"])
+    assert ok and cid == "999@g.us"
+    assert chamadas[0] == ("Turma", ["5551999991111"], False)
+    assert ("descricao", "Sobre") in chamadas
+    conv = banco.conversas("w1")[0]
+    assert (conv.id, conv.nome, conv.tipo) == ("999@g.us", "Turma", "grupo")
+    ok, _, cid = p.criar_conversa("comunidade", "Bairro", "",
+                                  ["+5551999991111"])
+    assert ok and chamadas[-1] == ("Bairro", [], True)   # sem participantes
+    ok, _, cid = p.criar_conversa("canal", "Notícias", "Sobre")
+    assert ok and cid == "55@newsletter"
+    assert any(c.tipo == "canal" for c in banco.conversas("w1"))
+
+    def recusa(*a, **k):
+        raise RuntimeError("nome longo")
+    cliente.create_group = recusa
+    ok, texto, cid = p.criar_conversa("grupo", "X")
+    assert not ok and "nome longo" in texto and cid == ""
+    banco.fechar()
