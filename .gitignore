@@ -47,3 +47,4 @@ Backup/neonize-0.5.2-chamadas/
 # Cloudflare Worker de relatos
 relatos/.wrangler/
 relatos/node_modules/
+relatos/credenciais-admin.txt
