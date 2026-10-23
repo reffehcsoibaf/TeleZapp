@@ -4593,3 +4593,24 @@ def test_grupo_com_topicos_fica_um_so_na_lista_e_pergunta_o_topico(j):
     finally:
         wx_falso.resposta_lista[0] = wx_falso.ID_OK
     assert j.atual is None
+
+
+def test_esc_no_topico_volta_para_a_lista_de_topicos_do_grupo(j):
+    j.b.publicar(ev.ConversasAtualizadas("t1", [
+        grupo("-100", "Equipe", 0, AGORA - 5),
+        grupo("-100#1", "Equipe › Geral", 0, AGORA - 5),
+        grupo("-100#9", "Equipe › Avisos", 0, AGORA - 50)]))
+    wx_falso.escolha_lista[0] = 1                  # Avisos
+    try:
+        j._abrir_conversa(j.indice[("t1", "-100")])
+        assert j.atual == ("t1", "-100#9")
+        wx_falso.escolha_lista[0] = 0              # Esc: escolhe o Geral
+        j._esc_da_conversa()
+        assert j.atual == ("t1", "-100#1")         # outro topico, mesmo grupo
+        wx_falso.resposta_lista[0] = wx_falso.ID_CANCEL
+        j._esc_da_conversa()                       # Esc na lista de topicos
+    finally:
+        wx_falso.escolha_lista[0] = 0
+        wx_falso.resposta_lista[0] = wx_falso.ID_OK
+    assert j.atual is None
+    assert j.lista_conv.GetSelection() == j._chaves_conv.index(("t1", "-100"))

@@ -3214,7 +3214,7 @@ class Janela(wx.Frame):
                     if not self._cancelar_download() and \
                             not self._parar_audio() and \
                             not self._voltar_da_respondida():
-                        self._fechar_conversa()
+                        self._esc_da_conversa()
                     return
             if k == wx.WXK_DELETE and sem_mod:
                 if foco is self.lista_conv:
@@ -3363,6 +3363,21 @@ class Janela(wx.Frame):
         if self.FindFocus() in (self.lista_conv, None):
             self.lista_msgs.SetFocus()
 
+    def _esc_da_conversa(self):
+        """Esc na conversa. Dentro de um topico de grupo (Telegram), volta
+        para a lista de topicos do grupo, sem sair dele; Esc ali fecha."""
+        aberta = self.atual
+        self._fechar_conversa()
+        if aberta is None or "#" not in aberta[1]:
+            return
+        grupo = (aberta[0], aberta[1].split("#")[0])
+        conv = self.indice.get(grupo)
+        if conv is None:
+            return
+        self._abrir_conversa(conv)
+        if self.atual is None and grupo in self._chaves_conv:
+            self.lista_conv.SetSelection(self._chaves_conv.index(grupo))
+
     def _fechar_conversa(self):
         """Esc na lista de mensagens: fecha a conversa e volta para a lista
         de conversas. Mensagens que chegarem depois contam como novas."""
@@ -3431,7 +3446,7 @@ class Janela(wx.Frame):
         if self.resposta_a is not None:
             self._cancelar_resposta()
             return
-        self._fechar_conversa()
+        self._esc_da_conversa()
 
     def _proxima_nao_lida(self):
         n = len(self._chaves_conv)
