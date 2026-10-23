@@ -1661,12 +1661,44 @@ class Janela(wx.Frame):
             del self.indice[chave]
         self._ordenar()
 
+    def _topicos_de(self, conv):
+        """Conversas dos topicos de um grupo com topicos (Telegram), as
+        fixadas e mais recentes primeiro; vazio nas outras conversas."""
+        prefixo = conv.id + "#"
+        return sorted((c for c in self.indice.values()
+                       if c.conta_id == conv.conta_id
+                       and c.id.startswith(prefixo)),
+                      key=lambda c: (not c.fixada, -c.data))
+
+    def _escolher_topico(self, conv):
+        """Grupo com topicos: pergunta qual abrir e devolve a conversa dele
+        (None se a pessoa desistir). As demais voltam como estao."""
+        topicos = self._topicos_de(conv)
+        if not topicos:
+            return conv
+        rotulos = [t.nome.split(" › ", 1)[-1] + (
+            ", %d não lidas" % t.nao_lidas if t.nao_lidas > 1 else
+            ", 1 não lida" if t.nao_lidas == 1 else "") for t in topicos]
+        dlg = wx.SingleChoiceDialog(
+            self, "Escolha o tópico de %s." % conv.nome, "Tópicos", rotulos)
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return None
+            return topicos[dlg.GetSelection()]
+        finally:
+            dlg.Destroy()
+
     def _ordenar(self):
         self._atualizar_caixa_conta()
+        for c in self.indice.values():
+            if "#" not in c.id:
+                filhos = self._topicos_de(c)
+                if filhos:       # o grupo mostra os nao lidas de todos
+                    c.nao_lidas = sum(f.nao_lidas for f in filhos)
         self.conversas = sorted(
             (c for c in self.indice.values()
-             if c.chave == self.atual or m.passa_filtro(
-                 c, self.filtro_tipo, self.filtro_conta, self.busca)),
+             if "#" not in c.id and (c.chave == self.atual or m.passa_filtro(
+                 c, self.filtro_tipo, self.filtro_conta, self.busca))),
             key=lambda c: (not c.fixada, -c.data))
 
     def _preencher_conversas(self):
@@ -3263,6 +3295,9 @@ class Janela(wx.Frame):
         self._abrir_conversa(conv)
 
     def _abrir_conversa(self, conv):
+        conv = self._escolher_topico(conv)
+        if conv is None:
+            return
         self.atual = conv.chave
         self.resposta_a = None
         self.editando = None

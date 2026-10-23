@@ -4565,3 +4565,31 @@ def test_novo_contato_guarda_e_avisa(j, monkeypatch):
                         lambda *a: None)
     j._novo_contato()
     assert renomeou == [True]                      # cancelou: nada muda
+
+
+def grupo(id, nome, nao_lidas, data):
+    return m.Conversa("t1", id, nome, "telegram", "grupo",
+                      nao_lidas=nao_lidas, data=data)
+
+
+def test_grupo_com_topicos_fica_um_so_na_lista_e_pergunta_o_topico(j):
+    j.b.publicar(ev.ConversasAtualizadas("t1", [
+        conv("10", "Ana", data=AGORA - 10),
+        grupo("-100", "Equipe", 0, AGORA - 5),
+        grupo("-100#1", "Equipe › Geral", 2, AGORA - 5),
+        grupo("-100#9", "Equipe › Avisos", 1, AGORA - 50)]))
+    assert j.lista_conv.itens == ["Equipe, Telegram, 3 não lidas",
+                                  "Ana, Telegram"]
+    wx_falso.escolha_lista[0] = 1               # o segundo: Avisos
+    try:
+        j._abrir_conversa(j.indice[("t1", "-100")])
+    finally:
+        wx_falso.escolha_lista[0] = 0
+    assert j.atual == ("t1", "-100#9")
+    j._fechar_conversa()
+    wx_falso.resposta_lista[0] = wx_falso.ID_CANCEL
+    try:
+        j._abrir_conversa(j.indice[("t1", "-100")])    # desistiu
+    finally:
+        wx_falso.resposta_lista[0] = wx_falso.ID_OK
+    assert j.atual is None

@@ -178,8 +178,9 @@ def entradas_do_telegram(links):
 # `status:<id>`, com as historias como mensagens (id = id da historia)
 PREFIXO_STATUS = "status:"
 
-# Grupo com topicos (forum): cada topico vira uma conversa, `<grupo>#<topico>`,
-# com o nome "Grupo › Tópico". O topico Geral tem sempre o numero 1.
+# Grupo com topicos (forum): o grupo e uma conversa da lista e cada topico e
+# uma conversa `<grupo>#<topico>` ("Grupo › Tópico"), que a janela esconde da
+# lista e abre quando a pessoa escolhe o topico. O Geral e sempre o numero 1.
 SEPARADOR_TOPICO = "#"
 TOPICO_GERAL = 1
 
@@ -825,10 +826,12 @@ class ProvedorTelegram(Provedor):
                 if getattr(getattr(d, "entity", None), "forum", False):
                     topicos = await self._conversas_de_topicos(d, c)
                     if topicos:
-                        # o grupo some da lista: entram os topicos dele
+                        # o grupo fica na lista e a janela pergunta o topico
+                        # ao abrir; os topicos viajam junto, fora da lista
                         self._foruns.add(cid)
+                        c.data = max([c.data] + [t.data for t in topicos])
+                        c.nao_lidas = sum(t.nao_lidas for t in topicos)
                         lista += topicos
-                        continue
                 lista.append(c)
         self.banco.salvar_conversas(lista)
         log.info("conversas: %d em %.2fs", len(lista),
@@ -1287,9 +1290,8 @@ class ProvedorTelegram(Provedor):
         self._historias_em = time.time()
         if mudou:
             self.barramento.publicar(ev.ConversasAtualizadas(
-                self.conta.id, sorted(
-                    (c for c in self._conversas.values()
-                     if c.id not in self._foruns), key=lambda c: -c.data)))
+                self.conta.id, sorted(self._conversas.values(),
+                                      key=lambda c: -c.data)))
 
     PODE_PUBLICAR_STATUS = True
 

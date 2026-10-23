@@ -1303,7 +1303,9 @@ def test_grupo_com_topicos_vira_uma_conversa_por_topico(ambiente):
         esperar(ambiente.fila, ev.ContaPronta)
         convs = esperar(ambiente.fila, ev.ConversasAtualizadas).conversas
         por_id = {c.id: c for c in convs}
-        assert sorted(por_id) == ["-100#1", "-100#9", "10"]   # sem o grupo
+        assert sorted(por_id) == ["-100", "-100#1", "-100#9", "10"]
+        assert por_id["-100"].nome == "Equipe"
+        assert por_id["-100"].nao_lidas == 5           # soma dos topicos
         assert por_id["-100#9"].nome == "Equipe › Avisos"
         assert por_id["-100#9"].nao_lidas == 3
         assert por_id["-100#9"].somente_leitura        # topico fechado
