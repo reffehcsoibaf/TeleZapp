@@ -2896,6 +2896,16 @@ def test_votar_envia_o_voto_e_guarda_o_meu(amb):
     assert m.enquete_de(b.mensagem)["meus"] == []
 
 
+def test_enquete_de_canal_nao_tenta_votar_e_avisa(amb):
+    msg = _enquete_chegou(amb)
+    msg.conversa_id = "120363172556943876@newsletter"
+    antes = len(amb.c.enviadas)
+    amb.p.votar_enquete(msg, [0])
+    aviso = esperar(amb.fila, ev.Aviso)
+    assert "canais" in aviso.texto
+    assert len(amb.c.enviadas) == antes
+
+
 def test_info_da_enquete_pode_ser_serializada_como_o_neonize_faz():
     # o cliente falso nao serializa; o verdadeiro recusa MessageInfo sem os
     # campos obrigatorios (o voto falhava com EncodeError em 23/10/2026)

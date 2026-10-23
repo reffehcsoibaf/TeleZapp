@@ -638,6 +638,8 @@ Conferido o plano de 13/10 contra o código. Decisões do responsável:
 - **Ainda sem teste ao vivo**: tudo. Pontos de atenção no WhatsApp: a lista de bloqueio pode guardar o endereço LID (o código compara pelo número e desbloqueia pelo endereço da lista) e o bloqueio por telefone novo usa o JID do número; se o serviço recusar, o erro aparece na fala e numa mensagem.
 - Junto veio a correção do voto em enquete do WhatsApp (`EncodeError` do `MessageInfo`, visto no log de 23/10 às 13:27 e 13:27:50). No Telegram não há falha de voto nesse log; o relato do responsável sobre o Telegram por volta das 13h28 não bate com as linhas do log, que são do WhatsApp.
 
+- **Voto em enquete de canal do WhatsApp: adiado (23/10/2026).** O whatsmeow só tem reação e "visto" para canais (conferido em `newsletter.go`), e o neonize não vota; o TeleZapp avisa que não vota e manda votar pelo celular. Implementar exigiria descobrir o formato do voto em canal e mexer na DLL. Só voltar ao assunto se virar demanda.
+
 ## Chamadas de voz do WhatsApp: fase 0 (21/10/2026)
 
 - Experimento em `experimentos/10-chamada-whatsapp-meowcaller/` (Go, meowcaller sobre o hypermeow) com a ponte de voz em Python (`experimentos/chamada_whatsapp.py`, microfone e alto-falante por socket local). Ainda fora do app.

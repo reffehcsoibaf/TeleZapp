@@ -3331,6 +3331,13 @@ class ProvedorWhatsApp(Provedor):
     def _votar_enquete(self, msg, escolhas):
         cid = msg.conversa_id
         enq = m.enquete_de(msg)
+        if cid.endswith("@newsletter"):
+            # canal: a mensagem nao tem a chave secreta das enquetes comuns
+            # e o neonize nao sabe votar nelas ("original message secret
+            # key not found" no log de 23/10/2026)
+            self._avisar("O TeleZapp ainda não vota em enquetes de canais "
+                         "do WhatsApp. Vote pelo celular.", False)
+            return
         try:
             if not self._conectada or self.cliente is None:
                 raise ConnectionError("sem conexão")
