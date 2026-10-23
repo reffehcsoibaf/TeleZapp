@@ -205,6 +205,16 @@ class Banco:
             log.info("banco atualizado: coluna expira")
         self._con.execute("CREATE INDEX IF NOT EXISTS mensagens_por_expira "
                           "ON mensagens (expira) WHERE expira > 0")
+        # minhas mensagens que ja tinham o recibo de reproduzida guardado,
+        # mas ficaram como "lida" (o estado reproduzida e mais novo)
+        n = self._con.execute(
+            "UPDATE mensagens SET estado='reproduzida' WHERE minha=1 AND "
+            "estado IN ('enviada','entregue','lida') AND EXISTS ("
+            "SELECT 1 FROM recibos r WHERE r.conta_id=mensagens.conta_id "
+            "AND r.conversa_id=mensagens.conversa_id AND "
+            "r.mensagem_id=mensagens.id AND r.tipo='ouvida')").rowcount
+        if n > 0:
+            log.info("banco atualizado: %d mensagens como reproduzidas", n)
 
     # ------------------------------------------------------------ depuracao
     def guardar_depuracao(self, conta_id, conversa_id, mensagem_id, dados):
