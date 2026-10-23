@@ -1279,6 +1279,35 @@ def test_enviar_voz_foto_e_documento(amb, dados_midia, tmp_path):
     assert "erro do WhatsApp" in falha.motivo
 
 
+def test_enviar_midia_como_resposta_e_com_mencao(amb, tmp_path):
+    from telezapp.midia import envio
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    cid = "5551988887777@s.whatsapp.net"
+    pdf = tmp_path / "r.pdf"
+    pdf.write_bytes(b"%PDF")
+    amb.p.enviar_arquivo(
+        cid, envio.preparar(str(pdf)), "veja @Ana", "ORIG1",
+        [{"id": "5551999@s.whatsapp.net", "nome": "Ana"}])
+    nova = esperar(amb.fila, ev.MensagemNova).mensagem
+    assert nova.resposta_a == "ORIG1" and nova.texto == "veja @Ana"
+    doc = amb.c.enviadas[-1][1].documentMessage
+    assert doc.caption == "veja @5551999"
+    assert doc.contextInfo.stanzaID == "ORIG1"
+    assert list(doc.contextInfo.mentionedJID) == ["5551999@s.whatsapp.net"]
+
+
+def test_enviar_texto_com_mencao_leva_o_jid(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.p.enviar_texto("120363@g.us", "oi @Ana Lima", "", [
+        {"id": "5552@s.whatsapp.net", "nome": "Ana Lima"}])
+    esperar(amb.fila, ev.MensagemNova)
+    ext = amb.c.enviadas[-1][1].extendedTextMessage
+    assert ext.text == "oi @5552"
+    assert list(ext.contextInfo.mentionedJID) == ["5552@s.whatsapp.net"]
+
+
 def test_enviar_arquivo_sem_conexao(amb, tmp_path):
     from telezapp.midia import envio
     pdf = tmp_path / "r.pdf"

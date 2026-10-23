@@ -489,6 +489,67 @@ def escolher_acao_grupo(pai, nome, pode_sair):
     return escolhida[0] if escolhida else None
 
 
+def escolher_membro(pai, membros):
+    """Lista dos membros do grupo para mencionar com @. Digitar filtra pelo
+    nome, telefone ou @usuario; Seta para baixo vai para a lista; Enter
+    escolhe. Devolve o membro (dicionario) ou None se cancelar."""
+    dlg = wx.Dialog(pai, title="Mencionar quem?",
+                    style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+    lay = wx.BoxSizer(wx.VERTICAL)
+    lay.Add(wx.StaticText(dlg, label="Digite para filtrar os membros do "
+                          "grupo. Seta para baixo vai à lista e Enter "
+                          "escolhe."), 0, wx.ALL, 10)
+    filtro = wx.TextCtrl(dlg, name="Filtrar membros", size=(420, -1),
+                         style=wx.TE_PROCESS_ENTER)
+    lay.Add(filtro, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+    lista = wx.ListBox(dlg, name="Membros", size=(420, 240))
+    lay.Add(lista, 1, wx.EXPAND | wx.ALL, 10)
+    lay.Add(dlg.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL), 0,
+            wx.ALL | wx.ALIGN_RIGHT, 10)
+    dlg.SetSizerAndFit(lay)
+    visiveis = []
+
+    def rotulo(x):
+        extra = x.get("telefone") or x.get("usuario") or ""
+        return "%s, %s" % (x["nome"], extra) if extra else x["nome"]
+
+    def preencher(_=None):
+        termo = filtro.GetValue().strip().lower()
+        visiveis[:] = [x for x in membros if not termo or termo in
+                       rotulo(x).lower()]
+        lista.Set([rotulo(x) for x in visiveis])
+        if visiveis:
+            lista.SetSelection(0)
+
+    def escolher(_=None):
+        if lista.GetSelection() != wx.NOT_FOUND:
+            dlg.EndModal(wx.ID_OK)
+
+    def tecla(evt):
+        if evt.GetKeyCode() == wx.WXK_DOWN and visiveis:
+            lista.SetFocus()
+        else:
+            evt.Skip()
+
+    filtro.Bind(wx.EVT_TEXT, preencher)
+    filtro.Bind(wx.EVT_TEXT_ENTER, escolher)
+    filtro.Bind(wx.EVT_KEY_DOWN, tecla)
+    lista.Bind(wx.EVT_LISTBOX_DCLICK, escolher)
+    lista.Bind(wx.EVT_CHAR_HOOK, lambda e: escolher() if e.GetKeyCode() in (
+        wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) else e.Skip())
+    dlg.SetEscapeId(wx.ID_CANCEL)
+    preencher()
+    dlg.CentreOnParent()
+    filtro.SetFocus()
+    try:
+        if dlg.ShowModal() != wx.ID_OK:
+            return None
+        i = lista.GetSelection()
+        return visiveis[i] if 0 <= i < len(visiveis) else None
+    finally:
+        dlg.Destroy()
+
+
 def escolher_destino_zip(pai, nome, pasta=""):
     """Janela do Windows para escolher onde gravar o .zip; None se cancelar."""
     dlg = wx.FileDialog(pai, "Salvar o conteúdo da conversa", defaultDir=pasta,

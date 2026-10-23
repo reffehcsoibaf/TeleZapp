@@ -57,8 +57,9 @@ class Provedor(ABC):
         """Busca as ultimas mensagens -> MensagensCarregadas."""
 
     @abstractmethod
-    def enviar_texto(self, conversa_id, texto, resposta_a=""):
-        """Envia -> MensagemNova(enviada_daqui=True) ou EnvioFalhou."""
+    def enviar_texto(self, conversa_id, texto, resposta_a="", mencoes=None):
+        """Envia -> MensagemNova(enviada_daqui=True) ou EnvioFalhou.
+        `mencoes`: quem foi mencionado com @ (ver nucleo.mencoes)."""
 
     @abstractmethod
     def marcar_como_lida(self, conversa_id):
@@ -95,9 +96,12 @@ class Provedor(ABC):
         """Avisa o servico que a pessoa tocou esta voz ou audio recebido
         (a marca de ouvida tambem aparece no celular)."""
 
-    def enviar_arquivo(self, conversa_id, anexo, legenda=""):
+    def enviar_arquivo(self, conversa_id, anexo, legenda="", resposta_a="",
+                       mencoes=None):
         """Envia foto, video, audio, documento ou nota de voz (`anexo`, ver
-        midia.envio). Volta na hora; o upload roda fora da fila de texto.
+        midia.envio), citando a mensagem `resposta_a` quando houver e com as
+        `mencoes` (ver nucleo.mencoes) da legenda. Volta na hora; o upload
+        roda fora da fila de texto.
         Publica MensagemNova(enviada_daqui=True) ou EnvioFalhou."""
         raise NotImplementedError
 

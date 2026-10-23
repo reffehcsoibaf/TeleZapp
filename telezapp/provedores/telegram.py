@@ -15,6 +15,7 @@ import time
 from telezapp import NOME, VERSAO, config
 from telezapp.midia import armazem
 from telezapp.nucleo import eventos as ev
+from telezapp.nucleo import mencoes as nucleo_mencoes
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import previa_links
 from telezapp.provedores.base import (PEDIR_CODIGO, PEDIR_SENHA,
@@ -1846,17 +1847,44 @@ class ProvedorTelegram(Provedor):
         finally:
             f.close()
 
-    def enviar_texto(self, conversa_id, texto, resposta_a=""):
-        self._agendar(self._enviar(conversa_id, texto, resposta_a))
+    def enviar_texto(self, conversa_id, texto, resposta_a="", mencoes=None):
+        self._agendar(self._enviar(conversa_id, texto, resposta_a, mencoes))
 
-    async def _enviar(self, conversa_id, texto, resposta_a):
+    async def _com_mencoes(self, texto, mencoes):
+        """(texto, entidades): quem tem @usuario vira '@usuario' no texto; os
+        demais viram mencao por entidade, que o Telegram mostra como o nome."""
+        if not mencoes:
+            return texto, None
+        from telethon.tl import types
+        entidades = []
+
+        def trocar(men):
+            return men.get("usuario") or "@" + men.get("nome", "")
+        novo, posicoes = nucleo_mencoes.aplicar(texto, mencoes, trocar)
+        for i, f, men in posicoes:
+            if men.get("usuario"):
+                continue
+            try:
+                usuario = await self.cliente.get_input_entity(int(men["id"]))
+            except Exception:
+                log.info("não consegui mencionar alguém sem @usuario")
+                continue
+            comeco = len(novo[:i].encode("utf-16-le")) // 2
+            tamanho = len(novo[i:f].encode("utf-16-le")) // 2
+            entidades.append(types.InputMessageEntityMentionName(
+                comeco, tamanho, usuario))
+        return novo, entidades or None
+
+    async def _enviar(self, conversa_id, texto, resposta_a, mencoes=None):
         inicio = time.perf_counter()
         try:
             ent = await self._entidade(conversa_id)
+            enviar, entidades = await self._com_mencoes(texto, mencoes)
             enviada = await self.cliente.send_message(
-                ent, texto, reply_to=self._resposta_em(
+                ent, enviar, reply_to=self._resposta_em(
                     conversa_id, resposta_a),
-                link_preview=previa_links.LIGADAS["enviar"])
+                link_preview=previa_links.LIGADAS["enviar"],
+                **({"formatting_entities": entidades} if entidades else {}))
         except Exception as e:
             log.warning("envio falhou: %s", type(e).__name__)
             self.barramento.publicar(ev.EnvioFalhou(
@@ -1865,24 +1893,29 @@ class ProvedorTelegram(Provedor):
         log.info("texto enviado em %.2fs", time.perf_counter() - inicio)
         await self._registrar_enviada(enviada, conversa_id)
 
-    def enviar_arquivo(self, conversa_id, anexo, legenda=""):
-        self._agendar(self._enviar_arquivo(conversa_id, anexo, legenda))
+    def enviar_arquivo(self, conversa_id, anexo, legenda="", resposta_a="",
+                       mencoes=None):
+        self._agendar(self._enviar_arquivo(conversa_id, anexo, legenda,
+                                           resposta_a, mencoes))
 
-    async def _enviar_arquivo(self, conversa_id, anexo, legenda):
+    async def _enviar_arquivo(self, conversa_id, anexo, legenda,
+                              resposta_a="", mencoes=None):
         from telethon.tl import types
         inicio = time.perf_counter()
         try:
             ent = await self._entidade(conversa_id)
-            extra = {}
+            texto_legenda, entidades = await self._com_mencoes(legenda,
+                                                               mencoes)
+            extra = {"formatting_entities": entidades} if entidades else {}
             if anexo.tipo == m.VOZ:
-                extra = dict(voice_note=True, attributes=[
+                extra.update(voice_note=True, attributes=[
                     types.DocumentAttributeAudio(duration=anexo.segundos,
                                                  voice=True)])
             elif anexo.tipo == m.AUDIO:
-                extra = dict(attributes=[types.DocumentAttributeAudio(
+                extra.update(attributes=[types.DocumentAttributeAudio(
                     duration=anexo.segundos, title=anexo.nome)])
             elif anexo.tipo == m.VIDEO:
-                extra = dict(attributes=[types.DocumentAttributeVideo(
+                extra.update(attributes=[types.DocumentAttributeVideo(
                     duration=anexo.segundos, w=anexo.largura,
                     h=anexo.altura, supports_streaming=True)])
             ultimo = [-1]
@@ -1894,8 +1927,8 @@ class ProvedorTelegram(Provedor):
                     self.barramento.publicar(ev.ProgressoEnvio(
                         self.conta.id, conversa_id, pct))
             enviada = await self.cliente.send_file(
-                ent, anexo.caminho, caption=legenda or None,
-                reply_to=self._resposta_em(conversa_id, ""),
+                ent, anexo.caminho, caption=texto_legenda or None,
+                reply_to=self._resposta_em(conversa_id, resposta_a),
                 force_document=anexo.tipo == m.DOCUMENTO,
                 progress_callback=andamento, **extra)
             self.barramento.publicar(ev.ProgressoEnvio(

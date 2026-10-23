@@ -3,6 +3,11 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.23.1
+
+- Mídia e documento enviados como resposta. `Provedor.enviar_arquivo(conversa_id, anexo, legenda, resposta_a, mencoes)`: o WhatsApp monta a mídia à mão com o `ContextInfo` da citação (`_contexto_da_resposta`, tirado de `_mensagem_de_texto`, que agora o reutiliza) e o Telegram passa `reply_to`. A mensagem local já mostra a resposta; a resposta só é limpa depois do último anexo colado, e o texto que sobrar vai como mensagem de texto, ainda citando. O aviso "A mídia vai sem citar a mensagem respondida" saiu. Resposta a status continua só de texto. Não verificado nos serviços reais: só testes com clientes simulados.
+- Menção (@) em grupo. `nucleo/mencoes.py` acha e troca os trechos "@Nome" do texto. Na caixa, um @ digitado no começo ou depois de espaço, numa conversa de grupo, abre `dialogos.escolher_membro` (filtro + lista); os membros vêm de `detalhes_do_grupo` (thread própria, guardados por conversa). Ao enviar, `enviar_texto` e `enviar_arquivo` recebem `mencoes=[{id, nome, usuario}]`: o WhatsApp troca "@Nome" por "@número" e põe o JID em `mentionedJID` (a mensagem guardada mantém o texto digitado); o Telegram troca por "@usuario" quando a pessoa tem e, senão, usa `InputMessageEntityMentionName`. Não verificado nos serviços reais.
+
 ## 2026.10.23.0
 
 - Minha mensagem de voz (ou áudio) tocada por quem recebeu passa a ter o estado **reproduzida**, depois de enviada, entregue e lida: a linha da lista, lida ao passar pela mensagem, e "Estado" nos detalhes dizem o estado mais avançado (`modelos.REPRODUZIDA`, no WhatsApp pelo recibo de tipo 6 e pelo histórico). Nos detalhes de uma conversa com uma pessoa a linha do recibo diz "Reproduzida a ..." (antes "Ouvida"). Ao abrir o banco, as mensagens minhas que já tinham o recibo de reproduzida guardado (e ficaram como "lida") passam a "reproduzida" (`Banco._atualizar_esquema`, uma vez e sem custo depois). O log passa a registrar "recibo de reproduzida" e os recibos de tipo desconhecido que ignora, para investigar se o WhatsApp não mandar o recibo (a pessoa pode ter a confirmação de leitura desligada). No Telegram não há esse aviso para quem envia.

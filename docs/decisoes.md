@@ -585,6 +585,10 @@ no fechamento, por assunto.
   prévia de links, o reinício do pareamento e o executável com OpenCV, emoji e
   `telezapp/sons` (conferir o PyInstaller).
 
+## Mídia como resposta e menção por @ (23/10/2026)
+
+Pedido do usuário: o programa dizia que a mídia ia sem citar a mensagem respondida; agora cita. E, em grupo, digitar @ lista os membros para mencionar. Decisões: a menção fica na caixa como "@Nome" (legível pelo leitor de tela) e só vira o formato do serviço no envio; o @ só abre a lista no começo ou depois de espaço (não atrapalha e-mails); Esc na lista deixa o @ digitado. Pendente: o usuário testar com contas reais (resposta com documento e foto no WhatsApp e no Telegram; menção com e sem @usuario no Telegram).
+
 ## Versão 2026.10.23.0 (23/10/2026): menus novos, criar grupos, chamadas e enquetes
 
 Reúne tudo o que entrou depois da 2026.10.21.0 (o detalhe técnico está no CHANGELOG): chamadas de voz do WhatsApp pela DLL de teste do neonize, corretor ortográfico, atalhos personalizáveis, gravar por atalho, segundo plano e bandeja, enquetes, menus Novo e Ir para, configurações Interface e Mensagens, criar grupo, canal e comunidade, tópicos de grupo do Telegram, estado reproduzida, correção do áudio Ogg, credenciais do Telegram embutidas e o formulário de relatos. As confirmações do responsável estão nas seções abaixo. **Ainda sem teste no app real:** criar grupo, canal e comunidade nos dois serviços, tópicos do Telegram, Nova chamada, Novo contato, a busca em Gerenciar contatos, as credenciais embutidas no executável, a tela de Atalhos e o gravar por atalho, o segundo plano, votar e quem votou no Telegram, e o estado reproduzida nas mensagens antigas.

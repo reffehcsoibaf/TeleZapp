@@ -389,6 +389,9 @@ class Janela(wx.Frame):
         self.aguardando_foco = False  # esperando o servico para dar o foco
         self.mapa = [None]            # por item da lista: msg id, MARCADOR...
         self.resposta_a = None
+        self.mencoes = []             # quem foi mencionado (@) na caixa
+        self._membros_grupo = {}      # chave da conversa -> lista de membros
+        self._carregando_membros = None
         self.cofre_ia = cofre_ia.Cofre(
             os.path.join(config.pasta_dados(), "ia_chaves.json"))
         self._ia_pendentes = {}   # chave da mensagem -> esperando o download
@@ -1065,6 +1068,7 @@ class Janela(wx.Frame):
         self.caixa.Bind(wx.EVT_TEXT_ENTER,
                         seguro(lambda e: self._enter_na_caixa()))
         self.caixa.Bind(wx.EVT_KEY_DOWN, self._tecla_caixa)
+        self.caixa.Bind(wx.EVT_CHAR, self._char_caixa)
         self.botao_enviar.Bind(wx.EVT_BUTTON,
                                seguro(lambda e: self._enviar_texto()))
         self.botao_anexar.Bind(wx.EVT_BUTTON,
@@ -3278,6 +3282,85 @@ class Janela(wx.Frame):
             return
         evt.Skip()
 
+    def _char_caixa(self, evt):
+        """Um @ digitado no comeco ou depois de espaco, numa conversa de
+        grupo, abre a lista de membros para mencionar."""
+        evt.Skip()
+        if evt.GetUnicodeKey() != ord("@") or self.atual is None or \
+                self.editando is not None:
+            return
+        conv = self.indice.get(self.atual)
+        if conv is None or conv.tipo != "grupo":
+            return
+        pos = self.caixa.GetInsertionPoint()
+        texto = self.caixa.GetValue()
+        if pos > 0 and not texto[pos - 1:pos].isspace():
+            return
+        wx.CallAfter(self._mencionar, self.atual, pos)
+
+    @seguro
+    def _mencionar(self, chave, pos):
+        if chave != self.atual:
+            return
+        membros = self._membros_grupo.get(chave)
+        if membros is None:
+            prov = self.contas.provedor(chave[0])
+            if prov is None or self.estados.get(chave[0]) != ev.CONECTADA \
+                    or self._carregando_membros == chave:
+                return
+            self._carregando_membros = chave
+            self.fala.falar("Carregando os membros do grupo.")
+
+            def ler():
+                try:
+                    dados = prov.detalhes_do_grupo(chave[1]) or {}
+                except Exception:
+                    log.error("membros do grupo:\n%s", traceback.format_exc())
+                    dados = {}
+                gente = [x for x in dados.get("participantes", [])
+                         if not x.get("eu")]
+                wx.CallAfter(self._membros_chegaram, chave, pos, gente)
+            threading.Thread(target=ler, daemon=True,
+                             name="membros-do-grupo").start()
+            return
+        self._escolher_mencao(membros, pos)
+
+    @seguro
+    def _membros_chegaram(self, chave, pos, gente):
+        self._carregando_membros = None
+        if not gente:
+            self.fala.falar("Não consegui a lista de membros deste grupo.",
+                            interromper=True)
+            return
+        self._membros_grupo[chave] = gente
+        if chave == self.atual:
+            self._escolher_mencao(gente, pos)
+
+    def _escolher_mencao(self, membros, pos):
+        escolhido = dialogos.escolher_membro(self, membros)
+        self.caixa.SetFocus()
+        if escolhido is None:
+            return
+        nome = escolhido["nome"]
+        for outro in self.mencoes:
+            if outro["nome"] == nome and outro["id"] != escolhido["id"]:
+                nome += " " + (escolhido.get("telefone") or
+                               escolhido["id"].split("@")[0][-4:])
+                break
+        men = {"id": escolhido["id"], "nome": nome,
+               "usuario": escolhido.get("usuario", "")}
+        if not any(x["id"] == men["id"] and x["nome"] == nome
+                   for x in self.mencoes):
+            self.mencoes.append(men)
+        texto = self.caixa.GetValue()
+        marca = "@" + nome + " "
+        if texto[pos:pos + 1] == "@":
+            self.caixa.Replace(pos, pos + 1, marca)
+            self.caixa.SetInsertionPoint(pos + len(marca))
+        else:
+            self.caixa.WriteText(marca)
+        self.fala.falar("Mencionado %s." % nome)
+
     def _tecla_mensagens(self, evt):
         # a pessoa mexeu na lista: nao mover a selecao sozinho
         if evt.GetKeyCode() in (wx.WXK_UP, wx.WXK_DOWN, wx.WXK_HOME,
@@ -3306,6 +3389,7 @@ class Janela(wx.Frame):
             return
         self.atual = conv.chave
         self.resposta_a = None
+        self.mencoes = []
         self.editando = None
         self.modo_msg, self.marc_msg = False, set()
         self._quem_cache.clear()
@@ -5300,7 +5384,8 @@ class Janela(wx.Frame):
         # a selecao fica na mensagem em que a pessoa estava
         self._preencher_mensagens()
         self.caixa.SetFocus()
-        p.enviar_texto(conversa_id, texto, resposta)
+        mencoes, self.mencoes = self.mencoes, []
+        p.enviar_texto(conversa_id, texto, resposta, mencoes or None)
         log.info("texto enviado para a fila (%d caracteres)", len(texto))
 
     def _tirar_local(self, chave, texto, tipo=m.TEXTO):
@@ -5495,22 +5580,26 @@ class Janela(wx.Frame):
             return
         self._enviar_anexo(anexo)
 
-    def _enviar_anexo(self, anexo, com_legenda=True):
+    def _enviar_anexo(self, anexo, com_legenda=True, limpar_resposta=True):
         """Manda um anexo ja preparado; o texto da caixa vai de legenda (menos
-        em audio e voz, que nao tem), a nao ser que `com_legenda` seja falso."""
+        em audio e voz, que nao tem), a nao ser que `com_legenda` seja falso.
+        Com uma resposta em andamento, a midia cita a mensagem respondida;
+        `limpar_resposta` falso deixa a resposta para o proximo envio."""
         destino = self._destino_do_envio()
         if destino is None:
             return False
         conta_id, conversa_id, p = destino
         legenda = "" if anexo.tipo in (m.VOZ, m.AUDIO) or not com_legenda \
             else self.caixa.GetValue().strip()
+        resposta = self.resposta_a.id if self.resposta_a is not None else ""
         self.locais += 1
         ultima = max((x.data for x in self._mensagens_atuais()), default=0)
         local = m.Mensagem(conta_id, conversa_id, "local-%d" % self.locais,
                            minha=True, data=max(time.time(), ultima + 0.001),
                            texto=legenda, tipo=anexo.tipo,
                            segundos=anexo.segundos, nome_arquivo=anexo.nome,
-                           tamanho=anexo.tamanho, estado=m.ENVIANDO)
+                           tamanho=anexo.tamanho, estado=m.ENVIANDO,
+                           resposta_a=resposta)
         self._mesclar(self.atual, [local])
         if legenda:
             self.caixa.Clear()
@@ -5519,10 +5608,20 @@ class Janela(wx.Frame):
                                       m.tamanho_legivel(anexo.tamanho))
         if anexo.aviso:
             texto += " " + anexo.aviso
-        if self.resposta_a is not None:
-            texto += " A mídia vai sem citar a mensagem respondida."
+        if resposta:
+            texto += " Como resposta."
         self.fala.falar(texto, interromper=True)
-        p.enviar_arquivo(conversa_id, anexo, legenda)
+        mencoes = self.mencoes if legenda else []
+        if legenda:
+            self.mencoes = []
+        if resposta or mencoes:
+            p.enviar_arquivo(conversa_id, anexo, legenda, resposta,
+                             mencoes or None)
+        else:
+            p.enviar_arquivo(conversa_id, anexo, legenda)
+        if resposta and limpar_resposta:
+            self.resposta_a = None
+            self._rotular_caixa()
         log.info("arquivo (%s, %d bytes) enviado para a fila", anexo.tipo,
                  anexo.tamanho)
         return True
@@ -5557,10 +5656,14 @@ class Janela(wx.Frame):
         for a in anexos:
             aceita = a.tipo not in (m.VOZ, m.AUDIO) and not legenda_usada
             tinha = bool(self.caixa.GetValue().strip())
-            if self._enviar_anexo(a, com_legenda=aceita) and aceita and tinha:
+            if self._enviar_anexo(a, com_legenda=aceita,
+                                  limpar_resposta=False) and aceita and tinha:
                 legenda_usada = True
         if not legenda_usada and self.caixa.GetValue().strip():
             self._enviar_texto()
+        elif self.resposta_a is not None:
+            self.resposta_a = None
+            self._rotular_caixa()
         self.caixa.SetFocus()
 
     # =============================================================== midias

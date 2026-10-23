@@ -32,6 +32,7 @@ LC_REPORT = LC_SINGLE_SEL = LC_NO_HEADER = 0
 EVT_LIST_ITEM_ACTIVATED = object()
 EVT_CLOSE = EVT_CHAR_HOOK = EVT_MENU = EVT_LISTBOX_DCLICK = object()
 EVT_CONTEXT_MENU = EVT_KEY_DOWN = EVT_BUTTON = EVT_LISTBOX = object()
+EVT_CHAR = object()
 EVT_CHOICE = EVT_TEXT = object()
 DefaultPosition = (-1, -1)
 mensagens = []          # o que passou por MessageBox

@@ -38,12 +38,17 @@ class ProvedorFalso:
     def parar_presenca(self, cid):
         self.pedidos.append(("parar_presenca", cid))
 
-    def enviar_texto(self, cid, texto, resposta_a=""):
+    def enviar_texto(self, cid, texto, resposta_a="", mencoes=None):
         self.pedidos.append(("enviar", cid, texto, resposta_a))
+        if mencoes:
+            self.pedidos.append(("mencoes", cid, mencoes))
 
-    def enviar_arquivo(self, cid, anexo, legenda=""):
+    def enviar_arquivo(self, cid, anexo, legenda="", resposta_a="",
+                       mencoes=None):
         self.pedidos.append(("arquivo", cid, anexo.tipo, anexo.nome,
                              legenda))
+        if resposta_a or mencoes:
+            self.pedidos.append(("arquivo_com", cid, resposta_a, mencoes))
 
     def responder_acao(self, msg, acao):
         self.pedidos.append(("acao", msg.id, acao["rotulo"]))
@@ -1399,6 +1404,26 @@ def test_gravar_descartado_nao_envia(j, monkeypatch):
     j._gravar(SOM_INTERNO)
     assert origens == [SOM_INTERNO]
     assert not [p for p in j.contas.p.pedidos if p[0] == "arquivo"]
+
+
+def test_midia_como_resposta_cita_a_mensagem(j, tmp_path):
+    _abrir_com_caixa(j)
+    j.resposta_a = j.cache[("t1", "20")][0]
+    pdf = tmp_path / "r.pdf"
+    pdf.write_bytes(b"%PDF")
+    j._enviar_arquivo(str(pdf))
+    assert ("arquivo_com", "20", "5", None) in j.contas.p.pedidos
+    assert j.resposta_a is None
+
+
+def test_mencao_na_legenda_e_no_texto_segue_para_o_servico(j, tmp_path):
+    _abrir_com_caixa(j)
+    men = {"id": "1@s.whatsapp.net", "nome": "Ana", "usuario": ""}
+    j.mencoes = [men]
+    j.caixa.SetValue("oi @Ana")
+    j._enviar_texto()
+    assert ("mencoes", "20", [men]) in j.contas.p.pedidos
+    assert j.mencoes == []
 
 
 def test_falha_de_midia_marca_so_a_mensagem_local(j, tmp_path):

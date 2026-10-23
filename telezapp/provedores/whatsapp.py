@@ -27,6 +27,7 @@ from telezapp import config
 from telezapp.midia import armazem, envio
 from telezapp.nucleo import chamadas as ch
 from telezapp.nucleo import eventos as ev
+from telezapp.nucleo import mencoes as nucleo_mencoes
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import previa_links
 from telezapp.provedores.base import DownloadCancelado, ErroMidia, Provedor
@@ -3519,15 +3520,31 @@ class ProvedorWhatsApp(Provedor):
             # pode ir a rede: nunca na abertura da conversa
             self._fila.put(lambda: self._rever_mencoes_do_grupo(conversa_id))
 
-    def enviar_texto(self, conversa_id, texto, resposta_a=""):
-        self._fila.put(lambda: self._enviar(conversa_id, texto, resposta_a))
+    def enviar_texto(self, conversa_id, texto, resposta_a="", mencoes=None):
+        self._fila.put(lambda: self._enviar(conversa_id, texto, resposta_a,
+                                            mencoes=mencoes))
 
     def _jid(self, conversa_id):
         from neonize.utils.jid import build_jid
         usuario, servidor = conversa_id.split("@", 1)
         return build_jid(usuario, servidor)
 
-    def _mensagem_de_texto(self, conversa_id, texto, resposta_a, previa=None):
+    def _mencoes_no_texto(self, texto, mencoes):
+        """(texto, [JID de quem foi mencionado]): cada '@Nome' escolhido na
+        caixa vira '@numero', que e como o WhatsApp mostra a mencao."""
+        if not mencoes:
+            return texto, []
+        jids = []
+
+        def trocar(men):
+            usuario, servidor = jid_de_texto(men.get("id", ""))
+            jids.append(jid_texto(_jid_obj(usuario, servidor)))
+            return "@" + usuario
+        novo, _ = nucleo_mencoes.aplicar(texto, mencoes, trocar)
+        return novo, jids
+
+    def _mensagem_de_texto(self, conversa_id, texto, resposta_a, previa=None,
+                           mencoes=None):
         from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (
             ContextInfo, ExtendedTextMessage, Message)
         campos = {}
@@ -3535,14 +3552,26 @@ class ProvedorWhatsApp(Provedor):
             campos = {"matchedText": previa.get("url", ""),
                       "title": previa.get("titulo", ""),
                       "description": previa.get("descricao", "")}
+        texto, jids = self._mencoes_no_texto(texto, mencoes)
         if not resposta_a:
-            if campos:
+            if campos or jids:
                 return Message(extendedTextMessage=ExtendedTextMessage(
-                    text=texto, **campos))
+                    text=texto, contextInfo=ContextInfo(
+                        mentionedJID=jids) if jids else None, **campos))
             return Message(conversation=texto)
         if resposta_a.startswith(RESPOSTA_A_STATUS):
             return self._resposta_a_status(
                 conversa_id, texto, resposta_a[len(RESPOSTA_A_STATUS):])
+        ctx = self._contexto_da_resposta(conversa_id, resposta_a)
+        if jids:
+            ctx.mentionedJID.extend(jids)
+        return Message(extendedTextMessage=ExtendedTextMessage(
+            text=texto, contextInfo=ctx, **campos))
+
+    def _contexto_da_resposta(self, conversa_id, resposta_a):
+        """O ContextInfo que cita a mensagem `resposta_a` da conversa."""
+        from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (
+            ContextInfo, Message)
         remetente, citado = self._remetentes.get(resposta_a, ("", ""))
         if not remetente or not citado:
             # mensagem de antes desta abertura do app: busca no banco
@@ -3573,8 +3602,7 @@ class ProvedorWhatsApp(Provedor):
             ctx.participant = remetente
         if grupo_de_origem:
             ctx.remoteJID = grupo_de_origem
-        return Message(extendedTextMessage=ExtendedTextMessage(
-            text=texto, contextInfo=ctx, **campos))
+        return ctx
 
     def _resposta_a_status(self, autor_id, texto, status_id):
         from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (
@@ -3693,7 +3721,7 @@ class ProvedorWhatsApp(Provedor):
             return resp
 
     def _enviar(self, conversa_id, texto, resposta_a, construir=None,
-                descricao_acao=""):
+                descricao_acao="", mencoes=None):
         inicio = time.perf_counter()
         previa = {}
         try:
@@ -3706,7 +3734,7 @@ class ProvedorWhatsApp(Provedor):
                 resp = self.cliente.send_message(
                     self._jid(conversa_id),
                     com_expiracao(self._mensagem_de_texto(
-                        conversa_id, texto, resposta_a, previa),
+                        conversa_id, texto, resposta_a, previa, mencoes),
                         self._prazo_da_conversa(conversa_id)))
             else:
                 resp = self._enviar_variantes(construir())
@@ -3788,11 +3816,39 @@ class ProvedorWhatsApp(Provedor):
         return msg
 
     # ------------------------------------------------------ arquivos
-    def enviar_arquivo(self, conversa_id, anexo, legenda=""):
+    def enviar_arquivo(self, conversa_id, anexo, legenda="", resposta_a="",
+                       mencoes=None):
         # thread propria: um upload grande nao pode travar a fila de texto
         threading.Thread(
-            target=self._enviar_arquivo, args=(conversa_id, anexo, legenda),
+            target=self._enviar_arquivo,
+            args=(conversa_id, anexo, legenda, resposta_a, mencoes),
             daemon=True, name="whatsapp-envio").start()
+
+    def _contexto_da_midia(self, conversa_id, legenda, resposta_a, mencoes):
+        """(legenda, ContextInfo ou None) de uma midia enviada como resposta
+        e/ou com mencoes na legenda."""
+        legenda, jids = self._mencoes_no_texto(legenda, mencoes)
+        if resposta_a.startswith(RESPOSTA_A_STATUS):
+            resposta_a = ""         # status so recebe resposta de texto
+        if not resposta_a and not jids:
+            return legenda, None
+        from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import ContextInfo
+        ctx = self._contexto_da_resposta(conversa_id, resposta_a) \
+            if resposta_a else ContextInfo()
+        ctx.mentionedJID.extend(jids)
+        return legenda, ctx
+
+    @staticmethod
+    def _com_contexto(mensagem, ctx):
+        """Poe o ContextInfo (citacao, mencoes) na midia ja montada."""
+        if ctx is None:
+            return mensagem
+        for nome in ("imageMessage", "videoMessage", "audioMessage",
+                     "documentMessage"):
+            if mensagem.HasField(nome):
+                getattr(mensagem, nome).contextInfo.MergeFrom(ctx)
+                break
+        return mensagem
 
     def _enviar_por_arquivo(self, conversa_id, anexo, legenda):
         """Sobe o arquivo direto do disco, publicando o avanco, e devolve a
@@ -3881,25 +3937,31 @@ class ProvedorWhatsApp(Provedor):
                             exc_info=True)
         return envio.como_documento(anexo)
 
-    def _enviar_arquivo(self, conversa_id, anexo, legenda):
+    def _enviar_arquivo(self, conversa_id, anexo, legenda, resposta_a="",
+                        mencoes=None):
         inicio = time.perf_counter()
+        original = legenda
         try:
             if not self._conectada or self.cliente is None:
                 raise ConnectionError("sem conexão")
             anexo = self._anexo_que_o_whatsapp_toca(anexo)
             jid = self._jid(conversa_id)
             prazo = self._prazo_da_conversa(conversa_id)
+            legenda, ctx = self._contexto_da_midia(
+                conversa_id, legenda, resposta_a, mencoes)
             if anexo.tamanho >= LIMITE_ENVIO_POR_ARQUIVO and \
                     self._tem_transferencias():
                 resp = self.cliente.send_message(
-                    jid, com_expiracao(self._enviar_por_arquivo(
-                        conversa_id, anexo, legenda), prazo))
-            elif prazo:
-                # com mensagens temporarias a mensagem e montada a mao, para
-                # levar o prazo
+                    jid, com_expiracao(self._com_contexto(
+                        self._enviar_por_arquivo(conversa_id, anexo, legenda),
+                        ctx), prazo))
+            elif prazo or ctx is not None:
+                # com mensagens temporarias, resposta ou mencao a mensagem e
+                # montada a mao, para levar o prazo e o contexto
                 resp = self.cliente.send_message(
-                    jid, com_expiracao(self._mensagem_de_midia(
-                        anexo, legenda), prazo))
+                    jid, com_expiracao(self._com_contexto(
+                        self._mensagem_de_midia(anexo, legenda), ctx),
+                        prazo))
             elif anexo.tipo == m.FOTO:
                 resp = self.cliente.send_image(jid, anexo.caminho,
                                                caption=legenda or None)
@@ -3916,14 +3978,16 @@ class ProvedorWhatsApp(Provedor):
             motivo = "sem conexão" if isinstance(e, ConnectionError) else \
                 "erro do WhatsApp (%s)" % type(e).__name__
             self.barramento.publicar(ev.EnvioFalhou(
-                self.conta.id, conversa_id, legenda, motivo,
+                self.conta.id, conversa_id, original, motivo,
                 devolver_texto=False, tipo=anexo.tipo))
             return
         log.info("%s enviado em %.2fs (%d bytes, %s, %ds)", anexo.tipo,
                  time.perf_counter() - inicio, anexo.tamanho, anexo.mime,
                  anexo.segundos)
         self._registrar_enviada(
-            resp, conversa_id, legenda, tipo=anexo.tipo,
+            resp, conversa_id, original, tipo=anexo.tipo,
+            resposta_a="" if resposta_a.startswith(RESPOSTA_A_STATUS)
+            else resposta_a,
             segundos=anexo.segundos, nome_arquivo=anexo.nome,
             tamanho=anexo.tamanho,
             arquivo=(anexo.caminho, anexo.temporario))
