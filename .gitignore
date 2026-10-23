@@ -17,6 +17,8 @@ configuracao*.txt
 codigo*.txt
 senha*.txt
 credenciais*.txt
+# api id e api hash do Telegram embutidos no executavel (empacotar.py)
+telezapp/_credenciais.py
 .env
 *.pem
 *.key

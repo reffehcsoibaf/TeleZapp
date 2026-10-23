@@ -696,9 +696,9 @@ class Config:
 
 # --------------------------------------------------- credenciais do Telegram
 # O api_id e o api_hash identificam o APLICATIVO perante o Telegram (nao a
-# pessoa). Quando o projeto registrar os seus, eles entram aqui e ninguem
-# precisara informar nada. Enquanto estiverem vazios, o app usa os da
-# configuracao (preenchidos uma vez pelo desenvolvedor).
+# pessoa). O executavel leva os do projeto (telezapp/_credenciais.py, gerado
+# na hora de empacotar e fora do git) e ninguem precisa informar nada. Sem
+# eles, o app usa os da configuracao e, por fim, pergunta uma vez.
 TELEGRAM_API_ID = 0
 TELEGRAM_API_HASH = ""
 
@@ -725,6 +725,19 @@ def credenciais_validas(api_id, api_hash):
         return False
 
 
+def credenciais_embutidas():
+    """(api_id, api_hash) postas no programa na hora de empacotar
+    (telezapp/_credenciais.py, fora do git: ferramentas/empacotar.py a gera),
+    ou None. Com elas, quem instala nao informa nada."""
+    try:
+        from telezapp import _credenciais
+    except ImportError:
+        return None
+    if credenciais_validas(_credenciais.API_ID, _credenciais.API_HASH):
+        return int(_credenciais.API_ID), str(_credenciais.API_HASH).strip()
+    return None
+
+
 def credenciais_telegram(config, arquivo_testes=ARQUIVO_TESTES):
     """(api_id, api_hash) ou None se ainda nao houver.
 
@@ -734,6 +747,9 @@ def credenciais_telegram(config, arquivo_testes=ARQUIVO_TESTES):
     """
     if credenciais_validas(TELEGRAM_API_ID, TELEGRAM_API_HASH):
         return int(TELEGRAM_API_ID), TELEGRAM_API_HASH
+    embutidas = credenciais_embutidas()
+    if embutidas is not None:
+        return embutidas
     api_id, api_hash = config.get("telegram_api_id"), config.get(
         "telegram_api_hash")
     if credenciais_validas(api_id, api_hash):

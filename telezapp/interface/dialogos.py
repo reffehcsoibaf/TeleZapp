@@ -92,8 +92,8 @@ def pedir_credenciais_telegram(pai, validar):
     """Pede api id e api hash do Telegram; (id, hash) ou None."""
     titulo = "Credenciais do aplicativo no Telegram"
     explicacao = (
-        "Nesta fase de testes, o TeleZapp ainda não tem as credenciais "
-        "próprias no Telegram. Informe o api id e o api hash criados em "
+        "Esta cópia do TeleZapp veio sem as credenciais do aplicativo no "
+        "Telegram. Informe o api id e o api hash criados em "
         "my.telegram.org, na opção API development tools. Eles identificam "
         "o aplicativo, não a sua conta, e ficam só neste computador.")
     valores = ["", ""]

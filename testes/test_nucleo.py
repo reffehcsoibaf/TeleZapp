@@ -791,3 +791,28 @@ def test_formatador_do_registro_mascara_ate_a_excecao():
     assert "ValueError: falhou em ...7252@s.whatsapp.net" in texto
     for numero in ("556136863608", "5511953057252", "5551999998888"):
         assert numero not in texto
+
+
+def test_credenciais_embutidas_no_programa_valem_antes_das_outras(
+        tmp_path, monkeypatch):
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path))
+    c = config.Config()
+    monkeypatch.setattr(config, "credenciais_embutidas",
+                        lambda: (777, "abcdefghijklmnop0123"))
+    assert config.credenciais_telegram(c, str(tmp_path / "nao.txt")) == (
+        777, "abcdefghijklmnop0123")
+    monkeypatch.setattr(config, "credenciais_embutidas", lambda: None)
+    assert config.credenciais_telegram(c, str(tmp_path / "nao.txt")) is None
+
+
+def test_modulo_de_credenciais_embutidas_e_lido(monkeypatch):
+    import sys
+    import types
+    falso = types.ModuleType("telezapp._credenciais")
+    falso.API_ID, falso.API_HASH = 42, "0123456789abcdef"
+    monkeypatch.setitem(sys.modules, "telezapp._credenciais", falso)
+    import telezapp
+    monkeypatch.setattr(telezapp, "_credenciais", falso, raising=False)
+    assert config.credenciais_embutidas() == (42, "0123456789abcdef")
+    falso.API_HASH = "curto"
+    assert config.credenciais_embutidas() is None
