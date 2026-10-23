@@ -607,6 +607,8 @@ no fechamento, por assunto.
 
 - **Envio de áudio que não é gravação direta (22/10/2026, corrigido em 23/10/2026):** encaminhar uma voz e colar um `.ogg` apareciam como enviados e nunca chegavam. O log mostrava `audio enviado` com o tipo `audio/ogg` sem `codecs=opus`; agora o Ogg com Opus vai como áudio comum com `audio/ogg; codecs=opus`, Ogg Vorbis vai como documento e encaminhar uma voz que não é Ogg/Opus segue como arquivo. **Verificado ao vivo pelo responsável (23/10/2026):** "me parece que o envio e o encaminhamento de áudio funcionou". Não se sabe quais casos ele testou além de encaminhar e colar; não verificado: Ogg Vorbis, M4A e MP3 como áudio comum.
 
+- **Verificado ao vivo pelo responsável (23/10/2026):** navegou pelo menu reorganizado (Novo, Ir para, Ferramentas) e pela janela de configurações nova (Interface, Mensagens e o botão Conteúdo falado), sem relatar problema. O arquivo de áudio que não chegava em 22/10 foi reenviado e **chegou ao destino como áudio**. Outros formatos (Ogg Vorbis, M4A, MP3) ele só vai testar numa oportunidade ou se um usuário relatar. **Não verificado:** criar grupo, canal e comunidade (WhatsApp e Telegram), tópicos de grupo do Telegram, Nova chamada, Novo contato e as credenciais do Telegram embutidas no executável (ainda não empacotado).
+
 ## Próximos passos sugeridos
 
 1. ~~Grupo 1 do plano acima~~ (concluído).
