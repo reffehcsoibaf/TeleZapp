@@ -82,11 +82,8 @@ def gravar_credenciais():
         return None
     caminho = os.path.join(RAIZ, "telezapp", "_credenciais.py")
     with open(caminho, "w", encoding="utf-8") as f:
-        f.write("# Gerado por ferramentas/empacotar.py; fora do git.
-"
-                "API_ID = %d
-API_HASH = %r
-" % cred)
+        f.write("# Gerado por ferramentas/empacotar.py; fora do git.\n"
+                "API_ID = %d\nAPI_HASH = %r\n" % cred)
     print("Credenciais do Telegram embutidas no programa.")
     return caminho
 
