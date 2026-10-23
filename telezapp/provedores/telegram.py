@@ -20,8 +20,8 @@ from telezapp.nucleo import modelos as m
 from telezapp.nucleo import previa_links
 from telezapp.provedores.base import (PEDIR_CODIGO, PEDIR_SENHA,
                                       PEDIR_TELEFONE, DownloadCancelado,
-                                      ErroBloqueio, ErroMidia, ErroPrivacidade,
-                                      Provedor)
+                                      ErroBloqueio, ErroMidia, ErroPerfil,
+                                      ErroPrivacidade, Provedor)
 
 log = logging.getLogger("telezapp.telegram")
 
@@ -652,6 +652,81 @@ class ProvedorTelegram(Provedor):
             raise ErroPrivacidade("Esta opção não existe no Telegram.")
         await self.cliente(functions.account.SetPrivacyRequest(
             key=tipo(), rules=[regra()]))
+
+    # ------------------------------------------------------------ perfil
+    PODE_EDITAR_PERFIL = True
+    PERFIL_SOBRENOME = True
+
+    def _executar_perfil(self, corotina, falha):
+        """Como _executar, mas todo erro vira ErroPerfil com o texto `falha`."""
+        try:
+            return self._executar(corotina)
+        except ErroPerfil:
+            raise
+        except ErroPrivacidade as e:          # conta nao conectada
+            raise ErroPerfil(str(e)) from e
+        except Exception as e:
+            log.exception("perfil do Telegram")
+            raise ErroPerfil(falha) from e
+
+    def meu_perfil(self):
+        return self._executar_perfil(
+            self._ler_perfil(), "Não consegui ler o seu perfil no Telegram.")
+
+    async def _ler_perfil(self):
+        from telethon.tl import functions, types
+        eu = await self.cliente.get_me()
+        completo = await self.cliente(functions.users.GetFullUserRequest(
+            types.InputUserSelf()))
+        return {"nome": getattr(eu, "first_name", "") or "",
+                "sobrenome": getattr(eu, "last_name", "") or "",
+                "recado": getattr(completo.full_user, "about", "") or ""}
+
+    def salvar_perfil(self, mudancas, foto=None):
+        return self._executar_perfil(
+            self._gravar_perfil(mudancas, foto),
+            "Não consegui salvar o perfil no Telegram.")
+
+    async def _gravar_perfil(self, mudancas, foto):
+        import io
+        from telethon import errors
+        from telethon.tl import functions
+        feitos, erros = [], []
+        campos = {"nome": "first_name", "sobrenome": "last_name",
+                  "recado": "about"}
+        pedido = {campos[c]: mudancas[c] for c in campos if c in mudancas}
+        if pedido:
+            try:
+                await self.cliente(functions.account.UpdateProfileRequest(
+                    **pedido))
+                feitos += [c for c in campos if c in mudancas]
+            except errors.FirstNameInvalidError:
+                erros.append(("nome", "o Telegram não aceitou esse nome."))
+            except errors.AboutTooLongError:
+                erros.append(("recado", "passou do limite do Telegram (70 "
+                              "caracteres; 140 com Premium)."))
+            except errors.FloodWaitError as e:
+                erros.append(("nome", "o Telegram pediu para esperar %d "
+                              "segundos." % e.seconds))
+            except Exception as e:
+                log.warning("perfil do Telegram: %s", type(e).__name__)
+                erros.append(("nome", "o Telegram não aceitou (%s)."
+                              % type(e).__name__))
+        if foto:
+            try:
+                arquivo = io.BytesIO(foto)
+                arquivo.name = "foto.jpg"
+                enviado = await self.cliente.upload_file(arquivo)
+                await self.cliente(functions.photos.UploadProfilePhotoRequest(
+                    file=enviado))
+                feitos.append("foto")
+            except (errors.PhotoInvalidError, errors.ImageProcessFailedError):
+                erros.append(("foto", "o Telegram não aceitou essa imagem."))
+            except Exception as e:
+                log.warning("foto do Telegram: %s", type(e).__name__)
+                erros.append(("foto", "o Telegram não aceitou (%s)."
+                              % type(e).__name__))
+        return feitos, erros
 
     # ------------------------------------------------------- bloqueados
     PODE_BLOQUEAR = True

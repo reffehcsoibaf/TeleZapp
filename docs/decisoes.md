@@ -640,6 +640,12 @@ Conferido o plano de 13/10 contra o código. Decisões do responsável:
 
 - **Voto em enquete de canal do WhatsApp: adiado (23/10/2026).** O whatsmeow só tem reação e "visto" para canais (conferido em `newsletter.go`), e o neonize não vota; o TeleZapp avisa que não vota e manda votar pelo celular. Implementar exigiria descobrir o formato do voto em canal e mexer na DLL. Só voltar ao assunto se virar demanda.
 
+### Editar o perfil (23/10/2026, versão 2026.10.23.1)
+
+- Feito nos dois serviços: nome, recado e foto (e o sobrenome no Telegram), em Ferramentas, "Editar o meu perfil". Envia só o que mudou e diz o que ficou salvo e o que o serviço recusou.
+- Decisões: a foto é preparada pelo TeleZapp (centro em quadrado, 640 px, JPEG) para o responsável poder escolher qualquer imagem; **sem remover a foto** por ora (o neonize não tem e o Telegram pediria outra chamada); o recado do Telegram aceita até 140 no formulário (Premium) e o serviço recusa acima de 70 sem Premium, com a frase explicada.
+- **Ainda sem teste ao vivo**: tudo. Pontos de atenção: o `set_profile_name` do neonize grava o nome de exibição (push name) e não confirmei que o WhatsApp o mostra na hora a quem já tem a conversa aberta; ler o recado próprio no WhatsApp depende de `get_user_info` do próprio JID.
+
 ## Chamadas de voz do WhatsApp: fase 0 (21/10/2026)
 
 - Experimento em `experimentos/10-chamada-whatsapp-meowcaller/` (Go, meowcaller sobre o hypermeow) com a ponte de voz em Python (`experimentos/chamada_whatsapp.py`, microfone e alto-falante por socket local). Ainda fora do app.

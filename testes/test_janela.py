@@ -2022,6 +2022,94 @@ def test_bloquear_pessoa_da_conversa_so_onde_o_servico_sabe(j, monkeypatch):
     assert chamadas == [("10", conv.nome)]
 
 
+def _perfil_falso(j, monkeypatch, valores, foto=None):
+    """Poe um provedor que edita o perfil e uma janela de edicao que devolve
+    `valores`; devolve (provedor, lista do que a janela falou)."""
+    import threading
+    from telezapp.interface import perfil as janela_perfil
+    p = j.contas.p
+    p.PODE_EDITAR_PERFIL, p.PERFIL_SOBRENOME = True, True
+    p.meu_perfil = lambda: {"nome": "Fábio", "sobrenome": "S.",
+                            "recado": "Oi"}
+    p.salvos = []
+    feito = threading.Event()
+
+    def salvar(mudancas, foto=None):
+        p.salvos.append((mudancas, foto))
+        feito.set()
+        return list(mudancas) + (["foto"] if foto else []), []
+    p.salvar_perfil, p.feito = salvar, feito
+
+    class Janela:
+        def __init__(self, pai, titulo, servico, atuais, sobrenome, f, nf):
+            self.foto, self.nome_da_foto = foto, "foto.png"
+
+        def ShowModal(self):
+            return wx_falso.ID_OK
+
+        def Destroy(self):
+            pass
+
+        def valores(self):
+            return valores
+    monkeypatch.setattr(janela_perfil, "DialogoPerfil", Janela)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.estados["t1"] = ev.CONECTADA
+    return p, ditas
+
+
+def test_editar_perfil_grava_so_o_que_mudou(j, monkeypatch):
+    p, ditas = _perfil_falso(j, monkeypatch, {
+        "nome": "Fábio", "sobrenome": "S.", "recado": "Livre"}, b"JPEG")
+    j._perfil_lido("t1", p.meu_perfil(), "")
+    assert p.feito.wait(5)
+    for _ in range(100):             # o resumo e falado depois de gravar
+        if "Perfil salvo: recado, foto." in ditas:
+            break
+        time.sleep(0.02)
+    assert p.salvos == [({"recado": "Livre"}, b"JPEG")]
+    assert ditas[-1] == "Perfil salvo: recado, foto."
+
+
+def test_editar_perfil_sem_mudanca_nao_grava(j, monkeypatch):
+    p, ditas = _perfil_falso(j, monkeypatch, {
+        "nome": "Fábio ", "sobrenome": "S.", "recado": "Oi"})
+    j._perfil_lido("t1", p.meu_perfil(), "")
+    assert p.salvos == [] and ditas[-1] == "Nada mudou no perfil."
+
+
+def test_editar_perfil_nome_vazio_avisa_e_reabre_a_janela(j, monkeypatch):
+    p, ditas = _perfil_falso(j, monkeypatch, {
+        "nome": "", "sobrenome": "S.", "recado": "Oi"})
+    from telezapp.interface import perfil as janela_perfil
+    aberturas = []
+    original = janela_perfil.DialogoPerfil
+
+    class Reabre(original):
+        def __init__(self, *a):
+            super().__init__(*a)
+            aberturas.append(a[3])
+
+        def ShowModal(self):
+            # na segunda vez a pessoa desiste
+            return wx_falso.ID_OK if len(aberturas) == 1 else                 wx_falso.ID_CANCEL
+    monkeypatch.setattr(janela_perfil, "DialogoPerfil", Reabre)
+    j._perfil_lido("t1", p.meu_perfil(), "")
+    assert len(aberturas) == 2 and aberturas[1]["nome"] == ""
+    assert "O nome não pode ficar vazio." in ditas and p.salvos == []
+
+
+def test_editar_perfil_sem_conta_que_edite_ou_com_erro_de_leitura(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.estados["t1"] = ev.CONECTADA
+    j._editar_perfil()
+    assert ditas[-1] == "Nenhuma conta conectada edita o perfil."
+    j._perfil_lido("t1", None, "A conta do WhatsApp não está conectada.")
+    assert ditas[-1] == "A conta do WhatsApp não está conectada."
+
+
 def test_limite_de_mensagens_por_conversa(j):
     j.cfg.set("mensagens_por_conversa", 50)
     assert j._limite_memoria() == 50

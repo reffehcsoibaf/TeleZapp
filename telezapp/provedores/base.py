@@ -30,6 +30,10 @@ class ErroBloqueio(Exception):
     dito a pessoa."""
 
 
+class ErroPerfil(Exception):
+    """Nao deu para ler ou mudar o perfil; o texto e dito a pessoa."""
+
+
 class DownloadCancelado(Exception):
     """A pessoa cancelou o download."""
 
@@ -314,6 +318,25 @@ class Provedor(ABC):
         """(tipo, quantas) de quem pode ver o status: contacts, blacklist
         ou whitelist; None se nao souber."""
         return None
+
+    # True nos servicos em que da para editar o proprio perfil; o sobrenome
+    # existe so em alguns (PERFIL_SOBRENOME)
+    PODE_EDITAR_PERFIL = False
+    PERFIL_SOBRENOME = False
+
+    def meu_perfil(self):
+        """{'nome', 'sobrenome', 'recado'} do proprio perfil (as chaves que o
+        servico nao tem ficam de fora). Espera o servico (thread propria).
+        Levanta ErroPerfil."""
+        raise ErroPerfil("Esta conta não edita o perfil por aqui.")
+
+    def salvar_perfil(self, mudancas, foto=None):
+        """Grava no servico os campos de `mudancas` ({'nome', 'sobrenome',
+        'recado'}: so os que mudaram) e a `foto` (bytes JPEG), se houver.
+        Espera o servico (thread propria). Devolve ([campos salvos],
+        [(campo, motivo)]); levanta ErroPerfil se nem tentou (conta
+        desconectada)."""
+        raise ErroPerfil("Esta conta não edita o perfil por aqui.")
 
     # True nos servicos em que da para bloquear e desbloquear pessoas
     PODE_BLOQUEAR = False

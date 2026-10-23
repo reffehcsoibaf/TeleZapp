@@ -31,7 +31,7 @@ from telezapp.nucleo import mencoes as nucleo_mencoes
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import previa_links
 from telezapp.provedores.base import (DownloadCancelado, ErroBloqueio,
-                                      ErroMidia, Provedor)
+                                      ErroMidia, ErroPerfil, Provedor)
 
 log = logging.getLogger("telezapp.whatsapp")
 
@@ -2333,6 +2333,55 @@ class ProvedorWhatsApp(Provedor):
         tipo = {1: "contacts", 2: "blacklist", 3: "whitelist"}.get(
             padrao.Type, "contacts")
         return tipo, len(padrao.List)
+
+    # ------------------------------------------------------------ perfil
+    PODE_EDITAR_PERFIL = True
+
+    def meu_perfil(self):
+        if self.cliente is None or not self._conectada:
+            raise ErroPerfil("A conta do WhatsApp não está conectada.")
+        try:
+            eu = self.cliente.get_me()
+            perfil = {"nome": eu.PushName or ""}
+        except Exception as e:
+            log.exception("não consegui ler o perfil")
+            raise ErroPerfil("Não consegui ler o seu perfil no WhatsApp.") \
+                from e
+        try:
+            for u in self.cliente.get_user_info(eu.JID):
+                perfil["recado"] = u.UserInfo.Status or ""
+                break
+        except Exception:
+            # o recado nao veio: o campo aparece vazio e so muda se a pessoa
+            # escrever algo
+            log.info("sem o recado do próprio perfil")
+            perfil["recado"] = ""
+        return perfil
+
+    def salvar_perfil(self, mudancas, foto=None):
+        if self.cliente is None or not self._conectada:
+            raise ErroPerfil("A conta do WhatsApp não está conectada.")
+        passos = []
+        if "nome" in mudancas:
+            passos.append(("nome", lambda: self.cliente.set_profile_name(
+                mudancas["nome"])))
+        if "recado" in mudancas:
+            passos.append(("recado", lambda: self.cliente.set_status_message(
+                mudancas["recado"])))
+        if foto:
+            passos.append(("foto", lambda: self.cliente.set_profile_photo(
+                foto)))
+        feitos, erros = [], []
+        for campo, fazer in passos:
+            try:
+                fazer()
+                feitos.append(campo)
+            except Exception as e:
+                log.warning("perfil, %s: %s: %s", campo, type(e).__name__,
+                            str(e)[:200])
+                erros.append((campo, "o WhatsApp não aceitou (%s)."
+                              % type(e).__name__))
+        return feitos, erros
 
     # ------------------------------------------------------- bloqueados
     PODE_BLOQUEAR = True

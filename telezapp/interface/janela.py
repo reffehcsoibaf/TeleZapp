@@ -36,7 +36,7 @@ from telezapp.midia.gravador import (MICROFONE, SOM_INTERNO, ErroGravacao,
 from telezapp.midia.reprodutor import (FormatoNaoSuportado, Reprodutor,
                                        formatar_tempo)
 from telezapp.nucleo import chamadas as ch
-from telezapp.provedores.base import ErroPrivacidade
+from telezapp.provedores.base import ErroPerfil, ErroPrivacidade
 from telezapp.nucleo import atualizacao
 from telezapp.nucleo import atualizador
 from telezapp.nucleo import inicializacao
@@ -655,6 +655,7 @@ class Janela(wx.Frame):
         m_fer = wx.Menu()
         item(m_fer, "gerenciar_contas", "&Gerenciar contas...")
         item(m_fer, "reconectar", "Reco&nectar as contas")
+        item(m_fer, "editar_perfil", "Editar o &meu perfil...")
         m_fer.AppendSeparator()
         item(m_fer, "backup", "Fazer &backup...")
         item(m_fer, "restaurar_backup", "&Restaurar backup...")
@@ -700,6 +701,7 @@ class Janela(wx.Frame):
         ligacoes = {
             "adicionar_conta": lambda e: self._adicionar_conta_pelo_menu(),
             "gerenciar_contas": lambda e: self._gerenciar_contas(),
+            "editar_perfil": lambda e: self._editar_perfil(),
             "reconectar": lambda e: self._reconectar(),
             "ir_filtro_conta": lambda e: self._ir_para(self.cx_conta, ""),
             "ir_filtro_tipo": lambda e: self._ir_para(self.cx_tipo, ""),
@@ -4912,6 +4914,107 @@ class Janela(wx.Frame):
                             % destino, interromper=True)
             return None
         return conta_id, achado[0], achado[1]
+
+    # ============================================================= perfil
+    @seguro
+    def _editar_perfil(self):
+        """Escolhe a conta (so se houver mais de uma que edite o perfil), le
+        o perfil dela e abre a janela de edicao."""
+        contas = [(d["id"], "%s, %s" % (
+            d.get("nome") or d.get("telefone") or d["id"],
+            m.SERVICOS.get(d.get("servico"), "")))
+            for d in self.cfg.contas()
+            if self.estados.get(d["id"]) == ev.CONECTADA
+            and getattr(self.contas.provedor(d["id"]), "PODE_EDITAR_PERFIL",
+                        False)]
+        if not contas:
+            bipe("erro")
+            self.fala.falar("Nenhuma conta conectada edita o perfil.",
+                            interromper=True)
+            return
+        conta_id = contas[0][0]
+        if len(contas) > 1:
+            dlg = wx.SingleChoiceDialog(
+                self, "De qual conta é o perfil?", "Editar o meu perfil",
+                [r for _, r in contas])
+            try:
+                if dlg.ShowModal() != wx.ID_OK:
+                    return
+                conta_id = contas[dlg.GetSelection()][0]
+            finally:
+                dlg.Destroy()
+        prov = self.contas.provedor(conta_id)
+
+        def ler():
+            try:
+                atual, erro = prov.meu_perfil(), ""
+            except ErroPerfil as e:
+                atual, erro = None, str(e)
+            except Exception:
+                log.exception("ler o perfil")
+                atual, erro = None, "Não consegui ler o seu perfil."
+            wx.CallAfter(self._perfil_lido, conta_id, atual, erro)
+        self.fala.falar("Lendo o seu perfil.", interromper=True)
+        threading.Thread(target=ler, daemon=True, name="ler-perfil").start()
+
+    @seguro
+    def _perfil_lido(self, conta_id, atual, erro):
+        from telezapp.interface import perfil as janela_perfil
+        from telezapp.nucleo import perfil as np_
+        if atual is None:
+            bipe("erro")
+            self.fala.falar(erro, interromper=True)
+            wx.MessageBox(erro, NOME, wx.OK | wx.ICON_WARNING, self)
+            return
+        prov = self.contas.provedor(conta_id)
+        servico = self.contas.servico(conta_id)
+        valores, foto, nome_da_foto = dict(atual), None, ""
+        while True:
+            dlg = janela_perfil.DialogoPerfil(
+                self, "Editar o meu perfil, %s" % m.SERVICOS.get(servico, ""),
+                servico, valores, prov.PERFIL_SOBRENOME, foto, nome_da_foto)
+            try:
+                if dlg.ShowModal() != wx.ID_OK:
+                    return
+                novos = dlg.valores()
+                foto, nome_da_foto = dlg.foto, dlg.nome_da_foto
+            finally:
+                dlg.Destroy()
+            mudadas = np_.mudancas(atual, novos)
+            problema = np_.validar(servico, mudadas)
+            if not problema:
+                break
+            bipe("erro")
+            self.fala.falar(problema, interromper=True)
+            wx.MessageBox(problema, "Editar o meu perfil",
+                          wx.OK | wx.ICON_WARNING, self)
+            valores = novos             # reabre com o que ela digitou
+        if not mudadas and not foto:
+            self.fala.falar("Nada mudou no perfil.", interromper=True)
+            return
+
+        def gravar():
+            try:
+                feitos, erros = prov.salvar_perfil(mudadas, foto)
+                texto = np_.resumo(feitos, erros)
+            except ErroPerfil as e:
+                feitos, erros, texto = [], [("", str(e))], str(e)
+            except Exception:
+                log.exception("salvar o perfil")
+                feitos, erros = [], [("", "")]
+                texto = "Não consegui salvar o perfil."
+            wx.CallAfter(self._perfil_salvo, texto, bool(erros))
+        self.fala.falar("Salvando o perfil.", interromper=True)
+        threading.Thread(target=gravar, daemon=True,
+                         name="salvar-perfil").start()
+
+    @seguro
+    def _perfil_salvo(self, texto, com_erro):
+        bipe("erro" if com_erro else "tarefa_pronta")
+        self.fala.falar(texto, interromper=True)
+        if com_erro:
+            wx.MessageBox(texto, "Editar o meu perfil",
+                          wx.OK | wx.ICON_WARNING, self)
 
     def _contatos_bloqueados(self):
         from telezapp.interface import bloqueados
