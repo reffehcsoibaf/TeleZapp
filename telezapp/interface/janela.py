@@ -4188,8 +4188,9 @@ class Janela(wx.Frame):
 
     @seguro
     def _nova_mensagem(self):
-        """Escreve para alguem sem abrir uma conversa antes: escolhe a conta
-        (so se houver mais de uma conectada), o destinatario e o texto."""
+        """Escolhe a conta (so se houver mais de uma conectada) e a pessoa e
+        abre a conversa com ela, onde a mensagem se escreve e se envia como
+        qualquer outra."""
         from telezapp.interface import contatos
         from telezapp.nucleo import nova_mensagem as nm
         contas = [(d["id"], "%s, %s" % (
@@ -4211,31 +4212,20 @@ class Janela(wx.Frame):
         escolha = contatos.dialogo_nova_mensagem(self, contas, buscar)
         if escolha is None:
             return
-        conta_id, destino, texto, pessoa, anexos = escolha
+        conta_id, destino, pessoa = escolha
         achado = pessoa or self._resolver_destino(conta_id, destino, nm)
         if achado is None:
-            colagem.descartar(anexos)
             bipe("erro")
             self.fala.falar("Não encontrei %s. Use o nome de um contato ou "
                             "conversa, um número com DDD ou um @usuário."
                             % destino, interromper=True)
             return
         conversa_id, nome = achado
-        chave = (conta_id, conversa_id)
-        conv = self.indice.get(chave)
-        if conv is None:
-            conv = m.Conversa(conta_id, conversa_id, nome,
-                              self.contas.servico(conta_id), "privada",
-                              data=time.time())
-            self.indice[chave] = conv
-            self._ordenar()
-            self._preencher_conversas()
-        if self.atual is not None and self.atual != chave:
+        conv = self._garantir_conversa(conta_id, conversa_id, nome)
+        if self.atual is not None and self.atual != conv.chave:
             self._fechar_conversa()
         self._abrir_conversa(conv)
-        self.caixa.SetValue(texto)
-        self.anexos = list(anexos)
-        self._enviar_texto()
+        self._mostrar_caixa()          # a mensagem se escreve na conversa
 
     @seguro
     def _nova_chamada(self):

@@ -2347,18 +2347,20 @@ def test_aplicar_privacidade_do_whatsapp_confere_pela_releitura(j):
 
 
 # ------------------------------------------------------- nova mensagem
-def test_nova_mensagem_escolhe_conta_e_envia(j, monkeypatch):
+def test_nova_mensagem_escolhe_a_pessoa_e_abre_a_conversa_sem_enviar(
+        j, monkeypatch):
     from telezapp.interface import contatos
     vistas = []
     monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
                         lambda pai, contas, buscar: vistas.append(contas) or
-                        (("t1", "bruno", "oi, tudo bem?", None, [])))
+                        (("t1", "bruno", None)))
     enviados = []
-    j._enviar_texto = lambda: enviados.append((j.atual, j.caixa.GetValue()))
+    j._enviar_texto = lambda: enviados.append(j.atual)
     j._nova_mensagem()
     assert [c for c, _ in vistas[0]] == ["t1"]           # so a conectada
-    assert enviados == [(("t1", "20"), "oi, tudo bem?")]  # Bruno ja existia
-    assert j.atual == ("t1", "20")
+    assert j.atual == ("t1", "20")           # Bruno ja existia: abriu
+    assert enviados == []                    # escreve-se na conversa
+    assert j.FindFocus() is j.caixa
 
 
 def test_nova_mensagem_para_telefone_cria_conversa_no_whatsapp(j, monkeypatch):
@@ -2384,12 +2386,10 @@ def test_nova_mensagem_para_telefone_cria_conversa_no_whatsapp(j, monkeypatch):
     vistas = []
     monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
                         lambda pai, contas, buscar: vistas.append(contas) or
-                        ("w1", "(51) 99999-8888", "oi", None, []))
-    enviados = []
-    j._enviar_texto = lambda: enviados.append(j.atual)
+                        ("w1", "(51) 99999-8888", None))
     j._nova_mensagem()
     assert len(vistas[0]) == 2                  # duas contas: aparece a escolha
-    assert enviados == [("w1", "5551999998888@s.whatsapp.net")]
+    assert j.atual == ("w1", "5551999998888@s.whatsapp.net")
     assert ("w1", "5551999998888@s.whatsapp.net") in j.indice
 
 
@@ -2403,7 +2403,7 @@ def test_nova_mensagem_sem_conta_conectada_ou_destino_desconhecido(j,
     assert ditas[-1] == "Nenhuma conta conectada para enviar."
     j.estados["t1"] = ev.CONECTADA
     monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
-                        lambda pai, contas, buscar: ("t1", "ninguem assim", "oi", None, []))
+                        lambda pai, contas, buscar: ("t1", "ninguem assim", None))
     j._nova_mensagem()
     assert ditas[-1].startswith("Não encontrei ninguem assim.")
 
@@ -2413,12 +2413,10 @@ def test_nova_mensagem_com_pessoa_escolhida_na_lista_nao_resolve_o_texto(
     from telezapp.interface import contatos
     monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
                         lambda pai, contas, buscar: (
-                            "t1", "br", "oi", ("20", "Bruno"), []))
-    enviados = []
-    j._enviar_texto = lambda: enviados.append(j.atual)
+                            "t1", "br", ("20", "Bruno")))
     j._resolver_destino = lambda *a: (_ for _ in ()).throw(AssertionError)
     j._nova_mensagem()
-    assert enviados == [("t1", "20")]
+    assert j.atual == ("t1", "20")
 
 
 def test_mensagem_apagada_no_celular_some_da_lista_e_nao_volta(j):
@@ -2518,20 +2516,6 @@ def test_esc_remove_a_midia_colada_antes_de_sair_da_conversa(j, tmp_path):
     j.anexos.append(jm.envio.preparar(str(pdf)))
     j._sair_da_caixa()
     assert j.anexos == [] and j.atual is not None
-
-
-def test_nova_mensagem_com_midia_colada_envia_com_a_legenda(j, monkeypatch,
-                                                            tmp_path):
-    from telezapp.interface import contatos
-    pdf = tmp_path / "contrato.pdf"
-    pdf.write_bytes(b"%PDF")
-    anexo = jm.envio.preparar(str(pdf))
-    monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
-                        lambda pai, contas, buscar: (
-                            "t1", "br", "segue", ("20", "Bruno"), [anexo]))
-    j._nova_mensagem()
-    assert ("arquivo", "20", m.DOCUMENTO, "contrato.pdf",
-            "segue") in j.contas.p.pedidos
 
 
 def test_delete_apaga_conversa_na_lista_de_conversas_e_mensagem_na_de_mensagens(j):
@@ -4614,3 +4598,35 @@ def test_esc_no_topico_volta_para_a_lista_de_topicos_do_grupo(j):
         wx_falso.resposta_lista[0] = wx_falso.ID_OK
     assert j.atual is None
     assert j.lista_conv.GetSelection() == j._chaves_conv.index(("t1", "-100"))
+
+
+def test_gerenciar_contatos_busca_por_nome_e_telefone(monkeypatch):
+    from telezapp.interface import contatos
+
+    class Banco:
+        def contatos(self, conta_id=None):
+            return [("t1", "1", "Ana Souza", "+5551999998888"),
+                    ("t1", "2", "Bruno", "+5511988887777"),
+                    ("t1", "3", "Édson", "")]
+
+    class Contas:
+        def lista(self):
+            return [("t1", "telegram", "Fábio")]
+
+        def provedor(self, cid):
+            return None
+    g = contatos.GerenciadorContatos(None, Banco(), Contas(), lambda: None,
+                                     lambda t: None)
+    assert len(g._itens) == 3
+    g.busca.SetValue("edson")                 # sem acento nem maiuscula
+    g._preencher(g._chave_selecionada())
+    assert [c[2] for c in g._itens] == ["Édson"]
+    g.busca.SetValue("1198888")               # parte do telefone
+    g._preencher()
+    assert [c[2] for c in g._itens] == ["Bruno"]
+    g.busca.SetValue("zzz")
+    g._preencher()
+    assert g._itens == [] and g.lista.itens == ["Nenhum contato encontrado"]
+    g.busca.SetValue("")
+    g._preencher()
+    assert len(g._itens) == 3
