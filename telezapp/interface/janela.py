@@ -515,6 +515,10 @@ class Janela(wx.Frame):
              "&Salvar a pessoa desta conversa como contato...")
         item(m_ctt, "salvar_autor",
              "Salvar quem enviou a &mensagem como contato...")
+        m_ctt.AppendSeparator()
+        item(m_ctt, "bloqueados", "Contatos &bloqueados...")
+        item(m_ctt, "bloquear_pessoa",
+             "Bloquear ou &desbloquear a pessoa desta conversa...")
 
         m_conv = wx.Menu()
         item(m_conv, "nao_lidas", "Mensagens &não lidas (marcador ou próxima "
@@ -706,6 +710,8 @@ class Janela(wx.Frame):
             "salvar_conv": lambda e: self._salvar_conversa(),
             "detalhes_conv": lambda e: self._detalhes_da_conversa(),
             "salvar_autor": lambda e: self._salvar_autor(),
+            "bloqueados": lambda e: self._contatos_bloqueados(),
+            "bloquear_pessoa": lambda e: self._bloquear_pessoa(),
             "logs": lambda e: self._abrir_logs(),
             "pasta_sons": lambda e: self._abrir_pasta("sons"),
             "sair": lambda e: self._sair(),
@@ -4850,6 +4856,73 @@ class Janela(wx.Frame):
         finally:
             dlg.Destroy()
 
+    def _pode_bloquear(self, conta_id):
+        prov = self.contas.provedor(conta_id) if self.contas else None
+        return bool(prov is not None and getattr(prov, "PODE_BLOQUEAR", False))
+
+    def _bloquear_pessoa(self, conv=None):
+        """Bloqueia a pessoa da conversa (ou desbloqueia, se ja esta
+        bloqueada), depois de perguntar."""
+        from telezapp.interface import bloqueados
+        if conv is None:
+            conv = self._conversa_privada_em_foco()
+        if conv is None or conv.tipo != "privada":
+            self.fala.falar("Selecione uma conversa com uma pessoa.")
+            return
+        if not self._pode_bloquear(conv.conta_id):
+            self.fala.falar("Esta conta não bloqueia pessoas por aqui.")
+            return
+        bloqueados.alternar(
+            self, self.contas.provedor(conv.conta_id), conv.id, conv.nome,
+            lambda t: self.fala.falar(t, interromper=True))
+
+    def _pessoa_para_bloquear(self):
+        """Escolhe a conta (so se houver mais de uma que bloqueie) e a pessoa.
+        Devolve (conta_id, conversa_id, nome) ou None."""
+        from telezapp.interface import contatos
+        from telezapp.nucleo import nova_mensagem as nm
+        contas = [(d["id"], "%s, %s" % (
+            d.get("nome") or d.get("telefone") or d["id"],
+            m.SERVICOS.get(d.get("servico"), "")))
+            for d in self.cfg.contas()
+            if self.estados.get(d["id"]) == ev.CONECTADA
+            and self._pode_bloquear(d["id"])]
+        if not contas:
+            bipe("erro")
+            self.fala.falar("Nenhuma conta conectada bloqueia pessoas.",
+                            interromper=True)
+            return None
+
+        def buscar(conta_id, texto):
+            return [c for c in nm.candidatos(
+                texto, self.banco.contatos(conta_id),
+                [c for c in self.indice.values()
+                 if c.conta_id == conta_id and c.tipo == "privada"])]
+        escolha = contatos.dialogo_nova_mensagem(
+            self, contas, buscar, "Bloquear contato")
+        if escolha is None:
+            return None
+        conta_id, destino, pessoa = escolha
+        achado = pessoa or self._resolver_destino(conta_id, destino, nm)
+        if achado is None:
+            bipe("erro")
+            self.fala.falar("Não encontrei %s. Use o nome de um contato ou "
+                            "conversa, um telefone no formato internacional "
+                            "(como +55 51 99999 8888) ou um @usuário."
+                            % destino, interromper=True)
+            return None
+        return conta_id, achado[0], achado[1]
+
+    def _contatos_bloqueados(self):
+        from telezapp.interface import bloqueados
+        dlg = bloqueados.GerenciadorBloqueados(
+            self, _ContasParaContatos(self), self._pessoa_para_bloquear,
+            lambda t: self.fala.falar(t, interromper=True))
+        try:
+            dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+
     def _conversa_privada_em_foco(self):
         conv = self.indice.get(self.atual) if self.atual else None
         if conv is None:
@@ -5123,6 +5196,9 @@ class Janela(wx.Frame):
         if conv.tipo == "privada":
             opcoes.append(("Salvar como contato...",
                            lambda: self._salvar_pessoa(conv)))
+            if self._pode_bloquear(conv.conta_id):
+                opcoes.append(("Bloquear ou desbloquear...",
+                               lambda: self._bloquear_pessoa(conv)))
         if self.cfg.get("depuracao"):
             opcoes.append(("Depurar conversa",
                            lambda: self._depurar_conversa(conv)))

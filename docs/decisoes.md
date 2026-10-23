@@ -593,6 +593,51 @@ Pedido do usuário: o programa dizia que a mídia ia sem citar a mensagem respon
 
 Reúne tudo o que entrou depois da 2026.10.21.0 (o detalhe técnico está no CHANGELOG): chamadas de voz do WhatsApp pela DLL de teste do neonize, corretor ortográfico, atalhos personalizáveis, gravar por atalho, segundo plano e bandeja, enquetes, menus Novo e Ir para, configurações Interface e Mensagens, criar grupo, canal e comunidade, tópicos de grupo do Telegram, estado reproduzida, correção do áudio Ogg, credenciais do Telegram embutidas e o formulário de relatos. As confirmações do responsável estão nas seções abaixo. **Ainda sem teste no app real:** criar grupo, canal e comunidade nos dois serviços, tópicos do Telegram, Nova chamada, Novo contato, a busca em Gerenciar contatos, as credenciais embutidas no executável, a tela de Atalhos e o gravar por atalho, o segundo plano, votar e quem votou no Telegram, e o estado reproduzida nas mensagens antigas.
 
+## Segurança dos dados: só documentar por ora (23/10/2026)
+
+- Perguntaram ao responsável sobre a segurança dos dados do WhatsApp e do
+  Telegram. Hoje só as chaves de IA são cifradas (DPAPI); sessões, banco de
+  mensagens e mídias ficam em arquivos comuns na pasta de dados, e o código
+  secreto das trancadas só as esconde na interface.
+- Decisão do responsável: **dizer isso com clareza no guia** (seção
+  "Segurança e privacidade dos seus dados": o que sai do computador, o que é
+  e o que não é cifrado, BitLocker e conta com senha, o que fazer se perder o
+  computador, risco de restrição da conta) e **não aumentar a complexidade
+  agora**. Só reabrir se muitas pessoas questionarem ou se acontecer algo.
+- Se reabrir, ordem sugerida: sessão do Telegram via DPAPI (custo mínimo);
+  SQLCipher no banco de mensagens, medindo antes e depois (faixa típica de 5 a
+  15%, não medida aqui); sessão do WhatsApp por último, pois depende da DLL do
+  neonize. Mídias ficam de fora (BitLocker cobre).
+
+## Funções do plano original que faltavam (23/10/2026)
+
+Conferido o plano de 13/10 contra o código. Decisões do responsável:
+
+- **Janela de atualização**: está exatamente como planejado.
+- **Listas de transmissão**: ficam quietas. Se algumas pessoas pedirem, o
+  responsável avalia se implementa.
+- **A fazer (vale a pena)**:
+  1. **Bloquear e desbloquear contatos**, com uma **lista dos bloqueados**.
+  2. **Editar o perfil** (nome, recado e foto), com a alteração indo para os
+     dois serviços.
+  3. **Ordem das informações**, escolhida pelo usuário, nas mensagens e
+     também na lista de conversas ("é algo a ver", ou seja, a estudar o
+     desenho antes).
+- **Continuam fora**: chamadas de vídeo; assinatura do executável (depende de
+  certificado).
+- **Viabilidade** (conferida em 23/10/2026): o neonize do venv tem
+  `update_blocklist`, `get_blocklist`, `set_profile_name`,
+  `set_status_message` e `set_profile_photo`; o Telethon cobre o Telegram
+  (`contacts.Block`, `Unblock`, `GetBlocked`, `account.UpdateProfile`,
+  `photos.UploadProfilePhoto`). Falta desenhar a interface e testar ao vivo.
+
+### Bloquear e desbloquear (23/10/2026, versão 2026.10.23.1)
+
+- Feito nos dois serviços: `Provedor.bloqueados`, `esta_bloqueado` e `bloquear`; janela "Contatos bloqueados" (menu Contatos) e "Bloquear ou desbloquear" (menu Contatos e menu de contexto da conversa privada). Só pessoas; grupos e canais não.
+- Decisões: o item da conversa **inverte o estado atual** (confere o serviço antes e pergunta), em vez de um rótulo que muda, porque o estado só se sabe indo à rede e o menu de contexto não pode esperar; na lista, Desbloquear age direto (Enter também) e Bloquear alguém pergunta antes.
+- **Ainda sem teste ao vivo**: tudo. Pontos de atenção no WhatsApp: a lista de bloqueio pode guardar o endereço LID (o código compara pelo número e desbloqueia pelo endereço da lista) e o bloqueio por telefone novo usa o JID do número; se o serviço recusar, o erro aparece na fala e numa mensagem.
+- Junto veio a correção do voto em enquete do WhatsApp (`EncodeError` do `MessageInfo`, visto no log de 23/10 às 13:27 e 13:27:50). No Telegram não há falha de voto nesse log; o relato do responsável sobre o Telegram por volta das 13h28 não bate com as linhas do log, que são do WhatsApp.
+
 ## Chamadas de voz do WhatsApp: fase 0 (21/10/2026)
 
 - Experimento em `experimentos/10-chamada-whatsapp-meowcaller/` (Go, meowcaller sobre o hypermeow) com a ponte de voz em Python (`experimentos/chamada_whatsapp.py`, microfone e alto-falante por socket local). Ainda fora do app.

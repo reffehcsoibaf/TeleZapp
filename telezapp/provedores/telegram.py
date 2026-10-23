@@ -20,7 +20,8 @@ from telezapp.nucleo import modelos as m
 from telezapp.nucleo import previa_links
 from telezapp.provedores.base import (PEDIR_CODIGO, PEDIR_SENHA,
                                       PEDIR_TELEFONE, DownloadCancelado,
-                                      ErroMidia, ErroPrivacidade, Provedor)
+                                      ErroBloqueio, ErroMidia, ErroPrivacidade,
+                                      Provedor)
 
 log = logging.getLogger("telezapp.telegram")
 
@@ -651,6 +652,82 @@ class ProvedorTelegram(Provedor):
             raise ErroPrivacidade("Esta opção não existe no Telegram.")
         await self.cliente(functions.account.SetPrivacyRequest(
             key=tipo(), rules=[regra()]))
+
+    # ------------------------------------------------------- bloqueados
+    PODE_BLOQUEAR = True
+
+    def _executar_bloqueio(self, corotina, falha):
+        """Como _executar, mas todo erro vira ErroBloqueio com o texto
+        `falha` (ou o proprio texto, quando ja e um ErroBloqueio)."""
+        try:
+            return self._executar(corotina)
+        except ErroBloqueio:
+            raise
+        except ErroPrivacidade as e:          # conta nao conectada
+            raise ErroBloqueio(str(e)) from e
+        except Exception as e:
+            log.exception("bloqueados do Telegram")
+            raise ErroBloqueio(falha) from e
+
+    def bloqueados(self):
+        return self._executar_bloqueio(
+            self._ler_bloqueados(),
+            "Não consegui ler a lista de bloqueados do Telegram.")
+
+    async def _ler_bloqueados(self):
+        from telethon.tl import functions
+        achados, vistos, inicio = [], set(), 0
+        while True:
+            r = await self.cliente(functions.contacts.GetBlockedRequest(
+                offset=inicio, limit=100))
+            bloqueados = getattr(r, "blocked", None) or []
+            por_id = {u.id: u for u in getattr(r, "users", None) or []}
+            for b in bloqueados:
+                u = por_id.get(getattr(b.peer_id, "user_id", None))
+                if u is None or str(u.id) in vistos:
+                    continue
+                vistos.add(str(u.id))
+                fone = getattr(u, "phone", "") or ""
+                achados.append((str(u.id), nome_de(u) or str(u.id),
+                                "+" + fone if fone else ""))
+            inicio += len(bloqueados)
+            if not bloqueados or inicio >= getattr(r, "count", inicio):
+                return achados
+
+    def _id_de_pessoa(self, conversa_id):
+        """Id numerico do usuario da conversa; so pessoas se bloqueiam."""
+        try:
+            id_ = int(conversa_id)
+        except ValueError:
+            id_ = 0
+        if id_ <= 0:
+            raise ErroBloqueio("Só dá para bloquear pessoas.")
+        return id_
+
+    def esta_bloqueado(self, conversa_id):
+        self._id_de_pessoa(conversa_id)
+        return self._executar_bloqueio(
+            self._ver_se_bloqueado(conversa_id),
+            "Não consegui ver se a pessoa está bloqueada no Telegram.")
+
+    async def _ver_se_bloqueado(self, conversa_id):
+        from telethon.tl import functions
+        completo = await self.cliente(functions.users.GetFullUserRequest(
+            await self._entidade(conversa_id)))
+        return bool(getattr(completo.full_user, "blocked", False))
+
+    def bloquear(self, conversa_id, bloquear=True):
+        self._id_de_pessoa(conversa_id)
+        self._executar_bloqueio(
+            self._mudar_bloqueio(conversa_id, bloquear),
+            "O Telegram não aceitou %s a pessoa."
+            % ("bloquear" if bloquear else "desbloquear"))
+
+    async def _mudar_bloqueio(self, conversa_id, bloquear):
+        from telethon.tl import functions
+        pedido = functions.contacts.BlockRequest if bloquear \
+            else functions.contacts.UnblockRequest
+        await self.cliente(pedido(id=await self._entidade(conversa_id)))
 
     def _avisar(self, texto, grave=False):
         self.barramento.publicar(ev.Aviso(self.conta.id, texto, grave))

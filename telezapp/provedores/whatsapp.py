@@ -30,7 +30,8 @@ from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import mencoes as nucleo_mencoes
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import previa_links
-from telezapp.provedores.base import DownloadCancelado, ErroMidia, Provedor
+from telezapp.provedores.base import (DownloadCancelado, ErroBloqueio,
+                                      ErroMidia, Provedor)
 
 log = logging.getLogger("telezapp.whatsapp")
 
@@ -2333,6 +2334,74 @@ class ProvedorWhatsApp(Provedor):
             padrao.Type, "contacts")
         return tipo, len(padrao.List)
 
+    # ------------------------------------------------------- bloqueados
+    PODE_BLOQUEAR = True
+
+    def _lista_de_bloqueio(self):
+        """Os JIDs da lista de bloqueio da conta, como o servico os guarda."""
+        if self.cliente is None or not self._conectada:
+            raise ErroBloqueio("A conta do WhatsApp não está conectada.")
+        try:
+            return list(self.cliente.get_blocklist().JIDs)
+        except Exception as e:
+            log.exception("não consegui ler a lista de bloqueados")
+            raise ErroBloqueio("Não consegui ler a lista de bloqueados do "
+                               "WhatsApp.") from e
+
+    def bloqueados(self):
+        achados, vistos = [], set()
+        for jid in self._lista_de_bloqueio():
+            alvo = self._numero_do_jid(jid)
+            id_ = jid_texto(alvo)
+            if id_ in vistos:
+                continue
+            vistos.add(id_)
+            telefone = "+" + alvo.User if alvo.Server == "s.whatsapp.net" \
+                and alvo.User else ""
+            achados.append((id_, self._nome_contato(jid), telefone))
+        return achados
+
+    def _jid_da_pessoa(self, conversa_id):
+        if "@" not in conversa_id or conversa_id.endswith("@g.us"):
+            raise ErroBloqueio("Só dá para bloquear pessoas.")
+        usuario, servidor = jid_de_texto(conversa_id)
+        return _jid_obj(usuario, servidor)
+
+    def _entrada_da_lista(self, conversa_id):
+        """O JID da lista de bloqueio que e dessa pessoa (o WhatsApp pode
+        guardar o telefone ou o endereco LID), ou None."""
+        alvo = jid_texto(self._numero_do_jid(self._jid_da_pessoa(conversa_id)))
+        for jid in self._lista_de_bloqueio():
+            if jid_texto(self._numero_do_jid(jid)) == alvo or \
+                    jid_texto(jid) == conversa_id:
+                return jid
+        return None
+
+    def esta_bloqueado(self, conversa_id):
+        return self._entrada_da_lista(conversa_id) is not None
+
+    def bloquear(self, conversa_id, bloquear=True):
+        from neonize.utils.enum import BlocklistAction
+        if bloquear:
+            if self.cliente is None or not self._conectada:
+                raise ErroBloqueio("A conta do WhatsApp não está conectada.")
+            jid = self._numero_do_jid(self._jid_da_pessoa(conversa_id))
+        else:
+            # desbloqueia pelo endereco que consta na lista
+            jid = self._entrada_da_lista(conversa_id)
+            if jid is None:
+                return
+        try:
+            self.cliente.update_blocklist(
+                jid, BlocklistAction.BLOCK if bloquear
+                else BlocklistAction.UNBLOCK)
+        except Exception as e:
+            log.exception("não consegui %s", "bloquear" if bloquear
+                          else "desbloquear")
+            raise ErroBloqueio(
+                "O WhatsApp não aceitou %s a pessoa."
+                % ("bloquear" if bloquear else "desbloquear")) from e
+
     def id_do_telefone(self, telefone):
         digitos = re.sub(r"\D", "", telefone or "")
         return digitos + "@s.whatsapp.net" if digitos else ""
@@ -3267,7 +3336,6 @@ class ProvedorWhatsApp(Provedor):
                 raise ConnectionError("sem conexão")
             if not enq:
                 raise ValueError("não é uma enquete")
-            from neonize.proto.Neonize_pb2 import MessageInfo, MessageSource
             eu = self.cliente.get_me().JID
             if msg.minha:
                 autor = eu
@@ -3278,10 +3346,9 @@ class ProvedorWhatsApp(Provedor):
                     raise ValueError("sem o remetente da enquete")
                 autor = _jid_obj(*jid_de_texto(rem))
             chat = self._jid(cid)
-            origem = MessageSource(Chat=chat, Sender=autor,
-                                   IsFromMe=bool(msg.minha),
-                                   IsGroup=cid.endswith("@g.us"))
-            enquete_info = MessageInfo(MessageSource=origem, ID=msg.id)
+            enquete_info = info_da_mensagem(
+                chat, autor, msg.id, bool(msg.minha),
+                cid.endswith("@g.us"))
             nomes = [enq["opcoes"][i] for i in escolhas]
             self.cliente.send_message(
                 chat, self.cliente.build_poll_vote(enquete_info, nomes))
@@ -4418,3 +4485,16 @@ def caminho_sessao(pasta, conta_id):
 def _jid_obj(usuario, servidor):
     from neonize.utils.jid import build_jid
     return build_jid(usuario, servidor)
+
+
+def info_da_mensagem(chat, remetente, id_, minha, grupo):
+    """MessageInfo que o neonize aceita serializar: todos os campos do
+    protobuf sao obrigatorios, entao os que o envio nao usa vao vazios."""
+    from neonize.proto.Neonize_pb2 import MessageInfo, MessageSource
+    origem = MessageSource(
+        Chat=chat, Sender=remetente, IsFromMe=minha, IsGroup=grupo,
+        SenderAlt=_jid_obj("", ""), RecipientAlt=_jid_obj("", ""),
+        BroadcastListOwner=_jid_obj("", ""))
+    return MessageInfo(
+        MessageSource=origem, ID=id_, ServerID=0, Type="", Pushname="",
+        Timestamp=0, Category="", Multicast=False, MediaType="", Edit="")

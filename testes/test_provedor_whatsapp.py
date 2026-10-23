@@ -2896,6 +2896,15 @@ def test_votar_envia_o_voto_e_guarda_o_meu(amb):
     assert m.enquete_de(b.mensagem)["meus"] == []
 
 
+def test_info_da_enquete_pode_ser_serializada_como_o_neonize_faz():
+    # o cliente falso nao serializa; o verdadeiro recusa MessageInfo sem os
+    # campos obrigatorios (o voto falhava com EncodeError em 23/10/2026)
+    from telezapp.provedores import whatsapp as w
+    jid = w._jid_obj("5551999998888", "s.whatsapp.net")
+    info = w.info_da_mensagem(jid, jid, "M1", False, False)
+    assert info.ID == "M1" and info.SerializeToString()
+
+
 def test_criar_enquete_no_whatsapp_envia_e_guarda_a_mensagem(amb):
     amb.f["Connected"](amb.c, N.Connected())
     esperar(amb.fila, ev.ContaPronta)

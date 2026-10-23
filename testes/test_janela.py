@@ -2004,6 +2004,24 @@ def test_salvar_pessoa_da_conversa(j, monkeypatch):
         any(i.startswith("Bruno S.") for i in j.lista_conv.itens)
 
 
+def test_bloquear_pessoa_da_conversa_so_onde_o_servico_sabe(j, monkeypatch):
+    from telezapp.interface import bloqueados
+    conv = j.indice[("t1", "10")]
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    rotulos = lambda: [r for r, _ in j._opcoes_da_conversa(conv)]
+    assert "Bloquear ou desbloquear..." not in rotulos()
+    j._bloquear_pessoa(conv)
+    assert ditas[-1] == "Esta conta não bloqueia pessoas por aqui."
+    j.contas.p.PODE_BLOQUEAR = True
+    assert "Bloquear ou desbloquear..." in rotulos()
+    chamadas = []
+    monkeypatch.setattr(bloqueados, "alternar",
+                        lambda *a, **k: chamadas.append(a[2:4]))
+    j._bloquear_pessoa(conv)
+    assert chamadas == [("10", conv.nome)]
+
+
 def test_limite_de_mensagens_por_conversa(j):
     j.cfg.set("mensagens_por_conversa", 50)
     assert j._limite_memoria() == 50

@@ -25,6 +25,11 @@ class ErroPrivacidade(Exception):
     """Nao deu para mudar a privacidade; o texto e dito a pessoa."""
 
 
+class ErroBloqueio(Exception):
+    """Nao deu para bloquear, desbloquear ou ler os bloqueados; o texto e
+    dito a pessoa."""
+
+
 class DownloadCancelado(Exception):
     """A pessoa cancelou o download."""
 
@@ -309,6 +314,24 @@ class Provedor(ABC):
         """(tipo, quantas) de quem pode ver o status: contacts, blacklist
         ou whitelist; None se nao souber."""
         return None
+
+    # True nos servicos em que da para bloquear e desbloquear pessoas
+    PODE_BLOQUEAR = False
+
+    def bloqueados(self):
+        """[(id, nome, telefone)] das pessoas que a conta bloqueou. Espera o
+        servico (thread propria). Levanta ErroBloqueio."""
+        return []
+
+    def esta_bloqueado(self, conversa_id):
+        """True se a pessoa da conversa esta bloqueada. Espera o servico
+        (thread propria). Levanta ErroBloqueio."""
+        return False
+
+    def bloquear(self, conversa_id, bloquear=True):
+        """Bloqueia a pessoa da conversa (ou desbloqueia, com `bloquear`
+        falso). Espera o servico (thread propria). Levanta ErroBloqueio."""
+        raise ErroBloqueio("Esta conta não bloqueia pessoas por aqui.")
 
     def resolver_destinatario(self, texto):
         """(conversa_id, nome) de quem o texto (@usuario, telefone) indica,
