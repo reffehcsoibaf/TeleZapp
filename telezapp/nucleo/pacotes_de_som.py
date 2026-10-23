@@ -175,6 +175,36 @@ def migrar_antigos(cfg):
     cfg.salvar()
 
 
+EVENTOS_DO_SOM_DE_MENSAGEM = ("nova", "nova_aberta", "nova_grupo")
+EVENTOS_DO_SOM_DE_CHAMADA = ("toque", "chamando")
+
+
+def migrar_liga_desliga(cfg):
+    """As opcoes "Som ao receber mensagem" e "Som de chamada" sairam de
+    Avisos (cada som se liga e desliga na tela de sons). Quem as tinha
+    desligadas fica com os eventos delas desativados em todos os pacotes
+    que existem. Roda uma vez: as chaves antigas saem da configuracao."""
+    sem = object()
+    som = cfg.dados.pop("som", sem)
+    toque = cfg.dados.pop("toque_chamada", sem)
+    if som is sem and toque is sem:
+        return
+    desligar = set()
+    if som is False:
+        desligar.update(EVENTOS_DO_SOM_DE_MENSAGEM)
+    if toque is False:
+        desligar.update(EVENTOS_DO_SOM_DE_CHAMADA)
+    if desligar:
+        guardado = {k: list(v) for k, v in
+                    (cfg.get("sons_desativados") or {}).items()}
+        for pacote in {PADRAO, TELEZAPP, cfg.get("pacote_de_sons")}:
+            if pacote:
+                guardado[pacote] = sorted(set(guardado.get(pacote, []))
+                                          | desligar)
+        cfg.dados["sons_desativados"] = guardado
+    cfg.salvar()
+
+
 class EstadoDeSons:
     """O que a pessoa mexeu na tela de sons e ainda nao aplicou: pacote
     escolhido, eventos ativados ou desativados, arquivos novos, pacotes a

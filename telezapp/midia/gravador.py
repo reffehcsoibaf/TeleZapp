@@ -166,6 +166,7 @@ class Gravador:
         self._taxa = TAXA
         self._pico = 0.0
         self._parar = threading.Event()
+        self._pausa = threading.Event()
         self._cancelado = False
         self._pronto = threading.Event()
         self._erro = None
@@ -187,7 +188,19 @@ class Gravador:
         return self._thread is not None and self._thread.is_alive() and \
             not self._parar.is_set()
 
+    @property
+    def pausado(self):
+        return self._pausa.is_set()
+
     # ----------------------------------------------------------- controle
+    def pausar(self):
+        """Deixa de gravar sem fechar a captura; `continuar()` retoma e o
+        trecho da pausa nao entra na gravacao."""
+        self._pausa.set()
+
+    def continuar(self):
+        self._pausa.clear()
+
     def iniciar(self):
         """Comeca a gravar. Levanta ErroGravacao se a fonte nao abrir."""
         if self._thread is not None:
@@ -269,8 +282,8 @@ class Gravador:
                 self._pronto.set()
                 while not self._parar.is_set():
                     bloco = fonte.ler()
-                    if len(bloco) == 0:
-                        continue
+                    if len(bloco) == 0 or self._pausa.is_set():
+                        continue      # na pausa a captura segue aberta
                     pico = float(abs(bloco).max())
                     if pico > self._pico:
                         self._pico = pico
@@ -292,6 +305,11 @@ class Gravador:
             self._pronto.set()
 
 
+def _mono(bloco):
+    """Junta os canais de um bloco (estereo vira a media dos dois)."""
+    return bloco if bloco.ndim == 1 else bloco.mean(axis=1)
+
+
 def converter(wav, destino):
     """WAV mono (qualquer taxa) -> Ogg/Opus mono de 48 kHz, em blocos, com
     interpolacao linear quando a taxa nao e 48 kHz (suficiente para voz)."""
@@ -303,13 +321,13 @@ def converter(wav, destino):
         taxa = entrada.samplerate
         if taxa == TAXA:
             for bloco in entrada.blocks(blocksize=TAXA, dtype="float32"):
-                saida.write(bloco)
+                saida.write(_mono(bloco))
             return
         passo = taxa / float(TAXA)   # amostras de entrada por amostra de saida
         pos = 0.0                    # posicao da proxima saida no buffer
         resto = np.empty(0, dtype="float32")
         for bloco in entrada.blocks(blocksize=taxa, dtype="float32"):
-            buf = np.concatenate([resto, bloco])
+            buf = np.concatenate([resto, _mono(bloco)])
             n = len(buf)
             if n < 2:
                 resto = buf

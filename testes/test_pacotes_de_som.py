@@ -144,3 +144,29 @@ def test_quem_escolhia_um_som_por_evento_ganha_o_pacote_personalizado(dados):
     pk.migrar_antigos(cfg2)
     assert cfg2.get("pacote_de_sons") == "padrao"
     assert [i for i, _ in pk.listar()].count("p:Personalizado") == 1
+
+
+def test_opcoes_som_e_toque_de_chamada_viram_eventos_desativados(tmp_path,
+                                                                  monkeypatch):
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path))
+    cfg = config.Config()
+    cfg.dados["som"] = False
+    cfg.dados["toque_chamada"] = False
+    pk.migrar_liga_desliga(cfg)
+    assert "som" not in cfg.dados and "toque_chamada" not in cfg.dados
+    desativados = cfg.get("sons_desativados")
+    for pacote in (pk.PADRAO, pk.TELEZAPP):
+        assert set(desativados[pacote]) == {"nova", "nova_aberta",
+                                            "nova_grupo", "toque", "chamando"}
+    pk.migrar_liga_desliga(config.Config())        # de novo: nada muda
+
+
+def test_quem_tinha_os_sons_ligados_nao_ganha_eventos_desativados(
+        tmp_path, monkeypatch):
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path))
+    cfg = config.Config()
+    cfg.dados["som"] = True
+    cfg.dados["toque_chamada"] = True
+    pk.migrar_liga_desliga(cfg)
+    assert "som" not in cfg.dados
+    assert not cfg.get("sons_desativados")

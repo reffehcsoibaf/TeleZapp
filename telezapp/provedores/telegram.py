@@ -177,6 +177,38 @@ def entradas_do_telegram(links):
 # Cada pessoa (ou canal) com historias vira uma "conversa" de tipo status,
 # `status:<id>`, com as historias como mensagens (id = id da historia)
 PREFIXO_STATUS = "status:"
+
+# Grupo com topicos (forum): o grupo e uma conversa da lista e cada topico e
+# uma conversa `<grupo>#<topico>` ("Grupo › Tópico"), que a janela esconde da
+# lista e abre quando a pessoa escolhe o topico. O Geral e sempre o numero 1.
+SEPARADOR_TOPICO = "#"
+TOPICO_GERAL = 1
+
+
+def id_do_topico(chat_id, topico):
+    return "%s%s%d" % (chat_id, SEPARADOR_TOPICO, int(topico))
+
+
+def separar_topico(conversa_id):
+    """(id do chat, topico) de uma conversa; topico 0 = conversa comum."""
+    chat, sep, topico = str(conversa_id).partition(SEPARADOR_TOPICO)
+    if sep and topico.isdigit():
+        return chat, int(topico)
+    return str(conversa_id), 0
+
+
+def topico_da_mensagem(msg):
+    """Topico de uma mensagem de grupo com topicos: o do cabecalho de
+    resposta ou, sem ele, o Geral."""
+    resp = getattr(msg, "reply_to", None)
+    if resp is None or not getattr(resp, "forum_topic", False):
+        return TOPICO_GERAL
+    return int(getattr(resp, "reply_to_top_id", 0) or
+               getattr(resp, "reply_to_msg_id", 0) or TOPICO_GERAL)
+
+
+def nome_do_topico(grupo, titulo):
+    return "%s › %s" % (grupo, titulo or "Tópico")
 ATUALIZAR_HISTORIAS_A_CADA = 10      # segundos, entre duas buscas
 
 
@@ -303,6 +335,52 @@ def prazo_da_mensagem(msg):
         return 0
 
 
+def _texto_de(x):
+    """O texto de um campo que pode ser str ou TextWithEntities."""
+    return str(getattr(x, "text", x) or "")
+
+
+def aplicar_resultados(enq, results):
+    """Poe em `enq` (dict da enquete) as contagens e as opcoes em que eu votei,
+    a partir dos PollResults do Telegram. Sem os numeros (o Telegram esconde
+    ate a pessoa votar), so o total, se vier."""
+    if results is None:
+        return enq
+    lista = getattr(results, "results", None) or []
+    if lista:
+        por_opcao = {bytes(r.option).hex(): r for r in lista}
+        enq["contagem"] = [int(getattr(por_opcao.get(i), "voters", 0) or 0)
+                           for i in enq["ids"]]
+        enq["meus"] = [n for n, i in enumerate(enq["ids"])
+                       if getattr(por_opcao.get(i), "chosen", False)]
+    elif getattr(results, "results", None) is not None:
+        enq["meus"] = []
+    total = getattr(results, "total_voters", None)
+    if total is not None:
+        enq["total"] = int(total)
+    return enq
+
+
+def enquete_do_telegram(msg):
+    """Dados da enquete de uma mensagem do Telethon ({} se nao e enquete)."""
+    media = getattr(msg, "poll", None)
+    poll = getattr(media, "poll", None)
+    if poll is None:
+        return {}
+    respostas = list(getattr(poll, "answers", None) or [])
+    if not respostas:
+        return {}
+    enq = {"pergunta": _texto_de(poll.question),
+           "opcoes": [_texto_de(a.text) for a in respostas],
+           "ids": [bytes(a.option).hex() for a in respostas],
+           "maximo": len(respostas) if getattr(poll, "multiple_choice",
+                                               False) else 1,
+           "encerrada": bool(getattr(poll, "closed", False)),
+           "anonima": not bool(getattr(poll, "public_voters", False)),
+           "poll_id": str(getattr(poll, "id", "") or "")}
+    return aplicar_resultados(enq, getattr(media, "results", None))
+
+
 def converter(msg, conta_id, conversa_id, lidas_ate=0, nome_padrao=""):
     """Mensagem do Telethon -> modelos.Mensagem (None para mensagens de
     servico, como 'fulano entrou no grupo')."""
@@ -342,6 +420,9 @@ def converter(msg, conta_id, conversa_id, lidas_ate=0, nome_padrao=""):
     m.guardar_extras(nova, links, botoes, mencoes,
                      acoes=entradas_do_telegram(links),
                      previa=previa_do_telegram(msg))
+    enquete = enquete_do_telegram(msg)
+    if enquete:
+        m.atualizar_extras(nova, enquete=enquete)
     # o Telegram marca as mensagens que citam esta conta (@ ou nome)
     if not minha and getattr(msg, "mentioned", False) is True:
         m.atualizar_extras(nova, citou_voce=True)
@@ -427,6 +508,7 @@ class ProvedorTelegram(Provedor):
         self._observada = None                  # conversa com a presenca aberta
         self._historias_em = 0.0                # ultima busca de historias
         self._conversas = {}                    # conversa_id -> Conversa
+        self._foruns = set()                    # grupos com topicos (ids)
         self._usuarios = {}                     # @usuario -> dados ou None
         self._pronto = threading.Event()
         self._chamadas = None                   # ChamadasTelegram, se houver
@@ -645,6 +727,8 @@ class ProvedorTelegram(Provedor):
         self.cliente.add_event_handler(
             self._ao_reacoes, events.Raw(tipos.UpdateMessageReactions))
         self.cliente.add_event_handler(
+            self._ao_enquete, events.Raw(tipos.UpdateMessagePoll))
+        self.cliente.add_event_handler(
             self._ao_historia, events.Raw(tipos.UpdateStory))
         self._estado(ev.CONECTADA)
         self._pronto.set()
@@ -739,6 +823,15 @@ class ProvedorTelegram(Provedor):
                         getattr(d, "entity", None)),
                     temporaria_s=int(getattr(d.dialog, "ttl_period", 0) or 0))
                 self._conversas[cid] = c
+                if getattr(getattr(d, "entity", None), "forum", False):
+                    topicos = await self._conversas_de_topicos(d, c)
+                    if topicos:
+                        # o grupo fica na lista e a janela pergunta o topico
+                        # ao abrir; os topicos viajam junto, fora da lista
+                        self._foruns.add(cid)
+                        c.data = max([c.data] + [t.data for t in topicos])
+                        c.nao_lidas = sum(t.nao_lidas for t in topicos)
+                        lista += topicos
                 lista.append(c)
         self.banco.salvar_conversas(lista)
         log.info("conversas: %d em %.2fs", len(lista),
@@ -833,7 +926,7 @@ class ProvedorTelegram(Provedor):
 
     def dados_do_contato(self, conversa_id):
         async def ler():
-            ent = await self.cliente.get_entity(int(conversa_id))
+            ent = await self.cliente.get_entity(self._chat_id(conversa_id))
             dados = {}
             if getattr(ent, "phone", None):
                 dados["telefone"] = "+" + ent.phone.lstrip("+")
@@ -845,7 +938,7 @@ class ProvedorTelegram(Provedor):
     def detalhes_do_grupo(self, conversa_id):
         async def ler():
             from telethon.tl import functions, types as T
-            ent = await self.cliente.get_entity(int(conversa_id))
+            ent = await self.cliente.get_entity(self._chat_id(conversa_id))
             gente = []
             async for u in self.cliente.iter_participants(ent, limit=500):
                 papel = type(getattr(u, "participant", None)).__name__
@@ -948,7 +1041,7 @@ class ProvedorTelegram(Provedor):
     async def _administrar(self, cid, acao, valor):
         from telethon.tl import functions, types as T
         try:
-            ent = await self.cliente.get_entity(int(cid))
+            ent = await self.cliente.get_entity(self._chat_id(cid))
             peer = await self.cliente.get_input_entity(ent)
             canal = isinstance(ent, T.Channel)
             if acao == "nome":
@@ -1023,10 +1116,62 @@ class ProvedorTelegram(Provedor):
             return False, "O Telegram não aceitou (%s)." % type(e).__name__
         return False, "Ação desconhecida."
 
+    CRIA = ("grupo", "canal")
+
+    def criar_conversa(self, tipo, nome, descricao="", participantes=(),
+                       topicos=False):
+        return self._sincrono(
+            self._criar(tipo, nome, descricao, participantes, topicos),
+            60) or (False, "O Telegram não respondeu.", "")
+
+    async def _criar(self, tipo, nome, descricao, participantes, topicos):
+        from telethon import utils
+        from telethon.tl import functions
+        grupo = tipo == "grupo"
+        try:
+            r = await self.cliente(functions.channels.CreateChannelRequest(
+                title=nome, about=descricao, broadcast=not grupo,
+                megagroup=grupo, forum=True if grupo and topicos else None))
+            canal = r.chats[0]
+        except Exception as e:
+            log.warning("criar %s falhou: %s", tipo, type(e).__name__)
+            return False, ("O Telegram não deixou criar (%s)." %
+                           type(e).__name__), ""
+        faltaram = []
+        if participantes:
+            alvos = []
+            for texto in participantes:
+                alvo = texto if texto.startswith("@") else (
+                    m.normalizar_telefone(texto) or "")
+                try:
+                    alvos.append(await self.cliente.get_input_entity(alvo))
+                except Exception:
+                    faltaram.append(texto)
+            if alvos:
+                try:
+                    await self.cliente(functions.channels.InviteToChannelRequest(
+                        canal, alvos))
+                except Exception as e:
+                    log.info("convite aos participantes falhou (%s)",
+                             type(e).__name__)
+                    faltaram = list(participantes)
+        cid = str(utils.get_peer_id(canal))
+        self._entidades[cid] = utils.get_input_peer(canal)
+        try:
+            await self._atualizar_conversas()
+        except Exception:
+            log.info("lista de conversas nao atualizou depois de criar")
+        log.info("%s criado pelo TeleZapp", tipo)
+        aviso = ""
+        if faltaram:
+            aviso = (" Não consegui adicionar: %s." % ", ".join(faltaram))
+        return True, aviso.strip(), (
+            id_do_topico(cid, TOPICO_GERAL) if grupo and topicos else cid)
+
     def detalhes_do_canal(self, conversa_id):
         async def ler():
             from telethon.tl import functions
-            ent = await self.cliente.get_entity(int(conversa_id))
+            ent = await self.cliente.get_entity(self._chat_id(conversa_id))
             cheio = await self.cliente(
                 functions.channels.GetFullChannelRequest(ent))
             direitos = getattr(ent, "admin_rights", None)
@@ -1246,6 +1391,105 @@ class ProvedorTelegram(Provedor):
                 self.conta.id, msg.conversa_id, texto, _motivo(e),
                 devolver_texto=True))
 
+    PODE_CRIAR_ENQUETE = True
+
+    def criar_enquete(self, conversa_id, pergunta, opcoes, multipla,
+                      anonima=True):
+        self._agendar(self._criar_enquete(
+            conversa_id, pergunta, list(opcoes), multipla, anonima))
+
+    async def _criar_enquete(self, cid, pergunta, opcoes, multipla, anonima):
+        from telethon.tl import types as tipos
+
+        def texto(t):
+            return tipos.TextWithEntities(text=t, entities=[])
+        try:
+            ent = await self._entidade(cid)
+            poll = tipos.Poll(
+                id=0, question=texto(pergunta), hash=0,
+                answers=[tipos.PollAnswer(text=texto(o), option=bytes([i]))
+                         for i, o in enumerate(opcoes)],
+                multiple_choice=bool(multipla),
+                public_voters=not anonima)
+            enviada = await self.cliente.send_message(
+                ent, file=tipos.InputMediaPoll(poll=poll))
+        except Exception as e:
+            log.warning("criar enquete falhou: %s", type(e).__name__)
+            self._avisar("Não consegui criar a enquete (%s)." % _motivo(e),
+                         False)
+            return
+        await self._registrar_enviada(enviada, cid)
+
+    PODE_VOTAR = True
+
+    def votar_enquete(self, mensagem, escolhas):
+        self._agendar(self._votar_enquete(mensagem, escolhas))
+
+    def atualizar_enquete(self, mensagem):
+        self._agendar(self._atualizar_enquete(mensagem))
+
+    async def _votar_enquete(self, msg, escolhas):
+        from telethon.tl import functions
+        enq = m.enquete_de(msg)
+        try:
+            if not enq or not enq["ids"]:
+                raise ValueError("enquete sem opções")
+            ent = await self._entidade(msg.conversa_id)
+            await self.cliente(functions.messages.SendVoteRequest(
+                peer=ent, msg_id=int(msg.id),
+                options=[bytes.fromhex(enq["ids"][i]) for i in escolhas]))
+        except Exception as e:
+            log.warning("voto em enquete falhou: %s", type(e).__name__)
+            self._avisar("Não consegui enviar o voto (%s)." %
+                         type(e).__name__, False)
+            return
+        await self._atualizar_enquete(msg, avisar=False, quem="Você")
+
+    async def _atualizar_enquete(self, msg, avisar=True, quem=""):
+        """Busca de novo a mensagem da enquete para ter o resultado atual."""
+        try:
+            ent = await self._entidade(msg.conversa_id)
+            atual = await self.cliente.get_messages(ent, ids=int(msg.id))
+            novo = enquete_do_telegram(atual)
+            if not novo:
+                return
+        except Exception as e:
+            log.warning("atualizar enquete falhou: %s", type(e).__name__)
+            if avisar:
+                self._avisar("Não consegui atualizar a enquete (%s)." %
+                             type(e).__name__, False)
+            return
+        self._guardar_enquete(msg.conversa_id, msg.id, novo, quem)
+
+    def _guardar_enquete(self, cid, mid, enquete, quem=""):
+        x = self.banco.mensagem(self.conta.id, cid, mid)
+        if x is None:
+            return
+        m.atualizar_extras(x, enquete=enquete)
+        self.banco.salvar_mensagens([x])
+        self.barramento.publicar(ev.MensagemAtualizada(
+            self.conta.id, cid, x, "enquete", quem))
+
+    async def _ao_enquete(self, evento):
+        """Alguem votou (ou a enquete foi encerrada)."""
+        try:
+            x = self.banco.mensagem_da_enquete(self.conta.id,
+                                               evento.poll_id)
+            if x is None:
+                return
+            enq = m.enquete_de(x)
+            antes = m.votantes_da_enquete(enq)
+            poll = getattr(evento, "poll", None)
+            if poll is not None:
+                enq["encerrada"] = bool(getattr(poll, "closed", False))
+            aplicar_resultados(enq, getattr(evento, "results", None))
+            # o Telegram nao diz quem votou: so avisa que alguem votou
+            self._guardar_enquete(
+                x.conversa_id, x.id, enq,
+                "alguém" if m.votantes_da_enquete(enq) > antes else "")
+        except Exception:
+            log.exception("erro ao tratar voto em enquete")
+
     PODE_REAGIR = True
 
     def reagir(self, mensagem, emoji):
@@ -1393,10 +1637,84 @@ class ProvedorTelegram(Provedor):
             nome = ""
         return {"id": str(ent.id), "nome": nome}
 
+    async def _conversas_de_topicos(self, d, grupo):
+        """Conversas dos topicos de um grupo com topicos, ou [] se o
+        Telegram nao deu a lista (o grupo fica como uma conversa so)."""
+        from telethon.tl import functions
+        try:
+            r = await self.cliente(functions.messages.GetForumTopicsRequest(
+                peer=d.input_entity, offset_date=None, offset_id=0,
+                offset_topic=0, limit=100))
+        except Exception as e:
+            log.info("topicos do grupo indisponiveis (%s)", type(e).__name__)
+            return []
+        datas = {x.id: x.date for x in getattr(r, "messages", [])}
+        conversas = []
+        for t in r.topics:
+            if not hasattr(t, "title"):
+                continue            # ForumTopicDeleted
+            cid = id_do_topico(grupo.id, t.id)
+            data = datas.get(getattr(t, "top_message", 0))
+            c = m.Conversa(
+                conta_id=self.conta.id, id=cid,
+                nome=nome_do_topico(grupo.nome, t.title),
+                servico=self.servico, tipo="grupo",
+                nao_lidas=int(getattr(t, "unread_count", 0) or 0),
+                data=data.timestamp() if data else grupo.data,
+                lidas_ate=grupo.lidas_ate, arquivada=grupo.arquivada,
+                fixada=bool(getattr(t, "pinned", False)),
+                silenciada_ate=grupo.silenciada_ate,
+                somente_leitura=grupo.somente_leitura or bool(
+                    getattr(t, "closed", False)))
+            self._conversas[cid] = c
+            self._entidades[cid] = d.input_entity
+            conversas.append(c)
+        return conversas
+
+    async def _conversa_do_topico(self, chat, grupo_nome, topico):
+        """Conversa de um topico que ainda nao se conhece (topico novo)."""
+        from telethon.tl import functions
+        cid = id_do_topico(chat, topico)
+        conv = self._conversas.get(cid)
+        if conv is not None:
+            return conv
+        titulo = "Geral" if topico == TOPICO_GERAL else ""
+        try:
+            ent = await self._entidade(str(chat))
+            r = await self.cliente(functions.messages.GetForumTopicsByIDRequest(
+                peer=ent, topics=[topico]))
+            titulo = next((t.title for t in r.topics
+                           if hasattr(t, "title")), titulo)
+        except Exception as e:
+            log.info("titulo do topico indisponivel (%s)", type(e).__name__)
+        conv = m.Conversa(self.conta.id, cid,
+                          nome_do_topico(grupo_nome, titulo), self.servico,
+                          "grupo")
+        self._conversas[cid] = conv
+        self._entidades[cid] = self._entidades.get(str(chat))
+        return conv
+
+    @staticmethod
+    def _resposta_em(conversa_id, resposta_a):
+        """A que mensagem a nova responde: a escolhida ou, na conversa de um
+        topico (fora o Geral), o proprio topico, que e onde ela vai cair."""
+        if resposta_a:
+            return int(resposta_a)
+        topico = separar_topico(conversa_id)[1]
+        return topico if topico > TOPICO_GERAL else None
+
+    def _chat_id(self, conversa_id):
+        """Id numerico do chat de uma conversa (a de um topico e do grupo)."""
+        return int(separar_topico(conversa_id)[0])
+
     async def _entidade(self, conversa_id):
         ent = self._entidades.get(conversa_id)
         if ent is None:
-            ent = await self.cliente.get_input_entity(int(conversa_id))
+            chat = separar_topico(conversa_id)[0]
+            ent = self._entidades.get(chat)
+            if ent is None:
+                ent = await self.cliente.get_input_entity(int(chat))
+                self._entidades[chat] = ent
             self._entidades[conversa_id] = ent
         return ent
 
@@ -1415,10 +1733,21 @@ class ProvedorTelegram(Provedor):
         lidas_ate = conv.lidas_ate if conv else 0
         nome = conv.nome if conv else ""
         msgs = []
-        async for msg in self.cliente.iter_messages(ent, limit=limite):
+        topico = separar_topico(conversa_id)[1]
+        if topico > TOPICO_GERAL:
+            fonte = self.cliente.iter_messages(ent, limit=limite,
+                                               reply_to=topico)
+        else:
+            fonte = self.cliente.iter_messages(
+                ent, limit=limite * 5 if topico else limite)
+        async for msg in fonte:
+            if topico == TOPICO_GERAL and topico_da_mensagem(msg) != topico:
+                continue            # de outro topico: nao entra no Geral
             x = converter(msg, self.conta.id, conversa_id, lidas_ate, nome)
             if x is not None:
                 msgs.append(x)
+                if len(msgs) >= limite:
+                    break
         msgs.reverse()
         await self._resolver_mencoes(msgs)
         self.banco.salvar_mensagens(msgs)
@@ -1525,7 +1854,8 @@ class ProvedorTelegram(Provedor):
         try:
             ent = await self._entidade(conversa_id)
             enviada = await self.cliente.send_message(
-                ent, texto, reply_to=int(resposta_a) if resposta_a else None,
+                ent, texto, reply_to=self._resposta_em(
+                    conversa_id, resposta_a),
                 link_preview=previa_links.LIGADAS["enviar"])
         except Exception as e:
             log.warning("envio falhou: %s", type(e).__name__)
@@ -1565,6 +1895,7 @@ class ProvedorTelegram(Provedor):
                         self.conta.id, conversa_id, pct))
             enviada = await self.cliente.send_file(
                 ent, anexo.caminho, caption=legenda or None,
+                reply_to=self._resposta_em(conversa_id, ""),
                 force_document=anexo.tipo == m.DOCUMENTO,
                 progress_callback=andamento, **extra)
             self.barramento.publicar(ev.ProgressoEnvio(
@@ -1598,7 +1929,8 @@ class ProvedorTelegram(Provedor):
             # primeira mensagem de uma conversa nova (ex.: aberta por uma
             # mencao): passa a existir de verdade
             try:
-                nome = nome_de(await self.cliente.get_entity(int(conversa_id)))
+                nome = nome_de(await self.cliente.get_entity(
+                    self._chat_id(conversa_id)))
             except Exception:
                 nome = ""
             conv = m.Conversa(self.conta.id, conversa_id, nome or "Sem nome",
@@ -1621,7 +1953,17 @@ class ProvedorTelegram(Provedor):
             await self._ver_historias(conversa_id)
             return
         ent = await self._entidade(conversa_id)
-        await self.cliente.send_read_acknowledge(ent)
+        topico = separar_topico(conversa_id)[1]
+        if topico:
+            # grupo com topicos: le-se um topico por vez
+            ultima = [x.id for x in self.banco.mensagens(
+                self.conta.id, conversa_id, 1) if x.id.isdigit()]
+            if ultima:
+                from telethon.tl import functions
+                await self.cliente(functions.messages.ReadDiscussionRequest(
+                    peer=ent, msg_id=topico, read_max_id=int(ultima[-1])))
+        else:
+            await self.cliente.send_read_acknowledge(ent)
         conv = self._conversas.get(conversa_id)
         if conv is not None:
             conv.nao_lidas = 0
@@ -1693,6 +2035,10 @@ class ProvedorTelegram(Provedor):
             msg = evento.message
             cid = str(evento.chat_id)
             conv = self._conversas.get(cid)
+            if conv is not None and conv.id in self._foruns:
+                conv = await self._conversa_do_topico(
+                    cid, conv.nome, topico_da_mensagem(msg))
+                cid = conv.id
             if conv is None:
                 chat = await evento.get_chat()
                 self._entidades[cid] = await evento.get_input_chat()
@@ -1703,6 +2049,11 @@ class ProvedorTelegram(Provedor):
                         "canal" if evento.is_channel else "privada"),
                     somente_leitura=somente_leitura_do_telegram(chat))
                 self._conversas[cid] = conv
+                if getattr(chat, "forum", False):
+                    self._foruns.add(cid)
+                    conv = await self._conversa_do_topico(
+                        cid, conv.nome, topico_da_mensagem(msg))
+                    cid = conv.id
             if not getattr(msg, "out", False) and msg.sender is None:
                 await evento.get_sender()
             acao = getattr(msg, "action", None)
@@ -1743,7 +2094,7 @@ class ProvedorTelegram(Provedor):
     async def _ler_status(self, conversa_id):
         from telethon.tl import types as tipos
         try:
-            ent = await self.cliente.get_entity(int(conversa_id))
+            ent = await self.cliente.get_entity(self._chat_id(conversa_id))
         except Exception:
             return
         estado = getattr(ent, "status", None)

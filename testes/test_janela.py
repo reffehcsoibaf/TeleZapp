@@ -146,10 +146,22 @@ def j(tmp_path, monkeypatch):
         cfg.set(chave, True)
     banco = Banco(str(tmp_path / "t.db"))
     b = ev.Barramento()
+    cfg.set("enter_envia", True)      # os testes antigos enviam com o Enter
     janela = jm.Janela(cfg, banco, b)
     janela.contas = ContasFalsas()
     janela.comecar()
     janela.lista_conv.SetFocus()      # o foco inicial e a caixa de conta
+    # no wx de verdade o Enter que a janela deixa passar chega a caixa, que
+    # envia pelo EVT_TEXT_ENTER; o falso faz o mesmo aqui
+    char_hook = janela._char_hook
+
+    def char_hook_com_caixa(evt):
+        char_hook(evt)
+        if evt.pulou and evt.GetKeyCode() == wx_falso.WXK_RETURN and \
+                janela.FindFocus() is janela.caixa and not (
+                    evt.ShiftDown() or evt.ControlDown()):
+            janela.caixa.ligacoes[wx_falso.EVT_TEXT_ENTER](None)
+    janela._char_hook = char_hook_com_caixa
     janela.b = b
     b.publicar(ev.EstadoConta("t1", ev.CONECTADA))
     b.publicar(ev.ConversasAtualizadas("t1", [
@@ -856,7 +868,7 @@ def test_lista_de_conversas_abre_no_topo_com_o_foco(j):
 
 
 def test_botao_sair_depois_da_busca_fecha_a_janela(j):
-    assert j.botao_sair.GetLabel() == "Sair"
+    assert j.botao_sair.GetLabel() == "Sair (Ctrl+Q)"
     fechou = []
     j.Close = lambda *a, **k: fechou.append(True) or True
     j.botao_sair.ligacoes[jm.wx.EVT_BUTTON](None)
@@ -1298,6 +1310,19 @@ def _abrir_com_caixa(j):
                                                           conversa="20")]))
 
 
+def test_anexar_pelo_botao_envia_foto_e_audio_como_documento(
+        j, tmp_path, monkeypatch):
+    _abrir_com_caixa(j)
+    for nome in ("foto.jpg", "som.mp3"):
+        arq = tmp_path / nome
+        arq.write_bytes(b"x" * 10)
+        monkeypatch.setattr(jm.dialogos, "escolher_arquivo",
+                            lambda pai, pasta="", a=str(arq): a)
+        j._anexar_arquivo()
+        assert ("arquivo", "20", m.DOCUMENTO, nome, "") in \
+            j.contas.p.pedidos
+
+
 def test_anexar_arquivo_usa_a_caixa_como_legenda(j, tmp_path, monkeypatch):
     _abrir_com_caixa(j)
     pdf = tmp_path / "relatorio.pdf"
@@ -1520,8 +1545,8 @@ def test_configuracoes_aplicam_com_os_efeitos_dos_menus(j):
     assert j.estilo == 2 and j.cfg.get("estilo") == 2
     j._aplicar_opcao("midias_baixar", "automatico")
     assert j.cfg.get("midias_baixar") == "automatico"
-    j._aplicar_opcao("som", False)
-    assert j.cfg.get("som") is False
+    j._aplicar_opcao("status_no_titulo", False)
+    assert j.cfg.get("status_no_titulo") is False
     j._aplicar_opcao("depuracao", True)
     assert j.banco.depuracao is True
     j._aplicar_opcao("audio_passo_velocidade", 1.0)
@@ -1629,14 +1654,6 @@ def test_chamada_recebida_abre_a_janela_toca_e_fala(chamadas):
     assert chamadas.falas[-1].startswith("Chamada de Ana")
     assert "toque" in chamadas.sons
     assert j.chamada is not None and j.chamada.entrante
-
-
-def test_sem_som_de_chamada_so_fala(chamadas):
-    j, ch = chamadas.j, chamadas.ch
-    j.cfg.set("toque_chamada", False)
-    estado(j, ch.TOCANDO, entrante=True)
-    assert "toque" not in chamadas.sons
-    assert chamadas.falas
 
 
 def test_atender_pede_ao_provedor_com_os_dispositivos(chamadas):
@@ -1928,10 +1945,12 @@ def test_o_que_falar_na_sequencia_e_configuravel(jm_midia, monkeypatch):
 
 
 def test_opcoes_de_fala_estao_no_menu_exibicao(j):
-    for chave in ("falar_quem_toca", "falar_reacoes"):
+    for chave in ("falar_reacoes",):
         assert chave in j.itens
         assert j.itens[chave].IsChecked() if hasattr(
             j.itens[chave], "IsChecked") else True
+    # a fala do primeiro audio mora em Configuracoes, Midias
+    assert "falar_quem_toca" not in j.itens
     j._aplicar_opcao("falar_quem_toca", False)
     assert j.cfg.get("falar_quem_toca") is False
 
@@ -2206,20 +2225,32 @@ def test_menu_unico_com_submenus_na_ordem_pedida(j):
     assert [r.replace("&", "") for r, _ in barra] == ["Menu"]
     raiz = barra[0][1]
     rotulos = [r.replace("&", "") for r, _ in raiz.submenus]
-    assert rotulos == ["Mensagens", "Conversas", "Contatos", "Chamadas",
-                       "Contas", "Mídias", "Exibir", "Ferramentas", "Ajuda"]
+    assert rotulos == ["Novo", "Ir para", "Mensagens", "Conversas",
+                       "Contatos", "Chamadas", "Mídias", "Exibir",
+                       "Ferramentas", "Ajuda"]
     menus = {r.replace("&", ""): mn for r, mn in raiz.submenus}
 
     def nomes(menu):
-        return [i.rotulo.split("\t")[0].replace("&", "")
+        return [i.rotulo.split("	")[0].replace("&", "")
                 for i in menu.itens]
-    # Nova mensagem e o primeiro item de Mensagens, e saiu de Conversas
-    assert nomes(menus["Mensagens"])[0] == "Nova mensagem..."
-    assert "Nova mensagem..." not in nomes(menus["Conversas"])
-    # Contas: adicionar (uma entrada so), gerenciar e reconectar
-    assert nomes(menus["Contas"]) == [
-        "Adicionar conta...", "Gerenciar contas...",
-        "Conectar as contas de novo"]
+    # Novo e o primeiro menu e junta tudo o que se cria
+    assert nomes(menus["Novo"]) == [
+        "Nova mensagem...", "Nova chamada...", "Nova enquete...",
+        "Novo contato...", "Novo status ou história...", "Nova conta...",
+        "Novo grupo...", "Novo canal...", "Nova comunidade..."]
+    for antigo in ("Mensagens", "Conversas"):
+        assert "Nova mensagem..." not in nomes(menus[antigo])
+    # Ir para junta as idas a um lugar da janela
+    assert nomes(menus["Ir para"]) == [
+        "Ir para a lista de conversas", "Ir para a lista de mensagens",
+        "Ir para o campo editável", "Ir para o filtro de serviço ou conta",
+        "Ir para o filtro de tipo de conversa",
+        "Ir para a mensagem respondida"]
+    assert "Escrever mensagem" not in nomes(menus["Conversas"])
+    # Contas deixou de ser um menu: o que sobrou foi para Ferramentas
+    assert "Contas" not in menus
+    assert nomes(menus["Ferramentas"])[:2] == [
+        "Gerenciar contas...", "Reconectar as contas"]
     # o que ficava solto no Menu foi para Ferramentas
     ferramentas = nomes(menus["Ferramentas"])
     for esperado in ("Fazer backup...", "Restaurar backup...",
@@ -2316,18 +2347,20 @@ def test_aplicar_privacidade_do_whatsapp_confere_pela_releitura(j):
 
 
 # ------------------------------------------------------- nova mensagem
-def test_nova_mensagem_escolhe_conta_e_envia(j, monkeypatch):
+def test_nova_mensagem_escolhe_a_pessoa_e_abre_a_conversa_sem_enviar(
+        j, monkeypatch):
     from telezapp.interface import contatos
     vistas = []
     monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
                         lambda pai, contas, buscar: vistas.append(contas) or
-                        (("t1", "bruno", "oi, tudo bem?", None, [])))
+                        (("t1", "bruno", None)))
     enviados = []
-    j._enviar_texto = lambda: enviados.append((j.atual, j.caixa.GetValue()))
+    j._enviar_texto = lambda: enviados.append(j.atual)
     j._nova_mensagem()
     assert [c for c, _ in vistas[0]] == ["t1"]           # so a conectada
-    assert enviados == [(("t1", "20"), "oi, tudo bem?")]  # Bruno ja existia
-    assert j.atual == ("t1", "20")
+    assert j.atual == ("t1", "20")           # Bruno ja existia: abriu
+    assert enviados == []                    # escreve-se na conversa
+    assert j.FindFocus() is j.caixa
 
 
 def test_nova_mensagem_para_telefone_cria_conversa_no_whatsapp(j, monkeypatch):
@@ -2353,12 +2386,10 @@ def test_nova_mensagem_para_telefone_cria_conversa_no_whatsapp(j, monkeypatch):
     vistas = []
     monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
                         lambda pai, contas, buscar: vistas.append(contas) or
-                        ("w1", "(51) 99999-8888", "oi", None, []))
-    enviados = []
-    j._enviar_texto = lambda: enviados.append(j.atual)
+                        ("w1", "(51) 99999-8888", None))
     j._nova_mensagem()
     assert len(vistas[0]) == 2                  # duas contas: aparece a escolha
-    assert enviados == [("w1", "5551999998888@s.whatsapp.net")]
+    assert j.atual == ("w1", "5551999998888@s.whatsapp.net")
     assert ("w1", "5551999998888@s.whatsapp.net") in j.indice
 
 
@@ -2372,7 +2403,7 @@ def test_nova_mensagem_sem_conta_conectada_ou_destino_desconhecido(j,
     assert ditas[-1] == "Nenhuma conta conectada para enviar."
     j.estados["t1"] = ev.CONECTADA
     monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
-                        lambda pai, contas, buscar: ("t1", "ninguem assim", "oi", None, []))
+                        lambda pai, contas, buscar: ("t1", "ninguem assim", None))
     j._nova_mensagem()
     assert ditas[-1].startswith("Não encontrei ninguem assim.")
 
@@ -2382,12 +2413,10 @@ def test_nova_mensagem_com_pessoa_escolhida_na_lista_nao_resolve_o_texto(
     from telezapp.interface import contatos
     monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
                         lambda pai, contas, buscar: (
-                            "t1", "br", "oi", ("20", "Bruno"), []))
-    enviados = []
-    j._enviar_texto = lambda: enviados.append(j.atual)
+                            "t1", "br", ("20", "Bruno")))
     j._resolver_destino = lambda *a: (_ for _ in ()).throw(AssertionError)
     j._nova_mensagem()
-    assert enviados == [("t1", "20")]
+    assert j.atual == ("t1", "20")
 
 
 def test_mensagem_apagada_no_celular_some_da_lista_e_nao_volta(j):
@@ -2487,20 +2516,6 @@ def test_esc_remove_a_midia_colada_antes_de_sair_da_conversa(j, tmp_path):
     j.anexos.append(jm.envio.preparar(str(pdf)))
     j._sair_da_caixa()
     assert j.anexos == [] and j.atual is not None
-
-
-def test_nova_mensagem_com_midia_colada_envia_com_a_legenda(j, monkeypatch,
-                                                            tmp_path):
-    from telezapp.interface import contatos
-    pdf = tmp_path / "contrato.pdf"
-    pdf.write_bytes(b"%PDF")
-    anexo = jm.envio.preparar(str(pdf))
-    monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
-                        lambda pai, contas, buscar: (
-                            "t1", "br", "segue", ("20", "Bruno"), [anexo]))
-    j._nova_mensagem()
-    assert ("arquivo", "20", m.DOCUMENTO, "contrato.pdf",
-            "segue") in j.contas.p.pedidos
 
 
 def test_delete_apaga_conversa_na_lista_de_conversas_e_mensagem_na_de_mensagens(j):
@@ -2681,7 +2696,6 @@ def test_sons_de_conta_caiu_e_voltou(j, monkeypatch):
 def test_som_da_mensagem_nova_depende_de_onde_ela_chegou(j, monkeypatch):
     sons = []
     monkeypatch.setattr(jm, "bipe", lambda tipo, valor=None: sons.append(tipo))
-    j.cfg.set("som", True)
     j.indice[("t1", "20")].tipo = "grupo"
     nova = lambda i: m.Mensagem("t1", "20", i, autor="Bia", texto="oi",
                                 data=AGORA + 50)
@@ -3360,7 +3374,6 @@ def test_falar_mensagens_novas_por_lugar_e_sem_depender_do_som(j, monkeypatch):
     j.fala.falar = lambda t, interromper=False: ditas.append(t)
     sons = []
     monkeypatch.setattr(jm, "bipe", lambda t, *a: sons.append(t))
-    j.cfg.set("som", False)                  # som desligado: a fala segue
     c = j.indice[("t1", "20")]
     j._abrir_conversa(c)
     ativa = [True]
@@ -3392,7 +3405,6 @@ def test_falar_mensagens_novas_por_lugar_e_sem_depender_do_som(j, monkeypatch):
     j.cfg.set("falar_novas", False)
     j.cfg.set("falar_novas_outras_conversas", False)
     assert falou("a7", "20", AGORA + 406) and falou("a8", "10", AGORA + 407)
-    assert sons == []                                  # som segue desligado
 
 
 def test_porcentagem_falada_no_download_segue_a_opcao(j):
@@ -3658,13 +3670,6 @@ def test_mencao_ou_resposta_num_grupo_toca_o_som_proprio(j, monkeypatch):
     sons.clear()
     chega("45", resposta_a="42")                  # resposta a mensagem alheia
     assert sons == ["nova_grupo"]
-    # com o som de mensagem desligado, a mencao ainda avisa; o comum nao
-    sons.clear()
-    j.cfg.set("som", False)
-    chega("46")
-    chega("47", citou=True)
-    assert sons == ["mencao_ou_resposta"]
-    j.cfg.set("som", True)
     # conversa com uma pessoa: nunca
     sons.clear()
     chega("48", citou=True, conv=j.indice[("t1", "20")])
@@ -3676,41 +3681,31 @@ def test_mencao_ou_resposta_num_grupo_toca_o_som_proprio(j, monkeypatch):
     assert sons == []
 
 
-def test_enter_entregue_ao_leitor_antes_de_enviar_quando_a_opcao_esta_ligada(
-        j):
+def test_enter_chega_a_caixa_e_ela_envia_pelo_evento_de_enter(j):
     j._abrir_conversa(j.indice[("t1", "20")])
     j.b.publicar(ev.MensagensCarregadas("t1", "20", [msg("5", "oi",
                                                           conversa="20")]))
-    # padrao: o Enter e tratado aqui, na hora, e o controle nao o recebe
+    # a janela deixa o Enter passar (o leitor de tela o ve na caixa)
     j.caixa.SetValue("primeira")
     j.caixa.SetFocus()
     enter = Tecla(wx_falso.WXK_RETURN)
     j._char_hook(enter)
-    assert not enter.pulou and ("enviar", "20", "primeira", "") in \
-        j.contas.p.pedidos
-    # ligada: o Enter segue para o controle (o leitor de tela o ve) e o
-    # envio vem logo depois, com a quebra de linha que o Enter deixou
-    j.cfg.set("enter_chega_ao_leitor", True)
-    j.caixa.SetValue("segunda")
-    j.caixa.SetFocus()
-    enter = Tecla(wx_falso.WXK_RETURN)
-    j._char_hook(enter)
     assert enter.pulou
-    assert ("enviar", "20", "segunda", "") not in j.contas.p.pedidos
-    j.caixa.SetValue("segunda\n")                 # o que o controle faz
-    j._enviar_depois_do_enter()
-    assert ("enviar", "20", "segunda", "") in j.contas.p.pedidos
-    assert j.caixa.GetValue() == ""
-    # Enter sem nada escrito: nao envia, e a caixa nao fica com a quebra
-    j.caixa.SetValue("\n")
-    j._enviar_depois_do_enter()
-    assert j.caixa.GetValue() == ""
-    # Shift+Enter continua sendo a nova linha, em qualquer caso
+    assert ("enviar", "20", "primeira", "") in j.contas.p.pedidos
+    # a caixa e criada com TE_PROCESS_ENTER
+    assert j.caixa.estilo & wx_falso.TE_PROCESS_ENTER
+    # Shift+Enter quebra a linha, sem enviar
     j.caixa.SetValue("a")
     j.caixa.SetFocus()
-    com_shift = Tecla(wx_falso.WXK_RETURN, shift=True)
-    j._char_hook(com_shift)
-    assert com_shift.pulou
+    t = Tecla(wx_falso.WXK_RETURN, shift=True)
+    j._tecla_caixa(t)
+    assert not t.pulou
+    assert j.caixa.GetValue() == "a\n"
+    assert ("enviar", "20", "a", "") not in j.contas.p.pedidos
+    # outra tecla segue para o controle
+    t = Tecla(ord("x"))
+    j._tecla_caixa(t)
+    assert t.pulou
 
 
 # ------------------------------------------------ mensagens temporarias
@@ -3948,3 +3943,690 @@ def test_envio_grande_abre_a_barra_e_fecha_no_fim_ou_na_falha(j, monkeypatch):
     j.b.publicar(ev.EnvioFalhou("t1", "20", "arquivo", "sem conexão",
                                 devolver_texto=False, tipo=m.DOCUMENTO))
     assert segunda.fechada and j._barras == {}
+
+
+class _DialogoFalso:
+    resposta = None
+
+    def __init__(self, *a, **k):
+        pass
+
+    def SetYesNoCancelLabels(self, *a):
+        pass
+
+    def ShowModal(self):
+        return self.resposta
+
+    def Destroy(self):
+        pass
+
+
+def _ortografia_pronta(j, monkeypatch, resposta):
+    from telezapp.interface import janela as modulo
+    from testes.test_ortografia import CorretorFalso
+    _DialogoFalso.resposta = resposta
+    monkeypatch.setattr(modulo.wx, "MessageDialog", _DialogoFalso,
+                        raising=False)
+    j._corretor_ort = CorretorFalso({"goistaria": ["gostaria"]})
+    j.cfg.set("ortografia_ao_enviar", True)
+    j._abrir_conversa(j.indice[("t1", "20")])
+    j.estados["t1"] = ev.CONECTADA
+
+
+def test_enviar_com_aviso_de_ortografia_pode_enviar_assim_mesmo(
+        j, monkeypatch):
+    _ortografia_pronta(j, monkeypatch, wx_falso.ID_NO)
+    j.caixa.SetValue("eu goistaria")
+    j._enviar_texto()
+    assert ("enviar", "20", "eu goistaria", "") in j.contas.p.pedidos
+
+
+def test_enviar_com_aviso_de_ortografia_cancelar_mantem_a_caixa(
+        j, monkeypatch):
+    _ortografia_pronta(j, monkeypatch, wx_falso.ID_CANCEL)
+    j.caixa.SetValue("eu goistaria")
+    j._enviar_texto()
+    assert j.caixa.GetValue() == "eu goistaria"
+    assert not any(p[0] == "enviar" for p in j.contas.p.pedidos)
+
+
+def test_enviar_sem_a_opcao_nao_consulta_o_corretor(j, monkeypatch):
+    _ortografia_pronta(j, monkeypatch, wx_falso.ID_CANCEL)
+    j.cfg.set("ortografia_ao_enviar", False)
+    j.caixa.SetValue("eu goistaria")
+    j._enviar_texto()
+    assert ("enviar", "20", "eu goistaria", "") in j.contas.p.pedidos
+
+
+def test_menus_mostram_o_atalho_e_a_opcao_esconde(j):
+    assert j.itens["ir_caixa"].rotulo.endswith("\tCtrl+E")
+    assert j.atalhos.efetivo("ir_caixa") == "Ctrl+E"
+    assert j.botao_enviar.GetLabel() == "&Enviar (Enter)"
+    assert j.botao_anexar.GetLabel() == "Anexar e enviar arquivo (Ctrl+Shift+A)"
+    j._aplicar_opcao("mostrar_atalhos", False)
+    assert "\t" not in j.itens["ir_caixa"].rotulo
+    assert j.botao_enviar.GetLabel() == "&Enviar"
+    # os atalhos seguem valendo, pela tabela de aceleracao
+    assert len(j.tabela_de_aceleracao.entradas) > 10
+    j._aplicar_opcao("mostrar_atalhos", True)
+    assert j.itens["ir_caixa"].rotulo.endswith("\tCtrl+E")
+    assert len(j.tabela_de_aceleracao.entradas) > 10     # vale sempre
+
+
+def test_atalho_personalizado_vai_ao_menu_ao_controle_e_a_config(j):
+    j._aplicar_opcao("atalhos", {"ir_caixa": "Ctrl+Alt+W", "anexar": ""})
+    assert j.itens["ir_caixa"].rotulo.endswith("\tCtrl+Alt+W")
+    assert "\t" not in j.itens["anexar"].rotulo      # tirado de proposito
+    assert j.botao_anexar.GetLabel() == "Anexar e enviar arquivo"
+    assert j.cfg.get("atalhos") == {"ir_caixa": "Ctrl+Alt+W", "anexar": ""}
+    assert j.atalhos.dono("Ctrl+Alt+W").chave == "ir_caixa"
+
+
+def test_toda_funcao_de_menu_esta_no_registro_de_atalhos(j):
+    assert set(j.itens) <= set(j.atalhos.acoes)
+    assert "mostrar_janela" in j.atalhos.acoes
+    # nenhum padrao repetido entre as funcoes
+    usados = [c for _, c in j.atalhos.todos() if c]
+    assert len(usados) == len(set(usados))
+
+
+class GravadorFalso:
+    criados = []
+
+    def __init__(self, pasta, origem=None, maximo_segundos=0):
+        self.pasta, self.origem = pasta, origem
+        self.cancelado = False
+        GravadorFalso.criados.append(self)
+
+    pausado = False
+    decorrido = 4.0
+
+    def pausar(self):
+        self.pausado = True
+
+    def continuar(self):
+        self.pausado = False
+
+    def iniciar(self):
+        pass
+
+    def parar(self):
+        from telezapp.midia.gravador import Gravacao
+        return Gravacao(self.arquivo, 3.0, -6.0)
+
+    def cancelar(self):
+        self.cancelado = True
+
+
+def _preparar_gravacao_rapida(j, monkeypatch, tmp_path):
+    import os
+    ogg = tmp_path / "voz-1.ogg"
+    with open(os.path.join(os.path.dirname(__file__), "amostras",
+                           "voz.ogg"), "rb") as f:
+        ogg.write_bytes(f.read())
+    GravadorFalso.criados = []
+    GravadorFalso.arquivo = str(ogg)
+    monkeypatch.setattr(jm, "Gravador", GravadorFalso)
+    monkeypatch.setattr(jm.time, "sleep", lambda s: None)
+    _abrir_com_caixa(j)
+
+
+def test_atalho_de_gravar_inicia_e_o_segundo_aperto_envia(j, monkeypatch,
+                                                           tmp_path):
+    from telezapp.midia.gravador import MICROFONE
+    _preparar_gravacao_rapida(j, monkeypatch, tmp_path)
+    j.caixa.SetValue("rascunho que fica")
+    j._gravar_rapido(MICROFONE)
+    assert len(GravadorFalso.criados) == 1 and j._gravacao_rapida
+    assert not [p for p in j.contas.p.pedidos if p[0] == "arquivo"]
+    j._gravar_rapido(MICROFONE)              # o mesmo atalho: para e envia
+    assert j._gravacao_rapida is None
+    pedido = [p for p in j.contas.p.pedidos if p[0] == "arquivo"][-1]
+    assert pedido[2] == m.VOZ and pedido[4] == ""
+    assert j.caixa.GetValue() == "rascunho que fica"
+
+
+def test_esc_descarta_a_gravacao_do_atalho(j, monkeypatch, tmp_path):
+    from telezapp.midia.gravador import MICROFONE
+    _preparar_gravacao_rapida(j, monkeypatch, tmp_path)
+    j._gravar_rapido(MICROFONE)
+    j.caixa.SetFocus()
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))
+    assert j._gravacao_rapida is None
+    assert GravadorFalso.criados[0].cancelado
+    assert not [p for p in j.contas.p.pedidos if p[0] == "arquivo"]
+
+
+def test_fechar_a_conversa_descarta_a_gravacao_do_atalho(j, monkeypatch,
+                                                          tmp_path):
+    from telezapp.midia.gravador import SOM_INTERNO
+    _preparar_gravacao_rapida(j, monkeypatch, tmp_path)
+    j._gravar_rapido(SOM_INTERNO)
+    j._fechar_conversa()
+    assert j._gravacao_rapida is None and GravadorFalso.criados[0].cancelado
+
+
+class EventoDeFechar:
+    def __init__(self, pode_vetar=True):
+        self.vetado = False
+        self.pode = pode_vetar
+
+    def CanVeto(self):
+        return self.pode
+
+    def Veto(self):
+        self.vetado = True
+
+
+class BandejaFalsa:
+    removida = False
+
+    def RemoveIcon(self):
+        self.removida = True
+
+    def Destroy(self):
+        pass
+
+
+def test_fechar_com_segundo_plano_so_esconde_a_janela(j, monkeypatch):
+    from telezapp.interface import bandeja
+    monkeypatch.setattr(bandeja, "criar", lambda janela: BandejaFalsa())
+    j._aplicar_opcao("segundo_plano", True)
+    assert isinstance(j._bandeja, BandejaFalsa)
+    escondida = []
+    j.Hide = lambda: escondida.append(True)
+    j.fala.falar = lambda t, interromper=False: escondida.append(t)
+    evento = EventoDeFechar()
+    j._ao_fechar(evento)
+    assert evento.vetado and escondida[0] is True
+    assert "segundo plano" in escondida[1]
+    assert j.vivo is not False                 # a janela nao foi destruida
+
+
+def test_sair_encerra_mesmo_com_segundo_plano(j, monkeypatch):
+    from telezapp.interface import bandeja
+    monkeypatch.setattr(bandeja, "criar", lambda janela: BandejaFalsa())
+    j._aplicar_opcao("segundo_plano", True)
+    j._sair()
+    assert j._saindo and j.vivo is False       # Close() foi chamado
+    evento = EventoDeFechar()
+    j.Hide = lambda: None
+    j.Destroy = lambda: None
+    j._ao_fechar(evento)
+    assert not evento.vetado
+
+
+def test_fechar_sem_a_opcao_encerra(j):
+    j.Hide = lambda: None
+    j.Destroy = lambda: None
+    evento = EventoDeFechar()
+    j._ao_fechar(evento)
+    assert not evento.vetado
+
+
+def test_fechamento_do_windows_nao_pode_ser_vetado(j, monkeypatch):
+    from telezapp.interface import bandeja
+    monkeypatch.setattr(bandeja, "criar", lambda janela: BandejaFalsa())
+    j._aplicar_opcao("segundo_plano", True)
+    j.Hide = lambda: None
+    j.Destroy = lambda: None
+    evento = EventoDeFechar(pode_vetar=False)
+    j._ao_fechar(evento)
+    assert not evento.vetado
+
+
+def test_iniciar_com_windows_liga_a_entrada(j, monkeypatch):
+    chamadas = []
+    monkeypatch.setattr(jm.inicializacao, "definir",
+                        lambda ligado, *a, **k: chamadas.append(ligado) or True)
+    j._aplicar_opcao("iniciar_com_windows", True)
+    j._aplicar_opcao("iniciar_com_windows", False)
+    assert chamadas == [True, False]
+    assert j.cfg.get("iniciar_com_windows") is False
+
+
+def test_atalho_global_e_registrado_e_avisa_se_estiver_ocupado(j):
+    registros, ditas = [], []
+    j.RegisterHotKey = lambda id_, mods, tecla: registros.append(
+        (mods, tecla)) or True
+    j.UnregisterHotKey = lambda id_: None
+    j._aplicar_opcao("atalhos", {"mostrar_janela": "Ctrl+Alt+Z"})
+    assert registros == [(wx_falso.MOD_CONTROL | wx_falso.MOD_ALT, ord("Z"))]
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.RegisterHotKey = lambda *a: False          # outro programa usa
+    j._aplicar_opcao("atalhos", {"mostrar_janela": "Ctrl+Alt+Y"})
+    assert "outro programa" in ditas[-1]
+
+
+def test_menu_midias_agrupa_as_escolhas_e_o_atalho_fala_portugues(j):
+    # as escolhas soltas (Só quando eu abrir...) ficam sob um titulo claro
+    assert j.atalhos.acoes["baixar_demanda"].rotulo == (
+        "Quando baixar as mídias: Só quando eu abrir")
+    assert j.atalhos.acoes["estilo1"].rotulo.startswith(
+        "Como cada mensagem é lida: ")
+    assert j.itens["audio_voltar"].rotulo.endswith(
+        " (Ctrl+Shift+Seta para a esquerda)")
+    assert j.itens["vel_mais"].rotulo.endswith(
+        " (Ctrl+Shift+Seta para cima)")
+    assert j.itens["audio_voltar_mais"].rotulo.endswith(
+        "	Ctrl+Shift+Page Up")
+    assert "Left" not in j.itens["audio_voltar"].rotulo
+
+
+def test_por_padrao_enter_quebra_a_linha_e_control_enter_envia(j):
+    j.cfg.set("enter_envia", False)
+    j._abrir_conversa(j.indice[("t1", "20")])
+    j.estados["t1"] = ev.CONECTADA
+    j.caixa.SetValue("linha um")
+    j.caixa.SetFocus()
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert j.caixa.GetValue() == "linha um\n"
+    assert not [p for p in j.contas.p.pedidos if p[0] == "enviar"]
+    # o Control Enter e a funcao Enviar a mensagem digitada (do menu)
+    assert j.atalhos.efetivo("enviar_msg") == "Ctrl+Enter"
+    j._enviar_texto()
+    assert ("enviar", "20", "linha um", "") in j.contas.p.pedidos
+    j._rotular_controles()
+    assert j.botao_enviar.GetLabel() == "&Enviar (Ctrl+Enter)"
+
+
+def test_com_a_opcao_enter_envia_e_o_botao_diz_enter(j):
+    j.cfg.set("enter_envia", False)
+    j._rotular_controles()
+    assert j.botao_enviar.GetLabel() == "&Enviar (Ctrl+Enter)"
+    j._aplicar_opcao("enter_envia", True)
+    j._rotular_controles()
+    assert j.botao_enviar.GetLabel() == "&Enviar (Enter)"
+    assert j._tecla_de_enviar() == "Enter"
+    j.cfg.set("enter_envia", False)
+    assert j._tecla_de_enviar() == "Control Enter"
+    j._aplicar_opcao("atalhos", {"enviar_msg": "Ctrl+Shift+Enter"})
+    assert j._tecla_de_enviar() == "Control Shift Enter"
+
+
+def test_control_enter_na_caixa_envia_e_shift_enter_quebra_a_linha(j):
+    j.cfg.set("enter_envia", False)
+    j._abrir_conversa(j.indice[("t1", "20")])
+    j.estados["t1"] = ev.CONECTADA
+    j.caixa.SetValue("oi")
+    j.caixa.SetFocus()
+    j._tecla_caixa(Tecla(wx_falso.WXK_RETURN, shift=True))
+    assert j.caixa.GetValue() == "oi\n"
+    assert not [p for p in j.contas.p.pedidos if p[0] == "enviar"]
+    j._tecla_caixa(Tecla(wx_falso.WXK_RETURN, ctrl=True))
+    assert ("enviar", "20", "oi", "") in j.contas.p.pedidos
+    # se o Control Enter for de outra funcao, ele so quebra a linha
+    j._aplicar_opcao("atalhos", {"enviar_msg": "Ctrl+Shift+Enter"})
+    j.caixa.SetValue("de novo")
+    j._tecla_caixa(Tecla(wx_falso.WXK_RETURN, ctrl=True))
+    assert j.caixa.GetValue() == "de novo\n"
+
+
+def test_enter_numa_enquete_abre_a_janela_e_o_voto_vai_ao_servico(
+        j, monkeypatch):
+    j._abrir_conversa(j.indice[("t1", "20")])
+    enquete = m.Mensagem("t1", "20", "9", tipo=m.OUTRO, data=AGORA,
+                         texto="enquete: Qual dia?")
+    m.atualizar_extras(enquete, enquete={
+        "pergunta": "Qual dia?", "opcoes": ["Sexta", "Sábado"], "maximo": 1})
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", [enquete]))
+    j.lista_msgs.SetSelection(j.mapa.index("9"))
+    assert "enquete: Qual dia?, 2 opções" in j.lista_msgs.itens[
+        j.mapa.index("9")]
+    abertas = []
+    monkeypatch.setattr(jm.ui_enquete, "abrir",
+                        lambda *a: abertas.append(a))
+    votos, atualizacoes = [], []
+    j.contas.p.PODE_VOTAR = True
+    j.contas.p.votar_enquete = lambda msg, esc: votos.append(
+        (msg.id, list(esc)))
+    j.contas.p.atualizar_enquete = lambda msg: atualizacoes.append(msg.id)
+    j.estados["t1"] = ev.CONECTADA
+    j._detalhes_ou_marcador()                       # Enter na enquete
+    assert len(abertas) == 1 and atualizacoes == ["9"]
+    pai, obter, pode, votar, atualizar, fala = abertas[0]
+    assert pode is True and obter().id == "9"
+    votar([1])
+    assert votos == [("9", [1])]
+    atualizar()
+    assert atualizacoes == ["9", "9"]
+    # sem conexao: so leitura
+    j.estados["t1"] = ev.DESCONECTADA
+    j._abrir_enquete()
+    assert abertas[-1][2] is False
+
+
+def test_ver_enquete_numa_mensagem_comum_avisa(j):
+    j._abrir_conversa(j.indice[("t1", "20")])
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", [
+        msg("1", "oi", conversa="20")]))
+    j.lista_msgs.SetSelection(j.mapa.index("1"))
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._abrir_enquete()
+    assert "não é uma enquete" in ditas[-1]
+
+
+def test_criar_enquete_pelo_menu_vai_ao_servico(j, monkeypatch):
+    _abrir_com_caixa(j)
+    pedidos = []
+    j.contas.p.PODE_CRIAR_ENQUETE = True
+    j.contas.p.criar_enquete = lambda *a: pedidos.append(a)
+    j.estados["t1"] = ev.CONECTADA
+    monkeypatch.setattr(jm.ui_nova_enquete, "pedir_enquete",
+                        lambda pai, servico, fala: (
+                            "Qual dia?", ["Sexta", "Sábado"], False, True))
+    j._nova_enquete()
+    assert pedidos == [("20", "Qual dia?", ["Sexta", "Sábado"], False, True)]
+    # cancelou: nada vai
+    pedidos.clear()
+    monkeypatch.setattr(jm.ui_nova_enquete, "pedir_enquete",
+                        lambda pai, servico, fala: None)
+    j._nova_enquete()
+    assert pedidos == []
+    # servico que nao cria enquete
+    j.contas.p.PODE_CRIAR_ENQUETE = False
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._nova_enquete()
+    assert "não cria enquetes" in ditas[-1]
+
+
+def _enquete_minha(j, id_="9"):
+    j._abrir_conversa(j.indice[("t1", "20")])
+    enquete = m.Mensagem("t1", "20", id_, minha=True, tipo=m.OUTRO,
+                         data=AGORA, texto="enquete: Q")
+    m.atualizar_extras(enquete, enquete={
+        "pergunta": "Q", "opcoes": ["A", "B"], "maximo": 1})
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", [enquete]))
+    return enquete
+
+
+def test_sons_dos_votos_em_enquete(j, monkeypatch):
+    sons = []
+    monkeypatch.setattr(jm, "bipe", lambda tipo, *a: sons.append(tipo))
+    enquete = _enquete_minha(j)
+    sons.clear()
+    j.b.publicar(ev.MensagemAtualizada("t1", "20", enquete, "enquete", "Bia"))
+    assert sons == ["voto_enquete"]
+    sons.clear()
+    j.b.publicar(ev.MensagemAtualizada("t1", "20", enquete, "enquete",
+                                       "Você"))
+    assert sons == ["voto_enviado"]
+    sons.clear()                                    # sem saber quem: mudo
+    j.b.publicar(ev.MensagemAtualizada("t1", "20", enquete, "enquete", ""))
+    assert sons == []
+    # enquete de outra pessoa: o voto de terceiros nao toca
+    alheia = m.Mensagem("t1", "20", "8", tipo=m.OUTRO, data=AGORA)
+    m.atualizar_extras(alheia, enquete={"pergunta": "Q", "opcoes": ["A", "B"]})
+    j.b.publicar(ev.MensagemAtualizada("t1", "20", alheia, "enquete", "Bia"))
+    assert sons == []
+
+
+def test_sons_de_esconder_e_voltar_da_bandeja(j, monkeypatch):
+    sons = []
+    monkeypatch.setattr(jm, "bipe", lambda tipo, *a: sons.append(tipo))
+    from testes.test_janela import BandejaFalsa
+    j._bandeja = BandejaFalsa()
+    j.Hide = lambda: None
+    j.IsShown = lambda: False
+    j.Show = lambda: None
+    j.IsIconized = lambda: False
+    j.Raise = lambda: None
+    j._esconder_na_bandeja()
+    j._mostrar_da_bandeja()
+    assert sons == ["escondido", "voltou"]
+
+
+def test_gravar_por_atalho_toca_o_som_de_gravando_e_o_de_parada(
+        j, monkeypatch, tmp_path):
+    from telezapp.midia.gravador import MICROFONE
+    sons = []
+    monkeypatch.setattr(jm, "bipe", lambda tipo, *a: sons.append(tipo))
+    _preparar_gravacao_rapida(j, monkeypatch, tmp_path)
+    j._gravar_rapido(MICROFONE)
+    j._gravar_rapido(MICROFONE)
+    assert sons[0] == "gravando" and "gravacao_parada" in sons
+    assert "nova" not in sons          # nao e o som de mensagem recebida
+
+
+def test_slots_de_atalho_das_funcoes_novas(j):
+    for chave in ("gravar_pausa", "gravar_descartar", "abrir_atalhos",
+                  "enviar_msg", "ver_enquete", "nova_enquete",
+                  "esconder_janela", "mostrar_janela", "ortografia",
+                  "gravar_mic", "gravar_som"):
+        assert chave in j.atalhos.acoes, chave
+    # as novas nascem sem atalho, prontas para receber um
+    assert j.atalhos.efetivo("gravar_pausa") == ""
+    j._aplicar_opcao("atalhos", {"gravar_pausa": "Ctrl+Alt+P"})
+    assert j.itens["gravar_pausa"].rotulo.endswith("	Ctrl+Alt+P")
+
+
+def test_pausar_e_descartar_a_gravacao_por_atalho(j, monkeypatch, tmp_path):
+    from telezapp.midia.gravador import MICROFONE
+    _preparar_gravacao_rapida(j, monkeypatch, tmp_path)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._pausar_gravacao_rapida()                      # sem gravar: avisa
+    assert "Nenhuma gravação" in ditas[-1]
+    j._gravar_rapido(MICROFONE)
+    g = GravadorFalso.criados[0]
+    j._pausar_gravacao_rapida()
+    assert g.pausado and "pausada em 0:04" in ditas[-1]
+    j._pausar_gravacao_rapida()
+    assert not g.pausado and "Gravando de novo" in ditas[-1]
+    j._descartar_gravacao_rapida()
+    assert g.cancelado and j._gravacao_rapida is None
+    assert not [p for p in j.contas.p.pedidos if p[0] == "arquivo"]
+
+
+def test_restaurar_backup_aplica_o_mapa_de_atalhos_nos_menus(j):
+    assert j.atalhos.efetivo("responder") == "Ctrl+Shift+R"
+    j._fim_da_restauracao({"atalhos": {"responder": "Alt+R"}}, [], "")
+    assert j.atalhos.efetivo("responder") == "Alt+R"
+    assert j.itens["responder"].rotulo.endswith("\tAlt+R")
+    assert j.cfg.get("atalhos") == {"responder": "Alt+R"}
+
+
+def test_enter_envia_vem_ligado_de_fabrica(tmp_path, monkeypatch):
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path))
+    assert config.Config().get("enter_envia") is True
+    assert config.PADROES["enter_envia"] is True
+
+
+# --------------------------------------- novo grupo, canal, chamada, contato
+def test_novo_grupo_cria_na_conta_e_abre_a_conversa(j, monkeypatch):
+    from telezapp.interface import criar_conversa as ui
+    criados = []
+    j.contas.p.CRIA = ("grupo", "canal")
+    j.contas.p.criar_conversa = lambda tipo, nome, desc, gente, topicos: \
+        criados.append((tipo, nome, desc, gente, topicos)) or (
+            True, "", "20")
+    j.estados["t1"] = ev.CONECTADA
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+
+    class Dialogo:
+        def __init__(self, pai, tipo, contas):
+            Dialogo.vistos = (tipo, contas)
+
+        def ShowModal(self):
+            return jm.wx.ID_OK
+
+        def escolhido(self):
+            return "t1", "Equipe", "Sobre", ["@bia"], True
+
+        def Destroy(self):
+            pass
+
+    class SemThread:
+        def __init__(self, target=None, args=(), **k):
+            self.alvo, self.args = target, args
+
+        def start(self):
+            self.alvo(*self.args)
+    monkeypatch.setattr(ui, "DialogoCriarConversa", Dialogo)
+    monkeypatch.setattr(jm.threading, "Thread", SemThread)
+    j._nova_conversa("grupo")
+    assert criados == [("grupo", "Equipe", "Sobre", ["@bia"], True)]
+    assert Dialogo.vistos[0] == "grupo" and Dialogo.vistos[1][0][0] == "t1"
+    assert any("Grupo Equipe criado" in t for t in ditas)
+    assert j.atual == ("t1", "20")            # abriu a conversa criada
+    # a conta nao cria comunidades: avisa e nao abre a janela
+    j._nova_conversa("comunidade")
+    assert ditas[-1] == "Nenhuma conta conectada cria comunidades."
+    assert len(criados) == 1
+
+
+def test_novo_grupo_que_falha_avisa_o_motivo(j, monkeypatch):
+    from telezapp.interface import criar_conversa as ui
+    j.contas.p.CRIA = ("grupo",)
+    j.contas.p.criar_conversa = lambda *a: (False, "O Telegram recusou.", "")
+    j.estados["t1"] = ev.CONECTADA
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+
+    class Dialogo:
+        def __init__(self, *a):
+            pass
+
+        def ShowModal(self):
+            return jm.wx.ID_OK
+
+        def escolhido(self):
+            return "t1", "Equipe", "", [], False
+
+        def Destroy(self):
+            pass
+
+    class SemThread:
+        def __init__(self, target=None, args=(), **k):
+            self.alvo, self.args = target, args
+
+        def start(self):
+            self.alvo(*self.args)
+    monkeypatch.setattr(ui, "DialogoCriarConversa", Dialogo)
+    monkeypatch.setattr(jm.threading, "Thread", SemThread)
+    j._nova_conversa("grupo")
+    assert ditas[-1] == "O Telegram recusou."
+    assert j.atual is None
+
+
+def test_nova_chamada_escolhe_a_pessoa_e_liga(j, monkeypatch):
+    from telezapp.interface import contatos
+    vistas = []
+    ligou = []
+    j._provedor_de_chamada = lambda conta_id: j.contas.p
+    j.estados["t1"] = ev.CONECTADA
+    monkeypatch.setattr(contatos, "dialogo_nova_chamada",
+                        lambda pai, contas, buscar: vistas.append(contas) or
+                        ("t1", "bruno", None))
+    j._ligar_para = lambda conv: ligou.append(conv.id)
+    j._nova_chamada()
+    assert [c for c, _ in vistas[0]] == ["t1"]
+    assert ligou == ["20"]                         # Bruno ja existia
+    # ninguem faz chamadas: avisa
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._provedor_de_chamada = lambda conta_id: None
+    j._nova_chamada()
+    assert ditas[-1] == "Nenhuma conta conectada faz chamadas."
+
+
+def test_novo_contato_guarda_e_avisa(j, monkeypatch):
+    from telezapp.interface import contatos
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    monkeypatch.setattr(contatos, "adicionar_contato",
+                        lambda pai, banco, contas, falar: (
+                            ("t1", "99@s.whatsapp.net"),
+                            "Contato Bia adicionado."))
+    renomeou = []
+    j._renomear_pelos_contatos = lambda: renomeou.append(True)
+    j._novo_contato()
+    assert renomeou == [True] and ditas[-1] == "Contato Bia adicionado."
+    monkeypatch.setattr(contatos, "adicionar_contato",
+                        lambda *a: None)
+    j._novo_contato()
+    assert renomeou == [True]                      # cancelou: nada muda
+
+
+def grupo(id, nome, nao_lidas, data):
+    return m.Conversa("t1", id, nome, "telegram", "grupo",
+                      nao_lidas=nao_lidas, data=data)
+
+
+def test_grupo_com_topicos_fica_um_so_na_lista_e_pergunta_o_topico(j):
+    j.b.publicar(ev.ConversasAtualizadas("t1", [
+        conv("10", "Ana", data=AGORA - 10),
+        grupo("-100", "Equipe", 0, AGORA - 5),
+        grupo("-100#1", "Equipe › Geral", 2, AGORA - 5),
+        grupo("-100#9", "Equipe › Avisos", 1, AGORA - 50)]))
+    assert j.lista_conv.itens == ["Equipe, Telegram, 3 não lidas",
+                                  "Ana, Telegram"]
+    wx_falso.escolha_lista[0] = 1               # o segundo: Avisos
+    try:
+        j._abrir_conversa(j.indice[("t1", "-100")])
+    finally:
+        wx_falso.escolha_lista[0] = 0
+    assert j.atual == ("t1", "-100#9")
+    j._fechar_conversa()
+    wx_falso.resposta_lista[0] = wx_falso.ID_CANCEL
+    try:
+        j._abrir_conversa(j.indice[("t1", "-100")])    # desistiu
+    finally:
+        wx_falso.resposta_lista[0] = wx_falso.ID_OK
+    assert j.atual is None
+
+
+def test_esc_no_topico_volta_para_a_lista_de_topicos_do_grupo(j):
+    j.b.publicar(ev.ConversasAtualizadas("t1", [
+        grupo("-100", "Equipe", 0, AGORA - 5),
+        grupo("-100#1", "Equipe › Geral", 0, AGORA - 5),
+        grupo("-100#9", "Equipe › Avisos", 0, AGORA - 50)]))
+    wx_falso.escolha_lista[0] = 1                  # Avisos
+    try:
+        j._abrir_conversa(j.indice[("t1", "-100")])
+        assert j.atual == ("t1", "-100#9")
+        wx_falso.escolha_lista[0] = 0              # Esc: escolhe o Geral
+        j._esc_da_conversa()
+        assert j.atual == ("t1", "-100#1")         # outro topico, mesmo grupo
+        wx_falso.resposta_lista[0] = wx_falso.ID_CANCEL
+        j._esc_da_conversa()                       # Esc na lista de topicos
+    finally:
+        wx_falso.escolha_lista[0] = 0
+        wx_falso.resposta_lista[0] = wx_falso.ID_OK
+    assert j.atual is None
+    assert j.lista_conv.GetSelection() == j._chaves_conv.index(("t1", "-100"))
+
+
+def test_gerenciar_contatos_busca_por_nome_e_telefone(monkeypatch):
+    from telezapp.interface import contatos
+
+    class Banco:
+        def contatos(self, conta_id=None):
+            return [("t1", "1", "Ana Souza", "+5551999998888"),
+                    ("t1", "2", "Bruno", "+5511988887777"),
+                    ("t1", "3", "Édson", "")]
+
+    class Contas:
+        def lista(self):
+            return [("t1", "telegram", "Fábio")]
+
+        def provedor(self, cid):
+            return None
+    g = contatos.GerenciadorContatos(None, Banco(), Contas(), lambda: None,
+                                     lambda t: None)
+    assert len(g._itens) == 3
+    g.busca.SetValue("edson")                 # sem acento nem maiuscula
+    g._preencher(g._chave_selecionada())
+    assert [c[2] for c in g._itens] == ["Édson"]
+    g.busca.SetValue("1198888")               # parte do telefone
+    g._preencher()
+    assert [c[2] for c in g._itens] == ["Bruno"]
+    g.busca.SetValue("zzz")
+    g._preencher()
+    assert g._itens == [] and g.lista.itens == ["Nenhum contato encontrado"]
+    g.busca.SetValue("")
+    g._preencher()
+    assert len(g._itens) == 3

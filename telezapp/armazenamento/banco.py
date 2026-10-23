@@ -205,6 +205,16 @@ class Banco:
             log.info("banco atualizado: coluna expira")
         self._con.execute("CREATE INDEX IF NOT EXISTS mensagens_por_expira "
                           "ON mensagens (expira) WHERE expira > 0")
+        # minhas mensagens que ja tinham o recibo de reproduzida guardado,
+        # mas ficaram como "lida" (o estado reproduzida e mais novo)
+        n = self._con.execute(
+            "UPDATE mensagens SET estado='reproduzida' WHERE minha=1 AND "
+            "estado IN ('enviada','entregue','lida') AND EXISTS ("
+            "SELECT 1 FROM recibos r WHERE r.conta_id=mensagens.conta_id "
+            "AND r.conversa_id=mensagens.conversa_id AND "
+            "r.mensagem_id=mensagens.id AND r.tipo='ouvida')").rowcount
+        if n > 0:
+            log.info("banco atualizado: %d mensagens como reproduzidas", n)
 
     # ------------------------------------------------------------ depuracao
     def guardar_depuracao(self, conta_id, conversa_id, mensagem_id, dados):
@@ -413,6 +423,17 @@ class Banco:
                 "AND id=?" % ", ".join(_CAMPOS_MSG),
                 (conta_id, conversa_id, mensagem_id)).fetchone()
         return _msg(linha) if linha else None
+
+    def mensagem_da_enquete(self, conta_id, poll_id):
+        """A mensagem guardada que tem a enquete com esse numero (Telegram:
+        as atualizacoes de voto citam so o numero da enquete)."""
+        with self._trava:
+            linha = self._con.execute(
+                "SELECT conversa_id, id FROM mensagens WHERE conta_id=? AND "
+                "extras LIKE ?", (conta_id, '%"poll_id": "' +
+                                  str(poll_id).replace('"', "") + '"%')
+            ).fetchone()
+        return self.mensagem(conta_id, linha[0], linha[1]) if linha else None
 
     def mudar_estado(self, conta_id, conversa_id, ids, estado):
         """WhatsApp: muda o estado das minhas mensagens com esses ids, sem

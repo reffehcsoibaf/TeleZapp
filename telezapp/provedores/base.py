@@ -208,6 +208,17 @@ class Provedor(ABC):
         """Ferramentas do canal (silenciar, deixar_de_seguir). (ok, texto)."""
         return False, "Esta conta não gerencia canais por aqui."
 
+    # tipos que o servico deixa criar: "grupo", "canal" e/ou "comunidade"
+    CRIA = ()
+
+    def criar_conversa(self, tipo, nome, descricao="", participantes=(),
+                       topicos=False):
+        """Cria um grupo, canal ou comunidade. `participantes`: telefones ou
+        @usuarios para ja pôr no grupo; `topicos`: grupo dividido em topicos
+        (onde o servico tem). Espera o servico (thread propria). Devolve
+        (ok, texto, conversa_id); o id e "" quando nao se sabe."""
+        return False, "Esta conta não cria grupos, canais ou comunidades.", ""
+
     def previa_do_convite(self, msg, acao):
         """Dados do grupo ou canal de um convite (acao do tipo "entrar"):
         {'nome', 'membros', 'descricao', 'ja_participa', 'erro'}; so 'erro'
@@ -229,6 +240,25 @@ class Provedor(ABC):
         """Reage a mensagem com o emoji (vazio: tira a minha reacao). Volta
         na hora; o resultado chega como ev.MensagemAtualizada (motivo
         "reacao") ou ev.Aviso."""
+
+    # True nos servicos em que da para criar uma enquete
+    PODE_CRIAR_ENQUETE = False
+
+    def criar_enquete(self, conversa_id, pergunta, opcoes, multipla,
+                      anonima=True):
+        """Cria a enquete na conversa. Volta na hora; a mensagem criada chega
+        como ev.MensagemNova(enviada_daqui=True) ou o erro como ev.Aviso."""
+
+    # True nos servicos em que da para votar numa enquete
+    PODE_VOTAR = False
+
+    def votar_enquete(self, mensagem, escolhas):
+        """Vota na enquete com as opcoes (posicoes); lista vazia tira o meu
+        voto. Volta na hora; o resultado chega como ev.MensagemAtualizada
+        (motivo "enquete") ou ev.Aviso."""
+
+    def atualizar_enquete(self, mensagem):
+        """Pede ao servico o resultado atual (onde ele nao manda sozinho)."""
 
     # True nos servicos em que da para ligar e desligar as mensagens
     # temporarias de uma conversa

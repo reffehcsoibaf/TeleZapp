@@ -63,7 +63,44 @@ def pyinstaller(spec, dist, work, env=None):
         cwd=RAIZ, env=dict(os.environ, **(env or {})))
 
 
+def gravar_credenciais():
+    """Poe o api id e o api hash do Telegram do projeto no programa, para
+    quem instala nao precisar criar os seus. Vem de TELEZAPP_API_ID e
+    TELEZAPP_API_HASH, da configuracao deste computador ou do arquivo dos
+    testes. Devolve o caminho gerado (apagado no fim) ou None."""
+    sys.path.insert(0, RAIZ)
+    from telezapp import config
+    api_id, api_hash = os.environ.get("TELEZAPP_API_ID"), os.environ.get(
+        "TELEZAPP_API_HASH")
+    if config.credenciais_validas(api_id, api_hash):
+        cred = (int(api_id), api_hash.strip())
+    else:
+        cred = config.credenciais_telegram(config.Config())
+    if cred is None:
+        print("AVISO: sem api id e api hash do Telegram; quem instalar "
+              "vai precisar informar os seus.")
+        return None
+    caminho = os.path.join(RAIZ, "telezapp", "_credenciais.py")
+    with open(caminho, "w", encoding="utf-8") as f:
+        f.write("# Gerado por ferramentas/empacotar.py; fora do git.
+"
+                "API_ID = %d
+API_HASH = %r
+" % cred)
+    print("Credenciais do Telegram embutidas no programa.")
+    return caminho
+
+
 def main():
+    credenciais = gravar_credenciais()
+    try:
+        _montar()
+    finally:
+        if credenciais and os.path.exists(credenciais):
+            os.remove(credenciais)
+
+
+def _montar():
     os.makedirs(SAIDA, exist_ok=True)
     programa = os.path.join(TRABALHO, "programa")
     print("1/3 Gerando o programa...")

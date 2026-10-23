@@ -25,7 +25,7 @@ partir dos experimentos, ainda a confirmar.
 - Tratar Enter e Esc na janela (`EVT_CHAR_HOOK`); o `ListBox` não entrega o Enter.
 - Ao abrir uma conversa: foco no item "Início das mensagens não lidas" ou, se
   não houver, na última mensagem. Esc volta para a lista de conversas.
-- Enter na caixa de digitação envia; Shift+Enter quebra a linha.
+- Na caixa de digitação, Enter envia e Shift+Enter quebra a linha; Control+Enter também envia (função `enviar_msg` dos atalhos, trocável). 22/10/2026: a opção `enter_envia` (Escrita) vem ligada; desmarcada, só Control+Enter envia e Enter quebra a linha, como no Telegram Web e no Gmail.
 - Três estilos de leitura da mensagem (autor primeiro, conteúdo primeiro, autor
   só quando muda), escolhidos num menu.
 - Avisos de mensagem nova: fala pelo NVDA mais som, ambos desligáveis.
@@ -366,9 +366,11 @@ automáticos): a lista do que falta testar fica na memória do projeto.
 - **Sons**: uma thread por vez no PortAudio (acessos simultâneos derrubavam o
   programa); sons de até 2 s pré-carregados na RAM; espera do Enter de 40 para
   10 ms. `falha-nativa.log` recebe também o stderr das DLLs.
-- **Visto no app real pelo responsável (21/10/2026)**: barras de progresso e a
-  espera de 10 ms. Não visto: M4A, som de envio mais rápido, atualização pela
-  janela.
+- **Visto no app real pelo responsável (21/10/2026)**: barras de progresso (envio
+  de arquivo grande), espera de 10 ms, M4A tocando e entrando na sequência, e o
+  exe novo abrindo normal. Não visto: som de envio mais rápido e atualização
+  pela janela (a barra de progresso da atualização só aparece quando a 21.0
+  atualizar para a versão seguinte).
 
 ### Registro e barras de progresso
 
@@ -582,6 +584,36 @@ no fechamento, por assunto.
   de sons e a tela nova, status e histórias (ver, responder, curtir e postar),
   prévia de links, o reinício do pareamento e o executável com OpenCV, emoji e
   `telezapp/sons` (conferir o PyInstaller).
+
+## Versão 2026.10.23.0 (23/10/2026): menus novos, criar grupos, chamadas e enquetes
+
+Reúne tudo o que entrou depois da 2026.10.21.0 (o detalhe técnico está no CHANGELOG): chamadas de voz do WhatsApp pela DLL de teste do neonize, corretor ortográfico, atalhos personalizáveis, gravar por atalho, segundo plano e bandeja, enquetes, menus Novo e Ir para, configurações Interface e Mensagens, criar grupo, canal e comunidade, tópicos de grupo do Telegram, estado reproduzida, correção do áudio Ogg, credenciais do Telegram embutidas e o formulário de relatos. As confirmações do responsável estão nas seções abaixo. **Ainda sem teste no app real:** criar grupo, canal e comunidade nos dois serviços, tópicos do Telegram, Nova chamada, Novo contato, a busca em Gerenciar contatos, as credenciais embutidas no executável, a tela de Atalhos e o gravar por atalho, o segundo plano, votar e quem votou no Telegram, e o estado reproduzida nas mensagens antigas.
+
+## Chamadas de voz do WhatsApp: fase 0 (21/10/2026)
+
+- Experimento em `experimentos/10-chamada-whatsapp-meowcaller/` (Go, meowcaller sobre o hypermeow) com a ponte de voz em Python (`experimentos/chamada_whatsapp.py`, microfone e alto-falante por socket local). Ainda fora do app.
+- **Verificado ao vivo pelo responsável (21/10/2026, 20:38):** ligação de saída de 60 s para um celular, atendida e com "voz boa nos dois lados". Codec MLow, memória do Go entre 11 e 21 MB. Houve 111 quedas de som no resumo (concentradas no meio e no fim da chamada): a investigar.
+- **Verificado ao vivo pelo responsável (21/10/2026, 21:12), com o whatsmeow do neonize:** o meowcaller, copiado com o import do hypermeow trocado por `go.mau.fi/whatsmeow` (pin `35ae40906e74`, o mesmo da DLL do neonize), compila (build, vet e testes) e fez uma ligação de saída de 50 s com "voz boa nos dois lados" (837 quadros enviados, 658 recebidos, memória do Go 15 a 25 MB). Não é preciso trocar de motor de conexão. Requisito do responsável: um único pareamento para mensagens e chamadas, então a integração será na própria DLL.
+- **Verificado ao vivo pelo responsável (21/10/2026, à noite), no TeleZapp do código:** chamada de voz **feita** pelo app, com a opção "Chamadas de voz do WhatsApp (experimental)" ligada e a DLL com o meowcaller dentro (um só login), "com sucesso e qualidade". Também visto: **atender** uma chamada recebida (boa qualidade) e **recusar** (a pessoa viu "recusado"; antes da correção da DLL, que passou a usar `Reject` no lugar de `Hangup` para chamada de entrada ainda tocando, a chamada seguia tocando nos dois lados). O celular da conta seguiu tocando depois de recusar no TeleZapp, o que o responsável diz acontecer às vezes até no WhatsApp oficial: observar. Também visto: **silenciar** o microfone. Com a DLL reconstruída (a mesma das chamadas), **arquivar uma conversa no celular chegou ao vivo** ao TeleZapp. **Trancar** uma conversa no celular também chegou ao vivo; destrancar pelo TeleZapp não destrancou no celular (não se sabe se antes destrancava; o responsável aceitou assim). Não verificado no app: trocar microfone ou saída no meio (o responsável só tem um de cada, só há teste automático); trocar microfone ou saída no meio; chamada longa; vídeo e grupos.
+- **Não verificado:** receber chamada, vídeo, grupos, chamada longa, o reaproveitamento do mesmo cliente da DLL (o teste usou um cliente whatsmeow próprio, com sessão separada) e a troca automática de código de pareamento quando digitado errado.
+
+## Corretor ortográfico (22/10/2026)
+
+- F7 na caixa de digitar (menu Mensagens): verificador do próprio Windows por ctypes, sem dependência nova; janela com palavra, frase, "Trocar por", sugestões e botões Trocar, Trocar todas, Ignorar, Ignorar todas e Adicionar ao dicionário (dicionário pessoal do Windows). Opções na categoria Escrita: idioma do corretor e aviso ao enviar (desligado por padrão).
+- **Verificado ao vivo pelo responsável (22/10/2026):** ele usou o corretor no TeleZapp do código e disse que gostou da função. Testado só em português do Brasil. Testado com o NVDA, sem dificuldade em nenhuma das telas. Também testado o aviso de ortografia incorreta ao enviar. Não foram testados os outros idiomas.
+
+- **Enter da caixa (22/10/2026):** a caixa passou a ter `TE_PROCESS_ENTER` e envia pelo `EVT_TEXT_ENTER`, como o WinZapp (o Enter chega ao controle e o leitor de tela fecha a última palavra). Sai a opção experimental `enter_chega_ao_leitor`. **Verificado ao vivo pelo responsável (22/10/2026):** parou de falar a última palavra colada com a primeira da mensagem seguinte. Foi o envio comum de mensagem, que era o principal. Shift+Enter, a edição (F2) e a resposta de status ficam só com teste automático.
+
+## Enquetes (22/10/2026)
+
+- Ver, votar e criar enquetes no WhatsApp e no Telegram (dados em `extras["enquete"]` da mensagem; janelas `interface/enquete.py` e `interface/nova_enquete.py`).
+- **Verificado ao vivo pelo responsável (22/10/2026), no WhatsApp:** criou uma enquete pelo TeleZapp, outras pessoas votaram e os resultados atualizaram na enquete criada por ele (depois de consertar o `decrypt_poll_vote` do neonize 0.5.2, que dava TypeError); um voto dado **com o TeleZapp fechado** chegou quando ele abriu. Entrou também com outra conta no TeleZapp e a enquete chegou e funcionou como enquete recebida. No Telegram só tentou criar. Não verificado: votar e ver quem votou no Telegram.
+
+- **Envio de áudio que não é gravação direta (22/10/2026, corrigido em 23/10/2026):** encaminhar uma voz e colar um `.ogg` apareciam como enviados e nunca chegavam. O log mostrava `audio enviado` com o tipo `audio/ogg` sem `codecs=opus`; agora o Ogg com Opus vai como áudio comum com `audio/ogg; codecs=opus`, Ogg Vorbis vai como documento e encaminhar uma voz que não é Ogg/Opus segue como arquivo. **Verificado ao vivo pelo responsável (23/10/2026):** "me parece que o envio e o encaminhamento de áudio funcionou". Não se sabe quais casos ele testou além de encaminhar e colar; não verificado: Ogg Vorbis, M4A e MP3 como áudio comum.
+
+- **Verificado ao vivo pelo responsável (23/10/2026):** navegou pelo menu reorganizado (Novo, Ir para, Ferramentas) e pela janela de configurações nova (Interface, Mensagens e o botão Conteúdo falado), sem relatar problema. O arquivo de áudio que não chegava em 22/10 foi reenviado e **chegou ao destino como áudio**. Outros formatos (Ogg Vorbis, M4A, MP3) ele só vai testar numa oportunidade ou se um usuário relatar. **Não verificado:** criar grupo, canal e comunidade (WhatsApp e Telegram), tópicos de grupo do Telegram, Nova chamada, Novo contato e as credenciais do Telegram embutidas no executável (ainda não empacotado).
+
+- **Formulário de relatos (23/10/2026):** `site/relatar.html` envia para o Worker `telezapp-relatos` (pasta `relatos/`, KV, relatos guardados 90 dias, leitura em `/admin` com senha, aviso por notificação do ntfy). **Verificado ao vivo pelo responsável (23/10/2026):** um relato de teste mandado direto ao Worker apareceu na lista do `/admin` e a notificação chegou ao celular. A página foi publicada (PR #25) e o envio por ela, com um log anexado, chegou ao Worker (visto por mim com um relato de teste, depois apagado); o responsável confirmou em 23/10/2026 que "tudo funcionou na página de relatos". O endereço do `/admin` com a senha ficou guardado por ele fora da pasta do projeto.
 
 ## Próximos passos sugeridos
 

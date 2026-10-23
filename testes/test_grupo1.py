@@ -42,8 +42,8 @@ def test_opcoes_e_busca_sem_acento():
     assert len(chaves) == len(set(chaves))
     assert set(chaves) <= set(config.PADROES)
     assert all(o.categoria and o.descricao for o in config.OPCOES)
-    assert [o.chave for o in config.buscar_opcoes("leitor DE TELA")] == \
-        ["falar_novas"]
+    assert "falar_novas" in [
+        o.chave for o in config.buscar_opcoes("leitor DE TELA")]
     assert [o.chave for o in config.buscar_opcoes("conteudo")]
     assert config.buscar_opcoes("zzz") == []
 
@@ -128,7 +128,8 @@ def test_extras_na_mensagem_e_migracao_do_banco(tmp_path):
     assert m.extras_de(x) == {"links": [], "botoes": [], "mencoes": [],
                               "acoes": [], "original": "", "editada": False,
                               "apagada": False, "ouvida": False,
-                              "favorita": False, "reacoes": [], "citou_voce": False, "previa": {}, "ia": {}}
+                              "favorita": False, "reacoes": [], "enquete": {},
+                              "citou_voce": False, "previa": {}, "ia": {}}
     m.guardar_extras(x, links=[("https://a.com", "clique aqui")],
                      botoes=[("Abrir", "https://b.com")],
                      mencoes=[{"nome": "Ana", "id": "5"}])

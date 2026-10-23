@@ -39,6 +39,7 @@ PASTA_GO = os.path.join(BASE, "10-chamada-whatsapp-meowcaller")
 EXE = os.path.join(PASTA_GO, "chamadas-teste.exe")
 ARQ_CONFIG = os.path.join(BASE, "configuracao-chamada-whatsapp.txt")
 ARQ_CODIGO = os.path.join(BASE, "codigo-pareamento-whatsapp.txt")
+TENTATIVAS_CODIGO = 4
 DURACAO_S = 45
 ESPERA_S = 90
 TAXA = 16000
@@ -91,34 +92,63 @@ def rodar_go(args, ao_linha, **extra):
     return proc
 
 
-def mostrar_codigo(fala, codigo):
+# Alfabeto para soletrar: M e N, B e D, F e S etc. soam parecido na voz do
+# leitor de tela, entao cada letra vai com um nome (M de Mike, N de Novembro).
+NOMES_LETRAS = {
+    "A": "Alfa", "B": "Bravo", "C": "Charlie", "D": "Delta", "E": "Eco",
+    "F": "Foxtrot", "G": "Golfe", "H": "Hotel", "I": "Índia", "J": "Juliet",
+    "K": "Quilo", "L": "Lima", "M": "Mike", "N": "Novembro", "O": "Oscar",
+    "P": "Papa", "Q": "Quebec", "R": "Romeu", "S": "Sierra", "T": "Tango",
+    "U": "Uniforme", "V": "Vitória", "W": "Whisky", "X": "Raio-X",
+    "Y": "Yankee", "Z": "Zulu",
+}
+
+
+def soletrar(codigo):
+    partes = []
+    for c in codigo.upper():
+        if c == "-":
+            partes.append("traço")
+        elif c in NOMES_LETRAS:
+            partes.append("%s de %s" % (c, NOMES_LETRAS[c]))
+        else:
+            partes.append(c)
+    return ", ".join(partes)
+
+
+def mostrar_codigo(fala, codigo, numero=1):
     """O codigo de pareamento num arquivo aberto no Bloco de Notas (o leitor
-    de tela le e da para copiar), mais a fala dele caractere por caractere."""
-    soletrado = " ".join("traço" if c == "-" else c for c in codigo)
+    de tela le e da para copiar), mais a fala dele caractere por caractere,
+    com o nome de cada letra para nao confundir M com N."""
+    soletrado = soletrar(codigo)
     texto = (
         "CODIGO DE PAREAMENTO DO WHATSAPP\r\n\r\n%s\r\n\r\n"
-        "Repetindo, caractere por caractere: %s\r\n\r\n"
+        "Soletrando: %s\r\n\r\n"
         "No celular da conta de teste: WhatsApp, Aparelhos conectados, "
         "Conectar um aparelho, Conectar com numero de telefone, e digite o "
-        "codigo. Ele vale por pouco tempo. Quando o celular aceitar, o teste "
-        "continua sozinho; pode fechar este Bloco de Notas.\r\n" % (
-            codigo, soletrado))
+        "codigo. Ele vale por pouco tempo. Se digitar errado, o teste gera "
+        "um codigo novo sozinho e abre este arquivo de novo (tentativa %d de "
+        "%d). Quando o celular aceitar, o teste continua sozinho; pode "
+        "fechar este Bloco de Notas.\r\n" % (
+            codigo, soletrado, numero, TENTATIVAS_CODIGO))
     try:
         with open(ARQ_CODIGO, "w", encoding="utf-8", newline="") as f:
             f.write(texto)
         subprocess.Popen(["notepad.exe", ARQ_CODIGO])
     except OSError as e:
         log("aviso: nao consegui abrir o Bloco de Notas: %r" % e)
-        aviso("Código de pareamento do WhatsApp: %s. Repetindo: %s." % (
+        aviso("Código de pareamento do WhatsApp: %s. Soletrando: %s." % (
             codigo, soletrado), titulo="Código do WhatsApp")
     bipe()
-    fala.falar("Código de pareamento: " + soletrado)
+    fala.falar("Código de pareamento, tentativa %d: %s" % (numero, soletrado))
     log("codigo de pareamento mostrado em %s" % ARQ_CODIGO)
 
 
 def parear(fala):
-    """Garante que a conta esta pareada. Devolve True se esta."""
-    estado = {"pareado": False, "erro": "", "codigo": ""}
+    """Garante que a conta esta pareada. Devolve True se esta. Se o codigo for
+    digitado errado (ou vencer), gera outro sozinho, ate TENTATIVAS_CODIGO."""
+    estado = {"pareado": False, "erro": "", "codigo": "", "recusado": False}
+    contagem = {"n": 0}
 
     def ao_linha(origem, linha):
         log("   [%s] %s" % (origem, linha))
@@ -127,14 +157,21 @@ def parear(fala):
         if linha.startswith("PAREADO"):
             estado["pareado"] = True
         elif linha.startswith("CODIGO "):
+            contagem["n"] += 1
             estado["codigo"] = linha.split(" ", 1)[1]
-            mostrar_codigo(fala, estado["codigo"])
+            try:
+                mostrar_codigo(fala, estado["codigo"], contagem["n"])
+            except Exception as e:  # nao deixar a thread morrer calada
+                log("ERRO ao mostrar o codigo: %r (codigo: %s)" % (
+                    e, estado["codigo"]))
         elif linha.startswith("ERRO"):
             estado["erro"] = linha[5:]
+        elif "Failed to handle code pair" in linha:
+            estado["recusado"] = True
 
-    for tentativa in (1, 2):
-        telefone = ""
-        if tentativa == 2:
+    telefone = ""
+    for tentativa in range(1, TENTATIVAS_CODIGO + 2):
+        if tentativa == 2 and not telefone:
             dados = pedir_por_arquivo(
                 ARQ_CONFIG, MODELO_CONFIG, telefone_valido,
                 "Vou abrir o Bloco de Notas: digite depois de TELEFONE= o "
@@ -145,22 +182,35 @@ def parear(fala):
                 log("ERRO: o telefone nao foi informado a tempo")
                 return False
             telefone = so_digitos(dados["TELEFONE"])
-        estado.update(pareado=False, erro="")
+        estado.update(pareado=False, erro="", recusado=False)
         args = ["parear"] + (["-telefone", telefone] if telefone else [])
         proc = rodar_go(args, ao_linha)
-        try:
-            proc.wait(timeout=300)
-        except subprocess.TimeoutExpired:
+        limite = time.time() + 300
+        while proc.poll() is None and time.time() < limite:
+            time.sleep(0.5)
+            if estado["recusado"] and not estado["pareado"]:
+                # codigo errado: espera um pouco por garantia e troca de codigo
+                for _ in range(16):
+                    if estado["pareado"] or proc.poll() is not None:
+                        break
+                    time.sleep(0.5)
+                if not estado["pareado"]:
+                    proc.kill()
+                    break
+        if proc.poll() is None:
             proc.kill()
-            log("ERRO: o pareamento passou de 5 minutos")
-            return False
         if estado["pareado"]:
             log("conta pareada")
             return True
-        if tentativa == 1 and "precisa de -telefone" in estado["erro"]:
+        if "precisa de -telefone" in estado["erro"] and not telefone:
             continue
-        log("ERRO no pareamento: %s" % estado["erro"])
-        return False
+        if tentativa > TENTATIVAS_CODIGO:
+            break
+        log("codigo nao aceito (digitado errado ou vencido); gerando outro")
+        bipe()
+        fala.falar("O celular não aceitou o código. Vou gerar um código novo.")
+        time.sleep(2)
+    log("ERRO no pareamento: %s" % (estado["erro"] or "codigo nao aceito"))
     return False
 
 

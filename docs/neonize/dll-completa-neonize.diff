@@ -1,0 +1,970 @@
+diff --git a/goneonize/Neonize.proto b/goneonize/Neonize.proto
+index f9160df..8cf0cb3 100644
+--- a/goneonize/Neonize.proto
++++ b/goneonize/Neonize.proto
+@@ -896,6 +896,66 @@ message RotateADVSecret {
+     required string OldSecret = 1;
+     required string NewSecret = 2;
+ }
++// Chat state changes made on the phone (app state sync): archive, pin, mute
++// and mark-as-read. JID is the chat; Timestamp is in seconds.
++message ChatArchive { //46
++    required JID JID = 1;
++    required int64 Timestamp = 2;
++    optional WAWebProtobufSyncAction.ArchiveChatAction Action = 3;
++    required bool FromFullSync = 4;
++}
++message ChatPin { //47
++    required JID JID = 1;
++    required int64 Timestamp = 2;
++    optional WAWebProtobufSyncAction.PinAction Action = 3;
++    required bool FromFullSync = 4;
++}
++message ChatMute { //48
++    required JID JID = 1;
++    required int64 Timestamp = 2;
++    optional WAWebProtobufSyncAction.MuteAction Action = 3;
++    required bool FromFullSync = 4;
++}
++message ChatMarkAsRead { //49
++    required JID JID = 1;
++    required int64 Timestamp = 2;
++    optional WAWebProtobufSyncAction.MarkChatAsReadAction Action = 3;
++    required bool FromFullSync = 4;
++}
++message ChatLock { //50
++    required JID JID = 1;
++    required int64 Timestamp = 2;
++    optional WAWebProtobufSyncAction.LockChatAction Action = 3;
++    required bool FromFullSync = 4;
++}
++// Chat deleted on the phone (app state sync).
++message ChatDelete { //51
++    required JID JID = 1;
++    required int64 Timestamp = 2;
++    optional WAWebProtobufSyncAction.DeleteChatAction Action = 3;
++    required bool FromFullSync = 4;
++    required bool DeleteMedia = 5;
++}
++// Message deleted for the current user on another device (app state sync).
++message MessageDeleteForMe { //52
++    required JID ChatJID = 1;
++    optional JID SenderJID = 2;
++    required bool IsFromMe = 3;
++    required string MessageID = 4;
++    required int64 Timestamp = 5;
++    optional WAWebProtobufSyncAction.DeleteMessageForMeAction Action = 6;
++    required bool FromFullSync = 7;
++}
++// Message starred or unstarred on another device (app state sync).
++message MessageStar { //53
++    required JID ChatJID = 1;
++    optional JID SenderJID = 2;
++    required bool IsFromMe = 3;
++    required string MessageID = 4;
++    required int64 Timestamp = 5;
++    optional WAWebProtobufSyncAction.StarAction Action = 6;
++    required bool FromFullSync = 7;
++}
+ message UpdateGroupParticipantsReturnFunction {
+     optional string Error = 1;
+     repeated GroupParticipant participants = 2;
+diff --git a/goneonize/calls.go b/goneonize/calls.go
+new file mode 100644
+index 0000000..0d2ea17
+--- /dev/null
++++ b/goneonize/calls.go
+@@ -0,0 +1,406 @@
++package main
++
++/*
++   #include <stdlib.h>
++   #include <stdint.h>
++*/
++import "C"
++
++// Chamadas de voz do WhatsApp pelo mesmo cliente whatsmeow que ja cuida das
++// mensagens (um unico pareamento). Usa o meowcaller (MIT,
++// https://github.com/purpshell/meowcaller), que cuida do protocolo de
++// chamada, do relay e do codec MLow.
++//
++// Sem protobuf nem callbacks: o Python pergunta por eventos (JSON, uma linha
++// por evento) e troca audio PCM s16le, 16 kHz, mono, em quadros de 960
++// amostras (60 ms), por duas funcoes bloqueantes com tempo limite.
++//
++// Ordem de uso: CallsConfigure(1) antes de Neonize() (o meowcaller precisa
++// estar instalado antes de o cliente conectar); depois CallsNextEvent em laco,
++// CallDial, CallAnswer, CallHangup, CallReadAudio e CallWriteAudio.
++
++import (
++	"context"
++	"encoding/json"
++	"fmt"
++	"strings"
++	"sync"
++	"sync/atomic"
++	"time"
++	"unsafe"
++
++	"github.com/purpshell/meowcaller"
++)
++
++const (
++	bytesPorQuadro  = meowcaller.FrameSamples * 2
++	quadrosNaFila   = 50 // 3 s de audio de cada lado
++	esperaFonteMs   = 150
++	eventosNaFila   = 256
++	erroSemChamada  = -2
++	erroSemCliente  = -3
++	erroTamanho     = -4
++	erroTempoLimite = 0
++)
++
++var (
++	chamadasQuer bool
++
++	chamadasMu      sync.Mutex
++	chamadasCliente = map[string]*meowcaller.Client{}
++	chamadasEventos = map[string]chan string{}
++	chamadasAtivas  = map[string]*chamadaAtiva{} // chave: id do cliente + "|" + id da chamada
++)
++
++// chamadaAtiva liga uma chamada do meowcaller as filas de audio do Python.
++type chamadaAtiva struct {
++	call *meowcaller.Call
++	// entrante: a chamada veio de fora; atendida: ja atendemos. Recusar uma
++	// chamada que ainda toca usa Reject (o terminate do Hangup nao a derruba).
++	entrante bool
++	atendida atomic.Bool
++	// entrada: o que chega do outro lado (rumo ao alto-falante).
++	entrada chan []byte
++	// saida: o que o microfone manda (rumo ao outro lado).
++	saida chan []byte
++	fim   chan struct{}
++	uma   sync.Once
++}
++
++func (c *chamadaAtiva) encerrar() { c.uma.Do(func() { close(c.fim) }) }
++
++// ReadFrame e chamado pelo meowcaller a cada 60 ms; sem audio do Python a
++// tempo, entrega silencio para o ritmo do envio nao parar.
++func (c *chamadaAtiva) ReadFrame() ([]float32, error) {
++	f := make([]float32, meowcaller.FrameSamples)
++	select {
++	case b := <-c.saida:
++		for i := range f {
++			f[i] = float32(int16(uint16(b[i*2])|uint16(b[i*2+1])<<8)) / 32768
++		}
++	case <-time.After(esperaFonteMs * time.Millisecond):
++	case <-c.fim:
++		return nil, fmt.Errorf("chamada encerrada")
++	}
++	return f, nil
++}
++
++func (c *chamadaAtiva) WriteFrame(frame []float32) error {
++	b := make([]byte, len(frame)*2)
++	for i, v := range frame {
++		if v > 1 {
++			v = 1
++		} else if v < -1 {
++			v = -1
++		}
++		s := uint16(int16(v * 32767))
++		b[i*2] = byte(s)
++		b[i*2+1] = byte(s >> 8)
++	}
++	select {
++	case c.entrada <- b:
++	default: // fila cheia: descarta o mais antigo para nao atrasar a voz
++		select {
++		case <-c.entrada:
++		default:
++		}
++		select {
++		case c.entrada <- b:
++		default:
++		}
++	}
++	return nil
++}
++
++func (c *chamadaAtiva) Close() error { return nil }
++
++func chaveChamada(cliente, chamada string) string { return cliente + "|" + chamada }
++
++func emitirEvento(cliente string, ev map[string]any) {
++	chamadasMu.Lock()
++	fila := chamadasEventos[cliente]
++	chamadasMu.Unlock()
++	if fila == nil {
++		return
++	}
++	b, _ := json.Marshal(ev)
++	select {
++	case fila <- string(b):
++	default: // ninguem esta lendo: perde o evento mais antigo
++		select {
++		case <-fila:
++		default:
++		}
++		select {
++		case fila <- string(b):
++		default:
++		}
++	}
++}
++
++// ligarChamada anexa o audio e os avisos a uma chamada nova (de entrada ou de saida).
++func ligarChamada(cliente string, c *meowcaller.Call, entrante bool) *chamadaAtiva {
++	a := &chamadaAtiva{
++		call:     c,
++		entrante: entrante,
++		entrada:  make(chan []byte, quadrosNaFila),
++		saida:    make(chan []byte, quadrosNaFila),
++		fim:      make(chan struct{}),
++	}
++	id := c.ID()
++	chamadasMu.Lock()
++	chamadasAtivas[chaveChamada(cliente, id)] = a
++	chamadasMu.Unlock()
++	c.Receive(a)
++	c.Play(a)
++	c.OnStateChange(func(p meowcaller.CallPhase) {
++		emitirEvento(cliente, map[string]any{"ev": "state", "call": id, "phase": int(p)})
++	})
++	c.OnReady(func() {
++		emitirEvento(cliente, map[string]any{"ev": "ready", "call": id})
++	})
++	c.OnEnd(func(motivo string) {
++		a.encerrar()
++		chamadasMu.Lock()
++		delete(chamadasAtivas, chaveChamada(cliente, id))
++		chamadasMu.Unlock()
++		emitirEvento(cliente, map[string]any{"ev": "end", "call": id, "reason": motivo})
++	})
++	return a
++}
++
++// instalarChamadas e chamado por Neonize() logo depois de criar o cliente e
++// antes de conectar.
++func instalarChamadas(id string) {
++	if !chamadasQuer {
++		return
++	}
++	cli := clients[id]
++	if cli == nil {
++		return
++	}
++	mc := meowcaller.NewClient(cli)
++	chamadasMu.Lock()
++	chamadasCliente[id] = mc
++	chamadasEventos[id] = make(chan string, eventosNaFila)
++	chamadasMu.Unlock()
++	mc.OnIncomingCall(func(c *meowcaller.Call) {
++		ligarChamada(id, c, true)
++		emitirEvento(id, map[string]any{"ev": "incoming", "call": c.ID(), "peer": c.Peer()})
++	})
++}
++
++func removerChamadas(id string) {
++	chamadasMu.Lock()
++	defer chamadasMu.Unlock()
++	delete(chamadasCliente, id)
++	delete(chamadasEventos, id)
++	for k, a := range chamadasAtivas {
++		if strings.HasPrefix(k, id+"|") {
++			a.encerrar()
++			delete(chamadasAtivas, k)
++		}
++	}
++}
++
++func escreverTexto(s string, buf *C.char, cap C.int) C.int {
++	b := []byte(s)
++	if len(b)+1 > int(cap) {
++		return erroTamanho
++	}
++	dst := unsafe.Slice((*byte)(unsafe.Pointer(buf)), int(cap))
++	copy(dst, b)
++	dst[len(b)] = 0
++	return C.int(len(b))
++}
++
++func buscarChamada(cliente, chamada string) *chamadaAtiva {
++	chamadasMu.Lock()
++	defer chamadasMu.Unlock()
++	return chamadasAtivas[chaveChamada(cliente, chamada)]
++}
++
++// variantesNumero: no Brasil muitas contas antigas nao tem o 9 depois do DDD.
++func variantesNumero(numero string) []string {
++	v := []string{numero}
++	if strings.HasPrefix(numero, "55") {
++		if len(numero) == 13 && numero[4] == '9' {
++			v = append(v, numero[:4]+numero[5:])
++		} else if len(numero) == 12 {
++			v = append(v, numero[:4]+"9"+numero[4:])
++		}
++	}
++	return v
++}
++
++//export CallsConfigure
++func CallsConfigure(enabled C.int) {
++	chamadasQuer = enabled != 0
++}
++
++// CallsEnabled diz se este build tem chamadas e se estao ligadas (1) ou nao (0).
++//
++//export CallsEnabled
++func CallsEnabled(id *C.char) C.int {
++	chamadasMu.Lock()
++	defer chamadasMu.Unlock()
++	if chamadasCliente[C.GoString(id)] != nil {
++		return 1
++	}
++	return 0
++}
++
++// CallsNextEvent espera ate timeoutMs por um evento e o escreve como JSON em
++// buf. Devolve o tamanho (0 = nenhum evento), -2 sem fila, -4 buffer pequeno.
++//
++//export CallsNextEvent
++func CallsNextEvent(id *C.char, buf *C.char, cap C.int, timeoutMs C.int) C.int {
++	chamadasMu.Lock()
++	fila := chamadasEventos[C.GoString(id)]
++	chamadasMu.Unlock()
++	if fila == nil {
++		return erroSemChamada
++	}
++	select {
++	case s := <-fila:
++		return escreverTexto(s, buf, cap)
++	case <-time.After(time.Duration(timeoutMs) * time.Millisecond):
++		return erroTempoLimite
++	}
++}
++
++// CallDial liga para um numero (so digitos, com DDI) e escreve em buf o JSON
++// {"call": id} ou {"error": texto}. Devolve o tamanho escrito.
++//
++//export CallDial
++func CallDial(id *C.char, target *C.char, buf *C.char, cap C.int) C.int {
++	cliente := C.GoString(id)
++	chamadasMu.Lock()
++	mc := chamadasCliente[cliente]
++	chamadasMu.Unlock()
++	erro := func(e error) C.int {
++		b, _ := json.Marshal(map[string]any{"error": e.Error()})
++		return escreverTexto(string(b), buf, cap)
++	}
++	if mc == nil {
++		return erro(fmt.Errorf("chamadas desligadas neste cliente"))
++	}
++	cli := clients[cliente]
++	if cli == nil {
++		return erro(fmt.Errorf("cliente nao encontrado"))
++	}
++	ctx, cancelar := context.WithTimeout(context.Background(), 30*time.Second)
++	defer cancelar()
++	numero := C.GoString(target)
++	destino := numero
++	if strings.Contains(numero, "@") {
++		// ja e um endereco (ex.: 123@lid): nao ha o que resolver
++	} else if resp, err := cli.IsOnWhatsApp(ctx, variantesNumero(numero)); err == nil {
++		for _, r := range resp {
++			if !r.IsIn {
++				continue
++			}
++			if !r.PhoneNumber.IsEmpty() && r.PhoneNumber.User != "" {
++				destino = r.PhoneNumber.User
++			} else {
++				destino = r.JID.User
++			}
++			break
++		}
++	}
++	c, err := mc.Call(ctx, destino)
++	if err != nil {
++		return erro(err)
++	}
++	ligarChamada(cliente, c, false)
++	b, _ := json.Marshal(map[string]any{"call": c.ID(), "peer": c.Peer()})
++	return escreverTexto(string(b), buf, cap)
++}
++
++// CallAnswer atende uma chamada recebida. 0 = ok.
++//
++//export CallAnswer
++func CallAnswer(id *C.char, call *C.char) C.int {
++	a := buscarChamada(C.GoString(id), C.GoString(call))
++	if a == nil {
++		return erroSemChamada
++	}
++	if err := a.call.Answer(); err != nil {
++		return -1
++	}
++	a.atendida.Store(true)
++	return 0
++}
++
++// CallHangup desliga (ou recusa, se ainda tocando). 0 = ok.
++//
++//export CallHangup
++func CallHangup(id *C.char, call *C.char) C.int {
++	a := buscarChamada(C.GoString(id), C.GoString(call))
++	if a == nil {
++		return erroSemChamada
++	}
++	var err error
++	if a.entrante && !a.atendida.Load() {
++		err = a.call.Reject()
++	} else {
++		err = a.call.Hangup()
++	}
++	if err != nil {
++		return -1
++	}
++	return 0
++}
++
++// CallReadAudio entrega um quadro (1920 bytes, PCM s16le) do que chegou do
++// outro lado, esperando ate timeoutMs. Devolve 1920, 0 (nada), -2 (chamada
++// acabou) ou -4 (buffer pequeno).
++//
++//export CallReadAudio
++func CallReadAudio(id *C.char, call *C.char, buf *C.uchar, cap C.int, timeoutMs C.int) C.int {
++	a := buscarChamada(C.GoString(id), C.GoString(call))
++	if a == nil {
++		return erroSemChamada
++	}
++	if int(cap) < bytesPorQuadro {
++		return erroTamanho
++	}
++	select {
++	case b := <-a.entrada:
++		copy(unsafe.Slice((*byte)(unsafe.Pointer(buf)), int(cap)), b)
++		return C.int(len(b))
++	case <-a.fim:
++		return erroSemChamada
++	case <-time.After(time.Duration(timeoutMs) * time.Millisecond):
++		return erroTempoLimite
++	}
++}
++
++// CallWriteAudio recebe um quadro de 1920 bytes (PCM s16le) do microfone.
++// 0 = ok, -2 chamada acabou, -4 tamanho errado.
++//
++//export CallWriteAudio
++func CallWriteAudio(id *C.char, call *C.char, buf *C.uchar, n C.int) C.int {
++	a := buscarChamada(C.GoString(id), C.GoString(call))
++	if a == nil {
++		return erroSemChamada
++	}
++	if int(n) != bytesPorQuadro {
++		return erroTamanho
++	}
++	b := make([]byte, bytesPorQuadro)
++	copy(b, unsafe.Slice((*byte)(unsafe.Pointer(buf)), bytesPorQuadro))
++	select {
++	case a.saida <- b:
++	default: // fila cheia: descarta o mais antigo
++		select {
++		case <-a.saida:
++		default:
++		}
++		select {
++		case a.saida <- b:
++		default:
++		}
++	}
++	return 0
++}
+diff --git a/goneonize/defproto/Neonize.proto b/goneonize/defproto/Neonize.proto
+index f9160df..8cf0cb3 100644
+--- a/goneonize/defproto/Neonize.proto
++++ b/goneonize/defproto/Neonize.proto
+@@ -896,6 +896,66 @@ message RotateADVSecret {
+     required string OldSecret = 1;
+     required string NewSecret = 2;
+ }
++// Chat state changes made on the phone (app state sync): archive, pin, mute
++// and mark-as-read. JID is the chat; Timestamp is in seconds.
++message ChatArchive { //46
++    required JID JID = 1;
++    required int64 Timestamp = 2;
++    optional WAWebProtobufSyncAction.ArchiveChatAction Action = 3;
++    required bool FromFullSync = 4;
++}
++message ChatPin { //47
++    required JID JID = 1;
++    required int64 Timestamp = 2;
++    optional WAWebProtobufSyncAction.PinAction Action = 3;
++    required bool FromFullSync = 4;
++}
++message ChatMute { //48
++    required JID JID = 1;
++    required int64 Timestamp = 2;
++    optional WAWebProtobufSyncAction.MuteAction Action = 3;
++    required bool FromFullSync = 4;
++}
++message ChatMarkAsRead { //49
++    required JID JID = 1;
++    required int64 Timestamp = 2;
++    optional WAWebProtobufSyncAction.MarkChatAsReadAction Action = 3;
++    required bool FromFullSync = 4;
++}
++message ChatLock { //50
++    required JID JID = 1;
++    required int64 Timestamp = 2;
++    optional WAWebProtobufSyncAction.LockChatAction Action = 3;
++    required bool FromFullSync = 4;
++}
++// Chat deleted on the phone (app state sync).
++message ChatDelete { //51
++    required JID JID = 1;
++    required int64 Timestamp = 2;
++    optional WAWebProtobufSyncAction.DeleteChatAction Action = 3;
++    required bool FromFullSync = 4;
++    required bool DeleteMedia = 5;
++}
++// Message deleted for the current user on another device (app state sync).
++message MessageDeleteForMe { //52
++    required JID ChatJID = 1;
++    optional JID SenderJID = 2;
++    required bool IsFromMe = 3;
++    required string MessageID = 4;
++    required int64 Timestamp = 5;
++    optional WAWebProtobufSyncAction.DeleteMessageForMeAction Action = 6;
++    required bool FromFullSync = 7;
++}
++// Message starred or unstarred on another device (app state sync).
++message MessageStar { //53
++    required JID ChatJID = 1;
++    optional JID SenderJID = 2;
++    required bool IsFromMe = 3;
++    required string MessageID = 4;
++    required int64 Timestamp = 5;
++    optional WAWebProtobufSyncAction.StarAction Action = 6;
++    required bool FromFullSync = 7;
++}
+ message UpdateGroupParticipantsReturnFunction {
+     optional string Error = 1;
+     repeated GroupParticipant participants = 2;
+diff --git a/goneonize/go.mod b/goneonize/go.mod
+index 0fe4470..d250217 100644
+--- a/goneonize/go.mod
++++ b/goneonize/go.mod
+@@ -9,6 +9,17 @@ require (
+ 	google.golang.org/protobuf v1.36.12
+ )
+ 
++require (
++	github.com/hajimehoshi/go-mp3 v0.3.4 // indirect
++	github.com/pion/datachannel v1.6.0 // indirect
++	github.com/pion/dtls/v3 v3.1.2 // indirect
++	github.com/pion/logging v0.2.4 // indirect
++	github.com/pion/opus v0.1.0 // indirect
++	github.com/pion/randutil v0.1.0 // indirect
++	github.com/pion/sctp v1.9.4 // indirect
++	github.com/pion/transport/v4 v4.0.1 // indirect
++)
++
+ require (
+ 	filippo.io/edwards25519 v1.2.0 // indirect
+ 	github.com/beeper/argo-go v1.1.2 // indirect
+@@ -18,6 +29,7 @@ require (
+ 	github.com/mattn/go-colorable v0.1.15 // indirect
+ 	github.com/mattn/go-isatty v0.0.24 // indirect
+ 	github.com/petermattis/goid v0.0.0-20260820044319-269ab09b5261 // indirect
++	github.com/purpshell/meowcaller v0.0.0
+ 	github.com/rs/zerolog v1.35.1 // indirect
+ 	github.com/vektah/gqlparser/v2 v2.5.37 // indirect
+ 	go.mau.fi/libsignal v0.2.2 // indirect
+@@ -29,3 +41,7 @@ require (
+ 	golang.org/x/sys v0.48.0 // indirect
+ 	golang.org/x/text v0.42.0 // indirect
+ )
++
++replace github.com/purpshell/meowcaller => ../../mc-whatsmeow
++
++replace go.mau.fi/whatsmeow => ../../whatsmeow
+diff --git a/goneonize/main.go b/goneonize/main.go
+index 06ac687..20b68c1 100644
+--- a/goneonize/main.go
++++ b/goneonize/main.go
+@@ -16,8 +16,11 @@ import (
+ 	// "crypto/sha256"
+ 	// "encoding/hex"
+ 	"fmt"
++	"io"
+ 	"os"
+ 	"strings"
++	"sync"
++	"sync/atomic"
+ 	"time"
+ 	"unsafe"
+ 
+@@ -595,6 +598,7 @@ func Stop(id *C.char) {
+ 	if client, exists := clients[C.GoString(id)]; exists {
+ 		client.Disconnect()
+ 		delete(clients, C.GoString(id))
++		removerChamadas(C.GoString(id))
+ 	}
+ 	if cancelFunc, exists := StopSignal[C.GoString(id)]; exists {
+ 		cancelFunc()
+@@ -658,6 +662,7 @@ func Neonize(db *C.char, id *C.char, JIDByte *C.uchar, JIDSize C.int, newDevice
+ 	clientLog := utils.NewLogger("Client", C.GoString(logLevel), utils.Callback(logCb))
+ 	client := whatsmeow.NewClient(deviceStore, clientLog)
+ 	clients[uuid] = client
++	instalarChamadas(uuid)
+ 	if err := applyProxySettings(client, proxySettingsRaw); err != nil {
+ 		return C.CString(err.Error())
+ 	}
+@@ -1096,6 +1101,125 @@ func Neonize(db *C.char, id *C.char, JIDByte *C.uchar, JIDSize C.int, newDevice
+ 				}
+ 				eventChan <- &messageEvent
+ 			}
++		case *events.Archive:
++			if _, ok := subscribers[46]; ok {
++				chatState := defproto.ChatArchive{
++					JID:          utils.EncodeJidProto(v.JID),
++					Timestamp:    proto.Int64(v.Timestamp.Unix()),
++					Action:       v.Action,
++					FromFullSync: proto.Bool(v.FromFullSync),
++				}
++				messageEvent := MessageEvent{
++					eventType: 46,
++					message:   &chatState,
++				}
++				eventChan <- &messageEvent
++			}
++		case *events.Pin:
++			if _, ok := subscribers[47]; ok {
++				chatState := defproto.ChatPin{
++					JID:          utils.EncodeJidProto(v.JID),
++					Timestamp:    proto.Int64(v.Timestamp.Unix()),
++					Action:       v.Action,
++					FromFullSync: proto.Bool(v.FromFullSync),
++				}
++				messageEvent := MessageEvent{
++					eventType: 47,
++					message:   &chatState,
++				}
++				eventChan <- &messageEvent
++			}
++		case *events.Mute:
++			if _, ok := subscribers[48]; ok {
++				chatState := defproto.ChatMute{
++					JID:          utils.EncodeJidProto(v.JID),
++					Timestamp:    proto.Int64(v.Timestamp.Unix()),
++					Action:       v.Action,
++					FromFullSync: proto.Bool(v.FromFullSync),
++				}
++				messageEvent := MessageEvent{
++					eventType: 48,
++					message:   &chatState,
++				}
++				eventChan <- &messageEvent
++			}
++		case *events.MarkChatAsRead:
++			if _, ok := subscribers[49]; ok {
++				chatState := defproto.ChatMarkAsRead{
++					JID:          utils.EncodeJidProto(v.JID),
++					Timestamp:    proto.Int64(v.Timestamp.Unix()),
++					Action:       v.Action,
++					FromFullSync: proto.Bool(v.FromFullSync),
++				}
++				messageEvent := MessageEvent{
++					eventType: 49,
++					message:   &chatState,
++				}
++				eventChan <- &messageEvent
++			}
++		case *events.Lock:
++			if _, ok := subscribers[50]; ok {
++				chatState := defproto.ChatLock{
++					JID:          utils.EncodeJidProto(v.JID),
++					Timestamp:    proto.Int64(v.Timestamp.Unix()),
++					Action:       v.Action,
++					FromFullSync: proto.Bool(v.FromFullSync),
++				}
++				messageEvent := MessageEvent{
++					eventType: 50,
++					message:   &chatState,
++				}
++				eventChan <- &messageEvent
++			}
++		case *events.DeleteChat:
++			if _, ok := subscribers[51]; ok {
++				chatState := defproto.ChatDelete{
++					JID:          utils.EncodeJidProto(v.JID),
++					Timestamp:    proto.Int64(v.Timestamp.Unix()),
++					Action:       v.Action,
++					FromFullSync: proto.Bool(v.FromFullSync),
++					DeleteMedia:  proto.Bool(v.DeleteMedia),
++				}
++				messageEvent := MessageEvent{
++					eventType: 51,
++					message:   &chatState,
++				}
++				eventChan <- &messageEvent
++			}
++		case *events.DeleteForMe:
++			if _, ok := subscribers[52]; ok {
++				deleted := defproto.MessageDeleteForMe{
++					ChatJID:      utils.EncodeJidProto(v.ChatJID),
++					SenderJID:    utils.EncodeJidProto(v.SenderJID),
++					IsFromMe:     proto.Bool(v.IsFromMe),
++					MessageID:    proto.String(v.MessageID),
++					Timestamp:    proto.Int64(v.Timestamp.Unix()),
++					Action:       v.Action,
++					FromFullSync: proto.Bool(v.FromFullSync),
++				}
++				messageEvent := MessageEvent{
++					eventType: 52,
++					message:   &deleted,
++				}
++				eventChan <- &messageEvent
++			}
++		case *events.Star:
++			if _, ok := subscribers[53]; ok {
++				starred := defproto.MessageStar{
++					ChatJID:      utils.EncodeJidProto(v.ChatJID),
++					SenderJID:    utils.EncodeJidProto(v.SenderJID),
++					IsFromMe:     proto.Bool(v.IsFromMe),
++					MessageID:    proto.String(v.MessageID),
++					Timestamp:    proto.Int64(v.Timestamp.Unix()),
++					Action:       v.Action,
++					FromFullSync: proto.Bool(v.FromFullSync),
++				}
++				messageEvent := MessageEvent{
++					eventType: 53,
++					message:   &starred,
++				}
++				eventChan <- &messageEvent
++			}
+ 		case *events.RotateADVSecret:
+ 			if _, ok := subscribers[45]; ok {
+ 				rot := defproto.RotateADVSecret{
+@@ -1934,6 +2058,24 @@ func SendAppState(id *C.char, patchByte *C.uchar, patchSize C.int) *C.char {
+ 	return C.CString("")
+ }
+ 
++//export FetchAppState
++func FetchAppState(id *C.char, name *C.char, fullSync C.int) *C.char {
++	err := clients[C.GoString(id)].FetchAppState(context.Background(), appstate.WAPatchName(C.GoString(name)), fullSync != 0, false)
++	if err != nil {
++		return C.CString(err.Error())
++	}
++	return C.CString("")
++}
++
++//export RequestAppStateRecovery
++func RequestAppStateRecovery(id *C.char, name *C.char) *C.char {
++	_, err := clients[C.GoString(id)].SendPeerMessage(context.Background(), whatsmeow.BuildAppStateRecoveryRequest(appstate.WAPatchName(C.GoString(name))))
++	if err != nil {
++		return C.CString(err.Error())
++	}
++	return C.CString("")
++}
++
+ //export SetDefaultDisappearingTimer
+ func SetDefaultDisappearingTimer(id *C.char, timer C.int64_t) *C.char {
+ 	err := clients[C.GoString(id)].SetDefaultDisappearingTimer(context.Background(), time.Duration(int64(timer)))
+@@ -2616,3 +2758,169 @@ func FreeString(str *C.char) {
+ 		C.free(unsafe.Pointer(str))
+ 	}
+ }
++
++
++// ---- Transferencias de midia com progresso e cancelamento (TeleZapp) ------
++// O download grava direto no arquivo (DownloadToFile, sem carregar a midia
++// inteira na memoria) e o upload le de um arquivo (UploadReader). Cada
++// transferencia tem uma chave dada por quem chama: TransferProgress devolve
++// 0..100 (no upload; no download quem chama olha o tamanho do arquivo) e
++// TransferCancel interrompe.
++
++type transferencia struct {
++	cancel    context.CancelFunc
++	progresso atomic.Int32
++}
++
++var transferencias sync.Map // chave -> *transferencia
++
++func novaTransferencia(chave string) (context.Context, *transferencia) {
++	ctx, cancel := context.WithCancel(context.Background())
++	t := &transferencia{cancel: cancel}
++	transferencias.Store(chave, t)
++	return ctx, t
++}
++
++//export TransferProgress
++func TransferProgress(key *C.char) C.int {
++	if t, ok := transferencias.Load(C.GoString(key)); ok {
++		return C.int(t.(*transferencia).progresso.Load())
++	}
++	return -1
++}
++
++//export TransferCancel
++func TransferCancel(key *C.char) {
++	if t, ok := transferencias.Load(C.GoString(key)); ok {
++		t.(*transferencia).cancel()
++	}
++}
++
++//export DownloadAnyToFile
++func DownloadAnyToFile(id *C.char, messageProto *C.uchar, size C.int, path *C.char, key *C.char) *C.char {
++	var message waE2E.Message
++	if err := proto.Unmarshal(getByteByAddr(messageProto, size), &message); err != nil {
++		return C.CString(err.Error())
++	}
++	var baixavel whatsmeow.DownloadableMessage
++	switch {
++	case message.ImageMessage != nil:
++		baixavel = message.ImageMessage
++	case message.VideoMessage != nil:
++		baixavel = message.VideoMessage
++	case message.AudioMessage != nil:
++		baixavel = message.AudioMessage
++	case message.DocumentMessage != nil:
++		baixavel = message.DocumentMessage
++	case message.StickerMessage != nil:
++		baixavel = message.StickerMessage
++	default:
++		return C.CString(whatsmeow.ErrNothingDownloadableFound.Error())
++	}
++	chave := C.GoString(key)
++	ctx, t := novaTransferencia(chave)
++	defer func() {
++		t.cancel()
++		transferencias.Delete(chave)
++	}()
++	arquivo, err := os.OpenFile(C.GoString(path), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
++	if err != nil {
++		return C.CString(err.Error())
++	}
++	err = clients[C.GoString(id)].DownloadToFile(ctx, baixavel, arquivo)
++	if cerr := arquivo.Close(); err == nil {
++		err = cerr
++	}
++	if err != nil {
++		return C.CString(err.Error())
++	}
++	return C.CString("")
++}
++
++// arquivoContador e o arquivo temporario do upload: conta o que se escreve
++// (cifrando, fase 1: de 0 a 10%) e o que se le (enviando, fase 2: de 10 a
++// 100%).
++type arquivoContador struct {
++	*os.File
++	t       *transferencia
++	total   int64
++	escrito atomic.Int64
++	lido    atomic.Int64
++	enviar  atomic.Bool
++}
++
++func (c *arquivoContador) Write(p []byte) (int, error) {
++	n, err := c.File.Write(p)
++	e := c.escrito.Add(int64(n))
++	if c.total > 0 {
++		v := e * 10 / c.total
++		if v > 10 {
++			v = 10
++		}
++		c.t.progresso.Store(int32(v))
++	}
++	return n, err
++}
++
++func (c *arquivoContador) Seek(off int64, whence int) (int64, error) {
++	if off == 0 && whence == io.SeekStart && c.escrito.Load() > 0 {
++		c.lido.Store(0)
++		c.enviar.Store(true)
++	}
++	return c.File.Seek(off, whence)
++}
++
++func (c *arquivoContador) Read(p []byte) (int, error) {
++	n, err := c.File.Read(p)
++	if c.enviar.Load() {
++		l := c.lido.Add(int64(n))
++		if e := c.escrito.Load(); e > 0 {
++			v := 10 + l*90/e
++			if v > 99 {
++				v = 99
++			}
++			c.t.progresso.Store(int32(v))
++		}
++	}
++	return n, err
++}
++
++//export UploadFile
++func UploadFile(id *C.char, path *C.char, mediatype C.int, key *C.char) *C.struct_BytesReturn {
++	return_ := defproto.UploadReturnFunction{}
++	origem, err := os.Open(C.GoString(path))
++	if err != nil {
++		return_.Error = proto.String(err.Error())
++		return ProtoReturnV3(&return_)
++	}
++	defer origem.Close()
++	info, err := origem.Stat()
++	if err != nil {
++		return_.Error = proto.String(err.Error())
++		return ProtoReturnV3(&return_)
++	}
++	temp, err := os.CreateTemp("", "telezapp-upload-*")
++	if err != nil {
++		return_.Error = proto.String(err.Error())
++		return ProtoReturnV3(&return_)
++	}
++	defer func() {
++		temp.Close()
++		os.Remove(temp.Name())
++	}()
++	chave := C.GoString(key)
++	ctx, t := novaTransferencia(chave)
++	defer func() {
++		t.cancel()
++		transferencias.Delete(chave)
++	}()
++	contador := &arquivoContador{File: temp, t: t, total: info.Size()}
++	resposta, err := clients[C.GoString(id)].UploadReader(ctx, origem, contador, utils.MediaType[int(mediatype)])
++	if err != nil {
++		return_.Error = proto.String(err.Error())
++	} else {
++		t.progresso.Store(100)
++	}
++	return_.UploadResponse = utils.EncodeUploadResponse(resposta)
++	return ProtoReturnV3(&return_)
++}
+diff --git a/goneonize/utils/decoder.go b/goneonize/utils/decoder.go
+index 170bb4a..a758473 100644
+--- a/goneonize/utils/decoder.go
++++ b/goneonize/utils/decoder.go
+@@ -168,12 +168,16 @@ func DecodeMutationInfo(mutationInfo *defproto.MutationInfo) appstate.MutationIn
+ 
+ func DecodePatchInfo(patchInfo *defproto.PatchInfo) *appstate.PatchInfo {
+ 	var Type appstate.WAPatchName
+-	switch patchInfo.Type {
+-	case defproto.PatchInfo_CRITICAL_BLOCK.Enum():
++	switch patchInfo.GetType() {
++	case defproto.PatchInfo_CRITICAL_BLOCK:
+ 		Type = appstate.WAPatchCriticalBlock
+-	case defproto.PatchInfo_CRITICAL_UNBLOCK_LOW.Enum():
++	case defproto.PatchInfo_CRITICAL_UNBLOCK_LOW:
+ 		Type = appstate.WAPatchCriticalUnblockLow
+-	case defproto.PatchInfo_REGULAR.Enum():
++	case defproto.PatchInfo_REGULAR_LOW:
++		Type = appstate.WAPatchRegularLow
++	case defproto.PatchInfo_REGULAR_HIGH:
++		Type = appstate.WAPatchRegularHigh
++	case defproto.PatchInfo_REGULAR:
+ 		Type = appstate.WAPatchRegular
+ 	}
+ 	mutationInfo := []appstate.MutationInfo{}

@@ -16,6 +16,7 @@ import wx
 from telezapp import config
 from telezapp.acessibilidade.fala import bipe
 
+from telezapp.nucleo import atalhos as nucleo_atalhos
 from telezapp.nucleo import pacotes_de_som
 from telezapp.nucleo.configuracoes import (CATEGORIA_BUSCA,
                                            ModeloConfiguracoes)
@@ -23,11 +24,13 @@ from telezapp.nucleo.configuracoes import (CATEGORIA_BUSCA,
 
 class DialogoConfiguracoes(wx.Dialog):
     def __init__(self, pai, cfg, aplicador, categoria_inicial=None,
-                 fala=None, privacidade=None, ia=None):
+                 fala=None, privacidade=None, ia=None, atalhos=None):
         """aplicador(chave, valor) executa uma mudanca (efeitos incluidos)."""
         super().__init__(pai, title="Configurações do TeleZapp",
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.modelo = ModeloConfiguracoes(cfg)
+        self.modelo.registro = atalhos   # funcoes que aceitam atalho
+        self.lista_atalhos = None        # lista de funcoes, se aberta
         self.aplicador = aplicador
         self.fala = fala
         # contas do WhatsApp e leitura da privacidade delas (ver janela)
@@ -136,6 +139,13 @@ class DialogoConfiguracoes(wx.Dialog):
             self.painel.Layout()
             self.painel.FitInside()
             return
+        self.lista_atalhos = None
+        if categoria == "Atalhos" and not self.modelo.busca.strip() \
+                and self.modelo.registro is not None:
+            self._criar_atalhos()
+            self.painel.Layout()
+            self.painel.FitInside()
+            return
         opcoes = self.modelo.opcoes(categoria)
         if not opcoes:
             self.lay_painel.Add(
@@ -144,6 +154,9 @@ class DialogoConfiguracoes(wx.Dialog):
                 0, wx.ALL, 8)
         for o in opcoes:
             self._criar_opcao(o)
+        if categoria != CATEGORIA_BUSCA:
+            for grupo in self.modelo.grupos(categoria):
+                self._criar_botao_grupo(categoria, grupo)
         if categoria == "Privacidade" and self.privacidade is not None \
                 and not self.modelo.busca.strip():
             self._criar_privacidade_conta()
@@ -152,6 +165,141 @@ class DialogoConfiguracoes(wx.Dialog):
             self._criar_ia()
         self.painel.Layout()
         self.painel.FitInside()
+
+    # ------------------------------------------------------------ atalhos
+    def _criar_atalhos(self):
+        """Busca, lista de funcoes com a tecla de cada uma (Enter ou duplo
+        clique altera) e os botoes Alterar, Remover e Restaurar."""
+        p, lay = self.painel, self.lay_painel
+        for o in self.modelo.opcoes("Atalhos"):
+            self._criar_opcao(o)         # Mostrar as teclas nos controles
+        lay.Add(wx.StaticText(p, label="Buscar função ou atalho:"), 0,
+                wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        self.busca_atalhos = wx.TextCtrl(p, name="Buscar função ou atalho")
+        lay.Add(self.busca_atalhos, 0, wx.EXPAND | wx.ALL, 8)
+        lay.Add(wx.StaticText(p, label="Funções (Enter altera o atalho):"),
+                0, wx.LEFT | wx.RIGHT, 8)
+        self.lista_atalhos = wx.ListBox(p, name="Funções", size=(-1, 230))
+        lay.Add(self.lista_atalhos, 1, wx.EXPAND | wx.ALL, 8)
+        linha = wx.WrapSizer(wx.HORIZONTAL)
+        self.btn_atalho_alterar = wx.Button(p, label="Alterar atalho...")
+        self.btn_atalho_remover = wx.Button(p, label="Remover atalho")
+        self.btn_atalho_padrao = wx.Button(p, label="Restaurar o padrão")
+        self.btn_atalho_todos = wx.Button(p, label="Restaurar todos os padrões")
+        for b in (self.btn_atalho_alterar, self.btn_atalho_remover,
+                  self.btn_atalho_padrao, self.btn_atalho_todos):
+            linha.Add(b, 0, wx.RIGHT | wx.BOTTOM, 8)
+        lay.Add(linha, 0, wx.LEFT | wx.RIGHT, 8)
+        self._atalhos_itens = []
+        self.busca_atalhos.Bind(wx.EVT_TEXT,
+                                lambda e: self._atalhos_preencher())
+        self.lista_atalhos.Bind(wx.EVT_LISTBOX_DCLICK,
+                                lambda e: self._atalhos_alterar())
+        self.lista_atalhos.Bind(wx.EVT_KEY_DOWN, self._atalhos_tecla)
+        self.btn_atalho_alterar.Bind(wx.EVT_BUTTON,
+                                     lambda e: self._atalhos_alterar())
+        self.btn_atalho_remover.Bind(wx.EVT_BUTTON,
+                                     lambda e: self._atalhos_remover())
+        self.btn_atalho_padrao.Bind(wx.EVT_BUTTON,
+                                    lambda e: self._atalhos_padrao())
+        self.btn_atalho_todos.Bind(wx.EVT_BUTTON,
+                                   lambda e: self._atalhos_todos())
+        self._atalhos_preencher()
+
+    def _atalhos_texto(self, acao, canon):
+        return "%s, %s: %s" % (acao.rotulo, acao.categoria,
+                               nucleo_atalhos.exibir(canon) or "sem atalho")
+
+    def _atalhos_preencher(self, manter=None):
+        """Mostra as funcoes que casam com a busca; `manter` e a chave da
+        funcao que continua selecionada."""
+        if manter is None:
+            manter = self._atalhos_chave()
+        self._atalhos_itens = self.modelo.atalhos_lista(
+            self.busca_atalhos.GetValue())
+        itens = [self._atalhos_texto(a, c) for a, c in self._atalhos_itens] \
+            or ["Nenhuma função encontrada."]
+        self.lista_atalhos.Set(itens)
+        chaves = [a.chave for a, _ in self._atalhos_itens]
+        if chaves:
+            self.lista_atalhos.SetSelection(
+                chaves.index(manter) if manter in chaves else 0)
+        for b in (self.btn_atalho_alterar, self.btn_atalho_remover,
+                  self.btn_atalho_padrao):
+            b.Enable(bool(chaves))
+
+    def _atalhos_chave(self):
+        i = self.lista_atalhos.GetSelection()
+        if 0 <= i < len(self._atalhos_itens):
+            return self._atalhos_itens[i][0].chave
+        return None
+
+    def _atalhos_tecla(self, evt):
+        if evt.GetKeyCode() in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) and \
+                not (evt.ControlDown() or evt.AltDown() or evt.ShiftDown()):
+            self._atalhos_alterar()
+            return
+        evt.Skip()
+
+    def _atalhos_dizer(self, texto):
+        if self.fala is not None:
+            self.fala.falar(texto, interromper=True)
+
+    def _atalhos_alterar(self):
+        from telezapp.interface import atalhos as ui_atalhos
+        chave = self._atalhos_chave()
+        if chave is None:
+            return
+        acao = self.modelo.registro.acoes[chave]
+        escolha = ui_atalhos.escolher_atalho(
+            self, acao.rotulo, self.modelo.atalho_de(chave), self.fala)
+        if escolha is None:
+            return
+        canon = "" if escolha == ui_atalhos.REMOVER else escolha
+        self._atalhos_definir(chave, canon)
+
+    def _atalhos_definir(self, chave, canon):
+        """Poe a combinacao na funcao; se outra a usa, avisa e pergunta se
+        substitui."""
+        outro = self.modelo.atalho_definir(chave, canon)
+        if outro is not None:
+            r = wx.MessageBox(
+                "O atalho %s já é usado por \"%s\" (%s). Substituir? \"%s\" "
+                "ficará sem atalho." % (nucleo_atalhos.exibir(canon),
+                                       outro.rotulo, outro.categoria,
+                                       outro.rotulo),
+                "Atalho em uso", wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
+                self)
+            if r != wx.YES:
+                self._atalhos_dizer("Atalho não alterado.")
+                return
+            self.modelo.atalho_definir(chave, canon, substituir=True)
+        self._atalhos_preencher(chave)
+        self._atalhos_dizer("Atalho %s. Aplique para valer." % (
+            nucleo_atalhos.texto_falado(canon) if canon else "removido"))
+
+    def _atalhos_remover(self):
+        chave = self._atalhos_chave()
+        if chave is not None:
+            self._atalhos_definir(chave, "")
+
+    def _atalhos_padrao(self):
+        chave = self._atalhos_chave()
+        if chave is None:
+            return
+        padrao = self.modelo.registro.acoes[chave].padrao
+        self._atalhos_definir(chave, padrao)
+
+    def _atalhos_todos(self):
+        r = wx.MessageBox("Voltar todos os atalhos ao padrão?",
+                          "Restaurar atalhos",
+                          wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
+        if r != wx.YES:
+            return
+        self.modelo.atalhos_restaurar_todos()
+        self._atalhos_preencher()
+        self._atalhos_dizer("Todos os atalhos voltaram ao padrão. Aplique "
+                            "para valer.")
 
     # ----------------------------------------------- pacotes de sons
     def _criar_sons(self):
@@ -331,6 +479,22 @@ class DialogoConfiguracoes(wx.Dialog):
         self.controles[o.chave] = c
         if o.chave == "trancadas_exigir_codigo":
             self._criar_campos_codigo()
+
+    def _criar_botao_grupo(self, categoria, grupo):
+        """Um botao que abre, numa janela, as opcoes que ficam juntas."""
+        b = wx.Button(self.painel, label=grupo)
+        b.Bind(wx.EVT_BUTTON, lambda e: self._abrir_grupo(categoria, grupo))
+        self.lay_painel.Add(b, 0, wx.ALL, 8)
+        self.controles["grupo:" + grupo] = b
+
+    def _abrir_grupo(self, categoria, grupo):
+        dlg = DialogoGrupoOpcoes(
+            self, grupo, self.modelo.opcoes_do_grupo(categoria, grupo))
+        dlg.ShowModal()
+        dlg.Destroy()
+        b = self.controles.get("grupo:" + grupo)
+        if b:
+            b.SetFocus()
 
     # ------------------------------------ provedores de IA
     def _criar_ia(self):
@@ -680,6 +844,50 @@ class DialogoConfiguracoes(wx.Dialog):
     def _ao_ok(self, evento):
         if self._aplicar():
             self.EndModal(wx.ID_OK)
+
+
+class DialogoGrupoOpcoes(wx.Dialog):
+    """As opcoes de um grupo (caixas de marcar), numa janela propria. O que
+    for marcado vale como pendente na janela de configuracoes: so entra ao
+    apertar OK ou Aplicar la."""
+
+    def __init__(self, pai, titulo, opcoes):
+        super().__init__(pai, title=titulo, style=wx.DEFAULT_DIALOG_STYLE)
+        self.pai = pai
+        self._em_foco = None
+        self.caixas = {}
+        lay = wx.BoxSizer(wx.VERTICAL)
+        for o in opcoes:
+            c = wx.CheckBox(self, label=o.rotulo, name=o.rotulo)
+            c.SetValue(bool(pai.modelo.valor(o.chave)))
+            c.Bind(wx.EVT_CHECKBOX, lambda e, o=o, c=c:
+                   pai.modelo.definir(o.chave, c.GetValue()))
+            c.Bind(wx.EVT_SET_FOCUS, lambda e, o=o: self._ao_focar(e, o))
+            lay.Add(c, 0, wx.ALL, 8)
+            self.caixas[o.chave] = c
+        fechar = wx.Button(self, wx.ID_OK, "Fechar")
+        fechar.SetDefault()
+        lay.Add(fechar, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+        self.SetEscapeId(wx.ID_OK)
+        self.SetSizerAndFit(lay)
+        self.Bind(wx.EVT_CHAR_HOOK, self._ao_tecla)
+        self.CentreOnParent()
+
+    def _ao_focar(self, evento, opcao):
+        evento.Skip()
+        self._em_foco = opcao
+        pai = self.pai
+        if pai._espera is not None:
+            pai._espera.Stop()
+        if pai.fala is not None and pai.modelo.valor("falar_descricoes"):
+            pai._espera = wx.CallLater(400, pai.fala.falar, opcao.descricao)
+
+    def _ao_tecla(self, evento):
+        if evento.GetKeyCode() == wx.WXK_F1 and self.pai.fala is not None \
+                and self._em_foco is not None:
+            self.pai.fala.falar(self._em_foco.descricao, interromper=True)
+            return
+        evento.Skip()
 
 
 class DialogoProvedorIA(wx.Dialog):

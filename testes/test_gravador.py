@@ -132,3 +132,21 @@ def test_conversao_nao_perde_duracao_em_blocos(tmp_path):
     destino = tmp_path / "a.ogg"
     gravador.converter(str(wav), str(destino))
     assert abs(sf.info(str(destino)).duration - n / taxa) < 0.05
+
+
+def test_pausa_nao_grava_o_trecho_da_pausa(tmp_path):
+    fonte = FonteFalsa()
+    g = Gravador(str(tmp_path), fabrica_fonte=lambda: fonte)
+    g.iniciar()
+    time.sleep(0.4)
+    g.pausar()
+    assert g.pausado and g.gravando       # a captura segue aberta
+    time.sleep(0.1)
+    antes = g.decorrido
+    time.sleep(0.6)
+    assert g.decorrido - antes < 0.15     # nada entrou durante a pausa
+    g.continuar()
+    time.sleep(0.4)
+    r = g.parar()
+    assert not g.pausado
+    assert 0.6 <= r.segundos < 1.3

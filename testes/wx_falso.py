@@ -8,6 +8,7 @@ import types
 
 _foco = [None]
 ID_ANY, ID_OK, ID_CANCEL = -1, 5100, 5101
+ID_YES, ID_NO = 5103, 5104
 YES, NO, OK, CANCEL = 2, 8, 4, 16
 YES_NO = YES | NO
 NO_DEFAULT = 0
@@ -15,8 +16,10 @@ ICON_WARNING = ICON_QUESTION = ICON_INFORMATION = 0
 DEFAULT_DIALOG_STYLE = RESIZE_BORDER = 0
 LB_SINGLE = LB_HSCROLL = TE_MULTILINE = TE_PASSWORD = TE_READONLY = 0
 VERTICAL = HORIZONTAL = EXPAND = ALL = BOTTOM = TOP = LEFT = RIGHT = 0
-ALIGN_RIGHT = ALIGN_CENTER = RA_SPECIFY_COLS = TE_PROCESS_ENTER = 0
-EVT_RADIOBOX = EVT_TEXT_ENTER = EVT_TEXT_PASTE = EVT_SIZE = object()
+ALIGN_RIGHT = ALIGN_CENTER = RA_SPECIFY_COLS = 0
+TE_PROCESS_ENTER = 1024
+EVT_RADIOBOX = EVT_SIZE = object()
+EVT_TEXT_ENTER, EVT_TEXT_PASTE = object(), object()
 TE_CENTER = 0
 WHITE = (255, 255, 255)
 escolha_lista = [0]       # o que o SingleChoiceDialog "escolhe"
@@ -100,6 +103,9 @@ class Frame(Janela):
 
     def GetMenuBar(self):
         return getattr(self, "barra_de_menus", None)
+
+    def SetAcceleratorTable(self, tabela):
+        self.tabela_de_aceleracao = tabela
 
     def SetMenuBar(self, b):
         self.barra_de_menus = b
@@ -369,6 +375,7 @@ class TextCtrl(Janela):
     def __init__(self, *a, value="", **k):
         super().__init__()
         self.valor = value
+        self.estilo = k.get("style", 0)
 
     def GetValue(self):
         return self.valor
@@ -432,6 +439,14 @@ class WrapSizer(BoxSizer):
 class MenuItem:
     def __init__(self):
         self.marcado = False
+        self.rotulo = ""
+        self.id = id(self)
+
+    def GetId(self):
+        return self.id
+
+    def SetItemLabel(self, rotulo):
+        self.rotulo = rotulo
 
     def Check(self, v=True):
         self.marcado = v
@@ -456,6 +471,21 @@ class Menu:
     def AppendSubMenu(self, submenu, rotulo):
         self.submenus.append((rotulo, submenu))
         return MenuItem()
+
+
+ACCEL_NORMAL, ACCEL_ALT, ACCEL_CTRL, ACCEL_SHIFT = 0, 1, 2, 4
+MOD_ALT, MOD_CONTROL, MOD_SHIFT = 1, 2, 4
+WXK_F1 = 340
+
+
+class AcceleratorEntry:
+    def __init__(self, marcas=0, tecla=0, id_=0):
+        self.marcas, self.tecla, self.id = marcas, tecla, id_
+
+
+class AcceleratorTable:
+    def __init__(self, entradas=()):
+        self.entradas = list(entradas)
 
 
 class MenuBar:

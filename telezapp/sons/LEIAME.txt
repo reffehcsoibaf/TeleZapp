@@ -17,7 +17,13 @@ instante do arquivo e terminam em silêncio. O nome do arquivo é o do evento:
   reconectada       conta reconectada
   desconectada      conta desconectada
   pronto            código ou QR pronto
-  atualizado        QR Code atualizado
+  atualizado        QR Code atualizado
+  gravando          gravação de voz iniciada
+  gravacao_parada   gravação de voz parada
+  voto_enquete      voto numa enquete sua
+  voto_enviado      voto seu enviado numa enquete
+  escondido         janela escondida em segundo plano
+  voltou            janela trazida de volta
   toque             toque de chamada recebida
   chamando          tom de chamada feita
   desligada         chamada encerrada

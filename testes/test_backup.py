@@ -22,23 +22,23 @@ def preparar(pasta):
                 (str(pasta / "midias" / "w1" / "a.jpg"),))
     con.commit()
     con.close()
-    return {"som": False, "estilo": 3, "contas": [{"id": "w1"}],
+    return {"status_no_titulo": False, "estilo": 3, "contas": [{"id": "w1"}],
             "telegram_api_id": 7, "codigo_trancadas": "hash",
             "trancadas_exigir_codigo": True, "depuracao": True,
             "pasta_anexos": "C:\nao-leva"}
 
 
 def test_so_as_opcoes_seguras_vao_no_backup():
-    dados = bk.opcoes_do_backup({"som": False, "depuracao": True,
+    dados = bk.opcoes_do_backup({"status_no_titulo": False, "depuracao": True,
                                  "trancadas_exigir_codigo": False,
                                  "contas": [1], "pasta_anexos": "x"})
-    assert dados["som"] is False
+    assert dados["status_no_titulo"] is False
     assert "depuracao" not in dados and "trancadas_exigir_codigo" not in dados
     assert "contas" not in dados and "pasta_anexos" not in dados
 
 
 def test_opcoes_validas_descarta_lixo_e_valores_fora_da_faixa():
-    boas = bk.opcoes_validas({"som": "sim", "estilo": 2, "inexistente": 1,
+    boas = bk.opcoes_validas({"status_no_titulo": "sim", "estilo": 2, "inexistente": 1,
                               "mensagens_por_conversa": 10 ** 9,
                               "depuracao": True, "audio_velocidade": 1.5})
     assert boas == {"estilo": 2, "audio_velocidade": 1.5}
@@ -66,11 +66,11 @@ def test_backup_com_senha_restaura_configuracoes_e_deixa_o_resto_em_espera(
     os.makedirs(destino / "sessoes")
     (destino / "sessoes" / "velha.db").write_bytes(b"v")
     (destino / "config.json").write_text(json.dumps(
-        {"contas": [], "som": True}), encoding="utf-8")
+        {"contas": [], "status_no_titulo": True}), encoding="utf-8")
     opcoes, espera = bk.restaurar(arquivo, "segredo",
                                   ["configuracoes", "contas", "conversas",
                                    "midias"], str(destino))
-    assert opcoes["som"] is False and opcoes["estilo"] == 3
+    assert opcoes["status_no_titulo"] is False and opcoes["estilo"] == 3
     assert "depuracao" not in opcoes
     assert espera == ["contas", "conversas", "midias"]
     assert bk.ha_pendente(str(destino))
@@ -79,7 +79,7 @@ def test_backup_com_senha_restaura_configuracoes_e_deixa_o_resto_em_espera(
     assert not bk.ha_pendente(str(destino))
     novo = json.loads((destino / "config.json").read_text(encoding="utf-8"))
     assert novo["contas"] == [{"id": "w1"}] and novo["codigo_trancadas"] == "hash"
-    assert novo["som"] is True            # as opcoes se aplicam a parte
+    assert novo["status_no_titulo"] is True            # as opcoes se aplicam a parte
     assert (destino / "sessoes" / "whatsapp-1.db").exists()
     assert not (destino / "sessoes" / "velha.db").exists()
     assert (destino / "midias" / "w1" / "a.jpg").read_bytes() == b"JPG"
@@ -219,3 +219,43 @@ def test_backup_e_restauracao_informam_o_avanco(tmp_path):
                  str(tmp_path / "c"),
                  progresso=lambda pct, texto="": vistos.append(pct))
     assert vistos == sorted(vistos) and vistos[-1] >= 90
+
+
+def test_backup_leva_os_atalhos_personalizados():
+    mapa = {"responder": "Alt+R", "anexar": "", "enviar_msg": "Ctrl+Enter"}
+    levadas = bk.opcoes_do_backup({"atalhos": mapa})
+    assert levadas["atalhos"] == mapa
+    assert bk.opcoes_do_backup({})["atalhos"] == {}      # sem nada: vazio
+    assert bk.opcoes_validas({"atalhos": mapa})["atalhos"] == mapa
+
+
+def test_atalhos_do_backup_so_voltam_validos_e_sem_repeticao():
+    lidos = {"a": "ctrl+shift+e",       # volta na forma canonica
+             "b": "Ctrl+Shift+E",       # repete a combinacao de "a"
+             "c": "Enter",              # nao pode ser atalho
+             "d": "banana",             # nao e combinacao
+             "e": 5,                    # nao e texto
+             "f": "",                   # sem atalho de proposito
+             3: "Ctrl+1"}               # funcao que nao e texto
+    assert bk.opcoes_validas({"atalhos": lidos})["atalhos"] == {
+        "a": "Ctrl+Shift+E", "f": ""}
+    assert "atalhos" not in bk.opcoes_validas({"atalhos": "lixo"})
+
+
+def test_abrir_com_o_windows_nunca_vem_do_backup():
+    assert "iniciar_com_windows" not in bk.opcoes_do_backup({})
+    assert "iniciar_com_windows" not in bk.opcoes_validas(
+        {"iniciar_com_windows": True})
+
+
+def test_ida_e_volta_do_backup_leva_o_mapa_de_atalhos(tmp_path):
+    origem = tmp_path / "a"
+    cfg = preparar(origem)
+    cfg["atalhos"] = {"responder": "Alt+R", "anexar": ""}
+    arquivo = str(tmp_path / "b.zip")
+    bk.criar(arquivo, str(origem), cfg, ["configuracoes"])
+    destino = tmp_path / "b"
+    os.makedirs(destino)
+    opcoes, espera = bk.restaurar(arquivo, "", ["configuracoes"],
+                                  str(destino))
+    assert opcoes["atalhos"] == {"responder": "Alt+R", "anexar": ""}

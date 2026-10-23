@@ -13,6 +13,7 @@
 
 O registro nunca grava texto de mensagens, telefones completos ou codigos.
 """
+import hashlib
 import json
 import logging
 import os
@@ -23,7 +24,7 @@ import time
 import uuid
 
 from telezapp import config
-from telezapp.midia import armazem
+from telezapp.midia import armazem, envio
 from telezapp.nucleo import chamadas as ch
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import modelos as m
@@ -175,7 +176,8 @@ def com_expiracao(mensagem, segundos):
             text=texto, contextInfo=ContextInfo(expiration=segundos)))
         return mensagem
     for nome in ("extendedTextMessage", "imageMessage", "videoMessage",
-                 "audioMessage", "documentMessage", "stickerMessage"):
+                 "audioMessage", "documentMessage", "stickerMessage",
+                 "pollCreationMessage"):
         if mensagem.HasField(nome):
             getattr(mensagem, nome).contextInfo.expiration = segundos
             return mensagem
@@ -588,6 +590,58 @@ def previa_do_whatsapp(interna):
                             x.description)
 
 
+def enquete_do_whatsapp(interna):
+    """Pergunta, opcoes e quantas dá para marcar de uma enquete criada ({} se
+    a mensagem nao e uma enquete)."""
+    presentes = set(campos(interna))
+    for nome in ("pollCreationMessage", "pollCreationMessageV2",
+                 "pollCreationMessageV3"):
+        if nome in presentes:
+            p = getattr(interna, nome)
+            opcoes = [o.optionName for o in p.options]
+            if not opcoes:
+                return {}
+            return {"pergunta": p.name, "opcoes": opcoes,
+                    "maximo": int(p.selectableOptionsCount or 0) or
+                    len(opcoes)}
+    return {}
+
+
+def consertar_decifrar_voto(cliente):
+    """O neonize 0.5.2 esqueceu `DecryptPollVote` na lista das funcoes cujo
+    retorno (um ponteiro de bytes do Go) vira `bytes`: sem isso, decifrar um
+    voto levanta TypeError (\"expected bytes, LP_Bytes found\"). Poe o mesmo
+    tratamento que as outras funcoes ja tem. Roda uma vez por biblioteca."""
+    import ctypes
+    go = next((getattr(cliente, a) for a in dir(cliente)
+               if a.endswith("__client")), None)
+    funcao = getattr(go, "DecryptPollVote", None)
+    if funcao is None or getattr(funcao, "errcheck", None) is not None:
+        return False
+
+    def consumir(resultado, func, argumentos):
+        if not resultado:
+            return b""
+        try:
+            conteudo = resultado.contents
+            if not conteudo.ptr or conteudo.size == 0:
+                return b""
+            return ctypes.string_at(conteudo.ptr, conteudo.size)
+        finally:
+            go.FreeBytesStruct(resultado)
+    funcao.errcheck = consumir
+    return True
+
+
+def indices_do_voto(opcoes, selecionados):
+    """Posicoes das opcoes escolhidas num voto: o WhatsApp manda o SHA-256 do
+    texto de cada opcao marcada."""
+    por_hash = {hashlib.sha256(o.encode()).digest(): i
+                for i, o in enumerate(opcoes)}
+    return sorted({por_hash[bytes(h)] for h in selecionados
+                   if bytes(h) in por_hash})
+
+
 def conteudo_de(interna):
     """(tipo, texto, segundos, nome_arquivo, tamanho) ou None se a mensagem
     nao tem nada para mostrar (chaves, reacoes, controle)."""
@@ -698,6 +752,9 @@ def converter(evento, conta_id, conversa_id, autor=""):
                      acoes=acoes_ + entradas_de_grupo(interna_, msg.texto),
                      original=original_com_acoes(interna_, acoes_),
                      previa=previa_do_whatsapp(interna_))
+    enquete_ = enquete_do_whatsapp(interna_)
+    if enquete_:
+        m.atualizar_extras(msg, enquete=enquete_)
     return msg, msg.remetente
 
 
@@ -797,7 +854,8 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
     estado = ""
     if minha:
         estado = {HIST_ENTREGUE: m.ENTREGUE, HIST_LIDA: m.LIDA,
-                  HIST_OUVIDA: m.LIDA}.get(int(wmi.status), m.ENVIADA)
+                  HIST_OUVIDA: m.REPRODUZIDA}.get(int(wmi.status),
+                                                  m.ENVIADA)
     forma = estrutura_interativa(desembrulhar(wmi.message))
     if forma:
         log.info("mensagem interativa: %s", json.dumps(
@@ -823,6 +881,9 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
                      acoes=acoes_ + entradas_de_grupo(interna_, msg.texto),
                      original=original_com_acoes(interna_, acoes_),
                      previa=previa_do_whatsapp(interna_))
+    enquete_ = enquete_do_whatsapp(interna_)
+    if enquete_:
+        m.atualizar_extras(msg, enquete=enquete_)
     if wmi.starred:
         m.atualizar_extras(msg, favorita=True)
     return msg, remetente
@@ -890,6 +951,7 @@ class ProvedorWhatsApp(Provedor):
         self._desligada = False     # desconectada pelo celular
         self._pareando = False      # QR ou codigo em andamento
         self._chamadas = {}         # id da chamada -> dados (so aviso)
+        self._voz = None            # ChamadasWhatsApp, se as chamadas estao ligadas
         self._disponivel = False    # presenca "disponivel" enviada
         self._observadas = {}       # JID da conversa observada -> conversa_id
         self._presenca_cid = None   # a conversa aberta com presenca
@@ -1006,6 +1068,7 @@ class ProvedorWhatsApp(Provedor):
         try:
             import neonize.events as nev
             self.cliente = self.fabrica_cliente()
+            self._preparar_chamadas()
             registros = {
                 "ConnectedEv": self._ao_conectar,
                 "PairStatusEv": self._ao_parear,
@@ -1084,6 +1147,8 @@ class ProvedorWhatsApp(Provedor):
 
     def parar(self):
         self._parar.set()
+        if self._voz is not None:
+            self._voz.parar()
         if self._ouvinte is not None:
             logging.getLogger("whatsmeow.Client").removeHandler(
                 self._ouvinte)
@@ -1842,6 +1907,58 @@ class ProvedorWhatsApp(Provedor):
                         type(e).__name__, exc_info=True)
             return False, "O WhatsApp não aceitou (%s)." % type(e).__name__
         return False, "Ação desconhecida."
+
+    CRIA = ("grupo", "canal", "comunidade")
+
+    def criar_conversa(self, tipo, nome, descricao="", participantes=(),
+                       topicos=False):
+        if self.cliente is None or not self._conectada:
+            return False, "Sem conexão com o WhatsApp.", ""
+        try:
+            if tipo == "canal":
+                meta = self.cliente.create_newsletter(nome, descricao, b"")
+                cid, conv_tipo = jid_texto(meta.ID), "canal"
+            else:
+                cid = self._criar_grupo(tipo, nome, descricao, participantes)
+                conv_tipo = "grupo"
+        except Exception as e:
+            log.warning("criar %s falhou: %s: %s", tipo, type(e).__name__,
+                        str(e)[:200])
+            return False, ("O WhatsApp não deixou criar (%s)." %
+                           (str(e)[:120] or type(e).__name__)), ""
+        with self._trava:
+            conv = self._conversas.get(cid)
+            if conv is None:
+                conv = m.Conversa(self.conta.id, cid, nome, self.servico,
+                                  conv_tipo, data=time.time())
+                self._conversas[cid] = conv
+        self.banco.salvar_conversas([conv])
+        self._publicar_conversas()
+        log.info("%s criado pelo TeleZapp", tipo)
+        return True, "", cid
+
+    def _criar_grupo(self, tipo, nome, descricao, participantes):
+        """Cria o grupo (ou a comunidade) e devolve o endereco dele."""
+        from neonize.proto.Neonize_pb2 import GroupParent
+        alvos = []
+        for texto in participantes:
+            tel = m.normalizar_telefone(str(texto))    # sem + no Brasil: +55
+            if tel:
+                alvos.append(_jid_obj(tel.lstrip("+"), "s.whatsapp.net"))
+        pai = GroupParent(
+            IsParent=True,
+            DefaultMembershipApprovalMode="request_required") \
+            if tipo == "comunidade" else None
+        info = self.cliente.create_group(
+            nome, [] if pai else alvos, group_parent=pai)
+        jid = info.JID
+        if descricao:
+            try:
+                self.cliente.set_group_topic(
+                    jid, "", uuid.uuid4().hex.upper(), descricao)
+            except Exception:
+                log.info("grupo criado, mas sem a descrição")
+        return jid_texto(jid)
 
     JANELA_EDICAO = 15 * 60       # o WhatsApp deixa editar por 15 minutos
 
@@ -2985,6 +3102,9 @@ class ProvedorWhatsApp(Provedor):
                 m.atualizar_extras(x, reacoes=reacoes)
             self._alterar(cid, alvo, aplicar, "reacao", quem, emoji)
             return True
+        if "pollUpdateMessage" in presentes:
+            self._tratar_voto(evento, cid, info, origem, interna)
+            return True
         if "protocolMessage" in presentes:
             p = interna.protocolMessage
             if p.HasField("type") and p.type == p.EPHEMERAL_SETTING:
@@ -3072,6 +3192,114 @@ class ProvedorWhatsApp(Provedor):
                                 "emoji": emoji, "minha": True})
             m.atualizar_extras(x, reacoes=reacoes)
         self._alterar(cid, msg.id, aplicar, "reacao", "Você", emoji)
+
+    def _tratar_voto(self, evento, cid, info, origem, interna):
+        """Voto numa enquete: o WhatsApp o manda cifrado com o segredo da
+        enquete, que o neonize guarda quando recebe a pergunta. Votos de
+        enquetes de antes do TeleZapp (sem o segredo) nao dá para ler."""
+        alvo = interna.pollUpdateMessage.pollCreationMessageKey.ID
+        try:
+            consertar_decifrar_voto(self.cliente)
+            voto = self.cliente.decrypt_poll_vote(evento)
+        except Exception as e:
+            log.info("voto em enquete que não consegui decifrar (%s: %s)",
+                     type(e).__name__, str(e)[:120])
+            return
+        quem_id = jid_texto(origem.Sender)
+        quem = "Você" if origem.IsFromMe else self._nome_contato(
+            origem.Sender, info.Pushname or nome_verificado(info))
+
+        def aplicar(x):
+            enq = m.enquete_de(x)
+            if not enq:
+                return
+            escolhas = indices_do_voto(enq["opcoes"], voto.selectedOptions)
+            votos = dict(enq["votos"])
+            votos[quem_id] = {"nome": quem, "escolhas": escolhas}
+            atual = dict(m.extras_de(x)["enquete"])
+            atual["votos"] = votos
+            if origem.IsFromMe:
+                atual["meus"] = escolhas
+            m.atualizar_extras(x, enquete=atual)
+        self._alterar(cid, alvo, aplicar, "enquete", quem)
+
+    PODE_CRIAR_ENQUETE = True
+
+    def criar_enquete(self, conversa_id, pergunta, opcoes, multipla,
+                      anonima=True):
+        self._fila.put(lambda: self._criar_enquete(
+            conversa_id, pergunta, list(opcoes), multipla))
+
+    def _criar_enquete(self, cid, pergunta, opcoes, multipla):
+        try:
+            if not self._conectada or self.cliente is None:
+                raise ConnectionError("sem conexão")
+            from neonize.utils.enum import VoteType
+            jid = self._jid(cid)
+            criada = self.cliente.build_poll_vote_creation(
+                pergunta, opcoes,
+                VoteType.MULTIPLE if multipla else VoteType.SINGLE)
+            resp = self.cliente.send_message(
+                jid, com_expiracao(criada, self._prazo_da_conversa(cid)))
+        except Exception as e:
+            log.warning("criar enquete falhou: %s: %s", type(e).__name__,
+                        str(e)[:200])
+            self._avisar("Não consegui criar a enquete (%s)." %
+                         ("sem conexão" if isinstance(e, ConnectionError)
+                          else type(e).__name__), False)
+            return
+        self._registrar_enviada(
+            resp, cid, "enquete: " + pergunta, tipo=m.OUTRO,
+            enquete={"pergunta": pergunta, "opcoes": opcoes,
+                     "maximo": len(opcoes) if multipla else 1})
+
+    PODE_VOTAR = True
+
+    def votar_enquete(self, mensagem, escolhas):
+        self._fila.put(lambda: self._votar_enquete(mensagem, escolhas))
+
+    def _votar_enquete(self, msg, escolhas):
+        cid = msg.conversa_id
+        enq = m.enquete_de(msg)
+        try:
+            if not self._conectada or self.cliente is None:
+                raise ConnectionError("sem conexão")
+            if not enq:
+                raise ValueError("não é uma enquete")
+            from neonize.proto.Neonize_pb2 import MessageInfo, MessageSource
+            eu = self.cliente.get_me().JID
+            if msg.minha:
+                autor = eu
+            else:
+                individual = not cid.endswith("@g.us")
+                rem = msg.remetente or (cid if individual else "")
+                if not rem:
+                    raise ValueError("sem o remetente da enquete")
+                autor = _jid_obj(*jid_de_texto(rem))
+            chat = self._jid(cid)
+            origem = MessageSource(Chat=chat, Sender=autor,
+                                   IsFromMe=bool(msg.minha),
+                                   IsGroup=cid.endswith("@g.us"))
+            enquete_info = MessageInfo(MessageSource=origem, ID=msg.id)
+            nomes = [enq["opcoes"][i] for i in escolhas]
+            self.cliente.send_message(
+                chat, self.cliente.build_poll_vote(enquete_info, nomes))
+        except Exception as e:
+            log.warning("voto em enquete falhou: %s: %s", type(e).__name__,
+                        str(e)[:200])
+            self._avisar("Não consegui enviar o voto (%s)." %
+                         type(e).__name__, False)
+            return
+        quem_id = jid_texto(eu)
+
+        def aplicar(x):
+            atual = dict(m.extras_de(x)["enquete"])
+            votos = dict(m.enquete_de(x)["votos"])
+            votos[quem_id] = {"nome": "Você", "escolhas": list(escolhas)}
+            atual["votos"] = votos
+            atual["meus"] = list(escolhas)
+            m.atualizar_extras(x, enquete=atual)
+        self._alterar(cid, msg.id, aplicar, "enquete", "Você")
 
     def _alterar(self, cid, alvo, aplicar, motivo, quem="", emoji=""):
         """Aplica `aplicar` a mensagem guardada, grava e avisa a interface.
@@ -3519,7 +3747,8 @@ class ProvedorWhatsApp(Provedor):
         return previa_links.buscar(url) if url else {}
 
     def _registrar_enviada(self, resp, conversa_id, texto, resposta_a="",
-                           arquivo=None, previa=None, **campos):
+                           arquivo=None, previa=None, enquete=None,
+                           **campos):
         """Guarda e publica a mensagem que o servidor confirmou. `arquivo`
         (origem, mover): copia a midia enviada para o armazem do app."""
         msg = m.Mensagem(self.conta.id, conversa_id, resp.ID, minha=True,
@@ -3530,6 +3759,8 @@ class ProvedorWhatsApp(Provedor):
                                  self._prazo_da_conversa(conversa_id))
         if previa:
             m.guardar_extras(msg, previa=previa)
+        if enquete:
+            m.atualizar_extras(msg, enquete=enquete)
         if arquivo is not None:
             try:
                 destino = armazem.guardar_enviada(msg, *arquivo)
@@ -3633,11 +3864,29 @@ class ProvedorWhatsApp(Provedor):
             mimetype="audio/ogg; codecs=opus" if voz else
             (anexo.mime or "audio/mpeg"), **comum))
 
+    def _anexo_que_o_whatsapp_toca(self, anexo):
+        """WAV e FLAC nao tocam no WhatsApp: pelo botao de anexar vao como
+        documento (o arquivo original); colados na caixa viram um audio
+        Ogg/Opus comum."""
+        if not envio.audio_que_o_whatsapp_nao_toca(anexo):
+            return anexo
+        if anexo.colado:
+            try:
+                novo = envio.converter_para_opus(anexo, config.pasta_temporaria())
+                log.info("audio %s convertido para Ogg/Opus (%d bytes)",
+                         os.path.splitext(anexo.nome)[1], novo.tamanho)
+                return novo
+            except envio.ErroEnvio:
+                log.warning("conversao do audio falhou; vai como documento",
+                            exc_info=True)
+        return envio.como_documento(anexo)
+
     def _enviar_arquivo(self, conversa_id, anexo, legenda):
         inicio = time.perf_counter()
         try:
             if not self._conectada or self.cliente is None:
                 raise ConnectionError("sem conexão")
+            anexo = self._anexo_que_o_whatsapp_toca(anexo)
             jid = self._jid(conversa_id)
             prazo = self._prazo_da_conversa(conversa_id)
             if anexo.tamanho >= LIMITE_ENVIO_POR_ARQUIVO and \
@@ -3670,8 +3919,9 @@ class ProvedorWhatsApp(Provedor):
                 self.conta.id, conversa_id, legenda, motivo,
                 devolver_texto=False, tipo=anexo.tipo))
             return
-        log.info("%s enviado em %.2fs (%d bytes)", anexo.tipo,
-                 time.perf_counter() - inicio, anexo.tamanho)
+        log.info("%s enviado em %.2fs (%d bytes, %s, %ds)", anexo.tipo,
+                 time.perf_counter() - inicio, anexo.tamanho, anexo.mime,
+                 anexo.segundos)
         self._registrar_enviada(
             resp, conversa_id, legenda, tipo=anexo.tipo,
             segundos=anexo.segundos, nome_arquivo=anexo.nome,
@@ -3753,6 +4003,79 @@ class ProvedorWhatsApp(Provedor):
         return self._id_da_conversa(jid)
 
     # ------------------------------------------------------------- recibos
+    # ------------------------------------------------- chamadas de voz
+    # O meowcaller vai dentro da DLL de teste do neonize e usa este mesmo
+    # cliente; sem essa DLL as chamadas ficam indisponiveis.
+    @property
+    def suporta_chamadas(self):
+        return self._voz is not None and self._voz.pronta
+
+    def _preparar_chamadas(self):
+        """Antes de conectar: liga o meowcaller no cliente, se a DLL tiver."""
+        if self._voz is not None:
+            self._voz.parar()
+            self._voz = None
+        try:
+            from telezapp.provedores.chamadas_whatsapp import (
+                ChamadasWhatsApp, Ponte)
+            if not Ponte.disponivel():
+                log.info("a DLL do neonize não tem o meowcaller: sem "
+                         "chamadas de voz do WhatsApp")
+                return
+            Ponte.configurar(True)
+            self._voz = ChamadasWhatsApp(
+                Ponte(self.cliente.uuid), self.conta.id, self.barramento,
+                self._conversa_do_peer, self._nome_da_conversa,
+                self._destino_da_chamada)
+            self._voz.iniciar()
+            log.info("chamadas de voz do WhatsApp ligadas")
+        except Exception:
+            log.exception("erro ao preparar as chamadas do WhatsApp")
+            self._voz = None
+
+    def _conversa_do_peer(self, peer):
+        usuario, servidor = jid_de_texto(peer)
+        return self._id_da_conversa(_jid_obj(usuario, servidor))
+
+    def _nome_da_conversa(self, cid):
+        conv = self._conversas.get(cid)
+        return conv.nome if conv is not None and conv.nome else ""
+
+    def _destino_da_chamada(self, cid):
+        """O texto que a DLL liga: o numero, ou o endereco LID."""
+        usuario, servidor = jid_de_texto(cid)
+        return usuario if servidor == "s.whatsapp.net" else             "%s@%s" % (usuario, servidor)
+
+    def _comando_de_chamada(self, metodo, conversa_id, *args):
+        if not self.suporta_chamadas or "@g.us" in conversa_id or                 "@newsletter" in conversa_id:
+            self._avisar("Chamadas de voz não estão disponíveis nesta "
+                         "conversa.")
+            return
+        threading.Thread(target=getattr(self._voz, metodo),
+                         args=(conversa_id,) + args, daemon=True,
+                         name="chamada-" + metodo).start()
+
+    def ligar(self, conversa_id, microfone="", saida=""):
+        self._comando_de_chamada("ligar", conversa_id, microfone, saida)
+
+    def atender_chamada(self, conversa_id, microfone="", saida=""):
+        self._comando_de_chamada("atender", conversa_id, microfone, saida)
+
+    def encerrar_chamada(self, conversa_id):
+        self._comando_de_chamada("encerrar", conversa_id)
+
+    def silenciar_chamada(self, conversa_id, silenciar):
+        self._comando_de_chamada("silenciar", conversa_id, silenciar)
+
+    def trocar_dispositivos(self, conversa_id, microfone="", saida=""):
+        self._comando_de_chamada("trocar_dispositivos", conversa_id,
+                                 microfone, saida)
+
+    def dispositivos_de_audio(self):
+        if self._voz is None:
+            return [], []
+        return self._voz.dispositivos()
+
     # ------------------------------------------------------------ chamadas
     def _tem_tag(self, no, tag):
         """A tag aparece em algum lugar da arvore do pacote da chamada?"""
@@ -3798,8 +4121,10 @@ class ProvedorWhatsApp(Provedor):
             # sem o aviso de mensagem nova: a janela da chamada avisa
             self.barramento.publicar(ev.MensagemNova(msg, conv,
                                                      silenciosa=True))
-            self.barramento.publicar(ev.ChamadaWhatsApp(
-                self.conta.id, cid, conv.nome, video, "tocando", chamada))
+            if not self.suporta_chamadas:
+                self.barramento.publicar(ev.ChamadaWhatsApp(
+                    self.conta.id, cid, conv.nome, video, "tocando",
+                    chamada))
         except Exception:
             log.exception("erro ao tratar chamada recebida")
 
@@ -3865,9 +4190,15 @@ class ProvedorWhatsApp(Provedor):
                         if not x.minha else None, "ouvida")
                 return
             estado = {RECIBO_ENTREGUE: m.ENTREGUE, RECIBO_LIDO: m.LIDA,
-                      RECIBO_OUVIDO: m.LIDA}.get(tipo)
+                      RECIBO_OUVIDO: m.REPRODUZIDA}.get(tipo)
+            if estado is None and not origem.IsFromMe:
+                log.info("recibo de tipo %d ignorado (%d mensagens)", tipo,
+                         len(e.MessageIDs))
             if estado is None or origem.IsFromMe:
                 return
+            if tipo == RECIBO_OUVIDO:
+                log.info("recibo de reproduzida (%d mensagens)",
+                         len(e.MessageIDs))
             self.banco.salvar_recibos(
                 self.conta.id, cid, list(e.MessageIDs),
                 self._id_do_participante(origem.Sender),

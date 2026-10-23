@@ -202,6 +202,29 @@ class ClienteFalso:
         return E.Message(reactionMessage=E.ReactionMessage(
             key=_chave(id_), text=emoji))
 
+    voto_decifrado = None
+    votos_montados = ()
+    enquetes_montadas = ()
+
+    def build_poll_vote_creation(self, nome, opcoes, tipo, quoted=None):
+        self.enquetes_montadas = list(self.enquetes_montadas) + [
+            (nome, list(opcoes), tipo.name)]
+        return E.Message(pollCreationMessage=E.PollCreationMessage(
+            name=nome, selectableOptionsCount=1 if tipo.name == "SINGLE"
+            else 0, options=[E.PollCreationMessage.Option(optionName=o)
+                             for o in opcoes]))
+
+    def decrypt_poll_vote(self, evento):
+        if self.voto_decifrado is None:
+            raise RuntimeError("sem o segredo da enquete")
+        return self.voto_decifrado
+
+    def build_poll_vote(self, info, nomes):
+        self.votos_montados = list(self.votos_montados) + [
+            (info.ID, list(nomes), info.MessageSource.IsFromMe)]
+        return E.Message(pollUpdateMessage=E.PollUpdateMessage(
+            pollCreationMessageKey=_chave(info.ID)))
+
     def send_message(self, para, mensagem, **kw):
         if mensagem.conversation == "falhar":
             raise RuntimeError("erro")
@@ -2725,3 +2748,241 @@ def test_registro_da_mensagem_interativa_nao_leva_o_texto():
     assert "hydratedContentText" in dump and "<texto 60>" in dump
     assert "QUICK_REPLY" in dump and "'n': '<n>'" in dump
     assert len(wa.forma_sem_textos(list(range(20)))) == 5
+
+
+def _wav_estereo(caminho, segundos=1.0, taxa=44100):
+    import numpy as np
+    import soundfile as sf
+    t = np.arange(int(segundos * taxa)) / taxa
+    onda = 0.3 * np.sin(2 * np.pi * 440 * t).astype("float32")
+    sf.write(str(caminho), np.stack([onda, onda], axis=1), taxa)
+
+
+def test_wav_pelo_botao_de_anexar_vai_como_documento(amb, dados_midia,
+                                                      tmp_path):
+    from telezapp.midia import envio
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    cid = "5551988887777@s.whatsapp.net"
+    wav = tmp_path / "som.wav"
+    _wav_estereo(wav)
+    anexo = envio.preparar(str(wav))
+    assert anexo.tipo == m.AUDIO              # o programa ainda o ve como audio
+    amb.p.enviar_arquivo(cid, anexo)
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.mensagem.tipo == m.DOCUMENTO
+    enviada = amb.c.enviadas[-1][1]
+    assert enviada[0] == "documento" and enviada[3] == "som.wav"
+    assert wav.exists()
+
+
+def test_wav_colado_vira_audio_ogg_opus_comum(amb, dados_midia, tmp_path):
+    from telezapp.midia import envio
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    cid = "5551988887777@s.whatsapp.net"
+    wav = tmp_path / "som.wav"
+    _wav_estereo(wav, segundos=1.0)
+    anexo = envio.preparar(str(wav))
+    anexo.colado = True
+    amb.p.enviar_arquivo(cid, anexo)
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.mensagem.tipo == m.AUDIO
+    audio = amb.c.enviadas[-1][1].audioMessage
+    assert not audio.PTT and audio.mimetype == "audio/ogg; codecs=opus"
+    assert audio.seconds == 1
+    assert wav.exists()                        # o original fica onde estava
+
+
+def test_mimes_dos_audios_que_o_whatsapp_toca(tmp_path):
+    from telezapp.midia import envio
+    for ext, mime in ((".m4a", "audio/mp4"), (".aac", "audio/aac"),
+                      (".mp3", "audio/mpeg")):
+        arq = tmp_path / ("a" + ext)
+        arq.write_bytes(b"x" * 100)
+        assert envio.preparar(str(arq)).mime == mime
+
+
+def _enquete_chegou(amb, id="M1", maximo=1):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    criacao = E.Message(pollCreationMessage=E.PollCreationMessage(
+        name="Qual dia?", selectableOptionsCount=maximo,
+        options=[E.PollCreationMessage.Option(optionName=o)
+                 for o in ("Sexta", "Sábado", "Domingo")]))
+    amb.f["Message"](amb.c, evento(id, criacao))
+    return esperar(amb.fila, ev.MensagemNova).mensagem
+
+
+def test_enquete_recebida_guarda_pergunta_e_opcoes(amb):
+    msg = _enquete_chegou(amb, maximo=2)
+    e = m.enquete_de(msg)
+    assert e["pergunta"] == "Qual dia?"
+    assert e["opcoes"] == ["Sexta", "Sábado", "Domingo"] and e["maximo"] == 2
+    assert msg.tipo == m.OUTRO and msg.texto == "enquete: Qual dia?"
+    assert "3 opções" in m.formatar(msg, m.ESTILO_AUTOR_PRIMEIRO)
+
+
+def test_voto_de_outra_pessoa_entra_na_contagem(amb):
+    import hashlib
+    _enquete_chegou(amb)
+    amb.c.voto_decifrado = E.PollVoteMessage(selectedOptions=[
+        hashlib.sha256("Sábado".encode()).digest()])
+    voto = E.Message(pollUpdateMessage=E.PollUpdateMessage(
+        pollCreationMessageKey=_chave("M1")))
+    amb.f["Message"](amb.c, evento("V1", voto, pushname="Bruno"))
+    a = esperar(amb.fila, ev.MensagemAtualizada)
+    assert a.motivo == "enquete"
+    e = m.enquete_de(a.mensagem)
+    assert m.contagens_da_enquete(e) == [0, 1, 0]
+    assert m.quem_votou_em(e, 1) and e["meus"] == []
+    # a mesma pessoa muda o voto: continua um voto so
+    amb.c.voto_decifrado = E.PollVoteMessage(selectedOptions=[
+        hashlib.sha256("Sexta".encode()).digest()])
+    amb.f["Message"](amb.c, evento("V2", voto, pushname="Bruno"))
+    b = esperar(amb.fila, ev.MensagemAtualizada)
+    assert m.contagens_da_enquete(m.enquete_de(b.mensagem)) == [1, 0, 0]
+
+
+def test_voto_que_nao_da_para_decifrar_e_ignorado(amb):
+    _enquete_chegou(amb)
+    voto = E.Message(pollUpdateMessage=E.PollUpdateMessage(
+        pollCreationMessageKey=_chave("M1")))
+    amb.f["Message"](amb.c, evento("V1", voto, pushname="Bruno"))
+    assert amb.fila.empty() or not isinstance(
+        amb.fila.get_nowait(), ev.MensagemAtualizada)
+
+
+def test_votar_envia_o_voto_e_guarda_o_meu(amb):
+    msg = _enquete_chegou(amb)
+    amb.p.votar_enquete(msg, [0, 2])
+    a = esperar(amb.fila, ev.MensagemAtualizada)
+    assert a.motivo == "enquete" and a.quem == "Você"
+    assert m.enquete_de(a.mensagem)["meus"] == [0, 2]
+    assert amb.c.votos_montados[-1][:2] == ("M1", ["Sexta", "Domingo"])
+    assert amb.c.enviadas[-1][1].HasField("pollUpdateMessage")
+    # tirar o voto
+    amb.p.votar_enquete(a.mensagem, [])
+    b = esperar(amb.fila, ev.MensagemAtualizada)
+    assert m.enquete_de(b.mensagem)["meus"] == []
+
+
+def test_criar_enquete_no_whatsapp_envia_e_guarda_a_mensagem(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    cid = "5551988887777@s.whatsapp.net"
+    amb.p.criar_enquete(cid, "Qual dia?", ["Sexta", "Sábado"], True)
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.enviada_daqui and nova.mensagem.tipo == m.OUTRO
+    e = m.enquete_de(nova.mensagem)
+    assert e["pergunta"] == "Qual dia?" and e["opcoes"] == ["Sexta", "Sábado"]
+    assert e["maximo"] == 2
+    assert amb.c.enquetes_montadas[-1] == ("Qual dia?", ["Sexta", "Sábado"],
+                                           "MULTIPLE")
+    assert amb.c.enviadas[-1][1].HasField("pollCreationMessage")
+    amb.p.criar_enquete(cid, "Sim ou não?", ["Sim", "Não"], False)
+    outra = esperar(amb.fila, ev.MensagemNova)
+    assert m.enquete_de(outra.mensagem)["maximo"] == 1
+    assert amb.c.enquetes_montadas[-1][2] == "SINGLE"
+
+
+def test_criar_enquete_sem_conexao_avisa(amb):
+    amb.p.criar_enquete("5551@s.whatsapp.net", "Q?", ["A", "B"], False)
+    aviso = esperar(amb.fila, ev.Aviso)
+    assert "Não consegui criar a enquete" in aviso.texto
+
+
+def test_consertar_decifrar_voto_poe_o_tratamento_que_faltava():
+    class Funcao:
+        errcheck = None
+
+    class Go:
+        DecryptPollVote = Funcao()
+        liberados = []
+
+        def FreeBytesStruct(self, ponteiro):
+            self.liberados.append(ponteiro)
+
+    class Cliente:
+        _NewClient__client = Go()
+    assert wa.consertar_decifrar_voto(Cliente()) is True
+    assert Go.DecryptPollVote.errcheck is not None
+    assert wa.consertar_decifrar_voto(Cliente()) is False     # so uma vez
+    # sem resultado: bytes vazios, e nada a liberar
+    assert Go.DecryptPollVote.errcheck(None, None, ()) == b""
+    # um cliente sem a biblioteca (os testes) nao quebra
+    assert wa.consertar_decifrar_voto(object()) is False
+
+
+def test_criar_grupo_comunidade_e_canal_no_whatsapp(tmp_path):
+    chamadas = []
+
+    def criar_grupo(nome, participantes=(), group_parent=None, **kw):
+        chamadas.append((nome, [j_.User for j_ in participantes],
+                         bool(group_parent and group_parent.IsParent)))
+        return N.GroupInfo(JID=jid("999", "g.us"),
+                           GroupName=N.GroupName(Name=nome))
+    cliente = types.SimpleNamespace(
+        create_group=criar_grupo,
+        set_group_topic=lambda j_, ant, novo, t: chamadas.append(
+            ("descricao", t)),
+        create_newsletter=lambda nome, desc, foto: N.NewsletterMetadata(
+            ID=jid("55", "newsletter")))
+    p, banco = _provedor_com_cliente(tmp_path, cliente)
+    assert p.CRIA == ("grupo", "canal", "comunidade")
+    ok, texto, cid = p.criar_conversa(
+        "grupo", "Turma", "Sobre", ["+55 51 99999-1111", "12", "@x"])
+    assert ok and cid == "999@g.us"
+    assert chamadas[0] == ("Turma", ["5551999991111"], False)
+    assert ("descricao", "Sobre") in chamadas
+    conv = banco.conversas("w1")[0]
+    assert (conv.id, conv.nome, conv.tipo) == ("999@g.us", "Turma", "grupo")
+    ok, _, cid = p.criar_conversa("comunidade", "Bairro", "",
+                                  ["+5551999991111"])
+    assert ok and chamadas[-1] == ("Bairro", [], True)   # sem participantes
+    ok, _, cid = p.criar_conversa("canal", "Notícias", "Sobre")
+    assert ok and cid == "55@newsletter"
+    assert any(c.tipo == "canal" for c in banco.conversas("w1"))
+
+    def recusa(*a, **k):
+        raise RuntimeError("nome longo")
+    cliente.create_group = recusa
+    ok, texto, cid = p.criar_conversa("grupo", "X")
+    assert not ok and "nome longo" in texto and cid == ""
+    banco.fechar()
+
+
+def test_recibo_de_reproduzida_leva_a_voz_ao_estado_reproduzida(amb):
+    cid = "5551988887777@s.whatsapp.net"
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento("V1", E.Message(
+        audioMessage=E.AudioMessage(seconds=3, PTT=True,
+                                    mimetype="audio/ogg; codecs=opus")),
+        de_mim=True))
+    esperar(amb.fila, ev.MensagemNova)
+    origem = N.MessageSource(Chat=jid("5551988887777"),
+                             Sender=jid("5551988887777"))
+    seguidos = []
+    for tipo in (1, 4, 6):                  # recebida, aberta, reproduzida
+        amb.f["Receipt"](amb.c, N.Receipt(
+            MessageSource=origem, MessageIDs=["V1"], Type=tipo,
+            Timestamp=TS + tipo))
+        seguidos.append(esperar(amb.fila, ev.EstadosMensagens).estado)
+    assert seguidos == [m.ENTREGUE, m.LIDA, m.REPRODUZIDA]
+    assert amb.banco.mensagem("w1", cid, "V1").estado == m.REPRODUZIDA
+    assert [r[1] for r in amb.banco.recibos("w1", cid, "V1")] == [
+        "entregue", "lida", "ouvida"]
+    # um recibo atrasado nao faz o estado voltar
+    amb.f["Receipt"](amb.c, N.Receipt(
+        MessageSource=origem, MessageIDs=["V1"], Type=4, Timestamp=TS + 9))
+    assert amb.banco.mensagem("w1", cid, "V1").estado == m.REPRODUZIDA
+
+
+def test_detalhes_dizem_reproduzida_e_a_linha_fala_o_estado():
+    x = m.Mensagem("w1", "5551@s.whatsapp.net", "V1", tipo=m.VOZ,
+                   minha=True, segundos=4, data=TS, estado=m.REPRODUZIDA)
+    texto = m.detalhes(x, "Ana", recibos=[
+        ("5551@s.whatsapp.net", "ouvida", TS + 6)])
+    assert "Estado: reproduzida" in texto and "Reproduzida a +5551" in texto
+    assert "reproduzida" in m.formatar(x, m.ESTILO_AUTOR_PRIMEIRO)

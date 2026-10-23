@@ -92,8 +92,8 @@ def pedir_credenciais_telegram(pai, validar):
     """Pede api id e api hash do Telegram; (id, hash) ou None."""
     titulo = "Credenciais do aplicativo no Telegram"
     explicacao = (
-        "Nesta fase de testes, o TeleZapp ainda não tem as credenciais "
-        "próprias no Telegram. Informe o api id e o api hash criados em "
+        "Esta cópia do TeleZapp veio sem as credenciais do aplicativo no "
+        "Telegram. Informe o api id e o api hash criados em "
         "my.telegram.org, na opção API development tools. Eles identificam "
         "o aplicativo, não a sua conta, e ficam só neste computador.")
     valores = ["", ""]
@@ -234,47 +234,55 @@ def mostrar_texto(pai, titulo, texto, rotulo, links=(), botoes=(),
 
 
 def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala):
-    """Grava, deixa ouvir e devolve a Gravacao que a pessoa quer enviar, ou
-    None se ela descartar ou se a captura nao abrir.
+    """Deixa gravar, pausar, ouvir e devolve a Gravacao que a pessoa quer
+    enviar, ou None se ela descartar.
 
-    A gravacao comeca assim que a janela abre. O foco fica em "Parar de
-    gravar"; depois de parar, em "Enviar". Esc descarta. `nova_gravacao()`
-    devolve um Gravador novo (usado tambem em "Gravar de novo")."""
+    A janela abre pronta, sem gravar: o foco fica em "Gravar" e a gravacao so
+    comeca quando a pessoa aperta o botao. Gravando, o foco fica em "Parar de
+    gravar" (Enter), ao lado de "Pausar"; depois de parar, em "Enviar". Esc
+    descarta em qualquer fase. `nova_gravacao()` devolve um Gravador novo
+    (usado tambem em "Gravar de novo")."""
     dlg = wx.Dialog(pai, title=titulo, style=wx.DEFAULT_DIALOG_STYLE)
     explicacao = wx.StaticText(dlg, label=instrucao)
     explicacao.Wrap(420)
-    situacao = wx.StaticText(dlg, label="Preparando...", name="Situação")
+    situacao = wx.StaticText(dlg, label="Pronto para gravar.", name="Situação")
+    b_gravar = wx.Button(dlg, wx.ID_ANY, "&Gravar")
     b_parar = wx.Button(dlg, wx.ID_ANY, "&Parar de gravar")
+    b_pausar = wx.Button(dlg, wx.ID_ANY, "Pausa&r")
     b_enviar = wx.Button(dlg, wx.ID_OK, "&Enviar")
     b_ouvir = wx.Button(dlg, wx.ID_ANY, "&Ouvir")
-    b_refazer = wx.Button(dlg, wx.ID_ANY, "&Gravar de novo")
+    b_refazer = wx.Button(dlg, wx.ID_ANY, "Gravar de &novo")
     b_descartar = wx.Button(dlg, wx.ID_CANCEL, "&Descartar")
     lay = wx.BoxSizer(wx.VERTICAL)
     lay.Add(explicacao, 0, wx.ALL, 10)
     lay.Add(situacao, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
     linha = wx.BoxSizer(wx.HORIZONTAL)
-    for b in (b_parar, b_enviar, b_ouvir, b_refazer, b_descartar):
+    for b in (b_gravar, b_parar, b_pausar, b_enviar, b_ouvir, b_refazer,
+              b_descartar):
         linha.Add(b, 0, wx.RIGHT, 6)
     lay.Add(linha, 0, wx.ALL, 10)
     dlg.SetSizer(lay)
     dlg.SetEscapeId(b_descartar.GetId())
     temporizador = wx.Timer(dlg)
     est = {"gravador": None, "gravacao": None, "player": None,
-           "fase": "gravando"}
+           "fase": "inicio"}
 
     def mostrar(fase):
+        """fase: inicio, gravando, pausada ou pronta."""
         est["fase"] = fase
-        gravando = fase == "gravando"
-        b_parar.Show(gravando)
+        ativa = fase in ("gravando", "pausada")
+        b_gravar.Show(fase == "inicio")
+        b_parar.Show(ativa)
+        b_pausar.Show(ativa)
+        b_pausar.SetLabel("&Continuar" if fase == "pausada" else "Pausa&r")
         for b in (b_enviar, b_ouvir, b_refazer):
-            b.Show(not gravando)
+            b.Show(fase == "pronta")
         dlg.Layout()
         dlg.Fit()
-        (b_parar if gravando else b_enviar).SetFocus()
-        if gravando:
-            b_parar.SetDefault()
-        else:
-            b_enviar.SetDefault()
+        foco = {"inicio": b_gravar, "gravando": b_parar,
+                "pausada": b_pausar, "pronta": b_enviar}[fase]
+        foco.SetFocus()
+        foco.SetDefault()
 
     def fechar_player():
         p, est["player"] = est["player"], None
@@ -285,14 +293,16 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala):
                 pass
         b_ouvir.SetLabel("&Ouvir")
 
-    def comecar():
+    def comecar(_e=None):
         g = nova_gravacao()
-        bipe("nova")
-        time.sleep(0.3)     # o bipe nao pode entrar na gravacao
+        bipe("gravando")
+        time.sleep(0.4)     # o bipe nao pode entrar na gravacao
         try:
             g.iniciar()
         except ErroGravacao as e:
-            wx.MessageBox(str(e), titulo, wx.OK | wx.ICON_WARNING, pai)
+            wx.MessageBox(str(e), titulo, wx.OK | wx.ICON_WARNING, dlg)
+            situacao.SetLabel("Pronto para gravar.")
+            mostrar("inicio")
             return False
         est["gravador"] = g
         situacao.SetLabel("Gravando: 0:00")
@@ -301,9 +311,25 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala):
         temporizador.Start(500)
         return True
 
+    def pausar(_e=None):
+        g = est["gravador"]
+        if g is None:
+            return
+        if est["fase"] == "gravando":
+            g.pausar()
+            texto = "Pausado em %s." % formatar_tempo(g.decorrido)
+            situacao.SetLabel(texto)
+            mostrar("pausada")
+            fala.falar(texto, interromper=True)
+        elif est["fase"] == "pausada":
+            g.continuar()
+            situacao.SetLabel("Gravando: %s" % formatar_tempo(g.decorrido))
+            mostrar("gravando")
+            fala.falar("Gravando.", interromper=True)
+
     def parar(_e=None):
         g = est["gravador"]
-        if est["fase"] != "gravando" or g is None:
+        if est["fase"] not in ("gravando", "pausada") or g is None:
             return
         temporizador.Stop()
         try:
@@ -314,7 +340,7 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala):
             wx.MessageBox(str(e), titulo, wx.OK | wx.ICON_WARNING, dlg)
             dlg.EndModal(wx.ID_CANCEL)
             return
-        bipe("enviada")
+        bipe("gravacao_parada")
         r = est["gravacao"]
         texto = "Gravação pronta: %s." % formatar_tempo(r.segundos)
         if r.silenciosa:
@@ -328,11 +354,11 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala):
 
     def quando_o_tempo_passa(_e=None):
         g = est["gravador"]
-        if est["fase"] == "gravando" and g is not None:
-            if g.gravando:
+        if est["fase"] in ("gravando", "pausada") and g is not None:
+            if not g.gravando:
+                parar()        # chegou ao limite de tempo
+            elif est["fase"] == "gravando":
                 situacao.SetLabel("Gravando: %s" % formatar_tempo(g.decorrido))
-            else:
-                parar()
         elif est["player"] is not None and not est["player"].tocando:
             fechar_player()
 
@@ -355,12 +381,15 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala):
         if est["gravacao"] is not None:
             _apagar(est["gravacao"].caminho)
             est["gravacao"] = None
-        comecar()
+        situacao.SetLabel("Pronto para gravar.")
+        mostrar("inicio")
+        fala.falar("Pronto para gravar de novo.", interromper=True)
 
     def descartar(_e=None):
         temporizador.Stop()
         fechar_player()
-        if est["fase"] == "gravando" and est["gravador"] is not None:
+        if est["fase"] in ("gravando", "pausada") and \
+                est["gravador"] is not None:
             est["gravador"].cancelar()
         elif est["gravacao"] is not None:
             _apagar(est["gravacao"].caminho)
@@ -372,7 +401,9 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala):
         fechar_player()
         dlg.EndModal(wx.ID_OK)
 
+    b_gravar.Bind(wx.EVT_BUTTON, comecar)
     b_parar.Bind(wx.EVT_BUTTON, parar)
+    b_pausar.Bind(wx.EVT_BUTTON, pausar)
     b_ouvir.Bind(wx.EVT_BUTTON, ouvir)
     b_refazer.Bind(wx.EVT_BUTTON, refazer)
     b_descartar.Bind(wx.EVT_BUTTON, descartar)
@@ -381,13 +412,14 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala):
     dlg.Bind(wx.EVT_CLOSE, descartar)
     resultado = None
     try:
-        if comecar():
-            dlg.CentreOnParent()
-            if dlg.ShowModal() == wx.ID_OK:
-                resultado = est["gravacao"]
+        mostrar("inicio")
+        dlg.CentreOnParent()
+        if dlg.ShowModal() == wx.ID_OK:
+            resultado = est["gravacao"]
     finally:
         temporizador.Stop()
-        if est["gravador"] is not None and est["fase"] == "gravando":
+        if est["gravador"] is not None and \
+                est["fase"] in ("gravando", "pausada"):
             est["gravador"].cancelar()
         dlg.Destroy()
     return resultado

@@ -38,9 +38,10 @@ PARTES = (
 NOMES_PARTES = dict(PARTES)
 
 # Opcoes que um arquivo de backup nunca muda sozinho: a exigencia do codigo
-# secreto (trocar o arquivo nao pode abrir as conversas trancadas) e o modo
-# de depuracao (guarda dados das mensagens)
-OPCOES_FORA = {"trancadas_exigir_codigo", "depuracao"}
+# secreto (trocar o arquivo nao pode abrir as conversas trancadas), o modo
+# de depuracao (guarda dados das mensagens) e abrir ao entrar no Windows (e
+# uma entrada do computador, com o caminho do programa dele)
+OPCOES_FORA = {"trancadas_exigir_codigo", "depuracao", "iniciar_com_windows"}
 # O que a parte "contas" leva do config.json
 CHAVES_CONTAS = ("contas", "telegram_api_id", "telegram_api_hash",
                  "codigo_trancadas", "trancadas_locais",
@@ -68,7 +69,8 @@ class Manifesto:
 # ------------------------------------------------------------- opcoes
 # Preferencias fora de config.OPCOES que tambem vao (a ordem dos provedores
 # de IA e os modelos; as chaves so em backup com senha, ver CHAVES_IA)
-EXTRAS = ("ia_ordem", "ia_modelos", "pacote_de_sons", "sons_desativados")
+EXTRAS = ("ia_ordem", "ia_modelos", "pacote_de_sons", "sons_desativados",
+          "atalhos")
 
 
 def opcoes_do_backup(dados):
@@ -78,6 +80,28 @@ def opcoes_do_backup(dados):
     for chave in EXTRAS:
         levadas[chave] = dados.get(chave, config.PADROES.get(chave, {}))
     return levadas
+
+
+def atalhos_validos(lidos):
+    """O mapa de atalhos personalizados ({funcao: combinacao}, "" = sem
+    atalho) com so o que serve: funcao em texto e combinacao que existe e
+    pode ser atalho, na forma canonica; duas funcoes com a mesma combinacao
+    ficam sem ela (a primeira vale)."""
+    from telezapp.nucleo import atalhos as at
+    boas, usadas = {}, set()
+    for funcao, valor in lidos.items():
+        if not isinstance(funcao, str) or not funcao \
+                or not isinstance(valor, str):
+            continue
+        if valor == "":
+            boas[funcao] = ""
+            continue
+        canon = at.normalizar(valor)
+        if canon is None or at.problema(canon) or canon in usadas:
+            continue
+        usadas.add(canon)
+        boas[funcao] = canon
+    return boas
 
 
 def opcoes_validas(lidas):
@@ -117,6 +141,9 @@ def opcoes_validas(lidas):
     if isinstance(pacote, str) and (pacote in ("padrao", "telezapp") or
                                     pacote.startswith("p:")):
         boas["pacote_de_sons"] = pacote
+    atalhos = lidas.get("atalhos")
+    if isinstance(atalhos, dict):
+        boas["atalhos"] = atalhos_validos(atalhos)
     desativados = lidas.get("sons_desativados")
     if isinstance(desativados, dict):
         boas["sons_desativados"] = {

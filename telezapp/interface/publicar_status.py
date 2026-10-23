@@ -11,7 +11,7 @@ class DialogoPublicarStatus(wx.Dialog):
     `resultado` tem conta_id, texto, anexo e publico."""
 
     def __init__(self, pai, contas, escolher_arquivo):
-        super().__init__(pai, title="Postar status",
+        super().__init__(pai, title="Novo status",
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.contas = list(contas)
         self.escolher_arquivo = escolher_arquivo
@@ -91,7 +91,7 @@ class DialogoPublicarStatus(wx.Dialog):
         anexo, texto, erro = ps.validar(servico, self.texto.GetValue(),
                                         self.caminho)
         if erro:
-            wx.MessageBox(erro, "Postar status", wx.OK | wx.ICON_WARNING,
+            wx.MessageBox(erro, "Novo status", wx.OK | wx.ICON_WARNING,
                           self)
             return
         publico = ps.PUBLICOS[max(self.cx_publico.GetSelection(), 0)][0]

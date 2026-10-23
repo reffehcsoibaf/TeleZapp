@@ -79,3 +79,22 @@ def test_banco_antigo_ganha_as_colunas_das_temporarias(tmp_path):
                                    temporaria_s=86400)])
     assert b.conversas("c")[0].temporaria_s == 86400
     b.fechar()
+
+
+def test_mensagens_com_recibo_de_reproduzida_viram_reproduzidas_ao_abrir(
+        tmp_path):
+    from telezapp.armazenamento.banco import Banco
+    from telezapp.nucleo import modelos as m
+    caminho = str(tmp_path / "r.db")
+    b = Banco(caminho)
+    b.salvar_mensagens([
+        m.Mensagem("w1", "c", "V1", tipo=m.VOZ, minha=True, data=1,
+                   estado=m.LIDA),
+        m.Mensagem("w1", "c", "V2", tipo=m.VOZ, minha=True, data=2,
+                   estado=m.LIDA)])
+    b.salvar_recibos("w1", "c", ["V1"], "p", "ouvida", 5)
+    b.fechar()
+    b = Banco(caminho)                        # abrir de novo corrige V1
+    assert b.mensagem("w1", "c", "V1").estado == m.REPRODUZIDA
+    assert b.mensagem("w1", "c", "V2").estado == m.LIDA
+    b.fechar()

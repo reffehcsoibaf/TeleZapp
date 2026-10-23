@@ -167,9 +167,20 @@ class ClienteFalso:
         return types.SimpleNamespace(id=777, first_name="Bia", last_name="",
                                      username=usuario, title=None)
 
-    async def send_message(self, ent, texto, reply_to=None, link_preview=True):
+    async def send_message(self, ent, texto="", reply_to=None,
+                           link_preview=True, file=None):
         if texto == "falhar":
             raise errors.ChatWriteForbiddenError(None)
+        if file is not None:
+            self.enquetes = getattr(self, "enquetes", []) + [file]
+            poll = file.poll
+            return types.SimpleNamespace(
+                id=98, message="", out=True, date=DATA, action=None,
+                poll=types.SimpleNamespace(poll=types.SimpleNamespace(
+                    id=555, question=poll.question, answers=poll.answers,
+                    multiple_choice=poll.multiple_choice, closed=False,
+                    public_voters=poll.public_voters), results=None),
+                media=object(), sender=None, post_author="")
         self.enviadas.append((ent, texto, reply_to))
         return mensagem(99, texto, out=True)
 
@@ -281,7 +292,7 @@ def test_sessao_salva_conecta_e_lista_conversas(ambiente):
         assert len(ambiente.banco.conversas("t1")) == 3
         assert [c.arquivada for c in ambiente.banco.conversas("t1")
                 if c.nome == "Velha"] == [True]
-        assert len(cliente.handlers) == 8
+        assert len(cliente.handlers) == 9
 
         p.carregar_mensagens("10")
         msgs = esperar(ambiente.fila, ev.MensagensCarregadas).mensagens
@@ -358,7 +369,7 @@ def test_mensagem_recebida_e_leitura(ambiente):
     p.iniciar()
     try:
         esperar(ambiente.fila, ev.ConversasAtualizadas)
-        receber, ler, _, _, _, _, _, _ = cliente.handlers
+        receber, ler, _, _, _, _, _, _, _ = cliente.handlers
 
         async def chegar():
             async def get_chat():
@@ -1108,5 +1119,264 @@ def test_prazo_ao_vivo_aviso_de_servico_e_definir(ambiente):
                   if type(r).__name__ == "SetHistoryTTLRequest"][0]
         assert pedido.period == 2678400
         assert p._conversas["88"].temporaria_s == 2678400
+    finally:
+        p.parar()
+
+
+def _enquete_falsa(votos=None, fechada=False, multipla=False, publica=False):
+    from telethon.tl import types as tipos
+    respostas = [types.SimpleNamespace(text=types.SimpleNamespace(text=t),
+                                       option=bytes([i]))
+                 for i, t in enumerate(("Sexta", "Sábado", "Domingo"))]
+    poll = types.SimpleNamespace(
+        id=777, question=types.SimpleNamespace(text="Qual dia?"),
+        answers=respostas, multiple_choice=multipla, closed=fechada,
+        public_voters=publica)
+    resultados = None
+    if votos is not None:
+        resultados = types.SimpleNamespace(
+            results=[types.SimpleNamespace(option=bytes([i]), voters=n,
+                                           chosen=i in votos.get("meus", ()))
+                     for i, n in enumerate(votos["contagem"])],
+            total_voters=sum(votos["contagem"]))
+    return types.SimpleNamespace(
+        id=5, message="", out=False, date=DATA, action=None,
+        poll=types.SimpleNamespace(poll=poll, results=resultados),
+        media=object(), sender=None, post_author="Ana")
+
+
+def test_enquete_do_telegram_vira_dados_da_mensagem():
+    from telezapp.provedores import telegram as tg
+    nova = tg.converter(_enquete_falsa({"contagem": [2, 0, 1],
+                                         "meus": [2]}), "t1", "10")
+    e = m.enquete_de(nova)
+    assert e["pergunta"] == "Qual dia?"
+    assert e["opcoes"] == ["Sexta", "Sábado", "Domingo"]
+    assert e["maximo"] == 1 and e["anonima"] and not e["encerrada"]
+    assert m.contagens_da_enquete(e) == [2, 0, 1] and e["meus"] == [2]
+    assert m.votantes_da_enquete(e) == 3
+    assert e["poll_id"] == "777" and e["ids"] == ["00", "01", "02"]
+    assert nova.texto == "enquete: Qual dia?"
+    # sem resultados (ainda nao votei) nem multipla escolha
+    sem = m.enquete_de(tg.converter(_enquete_falsa(None, multipla=True),
+                                    "t1", "10"))
+    assert sem["contagem"] is None and sem["maximo"] == 3
+
+
+def test_votar_no_telegram_manda_a_opcao_e_atualiza(ambiente):
+    import asyncio
+    cliente = ClienteFalso()
+    from telezapp.provedores import telegram as tg
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    nova = tg.converter(_enquete_falsa(), "t1", "10")
+    ambiente.banco.salvar_mensagens([nova])
+
+    async def get_messages(entidade, ids=None):
+        return _enquete_falsa({"contagem": [0, 1, 0], "meus": [1]})
+    cliente.get_messages = get_messages
+    asyncio.run(p._votar_enquete(nova, [1]))
+    pedido = [r for r in cliente.requisicoes
+              if type(r).__name__ == "SendVoteRequest"][-1]
+    assert pedido.msg_id == 5 and pedido.options == [b"\x01"]
+    a = esperar(ambiente.fila, ev.MensagemAtualizada)
+    assert a.motivo == "enquete"
+    assert m.enquete_de(a.mensagem)["meus"] == [1]
+    assert m.contagens_da_enquete(m.enquete_de(a.mensagem)) == [0, 1, 0]
+
+
+def test_voto_de_outra_pessoa_chega_pela_atualizacao_da_enquete(ambiente):
+    import asyncio
+    cliente = ClienteFalso()
+    from telezapp.provedores import telegram as tg
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    nova = tg.converter(_enquete_falsa({"contagem": [0, 0, 0]}), "t1", "10")
+    ambiente.banco.salvar_mensagens([nova])
+    atual = _enquete_falsa({"contagem": [3, 1, 0]})
+    evento = types.SimpleNamespace(poll_id=777, poll=None,
+                                   results=atual.poll.results)
+    asyncio.run(p._ao_enquete(evento))
+    a = esperar(ambiente.fila, ev.MensagemAtualizada)
+    assert a.motivo == "enquete" and a.quem == "alguém"   # os votos subiram
+    assert m.contagens_da_enquete(m.enquete_de(a.mensagem)) == [3, 1, 0]
+    # enquete encerrada
+    fechada = types.SimpleNamespace(
+        poll_id=777, poll=types.SimpleNamespace(closed=True),
+        results=atual.poll.results)
+    asyncio.run(p._ao_enquete(fechada))
+    b = esperar(ambiente.fila, ev.MensagemAtualizada)
+    assert m.enquete_de(b.mensagem)["encerrada"] is True
+    assert b.quem == ""                              # nenhum voto novo
+    # enquete que nao conhecemos: nada acontece
+    asyncio.run(p._ao_enquete(types.SimpleNamespace(
+        poll_id=1, poll=None, results=None)))
+    assert ambiente.fila.empty()
+
+
+def test_criar_enquete_no_telegram_manda_a_pergunta_e_as_opcoes(ambiente):
+    import asyncio
+    cliente = ClienteFalso()
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    asyncio.run(p._criar_enquete("10", "Qual dia?", ["Sexta", "Sábado"],
+                                 True, False))
+    media = cliente.enquetes[-1]
+    poll = media.poll
+    assert poll.question.text == "Qual dia?"
+    assert [a.text.text for a in poll.answers] == ["Sexta", "Sábado"]
+    assert [a.option for a in poll.answers] == [b"\x00", b"\x01"]
+    assert poll.multiple_choice is True and poll.public_voters is True
+    nova = esperar(ambiente.fila, ev.MensagemNova)
+    e = m.enquete_de(nova.mensagem)
+    assert nova.enviada_daqui and e["opcoes"] == ["Sexta", "Sábado"]
+    assert e["maximo"] == 2 and e["poll_id"] == "555"
+
+
+# ------------------------------------------------ grupos com topicos
+def test_ids_e_topicos_de_um_grupo_com_topicos():
+    assert tg.id_do_topico("-100", 7) == "-100#7"
+    assert tg.separar_topico("-100#7") == ("-100", 7)
+    assert tg.separar_topico("-100") == ("-100", 0)
+    assert tg.separar_topico("status:5") == ("status:5", 0)
+    assert tg.nome_do_topico("Equipe", "Avisos") == "Equipe › Avisos"
+    assert tg.topico_da_mensagem(mensagem(1)) == tg.TOPICO_GERAL
+    direta = mensagem(2, reply_to=types.SimpleNamespace(
+        forum_topic=True, reply_to_msg_id=9, reply_to_top_id=None))
+    assert tg.topico_da_mensagem(direta) == 9
+    resposta = mensagem(3, reply_to=types.SimpleNamespace(
+        forum_topic=True, reply_to_msg_id=20, reply_to_top_id=9))
+    assert tg.topico_da_mensagem(resposta) == 9
+    resp_geral = mensagem(4, reply_to=types.SimpleNamespace(
+        forum_topic=False, reply_to_msg_id=2, reply_to_top_id=None))
+    assert tg.topico_da_mensagem(resp_geral) == tg.TOPICO_GERAL
+
+
+class ClienteComForum(ClienteFalso):
+    """Um grupo com topicos (Geral e Avisos) e uma conversa comum."""
+
+    async def iter_dialogs(self, limit=None, folder=None, archived=None):
+        if folder == 1:
+            return
+        yield types.SimpleNamespace(
+            id=10, name="Ana", unread_count=0, date=DATA,
+            input_entity="peer10", is_group=False, is_channel=False,
+            dialog=types.SimpleNamespace(read_outbox_max_id=0))
+        yield types.SimpleNamespace(
+            id=-100, name="Equipe", unread_count=5, date=DATA,
+            input_entity="peer-100", is_group=True, is_channel=True,
+            entity=types.SimpleNamespace(forum=True),
+            dialog=types.SimpleNamespace(read_outbox_max_id=0))
+
+    async def iter_messages(self, ent, limit=None, reply_to=None):
+        self.filtros = getattr(self, "filtros", []) + [reply_to]
+        topico = types.SimpleNamespace(forum_topic=True, reply_to_msg_id=9,
+                                       reply_to_top_id=None)
+        if reply_to == 9:
+            yield mensagem(21, "no topico", reply_to=topico, sender=ANA)
+            return
+        yield mensagem(30, "no geral", sender=ANA)
+        yield mensagem(21, "no topico", reply_to=topico, sender=ANA)
+        yield mensagem(10, "antiga do geral", sender=ANA)
+
+    async def __call__(self, requisicao):
+        await super().__call__(requisicao)
+        nome = type(requisicao).__name__
+        if nome == "GetForumTopicsRequest":
+            def topico(id, titulo, nao_lidas, mensagem_id, fechado=False):
+                return types.SimpleNamespace(
+                    id=id, title=titulo, unread_count=nao_lidas,
+                    top_message=mensagem_id, pinned=False, closed=fechado)
+            return types.SimpleNamespace(
+                topics=[topico(1, "Geral", 2, 30),
+                        topico(9, "Avisos", 3, 21, fechado=True),
+                        types.SimpleNamespace(id=4)],     # apagado
+                messages=[mensagem(30), mensagem(21)])
+        return types.SimpleNamespace(chats=[types.SimpleNamespace(id=555)])
+
+
+def test_grupo_com_topicos_vira_uma_conversa_por_topico(ambiente):
+    cliente = ClienteComForum()
+    p = ambiente.criar(cliente)
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ContaPronta)
+        convs = esperar(ambiente.fila, ev.ConversasAtualizadas).conversas
+        por_id = {c.id: c for c in convs}
+        assert sorted(por_id) == ["-100", "-100#1", "-100#9", "10"]
+        assert por_id["-100"].nome == "Equipe"
+        assert por_id["-100"].nao_lidas == 5           # soma dos topicos
+        assert por_id["-100#9"].nome == "Equipe › Avisos"
+        assert por_id["-100#9"].nao_lidas == 3
+        assert por_id["-100#9"].somente_leitura        # topico fechado
+        assert not por_id["-100#1"].somente_leitura
+        assert por_id["-100#1"].tipo == "grupo"
+
+        p.carregar_mensagens("-100#9")
+        msgs = esperar(ambiente.fila, ev.MensagensCarregadas).mensagens
+        assert [x.id for x in msgs] == ["21"]
+        assert cliente.filtros[-1] == 9
+        assert msgs[0].conversa_id == "-100#9"
+        p.carregar_mensagens("-100#1")                  # o Geral
+        msgs = esperar(ambiente.fila, ev.MensagensCarregadas).mensagens
+        assert [x.id for x in msgs] == ["10", "30"]     # sem a do topico
+
+        p.enviar_texto("-100#9", "oi")
+        esperar(ambiente.fila, ev.MensagemNova)
+        p.enviar_texto("-100#1", "geral")
+        esperar(ambiente.fila, ev.MensagemNova)
+        p.enviar_texto("-100#9", "resp", resposta_a="21")
+        esperar(ambiente.fila, ev.MensagemNova)
+        # no topico responde ao topico; no Geral e na resposta, como antes
+        assert [(e[0], e[2]) for e in cliente.enviadas] == [
+            ("peer-100", 9), ("peer-100", None), ("peer-100", 21)]
+    finally:
+        p.parar()
+
+
+def test_marcar_topico_como_lido_le_so_aquele_topico(ambiente):
+    cliente = ClienteComForum()
+    p = ambiente.criar(cliente)
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ContaPronta)
+        esperar(ambiente.fila, ev.ConversasAtualizadas)
+        p.carregar_mensagens("-100#9")
+        esperar(ambiente.fila, ev.MensagensCarregadas)
+        p.marcar_como_lida("-100#9")
+        p.carregar_mensagens("10")       # garante que a anterior terminou
+        esperar(ambiente.fila, ev.MensagensCarregadas)
+        leitura = [r for r in cliente.requisicoes
+                   if type(r).__name__ == "ReadDiscussionRequest"]
+        assert leitura and leitura[0].msg_id == 9 and \
+            leitura[0].read_max_id == 21
+        assert cliente.lidas == []        # nao leu o grupo inteiro
+    finally:
+        p.parar()
+
+
+def test_criar_grupo_e_canal_no_telegram_monta_os_pedidos(ambiente,
+                                                          monkeypatch):
+    from telethon import utils
+    cliente = ClienteComForum()
+    p = ambiente.criar(cliente)
+    monkeypatch.setattr(utils, "get_peer_id", lambda c: -1000000000555)
+    monkeypatch.setattr(utils, "get_input_peer", lambda c: "peerNovo")
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ContaPronta)
+        assert p.CRIA == ("grupo", "canal")
+        ok, aviso, cid = p.criar_conversa("grupo", "Equipe", "Sobre", [],
+                                          topicos=True)
+        pedido = next(r for r in cliente.requisicoes
+                      if type(r).__name__ == "CreateChannelRequest")
+        assert ok and cid == "-1000000000555#1"
+        assert pedido.megagroup and pedido.forum and not pedido.broadcast
+        assert (pedido.title, pedido.about) == ("Equipe", "Sobre")
+        ok, aviso, cid = p.criar_conversa("canal", "Notícias", "")
+        pedido = [r for r in cliente.requisicoes
+                  if type(r).__name__ == "CreateChannelRequest"][-1]
+        assert ok and cid == "-1000000000555"
+        assert pedido.broadcast and not pedido.megagroup and not pedido.forum
     finally:
         p.parar()
