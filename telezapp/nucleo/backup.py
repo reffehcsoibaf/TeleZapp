@@ -70,7 +70,7 @@ class Manifesto:
 # Preferencias fora de config.OPCOES que tambem vao (a ordem dos provedores
 # de IA e os modelos; as chaves so em backup com senha, ver CHAVES_IA)
 EXTRAS = ("ia_ordem", "ia_modelos", "pacote_de_sons", "sons_desativados",
-          "atalhos")
+          "atalhos", "lista_conversas")
 
 
 def opcoes_do_backup(dados):
@@ -144,6 +144,10 @@ def opcoes_validas(lidas):
     atalhos = lidas.get("atalhos")
     if isinstance(atalhos, dict):
         boas["atalhos"] = atalhos_validos(atalhos)
+    lista = lidas.get("lista_conversas")
+    if isinstance(lista, dict):
+        from telezapp.nucleo import lista_conversas
+        boas["lista_conversas"] = lista_conversas.normalizar(lista)
     desativados = lidas.get("sons_desativados")
     if isinstance(desativados, dict):
         boas["sons_desativados"] = {

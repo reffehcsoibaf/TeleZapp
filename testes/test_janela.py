@@ -2110,6 +2110,71 @@ def test_editar_perfil_sem_conta_que_edite_ou_com_erro_de_leitura(j):
     assert ditas[-1] == "A conta do WhatsApp não está conectada."
 
 
+def test_lista_de_conversas_muda_a_ordem_e_os_itens(j):
+    from telezapp.nucleo import lista_conversas as lc
+    j.b.publicar(ev.ConversasAtualizadas("t1", [
+        conv("10", "Ana", nao_lidas=2, data=AGORA)]))
+    assert j.lista_conv.itens[0] == "Ana, Telegram, 2 não lidas"
+    j._aplicar_opcao("lista_conversas", {
+        "ordem": ["nao_lidas", "nome", "servico", "previa"],
+        "ocultos": ["servico", "previa"]})
+    assert j.lista_conv.itens[0] == "2 não lidas, Ana"
+    assert j.cfg.get("lista_conversas")["ocultos"] == ["servico", "previa"]
+    assert not j.itens["lista_servico"].marcado
+    assert j.itens["lista_nome"].marcado
+    j.itens["lista_servico"].Check(True)       # o menu marca antes do evento
+    j.fala.falar = lambda t, interromper=False: None
+    j._aplicar_opcao("lista_conversas", lc.padrao())
+    assert j.lista_conv.itens[0] == "Ana, Telegram, 2 não lidas"
+
+
+def test_item_do_menu_da_lista_nao_deixa_tirar_o_ultimo(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._aplicar_opcao("lista_conversas", {
+        "ordem": ["nome", "servico", "nao_lidas", "previa"],
+        "ocultos": ["servico", "nao_lidas", "previa"]})
+    j.itens["lista_nome"].Check(False)         # o wx desmarca sozinho
+    j._alternar_item_da_lista("nome")
+    assert ditas[-1] == "Pelo menos um item precisa ficar ativado."
+    assert j.itens["lista_nome"].marcado   # voltou marcado
+    assert j.cfg.get("lista_conversas")["ocultos"] == [
+        "servico", "nao_lidas", "previa"]
+    j._alternar_item_da_lista("previa")
+    assert ditas[-1] == "Trecho da última mensagem: ativado."
+    assert "previa" not in j.cfg.get("lista_conversas")["ocultos"]
+
+
+def test_trecho_da_ultima_mensagem_acompanha_a_conversa(j):
+    j._aplicar_opcao("lista_conversas", {
+        "ordem": ["nome", "previa", "nao_lidas", "servico"],
+        "ocultos": ["servico", "nao_lidas"]})
+    c = j.indice[("t1", "10")]
+    c.data = AGORA + 60
+    j.b.publicar(ev.MensagemNova(msg("5", "vamos almoçar?", data=AGORA + 60),
+                                 c))
+    assert j.lista_conv.itens[0] == "Ana, vamos almoçar?"
+    # uma mais antiga que chega depois nao troca o trecho
+    j._atualizar_previa(("t1", "10"), msg("1", "velha", data=AGORA + 1))
+    assert j.lista_conv.itens[0] == "Ana, vamos almoçar?"
+    # editada: o trecho acompanha
+    editada = msg("5", "vamos jantar?", data=AGORA + 60)
+    j.b.publicar(ev.MensagemAtualizada("t1", "10", editada, "editada"))
+    assert j.lista_conv.itens[0] == "Ana, vamos jantar?"
+
+
+def test_trechos_do_banco_entram_ao_ligar_o_item(j):
+    j.banco.salvar_mensagens([msg("3", "do banco", data=AGORA + 3)])
+    j._aplicar_opcao("lista_conversas", {
+        "ordem": ["nome", "previa", "nao_lidas", "servico"],
+        "ocultos": ["servico", "nao_lidas"]})
+    for _ in range(100):             # a leitura roda em segundo plano
+        if ("t1", "10") in j.previas:
+            break
+        time.sleep(0.02)
+    assert j.lista_conv.itens[0] == "Ana, do banco"
+
+
 def test_limite_de_mensagens_por_conversa(j):
     j.cfg.set("mensagens_por_conversa", 50)
     assert j._limite_memoria() == 50

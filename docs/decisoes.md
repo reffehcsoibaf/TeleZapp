@@ -646,6 +646,14 @@ Conferido o plano de 13/10 contra o código. Decisões do responsável:
 - Decisões: a foto é preparada pelo TeleZapp (centro em quadrado, 640 px, JPEG) para o responsável poder escolher qualquer imagem; **sem remover a foto** por ora (o neonize não tem e o Telegram pediria outra chamada); o recado do Telegram aceita até 140 no formulário (Premium) e o serviço recusa acima de 70 sem Premium, com a frase explicada.
 - **Ainda sem teste ao vivo**: tudo. Pontos de atenção: o `set_profile_name` do neonize grava o nome de exibição (push name) e não confirmei que o WhatsApp o mostra na hora a quem já tem a conversa aberta; ler o recado próprio no WhatsApp depende de `get_user_info` do próprio JID.
 
+### Lista de conversas configurável (23/10/2026, versão 2026.10.23.1)
+
+- A ordem das informações **da mensagem** já existe (estilos em Exibir, "Como cada mensagem é lida"); o que faltava era a **lista de conversas**. Quatro itens: nome da conversa, serviço, quantidade de não lidas e trecho da última mensagem. Cada um liga e desliga, com ordem escolhida pelos botões Mover para cima e para baixo.
+- Onde: botão "Lista de conversas" na categoria Interface (valor pendente até OK ou Aplicar, como as outras configurações) e submenu "Lista de conversas" em Exibir (efeito imediato).
+- Decisões: pelo menos um item sempre ativado (a tentativa de tirar o último é recusada e falada); **o trecho vem desligado por padrão** (a leitura da lista segue como sempre foi); fixada e silenciada aparecem sempre, depois do serviço (ou do nome); se os itens ativados não têm nada a mostrar numa conversa (sem não lidas e sem trecho, por exemplo), mostra o nome. Trecho: até 80 caracteres, "Você:" nas minhas e o autor nos grupos.
+- O trecho vem do banco numa consulta só, em segundo plano, quando o item está ligado, e depois acompanha as mensagens novas, editadas e apagadas.
+- **Ainda sem teste ao vivo.** A janela de ordem foi aberta com o wx de verdade (sem mostrar) e funciona; falta ver com o leitor de tela e com muitas conversas (o tempo da consulta do trecho num banco grande).
+
 ## Chamadas de voz do WhatsApp: fase 0 (21/10/2026)
 
 - Experimento em `experimentos/10-chamada-whatsapp-meowcaller/` (Go, meowcaller sobre o hypermeow) com a ponte de voz em Python (`experimentos/chamada_whatsapp.py`, microfone e alto-falante por socket local). Ainda fora do app.

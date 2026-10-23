@@ -5,6 +5,7 @@ sistema): categorias, busca e valores ainda nao aplicados."""
 from telezapp import config
 from telezapp.midia import velocidade as vel
 from telezapp.nucleo import codigo_secreto as cs
+from telezapp.nucleo import lista_conversas as lc
 from telezapp.nucleo.pacotes_de_som import EstadoDeSons
 from telezapp.nucleo import privacidade_conta as pw
 
@@ -49,6 +50,7 @@ class ModeloConfiguracoes:
         self.sons = EstadoDeSons(cfg)    # pacote, eventos e arquivos de som
         self.registro = None      # nucleo.atalhos.Registro, dado pela janela
         self.atalhos_pendentes = None    # personalizados ainda nao aplicados
+        self.lista_pendente = None       # lista de conversas ainda nao aplicada
 
     # ------------------------------------------------------------ consulta
     def lista_de_categorias(self):
@@ -278,11 +280,28 @@ class ModeloConfiguracoes:
         else:
             self.atalhos_pendentes = dict(novos)
 
+    # ------------------------------------------------ lista de conversas
+    def lista_em_uso(self):
+        """O que a lista de conversas mostra, com o que ainda nao foi
+        aplicado."""
+        if self.lista_pendente is not None:
+            return self.lista_pendente
+        return lc.normalizar(self.cfg.get("lista_conversas"))
+
+    def lista_definir(self, valor):
+        valor = lc.normalizar(valor)
+        if valor == lc.normalizar(self.cfg.get("lista_conversas")):
+            self.lista_pendente = None
+        else:
+            self.lista_pendente = valor
+
     def aplicar(self, aplicador):
         """Entrega cada mudanca ao aplicador(chave, valor) e zera."""
         feitas = self.mudancas()
         atalhos = self.atalhos_pendentes
         self.atalhos_pendentes = None
+        lista = self.lista_pendente
+        self.lista_pendente = None
         ia = self.ia_mudancas()
         self.ia_chaves, self.ia_modelos, self.ia_ordens = {}, {}, {}
         acao = self.acao_codigo() if not self.erro_codigo() else None
@@ -305,6 +324,9 @@ class ModeloConfiguracoes:
         if sons is not None:
             aplicador("sons_pacotes", sons)
             feitas.append(("sons_pacotes", sons))
+        if lista is not None:
+            aplicador("lista_conversas", lista)
+            feitas.append(("lista_conversas", lista))
         if atalhos is not None:
             aplicador("atalhos", atalhos)
             feitas.append(("atalhos", atalhos))

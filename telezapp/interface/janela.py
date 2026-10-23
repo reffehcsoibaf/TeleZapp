@@ -47,6 +47,7 @@ from telezapp.nucleo.ia import servico as servico_ia
 from telezapp.nucleo.ia.provedores import ErroIA
 from telezapp.nucleo import backup
 from telezapp.nucleo import codigo_secreto
+from telezapp.nucleo import lista_conversas as lista_conv_nucleo
 from telezapp.nucleo import depuracao
 from telezapp.nucleo import encaminhar as enc
 from telezapp.nucleo import eventos as ev
@@ -376,6 +377,8 @@ class Janela(wx.Frame):
         self._acoes_enviadas = []     # respostas de botao esperando resultado
         self.rascunhos = {}           # texto nao enviado de cada conversa
         self.indice = {}              # chave -> Conversa
+        self.previas = {}             # chave -> (data, trecho da ultima mensagem)
+        self._previas_lidas = False   # as do banco ja foram lidas?
         self.cache = {}               # chave da conversa -> [Mensagem]
         self.atual = None             # chave da conversa aberta
         self.marcador_n = 0           # nao lidas ao abrir a conversa
@@ -625,6 +628,13 @@ class Janela(wx.Frame):
             self.Bind(wx.EVT_MENU,
                       lambda e, est=est: self._mudar_estilo(est), it)
         m_exib.AppendSubMenu(m_estilo, "Como cada &mensagem é lida")
+        m_lista = wx.Menu()
+        for chave_lc, rotulo_lc in lista_conv_nucleo.ITENS:
+            item(m_lista, "lista_" + chave_lc, rotulo_lc, "check")
+        m_lista.AppendSeparator()
+        item(m_lista, "lista_ordem", "&Ordem das informações...")
+        item(m_lista, "lista_padrao", "&Restaurar o padrão")
+        m_exib.AppendSubMenu(m_lista, "&Lista de conversas")
         m_exib.AppendSeparator()
         rotulos = {o.chave: o.rotulo for o in config.OPCOES}
         for chave in ("falar_novas", "falar_novas_outras_conversas",
@@ -712,6 +722,15 @@ class Janela(wx.Frame):
             "salvar_conv": lambda e: self._salvar_conversa(),
             "detalhes_conv": lambda e: self._detalhes_da_conversa(),
             "salvar_autor": lambda e: self._salvar_autor(),
+            "lista_nome": lambda e: self._alternar_item_da_lista("nome"),
+            "lista_servico": lambda e: self._alternar_item_da_lista(
+                "servico"),
+            "lista_nao_lidas": lambda e: self._alternar_item_da_lista(
+                "nao_lidas"),
+            "lista_previa": lambda e: self._alternar_item_da_lista("previa"),
+            "lista_ordem": lambda e: self._ordem_da_lista(),
+            "lista_padrao": lambda e: self._aplicar_opcao(
+                "lista_conversas", lista_conv_nucleo.padrao()),
             "bloqueados": lambda e: self._contatos_bloqueados(),
             "bloquear_pessoa": lambda e: self._bloquear_pessoa(),
             "logs": lambda e: self._abrir_logs(),
@@ -1260,6 +1279,8 @@ class Janela(wx.Frame):
         for dados in self.cfg.contas():
             self._juntar_conversas(dados["id"], self.banco.conversas(
                 dados["id"]))
+        self._sincronizar_menu_da_lista()
+        self._carregar_previas()
         self._preencher_conversas()
         self.contas.iniciar_salvas()
         if not self.cfg.contas():
@@ -1713,6 +1734,97 @@ class Janela(wx.Frame):
                  c, self.filtro_tipo, self.filtro_conta, self.busca))),
             key=lambda c: (not c.fixada, -c.data))
 
+    # ------------------------------------------- lista de conversas
+    def _lista_em_uso(self):
+        return lista_conv_nucleo.normalizar(self.cfg.get("lista_conversas"))
+
+    def _rotulo_da_conversa(self, c):
+        """A linha da conversa, com as informacoes e a ordem escolhidas."""
+        return lista_conv_nucleo.rotulo(
+            c, self._lista_em_uso(), self.previas.get(c.chave, (0, ""))[1])
+
+    def _atualizar_previa_se_for_a_ultima(self, chave, msg):
+        """A mensagem mudou (editada, apagada...): se era a ultima da
+        conversa, o trecho acompanha."""
+        antes = self.previas.get(chave)
+        if antes is None or msg.data != antes[0]:
+            return False
+        return self._atualizar_previa(chave, msg)
+
+    def _atualizar_previa(self, chave, msg):
+        """Guarda o trecho da mensagem se ela e a mais nova da conversa.
+        Devolve True se o trecho mudou."""
+        if msg is None:
+            return False
+        antes = self.previas.get(chave)
+        if antes is not None and msg.data < antes[0]:
+            return False
+        conv = self.indice.get(chave)
+        grupo = conv is not None and conv.tipo == "grupo"
+        quem = self._quem_enviou(msg) if grupo else ""
+        trecho = lista_conv_nucleo.previa_da_mensagem(msg, grupo, quem)
+        if antes is not None and antes[1] == trecho:
+            return False
+        self.previas[chave] = (msg.data, trecho)
+        return True
+
+    def _carregar_previas(self):
+        """Le do banco, em segundo plano, a ultima mensagem de cada conversa
+        (so quando a lista mostra o trecho)."""
+        if self._previas_lidas or "previa" not in lista_conv_nucleo.ativos(
+                self._lista_em_uso()):
+            return
+        self._previas_lidas = True
+
+        def trabalho():
+            try:
+                ultimas = self.banco.ultimas_mensagens()
+            except Exception:
+                log.exception("ler a última mensagem de cada conversa")
+                ultimas = {}
+            wx.CallAfter(self._previas_prontas, ultimas)
+        threading.Thread(target=trabalho, daemon=True,
+                         name="previas-conversas").start()
+
+    @seguro
+    def _previas_prontas(self, ultimas):
+        for chave, msg in ultimas.items():
+            self._atualizar_previa(chave, msg)
+        self._preencher_conversas()
+
+    def _sincronizar_menu_da_lista(self):
+        """Marca no menu Exibir o que a lista de conversas mostra."""
+        ocultos = self._lista_em_uso()["ocultos"]
+        for chave in lista_conv_nucleo.CHAVES:
+            it = self.itens.get("lista_" + chave)
+            if it is not None:
+                it.Check(chave not in ocultos)
+
+    @seguro
+    def _alternar_item_da_lista(self, chave):
+        novo, ativado = lista_conv_nucleo.alternar(
+            self.cfg.get("lista_conversas"), chave)
+        if ativado is None:
+            self._sincronizar_menu_da_lista()     # o item volta marcado
+            self.fala.falar(lista_conv_nucleo.MENSAGEM_DO_MINIMO,
+                            interromper=True)
+            return
+        self._aplicar_opcao("lista_conversas", novo)
+        self.fala.falar("%s: %s." % (
+            lista_conv_nucleo.ROTULOS[chave],
+            "ativado" if ativado else "desativado"), interromper=True)
+
+    @seguro
+    def _ordem_da_lista(self):
+        from telezapp.interface.lista_conversas import DialogoListaConversas
+        dlg = DialogoListaConversas(
+            self, self._lista_em_uso,
+            lambda v: self._aplicar_opcao("lista_conversas", v), self.fala)
+        try:
+            dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+
     def _preencher_conversas(self):
         """Refaz a lista mantendo a conversa selecionada (por chave)."""
         if not self.conversas:
@@ -1726,7 +1838,7 @@ class Janela(wx.Frame):
         if 0 <= i < len(self._chaves_conv):
             antes = self._chaves_conv[i]
         chaves = [c.chave for c in self.conversas]
-        rotulos = [self._com_marca(m.rotulo_conversa(c),
+        rotulos = [self._com_marca(self._rotulo_da_conversa(c),
                                    c.chave in self.marc_conv)
                    for c in self.conversas]
         if chaves == self._chaves_conv and \
@@ -2801,6 +2913,7 @@ class Janela(wx.Frame):
         if aberta:
             conv.nao_lidas = 0
         self.indice[chave] = conv
+        self._atualizar_previa(chave, msg)
         self._ordenar()
         self._preencher_conversas()
         if e.enviada_daqui:
@@ -2936,6 +3049,8 @@ class Janela(wx.Frame):
             if x.id == e.mensagem.id:
                 self.cache[chave][i] = e.mensagem
                 break
+        if self._atualizar_previa_se_for_a_ultima(chave, e.mensagem):
+            self._preencher_conversas()
         aberta = chave == self.atual
         if aberta:
             self._preencher_mensagens()
@@ -6389,6 +6504,11 @@ class Janela(wx.Frame):
             self._aplicar_privacidade_conta(valor)
         elif chave == "atalhos":
             self._aplicar_atalhos(valor)
+        elif chave == "lista_conversas":
+            self.cfg.set(chave, lista_conv_nucleo.normalizar(valor))
+            self._sincronizar_menu_da_lista()
+            self._carregar_previas()
+            self._preencher_conversas()
         elif chave == "segundo_plano":
             self.cfg.set(chave, valor)
             self._atualizar_bandeja()

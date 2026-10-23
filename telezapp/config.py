@@ -627,6 +627,8 @@ PADROES.update({
     "ia_modelos": {},        # provedor -> modelo escolhido ("" = o padrao)
     "pacote_de_sons": "padrao",   # padrao, telezapp ou p:<nome>
     "sons_desativados": {},      # pacote -> eventos sem som
+    "lista_conversas": {"ordem": ["nome", "servico", "nao_lidas", "previa"],
+                        "ocultos": ["previa"]},  # o que cada linha mostra
     "ia_automatica_conversas": [],  # [conta, conversa] com a IA automatica
     "ia_consentimento": [],  # provedores que a pessoa autorizou a receber midia
     "contas": [],            # [{"id", "servico", "telefone", "nome"}]
