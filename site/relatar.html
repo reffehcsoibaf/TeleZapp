@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relatar um problema ou sugerir algo: TeleZapp</title>
+<meta name="description" content="Formulário para contar um problema, mandar uma sugestão ou tirar uma dúvida sobre o TeleZapp, sem precisar de conta no GitHub.">
+<style>
+:root {
+  --fundo: #ffffff; --texto: #1b1f24; --suave: #4a5460; --linha: #8a96a3;
+  --destaque: #0b5cad; --destaque-texto: #ffffff;
+  --aviso-fundo: #fff4d6; --aviso-borda: #b57d00; --card: #f4f6f9;
+  --ok: #0d6b2e; --erro: #a40e0e;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fundo: #12161b; --texto: #e8ecf1; --suave: #aab4bf; --linha: #5b6772;
+    --destaque: #6cb2ff; --destaque-texto: #0a1420;
+    --aviso-fundo: #2d2610; --aviso-borda: #d9a400; --card: #1a2027;
+    --ok: #66d98c; --erro: #ff8a8a;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--fundo); color: var(--texto);
+  font: 1.0625rem/1.6 system-ui, "Segoe UI", sans-serif; }
+a { color: var(--destaque); }
+a:focus-visible, button:focus-visible, input:focus-visible,
+select:focus-visible, textarea:focus-visible {
+  outline: 3px solid var(--destaque); outline-offset: 3px; }
+.conteudo { max-width: 46rem; margin: 0 auto; padding: 0 1rem; }
+header { padding: 2rem 0 .5rem; }
+h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 .5rem; }
+h2 { font-size: 1.3rem; margin: 1.8rem 0 .5rem; }
+label, legend { display: block; font-weight: 700; margin: 1.1rem 0 .3rem; }
+.dica { color: var(--suave); font-size: .95rem; margin: 0 0 .4rem; font-weight: 400; }
+input[type=text], select, textarea {
+  width: 100%; font: inherit; color: var(--texto); background: var(--fundo);
+  border: 2px solid var(--linha); border-radius: .4rem; padding: .55rem .7rem; }
+textarea { min-height: 9rem; }
+input[type=file] { width: 100%; font: inherit; }
+.caixa { display: flex; gap: .6rem; align-items: flex-start; margin: 1rem 0; font-weight: 400; }
+.caixa input { margin-top: .45rem; width: 1.2rem; height: 1.2rem; }
+button { font: inherit; font-weight: 700; background: var(--destaque);
+  color: var(--destaque-texto); border: 0; border-radius: .5rem;
+  padding: .85rem 1.6rem; cursor: pointer; margin-top: 1.2rem; }
+button[disabled] { opacity: .6; cursor: wait; }
+.aviso { background: var(--aviso-fundo); border-left: 5px solid var(--aviso-borda);
+  padding: .8rem 1rem; border-radius: .3rem; margin: 1.2rem 0; }
+.situacao { margin-top: 1rem; font-weight: 700; }
+.situacao.ok { color: var(--ok); } .situacao.erro { color: var(--erro); }
+.isca { position: absolute; left: -10000px; }
+ol li, ul li { margin: .35rem 0; }
+code { background: var(--card); padding: .1rem .35rem; border-radius: .25rem; }
+footer { border-top: 1px solid var(--linha); margin-top: 3rem; padding: 1.5rem 0 3rem; color: var(--suave); font-size: .95rem; }
+</style>
+</head>
+<body>
+<header>
+  <div class="conteudo">
+    <p><a href="./">Voltar para a página do TeleZapp</a></p>
+    <h1>Relatar um problema ou sugerir algo</h1>
+    <p>Não precisa de conta em lugar nenhum. Preencha, envie, e a resposta vai pela forma de contato que você escrever.</p>
+  </div>
+</header>
+<main class="conteudo">
+  <form id="formulario" novalidate>
+    <label for="tipo">O que você quer fazer?</label>
+    <select id="tipo" name="tipo">
+      <option value="problema">Relatar um problema</option>
+      <option value="sugestao">Sugerir algo</option>
+      <option value="duvida">Tirar uma dúvida</option>
+    </select>
+
+    <label for="nome">Seu nome</label>
+    <input type="text" id="nome" name="nome" autocomplete="name">
+
+    <label for="contato">Como posso falar com você? (obrigatório)</label>
+    <p class="dica" id="dica-contato">Escreva um e-mail, um usuário do Telegram (como @usuario) ou um número de WhatsApp com DDD, como +55 51 99999 8888. Pode pôr mais de um.</p>
+    <input type="text" id="contato" name="contato" aria-describedby="dica-contato" required>
+
+    <label for="descricao">Descrição (obrigatório)</label>
+    <p class="dica" id="dica-descricao">Conte o que está acontecendo, ou a sua sugestão ou dúvida. Para um problema, diga o que você estava fazendo, o que esperava que acontecesse e o que aconteceu de fato. Quanto mais detalhes, mais fácil de achar a causa.</p>
+    <textarea id="descricao" name="descricao" aria-describedby="dica-descricao" required></textarea>
+
+    <div id="bloco-problema">
+      <label for="quando">Quando aconteceu?</label>
+      <p class="dica" id="dica-quando">Dia e hora aproximados, e se acontece sempre ou só às vezes. O arquivo de registro (log) guarda a hora de cada evento, e com a hora fica fácil achar o ponto certo nele.</p>
+      <input type="text" id="quando" name="quando" aria-describedby="dica-quando">
+
+      <label for="versao">Versão do TeleZapp</label>
+      <p class="dica" id="dica-versao">No programa, abra Ajuda, Sobre. É um número como 2026.10.23.0.</p>
+      <input type="text" id="versao" name="versao" aria-describedby="dica-versao">
+
+      <h2>Enviar o registro (log)</h2>
+      <ol>
+        <li>No TeleZapp, aperte Alt, vá até <strong>Ajuda</strong> e escolha <strong>Abrir a pasta de logs</strong>.</li>
+        <li>Na pasta que abrir, procure <code>telezapp.log</code>. Se o problema foi um fechamento do programa, procure também <code>falha-nativa.log</code>. Se existirem, <code>telezapp.log.1</code> e os seguintes guardam os dias anteriores.</li>
+        <li>Escolha o arquivo abaixo (pode escolher mais de um com Control). No total, até 5 MB.</li>
+      </ol>
+      <label for="logs">Arquivos de registro (opcional)</label>
+      <input type="file" id="logs" name="log" multiple accept=".log,.txt,.1,.2,.3,.4">
+      <div class="aviso" role="note">
+        O registro não guarda o texto das suas mensagens e esconde os números de telefone, mas mostra o que o programa fez e a que horas. Só quem mantém o TeleZapp lê o que você envia, e tudo é apagado depois de 90 dias.
+      </div>
+      <div class="caixa">
+        <input type="checkbox" id="consentimento" name="consentimento" value="sim">
+        <label for="consentimento" style="margin:0;font-weight:400">Autorizo o envio dos arquivos escolhidos acima, para investigar este relato.</label>
+      </div>
+    </div>
+
+    <div class="isca" aria-hidden="true">
+      <label for="site">Deixe este campo vazio</label>
+      <input type="text" id="site" name="site" tabindex="-1" autocomplete="off">
+    </div>
+
+    <button type="submit" id="enviar">Enviar</button>
+    <p class="situacao" id="situacao" role="status" aria-live="polite" tabindex="-1"></p>
+  </form>
+  <p class="dica">Prefere o GitHub? Dá para <a href="https://github.com/reffehcsoibaf/TeleZapp/issues">abrir um relato por lá</a>.</p>
+</main>
+<footer>
+  <div class="conteudo">Software livre sob a licença GPL versão 3 ou posterior.</div>
+</footer>
+<script>
+(function () {
+  // Endereço do Worker que recebe os relatos (veja relatos/LEIAME.md).
+  var ENDERECO = "https://telezapp-relatos.fabioscheffer.workers.dev/relato";
+  var LIMITE = 5 * 1024 * 1024;
+  var form = document.getElementById("formulario");
+  var situacao = document.getElementById("situacao");
+  var botao = document.getElementById("enviar");
+  var tipo = document.getElementById("tipo");
+  var problema = document.getElementById("bloco-problema");
+
+  tipo.addEventListener("change", function () {
+    problema.hidden = tipo.value !== "problema";
+  });
+
+  function dizer(texto, classe) {
+    situacao.className = "situacao " + (classe || "");
+    situacao.textContent = texto;
+  }
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var contato = form.contato.value.trim();
+    var descricao = form.descricao.value.trim();
+    if (!contato) { dizer("Escreva uma forma de contato.", "erro"); form.contato.focus(); return; }
+    if (!descricao) { dizer("Escreva a descrição.", "erro"); form.descricao.focus(); return; }
+    var arquivos = problema.hidden ? [] : Array.prototype.slice.call(form.log.files);
+    var total = arquivos.reduce(function (s, a) { return s + a.size; }, 0);
+    if (total > LIMITE) { dizer("Os arquivos passam de 5 MB juntos. Envie só o telezapp.log.", "erro"); form.log.focus(); return; }
+    if (arquivos.length && !form.consentimento.checked) {
+      dizer("Marque a autorização para enviar os arquivos, ou tire os arquivos.", "erro");
+      form.consentimento.focus(); return;
+    }
+    var dados = new FormData();
+    ["tipo", "nome", "contato", "descricao", "site"].forEach(function (c) { dados.append(c, form[c].value); });
+    if (!problema.hidden) {
+      dados.append("quando", form.quando.value);
+      dados.append("versao", form.versao.value);
+      arquivos.forEach(function (a) { dados.append("log", a, a.name); });
+      if (arquivos.length) dados.append("consentimento", "sim");
+    }
+    botao.disabled = true;
+    dizer("Enviando...");
+    fetch(ENDERECO, { method: "POST", body: dados })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (r) {
+        botao.disabled = false;
+        if (r.ok) {
+          form.reset();
+          problema.hidden = false;
+          dizer("Enviado. Obrigado! Respondo pela forma de contato que você escreveu.", "ok");
+        } else {
+          dizer((r.j && r.j.erro) || "Não consegui enviar. Tente de novo.", "erro");
+        }
+        situacao.focus();
+      })
+      .catch(function () {
+        botao.disabled = false;
+        dizer("Não consegui enviar agora. Tente de novo mais tarde, ou use o GitHub (link abaixo).", "erro");
+        situacao.focus();
+      });
+  });
+})();
+</script>
+</body>
+</html>
