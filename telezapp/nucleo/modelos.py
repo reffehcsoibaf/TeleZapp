@@ -26,10 +26,12 @@ NOMES_TIPOS = {
 }
 
 # Estados de uma mensagem enviada
-ENVIANDO, ENVIADA, ENTREGUE, LIDA, FALHOU = (
-    "enviando", "enviada", "entregue", "lida", "falhou")
-# ordem de avanco: um estado nunca volta para um anterior
-ORDEM_ESTADOS = {ENVIANDO: 0, ENVIADA: 1, ENTREGUE: 2, LIDA: 3}
+ENVIANDO, ENVIADA, ENTREGUE, LIDA, FALHOU, REPRODUZIDA = (
+    "enviando", "enviada", "entregue", "lida", "falhou", "reproduzida")
+# ordem de avanco: um estado nunca volta para um anterior (reproduzida: voz,
+# audio ou video que a outra pessoa tocou)
+ORDEM_ESTADOS = {ENVIANDO: 0, ENVIADA: 1, ENTREGUE: 2, LIDA: 3,
+                 REPRODUZIDA: 4}
 
 # Estilos de leitura da lista de mensagens
 ESTILO_AUTOR_PRIMEIRO = 1
@@ -1022,7 +1024,7 @@ def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
     elif m.minha and recibos:
         nomes = nomes or {}
         rotulos = {"entregue": "Entregue", "lida": "Lida",
-                   "ouvida": "Ouvida"}
+                   "ouvida": "Reproduzida"}
         linhas.append("")
         for quem, tipo, data in recibos:
             linhas.append("%s a %s em %s" % (

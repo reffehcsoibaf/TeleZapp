@@ -854,7 +854,8 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
     estado = ""
     if minha:
         estado = {HIST_ENTREGUE: m.ENTREGUE, HIST_LIDA: m.LIDA,
-                  HIST_OUVIDA: m.LIDA}.get(int(wmi.status), m.ENVIADA)
+                  HIST_OUVIDA: m.REPRODUZIDA}.get(int(wmi.status),
+                                                  m.ENVIADA)
     forma = estrutura_interativa(desembrulhar(wmi.message))
     if forma:
         log.info("mensagem interativa: %s", json.dumps(
@@ -4189,9 +4190,15 @@ class ProvedorWhatsApp(Provedor):
                         if not x.minha else None, "ouvida")
                 return
             estado = {RECIBO_ENTREGUE: m.ENTREGUE, RECIBO_LIDO: m.LIDA,
-                      RECIBO_OUVIDO: m.LIDA}.get(tipo)
+                      RECIBO_OUVIDO: m.REPRODUZIDA}.get(tipo)
+            if estado is None and not origem.IsFromMe:
+                log.info("recibo de tipo %d ignorado (%d mensagens)", tipo,
+                         len(e.MessageIDs))
             if estado is None or origem.IsFromMe:
                 return
+            if tipo == RECIBO_OUVIDO:
+                log.info("recibo de reproduzida (%d mensagens)",
+                         len(e.MessageIDs))
             self.banco.salvar_recibos(
                 self.conta.id, cid, list(e.MessageIDs),
                 self._id_do_participante(origem.Sender),

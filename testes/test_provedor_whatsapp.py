@@ -2950,3 +2950,39 @@ def test_criar_grupo_comunidade_e_canal_no_whatsapp(tmp_path):
     ok, texto, cid = p.criar_conversa("grupo", "X")
     assert not ok and "nome longo" in texto and cid == ""
     banco.fechar()
+
+
+def test_recibo_de_reproduzida_leva_a_voz_ao_estado_reproduzida(amb):
+    cid = "5551988887777@s.whatsapp.net"
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento("V1", E.Message(
+        audioMessage=E.AudioMessage(seconds=3, PTT=True,
+                                    mimetype="audio/ogg; codecs=opus")),
+        de_mim=True))
+    esperar(amb.fila, ev.MensagemNova)
+    origem = N.MessageSource(Chat=jid("5551988887777"),
+                             Sender=jid("5551988887777"))
+    seguidos = []
+    for tipo in (1, 4, 6):                  # recebida, aberta, reproduzida
+        amb.f["Receipt"](amb.c, N.Receipt(
+            MessageSource=origem, MessageIDs=["V1"], Type=tipo,
+            Timestamp=TS + tipo))
+        seguidos.append(esperar(amb.fila, ev.EstadosMensagens).estado)
+    assert seguidos == [m.ENTREGUE, m.LIDA, m.REPRODUZIDA]
+    assert amb.banco.mensagem("w1", cid, "V1").estado == m.REPRODUZIDA
+    assert [r[1] for r in amb.banco.recibos("w1", cid, "V1")] == [
+        "entregue", "lida", "ouvida"]
+    # um recibo atrasado nao faz o estado voltar
+    amb.f["Receipt"](amb.c, N.Receipt(
+        MessageSource=origem, MessageIDs=["V1"], Type=4, Timestamp=TS + 9))
+    assert amb.banco.mensagem("w1", cid, "V1").estado == m.REPRODUZIDA
+
+
+def test_detalhes_dizem_reproduzida_e_a_linha_fala_o_estado():
+    x = m.Mensagem("w1", "5551@s.whatsapp.net", "V1", tipo=m.VOZ,
+                   minha=True, segundos=4, data=TS, estado=m.REPRODUZIDA)
+    texto = m.detalhes(x, "Ana", recibos=[
+        ("5551@s.whatsapp.net", "ouvida", TS + 6)])
+    assert "Estado: reproduzida" in texto and "Reproduzida a +5551" in texto
+    assert "reproduzida" in m.formatar(x, m.ESTILO_AUTOR_PRIMEIRO)
