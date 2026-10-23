@@ -585,6 +585,10 @@ no fechamento, por assunto.
   prévia de links, o reinício do pareamento e o executável com OpenCV, emoji e
   `telezapp/sons` (conferir o PyInstaller).
 
+## Versão 2026.10.23.0 (23/10/2026): menus novos, criar grupos, chamadas e enquetes
+
+Reúne tudo o que entrou depois da 2026.10.21.0 (o detalhe técnico está no CHANGELOG): chamadas de voz do WhatsApp pela DLL de teste do neonize, corretor ortográfico, atalhos personalizáveis, gravar por atalho, segundo plano e bandeja, enquetes, menus Novo e Ir para, configurações Interface e Mensagens, criar grupo, canal e comunidade, tópicos de grupo do Telegram, estado reproduzida, correção do áudio Ogg, credenciais do Telegram embutidas e o formulário de relatos. As confirmações do responsável estão nas seções abaixo. **Ainda sem teste no app real:** criar grupo, canal e comunidade nos dois serviços, tópicos do Telegram, Nova chamada, Novo contato, a busca em Gerenciar contatos, as credenciais embutidas no executável, a tela de Atalhos e o gravar por atalho, o segundo plano, votar e quem votou no Telegram, e o estado reproduzida nas mensagens antigas.
+
 ## Chamadas de voz do WhatsApp: fase 0 (21/10/2026)
 
 - Experimento em `experimentos/10-chamada-whatsapp-meowcaller/` (Go, meowcaller sobre o hypermeow) com a ponte de voz em Python (`experimentos/chamada_whatsapp.py`, microfone e alto-falante por socket local). Ainda fora do app.

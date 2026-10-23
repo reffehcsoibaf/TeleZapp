@@ -3,7 +3,7 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
-## Próxima versão (ainda sem número: segue o dia do lançamento)
+## 2026.10.23.0
 
 - Minha mensagem de voz (ou áudio) tocada por quem recebeu passa a ter o estado **reproduzida**, depois de enviada, entregue e lida: a linha da lista, lida ao passar pela mensagem, e "Estado" nos detalhes dizem o estado mais avançado (`modelos.REPRODUZIDA`, no WhatsApp pelo recibo de tipo 6 e pelo histórico). Nos detalhes de uma conversa com uma pessoa a linha do recibo diz "Reproduzida a ..." (antes "Ouvida"). Ao abrir o banco, as mensagens minhas que já tinham o recibo de reproduzida guardado (e ficaram como "lida") passam a "reproduzida" (`Banco._atualizar_esquema`, uma vez e sem custo depois). O log passa a registrar "recibo de reproduzida" e os recibos de tipo desconhecido que ignora, para investigar se o WhatsApp não mandar o recibo (a pessoa pode ter a confirmação de leitura desligada). No Telegram não há esse aviso para quem envia.
 - Texto do campo "Para" (Nova mensagem e Nova chamada) e dos participantes de um grupo novo: pede o telefone no formato internacional (+55 51 99999 8888) e diz que, no Brasil, só o DDD e o número também serve. Conferido em `modelos.normalizar_telefone`: sem o `+`, com 10 ou 11 dígitos assume `+55`; com `+` vale o número como está (outros países exigem o `+`). Os participantes de grupo novo agora passam pela mesma normalização (antes o WhatsApp usava os dígitos como vieram e o Telegram punha só um `+`).
