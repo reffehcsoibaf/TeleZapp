@@ -4217,7 +4217,8 @@ class Janela(wx.Frame):
         if achado is None:
             bipe("erro")
             self.fala.falar("Não encontrei %s. Use o nome de um contato ou "
-                            "conversa, um número com DDD ou um @usuário."
+                            "conversa, um telefone no formato internacional (como "
+                            "+55 51 99999 8888) ou um @usuário."
                             % destino, interromper=True)
             return
         conversa_id, nome = achado
@@ -4263,7 +4264,8 @@ class Janela(wx.Frame):
         if achado is None:
             bipe("erro")
             self.fala.falar("Não encontrei %s. Use o nome de um contato ou "
-                            "conversa, um número com DDD ou um @usuário."
+                            "conversa, um telefone no formato internacional (como "
+                            "+55 51 99999 8888) ou um @usuário."
                             % destino, interromper=True)
             return
         conversa_id, nome = achado

@@ -1141,9 +1141,8 @@ class ProvedorTelegram(Provedor):
         if participantes:
             alvos = []
             for texto in participantes:
-                digitos = "".join(c for c in texto if c.isdigit())
                 alvo = texto if texto.startswith("@") else (
-                    "+" + digitos if digitos else "")
+                    m.normalizar_telefone(texto) or "")
                 try:
                     alvos.append(await self.cliente.get_input_entity(alvo))
                 except Exception:

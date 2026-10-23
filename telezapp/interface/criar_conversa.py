@@ -38,7 +38,8 @@ class DialogoCriarConversa(wx.Dialog):
         self.participantes = None
         if tipo == cc.GRUPO:
             self.participantes = campo(
-                "Participantes (opcional): telefones com DDD ou @usuários, "
+                "Participantes (opcional): telefones no formato internacional, "
+                "como +55 51 99999 8888, ou @usuários, "
                 "separados por vírgula",
                 lambda: wx.TextCtrl(self, name="Participantes",
                                     size=(420, -1)))

@@ -337,7 +337,8 @@ class DialogoEscolherPessoa(wx.Dialog):
             self.conta.Bind(wx.EVT_CHOICE, lambda e: self._atualizar())
         self.para = campo(
             "Para (digite para buscar nos contatos e conversas, ou um "
-            "número com DDD ou @usuário)",
+            "telefone no formato internacional, como +55 51 99999 8888 "
+            "(no Brasil, só o DDD e o número também serve), ou @usuário)",
             lambda: wx.TextCtrl(self, name="Para", size=(420, -1),
                                 style=wx.TE_PROCESS_ENTER))
         self.para.Bind(wx.EVT_TEXT, lambda e: self._atualizar())

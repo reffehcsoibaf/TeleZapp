@@ -1941,9 +1941,9 @@ class ProvedorWhatsApp(Provedor):
         from neonize.proto.Neonize_pb2 import GroupParent
         alvos = []
         for texto in participantes:
-            digitos = "".join(c for c in str(texto) if c.isdigit())
-            if len(digitos) >= 8:
-                alvos.append(_jid_obj(digitos, "s.whatsapp.net"))
+            tel = m.normalizar_telefone(str(texto))    # sem + no Brasil: +55
+            if tel:
+                alvos.append(_jid_obj(tel.lstrip("+"), "s.whatsapp.net"))
         pai = GroupParent(
             IsParent=True,
             DefaultMembershipApprovalMode="request_required") \
