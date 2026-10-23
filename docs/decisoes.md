@@ -605,6 +605,8 @@ no fechamento, por assunto.
 - Ver, votar e criar enquetes no WhatsApp e no Telegram (dados em `extras["enquete"]` da mensagem; janelas `interface/enquete.py` e `interface/nova_enquete.py`).
 - **Verificado ao vivo pelo responsável (22/10/2026), no WhatsApp:** criou uma enquete pelo TeleZapp, outras pessoas votaram e os resultados atualizaram na enquete criada por ele (depois de consertar o `decrypt_poll_vote` do neonize 0.5.2, que dava TypeError); um voto dado **com o TeleZapp fechado** chegou quando ele abriu. Entrou também com outra conta no TeleZapp e a enquete chegou e funcionou como enquete recebida. No Telegram só tentou criar. Não verificado: votar e ver quem votou no Telegram.
 
+- **Envio de áudio que não é gravação direta (22/10/2026, corrigido em 23/10/2026):** encaminhar uma voz e colar um `.ogg` apareciam como enviados e nunca chegavam. O log mostrava `audio enviado` com o tipo `audio/ogg` sem `codecs=opus`; agora o Ogg com Opus vai como áudio comum com `audio/ogg; codecs=opus`, Ogg Vorbis vai como documento e encaminhar uma voz que não é Ogg/Opus segue como arquivo. **Verificado ao vivo pelo responsável (23/10/2026):** "me parece que o envio e o encaminhamento de áudio funcionou". Não se sabe quais casos ele testou além de encaminhar e colar; não verificado: Ogg Vorbis, M4A e MP3 como áudio comum.
+
 ## Próximos passos sugeridos
 
 1. ~~Grupo 1 do plano acima~~ (concluído).
