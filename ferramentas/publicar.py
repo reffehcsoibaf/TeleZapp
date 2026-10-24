@@ -17,9 +17,10 @@ ainda nao existe, monta a partir da pasta do programa) e deixa la:
 Nada vai para o GitHub sem o --publicar. Uso:
 
     python ferramentas\\publicar.py                    so monta os arquivos
-    python ferramentas\\publicar.py --publicar         e cria a Release
-                                                      (pre-lancamento)
-    python ferramentas\\publicar.py --publicar --final  Release comum
+    python ferramentas\\publicar.py --publicar         e cria a Release comum,
+                                                      a "latest" do GitHub
+    python ferramentas\\publicar.py --publicar --prerelease
+                                                      e cria um pre-lancamento
 
 O executavel precisa ser gerado de novo antes, com a versao que esta em
 telezapp\\__init__.py (a mesma que sai na tag). Precisa do gh (GitHub CLI)
@@ -107,8 +108,11 @@ def main():
     ap.add_argument("--saida", default=os.path.join(RAIZ, "lancamento"))
     ap.add_argument("--publicar", action="store_true",
                     help="cria a Release no GitHub com o gh")
+    ap.add_argument("--prerelease", action="store_true",
+                    help="com --publicar: pre-lancamento (o padrao e a "
+                         "Release comum, a latest)")
     ap.add_argument("--final", action="store_true",
-                    help="com --publicar: Release comum, nao pre-lancamento")
+                    help=argparse.SUPPRESS)      # antigo: agora e o padrao
     args = ap.parse_args()
 
     versao = versao_atual()
@@ -141,8 +145,7 @@ def main():
 
     comando = ["gh", "release", "create", versao, instalador, zip_, arquivo_hash,
                "--title", "TeleZapp %s" % versao, "--notes-file", notas]
-    if not args.final:
-        comando.append("--prerelease")
+    comando.append("--prerelease" if args.prerelease else "--latest")
     if not args.publicar:
         print("Para publicar:\n  " + " ".join(comando))
         return
