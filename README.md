@@ -43,9 +43,8 @@ cria a Release com `python ferramentas\publicar.py`.
   dependa de ler o terminal.
 
 Chamadas: o Telegram e o WhatsApp fazem e atendem chamadas de voz. No
-WhatsApp isso depende da versão de teste da conexão que acompanha o
-programa; sem ela, o TeleZapp só avisa quem está ligando (voz ou vídeo),
-registra a chamada na conversa e deixa o atendimento para outro
+WhatsApp, chamadas de vídeo só são avisadas: o TeleZapp mostra quem está
+ligando, registra a chamada na conversa e deixa o atendimento para outro
 dispositivo.
 
 ## O que o TeleZapp faz
