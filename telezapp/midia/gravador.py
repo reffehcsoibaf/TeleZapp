@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Contribuidores do TeleZapp
-"""Gravacao de nota de voz: do microfone ou do som interno do computador.
+"""Gravacao de nota de voz: do microfone, do som interno do computador ou dos
+dois juntos.
 
 O som interno e capturado por "loopback" do WASAPI: o que a placa de som
 toca (o navegador, um video, a fala do leitor de tela). O microfone usa a
@@ -28,6 +29,7 @@ ESPERA_ABERTURA_S = 8.0
 
 MICROFONE = "microfone"
 SOM_INTERNO = "som_interno"
+SOM_E_MICROFONE = "som_e_microfone"     # o som interno somado ao microfone
 
 
 class ErroGravacao(Exception):
@@ -51,7 +53,7 @@ def para_dbfs(valor):
 
 # ------------------------------------------------------------------ fontes
 class FonteMicrofone:
-    """Microfone padrao do Windows, em mono."""
+    """O microfone escolhido (ou o padrao do Windows), em mono."""
 
     origem = MICROFONE
 
@@ -61,8 +63,11 @@ class FonteMicrofone:
         except Exception as e:      # biblioteca ou driver ausentes
             raise ErroGravacao("Não consegui carregar o sistema de áudio "
                                "(%s)." % type(e).__name__)
+        from telezapp.midia import dispositivos
+        dispositivo = dispositivos.indice_do_microfone()   # None = padrao
         try:
-            info = sd.query_devices(kind="input")
+            info = sd.query_devices(dispositivo) if dispositivo is not None \
+                else sd.query_devices(kind="input")
         except Exception:
             raise ErroGravacao(
                 "Não encontrei nenhum microfone. Conecte um microfone ou "
@@ -70,7 +75,8 @@ class FonteMicrofone:
         taxa = None
         for candidata in (TAXA, int(info["default_samplerate"])):
             try:
-                sd.check_input_settings(samplerate=candidata, channels=1)
+                sd.check_input_settings(device=dispositivo,
+                                        samplerate=candidata, channels=1)
                 taxa = candidata
                 break
             except Exception:
@@ -83,7 +89,7 @@ class FonteMicrofone:
         self._bloco = max(256, int(taxa * BLOCO_S))
         try:
             self._fluxo = sd.InputStream(samplerate=taxa, channels=1,
-                                         dtype="float32",
+                                         dtype="float32", device=dispositivo,
                                          blocksize=self._bloco)
             self._fluxo.start()
         except Exception as e:
@@ -106,7 +112,8 @@ class FonteMicrofone:
 
 
 class FonteSomInterno:
-    """O que toca na saida de som padrao (loopback do WASAPI), em mono."""
+    """O que toca na saida de som escolhida, ou na padrao (loopback do
+    WASAPI), em mono."""
 
     origem = SOM_INTERNO
 
@@ -118,6 +125,14 @@ class FonteSomInterno:
                                "computador (%s)." % type(e).__name__)
         try:
             saida = sc.default_speaker()
+            from telezapp.midia import dispositivos
+            escolhida = dispositivos.saida()
+            if escolhida:
+                for alto_falante in sc.all_speakers():
+                    if dispositivos.parecem_o_mesmo(escolhida,
+                                                    alto_falante.name):
+                        saida = alto_falante
+                        break
             captura = sc.get_microphone(id=str(saida.name),
                                         include_loopback=True)
         except Exception:
@@ -147,7 +162,66 @@ class FonteSomInterno:
             pass
 
 
-FABRICAS = {MICROFONE: FonteMicrofone, SOM_INTERNO: FonteSomInterno}
+def misturar(som, mic, taxa_mic=TAXA):
+    """Soma o bloco do microfone ao do som interno (ambos mono, float32).
+    O microfone pode ter outra taxa ou um tamanho de bloco diferente: ele e
+    reamostrado, por interpolacao linear, para o tamanho do bloco do som. O
+    resultado e limitado a -1..1 para a soma nao estourar."""
+    import numpy as np
+    som = np.asarray(som, dtype="float32")
+    mic = np.asarray(mic, dtype="float32")
+    if len(mic) == 0:
+        return som
+    if len(mic) != len(som):
+        mic = np.interp(np.linspace(0, len(mic) - 1, len(som)),
+                        np.arange(len(mic)), mic).astype("float32")
+    return np.clip(som + mic, -1.0, 1.0).astype("float32")
+
+
+class FonteMista:
+    """O som interno somado ao microfone, em mono. O microfone liga e desliga
+    com a gravacao em andamento (`microfone_ligado`); desligado, ele segue
+    aberto e e lido e descartado, para o fluxo nao acumular e poder voltar
+    na hora. Sem microfone no computador, grava so o som interno e avisa em
+    `aviso`."""
+
+    origem = SOM_E_MICROFONE
+
+    def __init__(self):
+        self._som = FonteSomInterno()
+        self.nome = self._som.nome
+        self.taxa = TAXA
+        self.microfone_ligado = True
+        self.aviso = ""
+        self._mic = None
+        try:
+            self._mic = FonteMicrofone()
+        except ErroGravacao as e:
+            log.warning("gravacao do som sem microfone: %s", e)
+            self.aviso = str(e)
+            self.microfone_ligado = False
+
+    @property
+    def microfone_disponivel(self):
+        return self._mic is not None
+
+    def ler(self):
+        som = self._som.ler()
+        if self._mic is None:
+            return som
+        mic = self._mic.ler()
+        if not self.microfone_ligado:
+            return som
+        return misturar(som, mic, self._mic.taxa)
+
+    def fechar(self):
+        for fonte in (self._som, self._mic):
+            if fonte is not None:
+                fonte.fechar()
+
+
+FABRICAS = {MICROFONE: FonteMicrofone, SOM_INTERNO: FonteSomInterno,
+            SOM_E_MICROFONE: FonteMista}
 
 
 # --------------------------------------------------------------- gravador
@@ -156,9 +230,11 @@ class Gravador:
     gravacao: o COM e o PortAudio gostam de ficar numa thread so)."""
 
     def __init__(self, pasta, origem=MICROFONE, fabrica_fonte=None,
-                 maximo_segundos=0):
+                 maximo_segundos=0, microfone_ligado=True):
         self.pasta = pasta
         self.origem = origem
+        self._microfone_ligado = microfone_ligado
+        self._fonte = None
         self._fabrica = fabrica_fonte or FABRICAS[origem]
         self.maximo_segundos = maximo_segundos
         self._wav = None
@@ -191,6 +267,28 @@ class Gravador:
     @property
     def pausado(self):
         return self._pausa.is_set()
+
+    @property
+    def microfone_ligado(self):
+        """So tem efeito na gravacao do som do computador com microfone."""
+        return self._microfone_ligado
+
+    @microfone_ligado.setter
+    def microfone_ligado(self, ligado):
+        self._microfone_ligado = bool(ligado)
+        if self._fonte is not None and hasattr(self._fonte,
+                                               "microfone_ligado"):
+            self._fonte.microfone_ligado = bool(ligado) and getattr(
+                self._fonte, "microfone_disponivel", True)
+
+    @property
+    def microfone_disponivel(self):
+        """False quando a gravacao mista nao achou um microfone."""
+        return getattr(self._fonte, "microfone_disponivel", True)
+
+    @property
+    def aviso(self):
+        return getattr(self._fonte, "aviso", "")
 
     # ----------------------------------------------------------- controle
     def pausar(self):
@@ -274,6 +372,8 @@ class Gravador:
                 if self._erro is not None:
                     self._pronto.set()
             self._taxa = fonte.taxa
+            self._fonte = fonte
+            self.microfone_ligado = self._microfone_ligado
             self.nome_dispositivo = getattr(fonte, "nome", "")
             log.info("gravando (%s) em %s a %d Hz", self.origem,
                      self.nome_dispositivo, self._taxa)

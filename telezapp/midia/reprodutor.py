@@ -98,8 +98,10 @@ class Reprodutor:
     @staticmethod
     def _saida_padrao(taxa, canais, callback):
         import sounddevice as sd
+        from telezapp.midia import dispositivos
         return sd.OutputStream(samplerate=taxa, channels=canais,
-                               dtype="float32", callback=callback)
+                               dtype="float32", callback=callback,
+                               device=dispositivos.indice_da_saida())
 
     # ------------------------------------------------------------ estado
     @property

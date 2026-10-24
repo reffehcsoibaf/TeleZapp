@@ -151,6 +151,15 @@ _CAMPOS_CONV = [f.name for f in fields(Conversa)]
 _CAMPOS_MSG = [f.name for f in fields(Mensagem)]
 
 
+def _numero(id_):
+    """O id como numero, para desempatar mensagens da mesma hora (0 se nao
+    for numerico)."""
+    try:
+        return int(id_)
+    except (TypeError, ValueError):
+        return 0
+
+
 class Banco:
     def __init__(self, caminho):
         self.caminho = caminho
@@ -364,6 +373,24 @@ class Banco:
                 % ", ".join(_CAMPOS_MSG),
                 (conta_id, conversa_id, limite)).fetchall()
         return [_msg(l) for l in reversed(linhas)]
+
+    def ultimas_mensagens(self):
+        """{(conta_id, conversa_id): Mensagem} a mais nova de cada conversa
+        (para o trecho da ultima mensagem na lista de conversas)."""
+        with self._trava:
+            linhas = self._con.execute(
+                "SELECT %s FROM mensagens WHERE (conta_id, conversa_id, "
+                "data) IN (SELECT conta_id, conversa_id, MAX(data) FROM "
+                "mensagens GROUP BY conta_id, conversa_id)"
+                % ", ".join(_CAMPOS_MSG)).fetchall()
+        saida = {}
+        for l in linhas:
+            msg = _msg(l)
+            chave = (msg.conta_id, msg.conversa_id)
+            antiga = saida.get(chave)
+            if antiga is None or _numero(msg.id) >= _numero(antiga.id):
+                saida[chave] = msg
+        return saida
 
     def mensagens_por_id(self, conta_id, ids, conversa_id=None):
         """Mensagens guardadas com esses ids (no Telegram o id da mensagem

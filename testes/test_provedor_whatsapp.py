@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Provedor do WhatsApp com mensagens protobuf de verdade do neonize e um
 cliente simulado (sem rede)."""
+import time
 import logging
 import os
 import queue
@@ -464,6 +465,30 @@ def test_falha_de_envio_e_lida_em_outro_aparelho(amb):
     assert [c.nao_lidas for c in convs] == [0]
 
 
+def test_ler_no_celular_chega_como_recibo_de_leitura_meu(amb):
+    """Com a confirmacao de leitura ligada, o celular avisa os outros
+    aparelhos com um recibo de leitura comum (tipo 4) cujo remetente sou eu."""
+    amb.f["Connected"](amb.c, N.Connected())
+    amb.f["Message"](amb.c, evento("R1", E.Message(conversation="a")))
+    esperar(amb.fila, ev.MensagemNova)
+    amb.f["Receipt"](amb.c, N.Receipt(
+        MessageSource=N.MessageSource(Chat=jid("5551988887777"),
+                                      IsFromMe=True),
+        MessageIDs=["R1"], Type=4))
+    convs = esperar(amb.fila, ev.ConversasAtualizadas).conversas
+    assert [c.nao_lidas for c in convs] == [0]
+
+
+def test_leitura_de_quem_recebeu_minha_mensagem_nao_zera_as_nao_lidas(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    amb.f["Message"](amb.c, evento("R1", E.Message(conversation="a")))
+    esperar(amb.fila, ev.MensagemNova)
+    amb.f["Receipt"](amb.c, N.Receipt(
+        MessageSource=N.MessageSource(Chat=jid("5551988887777"),
+                                      IsFromMe=False),
+        MessageIDs=["MINHA"], Type=4))
+    for conv in amb.p._conversas.values():
+        assert conv.nao_lidas == 1
 
 
 # ------------------------------------------------------------- historico
@@ -1279,6 +1304,35 @@ def test_enviar_voz_foto_e_documento(amb, dados_midia, tmp_path):
     assert "erro do WhatsApp" in falha.motivo
 
 
+def test_enviar_midia_como_resposta_e_com_mencao(amb, tmp_path):
+    from telezapp.midia import envio
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    cid = "5551988887777@s.whatsapp.net"
+    pdf = tmp_path / "r.pdf"
+    pdf.write_bytes(b"%PDF")
+    amb.p.enviar_arquivo(
+        cid, envio.preparar(str(pdf)), "veja @Ana", "ORIG1",
+        [{"id": "5551999@s.whatsapp.net", "nome": "Ana"}])
+    nova = esperar(amb.fila, ev.MensagemNova).mensagem
+    assert nova.resposta_a == "ORIG1" and nova.texto == "veja @Ana"
+    doc = amb.c.enviadas[-1][1].documentMessage
+    assert doc.caption == "veja @5551999"
+    assert doc.contextInfo.stanzaID == "ORIG1"
+    assert list(doc.contextInfo.mentionedJID) == ["5551999@s.whatsapp.net"]
+
+
+def test_enviar_texto_com_mencao_leva_o_jid(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.p.enviar_texto("120363@g.us", "oi @Ana Lima", "", [
+        {"id": "5552@s.whatsapp.net", "nome": "Ana Lima"}])
+    esperar(amb.fila, ev.MensagemNova)
+    ext = amb.c.enviadas[-1][1].extendedTextMessage
+    assert ext.text == "oi @5552"
+    assert list(ext.contextInfo.mentionedJID) == ["5552@s.whatsapp.net"]
+
+
 def test_enviar_arquivo_sem_conexao(amb, tmp_path):
     from telezapp.midia import envio
     pdf = tmp_path / "r.pdf"
@@ -1438,6 +1492,23 @@ def test_whatsapp_voz_tocada_no_celular_vira_ouvida(amb):
         "w1", a.conversa_id, "V1"))["ouvida"] is True
 
 
+def test_voz_tocada_no_celular_chega_tambem_como_recibo_de_reproduzida_meu(amb):
+    """Com a confirmacao de leitura ligada o celular avisa os outros aparelhos
+    com um recibo de reproduzida comum (tipo 6) cujo remetente sou eu."""
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    voz = E.Message(audioMessage=E.AudioMessage(PTT=True, seconds=7,
+                                                fileLength=900))
+    amb.f["Message"](amb.c, evento("V2", voz))
+    esperar(amb.fila, ev.MensagemNova)
+    amb.f["Receipt"](amb.c, N.Receipt(
+        MessageSource=N.MessageSource(Chat=jid("5551988887777"),
+                                      IsFromMe=True),
+        MessageIDs=["V2"], Type=6))
+    a = esperar(amb.fila, ev.MensagemAtualizada)
+    assert a.motivo == "ouvida" and m.extras_de(a.mensagem)["ouvida"]
+
+
 def test_arquivadas_seguem_o_celular(tmp_path):
     """O armazem local do whatsmeow guarda o que o celular arquivou."""
     b = ev.Barramento()
@@ -1541,6 +1612,20 @@ def test_mensagem_apagada_no_celular_vira_evento(amb):
         Timestamp=TS, FromFullSync=False))
     e = esperar(amb.fila, ev.MensagemApagadaNoCelular)
     assert (e.conversa_id, e.mensagem_id) == ("123@g.us", "G7")
+
+
+def test_arquivar_e_desarquivar_aqui_avisa_o_celular(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    assert amb.p.arquivar_conversa("5551@s.whatsapp.net", True)
+    patch = amb.c.patches[-1]
+    assert patch.Type == N.PatchInfo.REGULAR_LOW
+    mut = patch.Mutations[0]
+    assert list(mut.Index) == ["archive", "5551@s.whatsapp.net"]
+    assert mut.Version == 3
+    assert mut.Value.archiveChatAction.archived is True
+    assert mut.Value.archiveChatAction.messageRange.lastMessageTimestamp > 0
+    assert amb.p.arquivar_conversa("5551@s.whatsapp.net", False)
+    assert amb.c.patches[-1].Mutations[0].Value.archiveChatAction.archived         is False
 
 
 def test_apagar_mensagem_aqui_avisa_o_whatsapp(amb):
@@ -2867,6 +2952,25 @@ def test_votar_envia_o_voto_e_guarda_o_meu(amb):
     assert m.enquete_de(b.mensagem)["meus"] == []
 
 
+def test_enquete_de_canal_nao_tenta_votar_e_avisa(amb):
+    msg = _enquete_chegou(amb)
+    msg.conversa_id = "120363172556943876@newsletter"
+    antes = len(amb.c.enviadas)
+    amb.p.votar_enquete(msg, [0])
+    aviso = esperar(amb.fila, ev.Aviso)
+    assert "canais" in aviso.texto
+    assert len(amb.c.enviadas) == antes
+
+
+def test_info_da_enquete_pode_ser_serializada_como_o_neonize_faz():
+    # o cliente falso nao serializa; o verdadeiro recusa MessageInfo sem os
+    # campos obrigatorios (o voto falhava com EncodeError em 23/10/2026)
+    from telezapp.provedores import whatsapp as w
+    jid = w._jid_obj("5551999998888", "s.whatsapp.net")
+    info = w.info_da_mensagem(jid, jid, "M1", False, False)
+    assert info.ID == "M1" and info.SerializeToString()
+
+
 def test_criar_enquete_no_whatsapp_envia_e_guarda_a_mensagem(amb):
     amb.f["Connected"](amb.c, N.Connected())
     esperar(amb.fila, ev.ContaPronta)
@@ -2986,3 +3090,78 @@ def test_detalhes_dizem_reproduzida_e_a_linha_fala_o_estado():
         ("5551@s.whatsapp.net", "ouvida", TS + 6)])
     assert "Estado: reproduzida" in texto and "Reproduzida a +5551" in texto
     assert "reproduzida" in m.formatar(x, m.ESTILO_AUTOR_PRIMEIRO)
+
+
+def test_erro_de_estado_fora_de_sincronia_numa_notificacao_e_reconhecido():
+    texto = ("Failed to sync app state after notification: failed to decode "
+             "app state regular_low patches: failed to verify patch v29: "
+             "mismatching LTHash")
+    assert wa.colecao_fora_de_sincronia(texto) == "regular_low"
+    assert wa.colecao_fora_de_sincronia("Failed to pair device") is None
+    assert wa.colecao_fora_de_sincronia(
+        "failed to decode app state regular_low patches: outro erro") is None
+
+
+def test_reparo_do_estado_nao_se_repete_antes_do_intervalo(tmp_path):
+    p, banco = _provedor_com_cliente(tmp_path, ClienteFalso())
+    chamadas = []
+    p._reparar_colecao = lambda nome, forcar=True: chamadas.append(nome)
+    p._reparar_em_segundo_plano("regular_low")
+    p._reparar_em_segundo_plano("regular_low")       # logo depois: ignorado
+    p._reparar_em_segundo_plano("regular_high")      # outra colecao: vale
+    for t in threading.enumerate():
+        if t.name == "reparo-estado":
+            t.join(2)
+    assert sorted(chamadas) == ["regular_high", "regular_low"]
+    banco.fechar()
+
+
+def test_estado_fora_de_sincronia_tenta_de_novo_ate_o_celular_responder(
+        tmp_path):
+    """O iPhone so manda a copia do estado com o WhatsApp aberto: se nao
+    respondeu, o TeleZapp repete o pedido sozinho e registra quando voltar."""
+    p, banco = _provedor_com_cliente(tmp_path, ClienteFalso())
+    p.ESPERA_DA_RECUPERACAO = 0.2
+    p.PASSO_DA_RECUPERACAO = 0.05
+    p.ESPERA_ENTRE_TENTATIVAS = 0.05
+    pedidos, chamadas = [], []
+
+    class Cliente:
+        def fetch_app_state(self, nome, full_sync=False):
+            chamadas.append((nome, full_sync))
+            # volta depois do segundo pedido de copia ao celular
+            if len(pedidos) < 2:
+                raise RuntimeError("failed to verify patch: mismatching LTHash")
+
+        def request_app_state_recovery(self, nome):
+            pedidos.append(nome)
+    p.cliente = Cliente()
+    assert p._reparar_colecao("regular_low", forcar=False) is False
+    for _ in range(100):
+        if len(pedidos) >= 2 and not p._em_nova_tentativa:
+            break
+        time.sleep(0.05)
+    assert pedidos == ["regular_low", "regular_low"]
+    assert not p._em_nova_tentativa
+    banco.fechar()
+
+
+def test_busca_periodica_do_estado_pula_a_colecao_em_reparo(tmp_path):
+    p, banco = _provedor_com_cliente(tmp_path, ClienteFalso())
+    buscadas = []
+
+    class Cliente:
+        def fetch_app_state(self, nome, full_sync=False):
+            buscadas.append(nome)
+    p.cliente = Cliente()
+    p._buscar_mudancas_de_estado()
+    assert buscadas == ["regular_low", "regular_high"]
+    buscadas.clear()
+    p._em_nova_tentativa.add("regular_low")          # esta ja esta em reparo
+    p._buscar_mudancas_de_estado()
+    assert buscadas == ["regular_high"]
+    p._conectada = False                             # desconectada: nao busca
+    buscadas.clear()
+    p._buscar_mudancas_de_estado()
+    assert buscadas == []
+    banco.fechar()

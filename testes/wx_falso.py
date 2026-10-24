@@ -32,6 +32,7 @@ LC_REPORT = LC_SINGLE_SEL = LC_NO_HEADER = 0
 EVT_LIST_ITEM_ACTIVATED = object()
 EVT_CLOSE = EVT_CHAR_HOOK = EVT_MENU = EVT_LISTBOX_DCLICK = object()
 EVT_CONTEXT_MENU = EVT_KEY_DOWN = EVT_BUTTON = EVT_LISTBOX = object()
+EVT_CHAR = object()
 EVT_CHOICE = EVT_TEXT = object()
 DefaultPosition = (-1, -1)
 mensagens = []          # o que passou por MessageBox
@@ -80,6 +81,9 @@ class Janela:
 
     def SetFocus(self):
         _foco[0] = self
+
+    def IsEnabled(self):
+        return getattr(self, "ativo", True)
 
     def HasFocus(self):
         return _foco[0] is self
@@ -386,7 +390,12 @@ class TextCtrl(Janela):
     def Clear(self):
         self.valor = ""
 
+    def SelectAll(self):
+        self.tudo_selecionado = True
+
     def WriteText(self, texto):
+        if getattr(self, "tudo_selecionado", False):
+            self.valor, self.tudo_selecionado = "", False
         self.valor += texto
 
     def SetInsertionPoint(self, i):

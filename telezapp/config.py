@@ -182,6 +182,18 @@ class Opcao:
 
 
 OPCOES = (
+    Opcao("digitar_na_lista", "Ao digitar uma letra numa lista", "Interface",
+          "pular",
+          "O que acontece quando você digita um caractere com o foco na lista "
+          "de mensagens ou na lista de conversas. Pular para o item com a "
+          "inicial é o comportamento das listas do Windows: o foco vai para "
+          "o próximo item que começa com o que você digitou. Ir para o campo "
+          "leva o foco ao campo de escrever a mensagem (na lista de "
+          "mensagens) ou ao campo de busca de conversas (na lista de "
+          "conversas) e coloca ali o que você digitou. Sem uma conversa "
+          "aberta, a lista de mensagens não tem campo e continua pulando.",
+          (("pular", "Pular para o item que começa com a letra"),
+           ("campo", "Ir direto para o campo de texto"))),
     Opcao("status_no_titulo",
           "Mostrar status de presença no título da janela",
           "Interface", True,
@@ -247,8 +259,11 @@ OPCOES = (
           "Avisar quando houver versão nova do TeleZapp", "Atualizações",
           True,
           "Ao abrir, consulta as versões publicadas no GitHub. Sem versão "
-          "nova, não diz nada. Havendo, abre a janela com as novidades, uma "
-          "vez por versão, e você escolhe se instala. Só lê a lista de "
+          "nova, não diz nada. Havendo, abre a janela com as novidades e você "
+          "escolhe se instala. Se responder Não, o TeleZapp pergunta se você "
+          "quer \"Não me avise mais sobre essa versão\" (só volta a avisar "
+          "quando sair outra) ou \"Talvez mais tarde\" (a janela volta na "
+          "próxima vez que abrir o TeleZapp). Só lê a lista de "
           "versões; não baixa nada sem você aceitar. O GitHub vê o endereço "
           "de internet do computador, como em qualquer site. Desmarcada, só "
           "consulta quando você pedir, em Ajuda, Verificar atualizações."),
@@ -346,6 +361,16 @@ OPCOES = (
           "opção logo depois que você chega nela. Desmarcada, a explicação "
           "só é falada com F1.",
           grupo="Conteúdo falado"),
+    Opcao("gravar_som_com_microfone",
+          "Gravar também o microfone ao gravar o som do computador",
+          "Mídias", True,
+          "Na janela \"Gravar o som do computador\", a caixa \"Gravar também "
+          "o microfone\" já vem marcada: o que o computador toca e o que "
+          "você fala entram juntos na mesma nota de voz. Dá para ligar e "
+          "desligar o microfone durante a gravação. Desmarcada, a janela "
+          "grava só o som do computador. O atalho Control Shift S grava sempre "
+          "só o som do computador, e o Control Shift B grava sempre o som do "
+          "computador com o microfone."),
     Opcao("barra_de_progresso",
           "Janela com barra de progresso em downloads e envios longos",
           "Mídias", True,
@@ -573,6 +598,12 @@ def _opcoes_de_ia():
               "artificial", "medio", "Quanto o provedor escreve ao descrever "
               "imagens, figurinhas e vídeos. Transcrições e PDFs sempre "
               "saem completos.", tuple(catalogo.PERFIS)),
+        Opcao("ia_tom", "Tom ao redigir com a IA", "Inteligência "
+              "artificial", "natural", "O tom da mensagem que a IA escreve "
+              "em Mensagem, Inteligência artificial, Redigir a mensagem. "
+              "Natural deixa a IA seguir o tom da conversa. O item Redigir "
+              "com um tom à escolha pergunta o tom na hora, sem mudar esta "
+              "opção.", tuple(catalogo.TONS)),
         Opcao("ia_linha_descricao", "Tamanho da descrição na lista de "
               "mensagens", "Inteligência artificial", 0, "Quantas letras da "
               "descrição de uma foto, figurinha ou vídeo a linha da mensagem "
@@ -627,7 +658,11 @@ PADROES.update({
     "ia_modelos": {},        # provedor -> modelo escolhido ("" = o padrao)
     "pacote_de_sons": "padrao",   # padrao, telezapp ou p:<nome>
     "sons_desativados": {},      # pacote -> eventos sem som
+    "lista_conversas": {"ordem": ["nome", "servico", "nao_lidas", "previa"],
+                        "ocultos": ["previa"]},  # o que cada linha mostra
     "ia_automatica_conversas": [],  # [conta, conversa] com a IA automatica
+    "ia_idioma_traducao": "English",  # ultimo idioma de destino da traducao
+    "ia_consentimento_texto": [],  # provedores que podem receber seu texto
     "ia_consentimento": [],  # provedores que a pessoa autorizou a receber midia
     "contas": [],            # [{"id", "servico", "telefone", "nome"}]
     "chamada_microfone": "",     # nome do microfone usado nas chamadas

@@ -150,3 +150,72 @@ def test_pausa_nao_grava_o_trecho_da_pausa(tmp_path):
     r = g.parar()
     assert not g.pausado
     assert 0.6 <= r.segundos < 1.3
+
+
+# ------------------------------------------- som do computador + microfone
+def test_misturar_soma_e_limita():
+    som = np.full(480, 0.4, dtype="float32")
+    mic = np.full(480, 0.3, dtype="float32")
+    misto = gravador.misturar(som, mic)
+    assert misto.shape == (480,) and abs(float(misto[0]) - 0.7) < 1e-6
+    estourado = gravador.misturar(np.full(10, 0.9, "float32"),
+                                  np.full(10, 0.9, "float32"))
+    assert float(estourado.max()) <= 1.0
+
+
+def test_misturar_reamostra_o_microfone_para_o_bloco_do_som():
+    som = np.zeros(4800, dtype="float32")
+    mic = np.full(1600, 0.5, dtype="float32")       # outro tamanho de bloco
+    misto = gravador.misturar(som, mic, 16000)
+    assert len(misto) == 4800 and abs(float(misto[1234]) - 0.5) < 1e-6
+    sem_mic = gravador.misturar(som, np.empty(0, dtype="float32"))
+    assert len(sem_mic) == 4800 and float(abs(sem_mic).max()) == 0.0
+
+
+class FonteMistaFalsa:
+    """Mistura de mentira: o som interno e o microfone separados."""
+    origem = "som_e_microfone"
+    nome = "Saida de teste"
+    taxa = 48000
+
+    def __init__(self, tem_microfone=True):
+        self.microfone_disponivel = tem_microfone
+        self.microfone_ligado = True
+        self.aviso = "" if tem_microfone else "sem microfone"
+
+    def ler(self):
+        time.sleep(0.05)
+        n = 4800
+        som = np.full(n, 0.2, dtype="float32")
+        if self.microfone_ligado and self.microfone_disponivel:
+            return gravador.misturar(som, np.full(n, 0.3, "float32"))
+        return som
+
+    def fechar(self):
+        pass
+
+
+def test_microfone_liga_e_desliga_durante_a_gravacao(tmp_path):
+    fonte = FonteMistaFalsa()
+    g = Gravador(str(tmp_path), "som_e_microfone",
+                 fabrica_fonte=lambda: fonte, microfone_ligado=False)
+    g.iniciar()
+    assert fonte.microfone_ligado is False         # comecou desligado
+    g.microfone_ligado = True
+    assert fonte.microfone_ligado is True
+    g.microfone_ligado = False
+    assert fonte.microfone_ligado is False
+    g.cancelar()
+
+
+def test_sem_microfone_a_mistura_grava_so_o_som_e_avisa(tmp_path):
+    fonte = FonteMistaFalsa(tem_microfone=False)
+    g = Gravador(str(tmp_path), "som_e_microfone",
+                 fabrica_fonte=lambda: fonte)
+    g.iniciar()
+    assert g.microfone_disponivel is False and g.aviso == "sem microfone"
+    g.microfone_ligado = True                      # nao liga o que nao existe
+    assert fonte.microfone_ligado is False
+    time.sleep(0.3)
+    r = g.parar()
+    assert r.segundos > 0.2

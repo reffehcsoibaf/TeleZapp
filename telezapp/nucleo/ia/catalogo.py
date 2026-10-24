@@ -6,11 +6,13 @@ from dataclasses import dataclass
 
 # As tarefas que a pessoa liga, cada uma com o seu provedor
 AUDIO, IMAGEM, VIDEO, PDF = "audio", "imagem", "video", "pdf"
-TAREFAS = (AUDIO, IMAGEM, VIDEO, PDF)
+TEXTO = "texto"             # redigir, resumir e corrigir textos (sem midia)
+TAREFAS = (AUDIO, IMAGEM, VIDEO, PDF, TEXTO)
 NOMES_DE_TAREFA = {AUDIO: "Transcrição de voz e áudio",
                    IMAGEM: "Descrição de imagens e figurinhas",
                    VIDEO: "Descrição de vídeos",
-                   PDF: "PDF em texto acessível"}
+                   PDF: "PDF em texto acessível",
+                   TEXTO: "Redigir, resumir e corrigir textos"}
 # O que a midia e para o provedor: figurinha e imagem
 GENEROS = ("audio", "imagem", "figurinha", "video", "pdf")
 TAREFA_DO_GENERO = {"audio": AUDIO, "imagem": IMAGEM, "figurinha": IMAGEM,
@@ -34,28 +36,28 @@ class Provedor:
 PROVEDORES = {
     "gemini": Provedor(
         "gemini", "Google Gemini", "gemini-3.8-flash",
-        frozenset({"audio", "imagem", "pdf", "video"}),
+        frozenset({"texto", "audio", "imagem", "pdf", "video"}),
         "https://aistudio.google.com/api-keys",
         "https://ai.google.dev/gemini-api/terms",
         alternativos=("gemini-3.6-flash", "gemini-3.5-flash-lite")),
     "openai": Provedor(
         "openai", "OpenAI", "gpt-4.1-mini",
-        frozenset({"audio", "imagem", "pdf"}),
+        frozenset({"texto", "audio", "imagem", "pdf"}),
         "https://platform.openai.com/api-keys",
         "https://developers.openai.com/api/docs/guides/your-data",
         modelo_transcricao="gpt-4o-mini-transcribe"),
     "claude": Provedor(
         "claude", "Claude (Anthropic)", "claude-haiku-5-5",
-        frozenset({"imagem", "pdf"}),
+        frozenset({"texto", "imagem", "pdf"}),
         "https://console.anthropic.com/settings/keys",
         "https://www.anthropic.com/legal/privacy"),
     "groq": Provedor(
-        "groq", "Groq", "qwen/qwen3.8-27b", frozenset({"audio", "imagem"}),
+        "groq", "Groq", "qwen/qwen3.8-27b", frozenset({"texto", "audio", "imagem"}),
         "https://console.groq.com/keys", "https://groq.com/privacy-policy",
         modelo_transcricao="whisper-large-v3-turbo"),
     "openrouter": Provedor(
         "openrouter", "OpenRouter", "google/gemini-3.5-flash-lite",
-        frozenset({"imagem", "pdf"}), "https://openrouter.ai/settings/keys",
+        frozenset({"texto", "imagem", "pdf"}), "https://openrouter.ai/settings/keys",
         "https://openrouter.ai/privacy"),
 }
 
@@ -70,9 +72,22 @@ LIMITE_BYTES = {"audio": 14 * 1024 * 1024, "imagem": 14 * 1024 * 1024,
                 "pdf": 14 * 1024 * 1024}
 # Maior resposta guardada e orcamento pedido ao provedor
 MAX_CARACTERES = {"audio": 50_000, "imagem": 12_000, "figurinha": 12_000,
-                  "video": 12_000, "pdf": 100_000}
+                  "video": 12_000, "pdf": 100_000, "texto": 20_000}
 MAX_TOKENS = {"audio": 8000, "imagem": 1800, "figurinha": 1200,
-              "video": 2200, "pdf": 16000}
+              "video": 2200, "pdf": 16000, "texto": 4000}
+# O tom ao redigir (chave, o que a pessoa le) e os idiomas da traducao (nome
+# em ingles, que vai ao provedor, e o que a pessoa le)
+TONS = (("natural", "Natural, no tom da conversa"),
+        ("amigavel", "Amigável e simpático"),
+        ("formal", "Formal e educado"),
+        ("direto", "Direto e objetivo"),
+        ("descontraido", "Descontraído, com leveza"))
+IDIOMAS = (("Brazilian Portuguese", "Português do Brasil"),
+           ("English", "Inglês"), ("Spanish", "Espanhol"),
+           ("French", "Francês"), ("German", "Alemão"),
+           ("Italian", "Italiano"))
+# Mais que isso do texto da pessoa ou da conversa nao viaja (fica o final)
+MAX_ENTRADA_TEXTO = 24_000
 MAX_RESPOSTA_BYTES = 8 * 1024 * 1024
 
 
@@ -101,7 +116,7 @@ def aceita(provedor, genero):
 def provedores_da_tarefa(tarefa):
     """[(chave, nome)] dos provedores que fazem a tarefa."""
     genero = {AUDIO: "audio", IMAGEM: "imagem", VIDEO: "video",
-              PDF: "pdf"}[tarefa]
+              PDF: "pdf", TEXTO: "texto"}[tarefa]
     return [(p.chave, p.nome) for p in PROVEDORES.values()
             if aceita(p.chave, genero)]
 

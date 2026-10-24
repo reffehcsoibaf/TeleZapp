@@ -585,9 +585,194 @@ no fechamento, por assunto.
   prévia de links, o reinício do pareamento e o executável com OpenCV, emoji e
   `telezapp/sons` (conferir o PyInstaller).
 
+## Mídia como resposta e menção por @ (23/10/2026)
+
+Pedido do usuário: o programa dizia que a mídia ia sem citar a mensagem respondida; agora cita. E, em grupo, digitar @ lista os membros para mencionar. Decisões: a menção fica na caixa como "@Nome" (legível pelo leitor de tela) e só vira o formato do serviço no envio; o @ só abre a lista no começo ou depois de espaço (não atrapalha e-mails); Esc na lista deixa o @ digitado. Pendente: o usuário testar com contas reais (resposta com documento e foto no WhatsApp e no Telegram; menção com e sem @usuario no Telegram).
+
 ## Versão 2026.10.23.0 (23/10/2026): menus novos, criar grupos, chamadas e enquetes
 
 Reúne tudo o que entrou depois da 2026.10.21.0 (o detalhe técnico está no CHANGELOG): chamadas de voz do WhatsApp pela DLL de teste do neonize, corretor ortográfico, atalhos personalizáveis, gravar por atalho, segundo plano e bandeja, enquetes, menus Novo e Ir para, configurações Interface e Mensagens, criar grupo, canal e comunidade, tópicos de grupo do Telegram, estado reproduzida, correção do áudio Ogg, credenciais do Telegram embutidas e o formulário de relatos. As confirmações do responsável estão nas seções abaixo. **Ainda sem teste no app real:** criar grupo, canal e comunidade nos dois serviços, tópicos do Telegram, Nova chamada, Novo contato, a busca em Gerenciar contatos, as credenciais embutidas no executável, a tela de Atalhos e o gravar por atalho, o segundo plano, votar e quem votou no Telegram, e o estado reproduzida nas mensagens antigas.
+
+## Segurança dos dados: só documentar por ora (23/10/2026)
+
+- Perguntaram ao responsável sobre a segurança dos dados do WhatsApp e do
+  Telegram. Hoje só as chaves de IA são cifradas (DPAPI); sessões, banco de
+  mensagens e mídias ficam em arquivos comuns na pasta de dados, e o código
+  secreto das trancadas só as esconde na interface.
+- Decisão do responsável: **dizer isso com clareza no guia** (seção
+  "Segurança e privacidade dos seus dados": o que sai do computador, o que é
+  e o que não é cifrado, BitLocker e conta com senha, o que fazer se perder o
+  computador, risco de restrição da conta) e **não aumentar a complexidade
+  agora**. Só reabrir se muitas pessoas questionarem ou se acontecer algo.
+- Se reabrir, ordem sugerida: sessão do Telegram via DPAPI (custo mínimo);
+  SQLCipher no banco de mensagens, medindo antes e depois (faixa típica de 5 a
+  15%, não medida aqui); sessão do WhatsApp por último, pois depende da DLL do
+  neonize. Mídias ficam de fora (BitLocker cobre).
+
+## Funções do plano original que faltavam (23/10/2026)
+
+Conferido o plano de 13/10 contra o código. Decisões do responsável:
+
+- **Janela de atualização**: está exatamente como planejado.
+- **Listas de transmissão**: ficam quietas. Se algumas pessoas pedirem, o
+  responsável avalia se implementa.
+- **A fazer (vale a pena)**:
+  1. **Bloquear e desbloquear contatos**, com uma **lista dos bloqueados**.
+  2. **Editar o perfil** (nome, recado e foto), com a alteração indo para os
+     dois serviços.
+  3. **Ordem das informações**, escolhida pelo usuário, nas mensagens e
+     também na lista de conversas ("é algo a ver", ou seja, a estudar o
+     desenho antes).
+- **Continuam fora**: chamadas de vídeo; assinatura do executável (depende de
+  certificado).
+- **Viabilidade** (conferida em 23/10/2026): o neonize do venv tem
+  `update_blocklist`, `get_blocklist`, `set_profile_name`,
+  `set_status_message` e `set_profile_photo`; o Telethon cobre o Telegram
+  (`contacts.Block`, `Unblock`, `GetBlocked`, `account.UpdateProfile`,
+  `photos.UploadProfilePhoto`). Falta desenhar a interface e testar ao vivo.
+
+### Bloquear e desbloquear (23/10/2026, versão 2026.10.23.1)
+
+- Feito nos dois serviços: `Provedor.bloqueados`, `esta_bloqueado` e `bloquear`; janela "Contatos bloqueados" (menu Contatos) e "Bloquear ou desbloquear" (menu Contatos e menu de contexto da conversa privada). Só pessoas; grupos e canais não.
+- Decisões: o item da conversa **inverte o estado atual** (confere o serviço antes e pergunta), em vez de um rótulo que muda, porque o estado só se sabe indo à rede e o menu de contexto não pode esperar; na lista, Desbloquear age direto (Enter também) e Bloquear alguém pergunta antes.
+- **Verificado ao vivo pelo responsável (23/10/2026):** "tudo se comportou conforme eu esperava" (dito depois de testar o bloqueio, o perfil e a lista de conversas; ele não detalhou caso a caso, então não se sabe se testou os dois serviços em cada função). Os pontos de atenção abaixo ficam como foram escritos, sem relato de problema.
+- Pontos de atenção no WhatsApp (antes do teste): a lista de bloqueio pode guardar o endereço LID (o código compara pelo número e desbloqueia pelo endereço da lista) e o bloqueio por telefone novo usa o JID do número; se o serviço recusar, o erro aparece na fala e numa mensagem.
+- Junto veio a correção do voto em enquete do WhatsApp (`EncodeError` do `MessageInfo`, visto no log de 23/10 às 13:27 e 13:27:50). No Telegram não há falha de voto nesse log; o relato do responsável sobre o Telegram por volta das 13h28 não bate com as linhas do log, que são do WhatsApp.
+
+- **Voto em enquete de canal do WhatsApp: adiado (23/10/2026).** O whatsmeow só tem reação e "visto" para canais (conferido em `newsletter.go`), e o neonize não vota; o TeleZapp avisa que não vota e manda votar pelo celular. Implementar exigiria descobrir o formato do voto em canal e mexer na DLL. Só voltar ao assunto se virar demanda.
+
+### Editar o perfil (23/10/2026, versão 2026.10.23.1)
+
+- Feito nos dois serviços: nome, recado e foto (e o sobrenome no Telegram), em Ferramentas, "Editar o meu perfil". Envia só o que mudou e diz o que ficou salvo e o que o serviço recusou.
+- Decisões: a foto é preparada pelo TeleZapp (centro em quadrado, 640 px, JPEG) para o responsável poder escolher qualquer imagem; **sem remover a foto** por ora (o neonize não tem e o Telegram pediria outra chamada); o recado do Telegram aceita até 140 no formulário (Premium) e o serviço recusa acima de 70 sem Premium, com a frase explicada.
+- **Verificado ao vivo pelo responsável (23/10/2026):** "tudo se comportou conforme eu esperava" (ver a nota do bloqueio acima: ele não detalhou). Pontos de atenção (antes do teste): o `set_profile_name` do neonize grava o nome de exibição (push name) e não confirmei que o WhatsApp o mostra na hora a quem já tem a conversa aberta; ler o recado próprio no WhatsApp depende de `get_user_info` do próprio JID.
+
+### Lista de conversas configurável (23/10/2026, versão 2026.10.23.1)
+
+- A ordem das informações **da mensagem** já existe (estilos em Exibir, "Como cada mensagem é lida"); o que faltava era a **lista de conversas**. Quatro itens: nome da conversa, serviço, quantidade de não lidas e trecho da última mensagem. Cada um liga e desliga, com ordem escolhida pelos botões Mover para cima e para baixo.
+- Onde: botão "Lista de conversas" na categoria Interface (valor pendente até OK ou Aplicar, como as outras configurações) e submenu "Lista de conversas" em Exibir (efeito imediato).
+- Decisões: pelo menos um item sempre ativado (a tentativa de tirar o último é recusada e falada); **o trecho vem desligado por padrão** (a leitura da lista segue como sempre foi); fixada e silenciada aparecem sempre, depois do serviço (ou do nome); se os itens ativados não têm nada a mostrar numa conversa (sem não lidas e sem trecho, por exemplo), mostra o nome. Trecho: até 80 caracteres, "Você:" nas minhas e o autor nos grupos.
+- O trecho vem do banco numa consulta só, em segundo plano, quando o item está ligado, e depois acompanha as mensagens novas, editadas e apagadas.
+- **Verificado ao vivo pelo responsável (23/10/2026):** "tudo se comportou conforme eu esperava" (ver a nota do bloqueio acima). Antes disso, a janela de ordem foi aberta com o wx de verdade (sem mostrar) e funciona; falta ver com o leitor de tela e com muitas conversas (o tempo da consulta do trecho num banco grande).
+
+### Arquivar avisa o celular (23/10/2026, versão 2026.10.23.1)
+
+- Arquivar e desarquivar uma conversa do WhatsApp no TeleZapp nunca avisava o
+  celular (a fala dizia "só no TeleZapp"; o comentário dizia que a biblioteca
+  não deixava). Depois do conserto do `send_app_state` (17/10) fixar,
+  silenciar e apagar passaram a avisar, mas arquivar ficou sem código. Agora
+  `ProvedorWhatsApp.arquivar_conversa` manda o aviso de estado `archive`
+  (coleção `regular_low`, versão 3, `ArchiveChatAction` com a hora da última
+  mensagem), pelo mesmo `_enviar_estado`.
+- **Verificado ao vivo pelo responsável (23/10/2026):** arquivar no celular já
+  chegava ao TeleZapp; arquivar e desarquivar no TeleZapp agora "refletiu no
+  celular".
+
+### Ler no celular zera as não lidas (23/10/2026, versão 2026.10.23.1)
+
+- Com a confirmação de leitura ligada, o celular avisa os outros aparelhos com
+  um recibo de leitura comum (tipo `READ`) cujo `MessageSource.IsFromMe` é
+  verdadeiro, não com `READ_SELF`. `_ao_recibo` descartava esse recibo. Agora
+  `READ` e `PLAYED` com `IsFromMe` valem como "li" e "ouvi no celular".
+  Descoberto no registro bruto da ponte do WinZapp (36 recibos `read` com o
+  próprio identificador como participante).
+- **Verificado ao vivo pelo responsável (23/10/2026):** "telezapp marcou como
+  lida" depois da correção. O aviso só chega com o aparelho conectado.
+
+### Trancar e destrancar só pelo celular (23/10/2026, versão 2026.10.23.1)
+
+- **Decisão do responsável:** trancar e destrancar é coisa sensível para fazer
+  no computador, então só vale pelo celular, no TeleZapp e no WinZapp. No
+  TeleZapp a tranca só local "não faz sentido" e saiu: o comando de menu, o
+  atalho, a opção da seleção em massa, o item do menu de contexto e
+  `Janela._trancar_conversa`. Continua tudo que mostra o que o celular trancou:
+  o tipo Trancadas, o código secreto e o aviso `ChatLockEv`
+  (celular → TeleZapp, conferido: trancar e destrancar no celular chegam).
+  A tranca local de versões anteriores (`trancadas_locais`) é esvaziada ao
+  carregar a lista.
+- No WinZapp o cofre que o Gabriel fez fica como está (tranca local).
+- Descartado: avisar o celular a partir do TeleZapp. O WhatsApp guarda a tranca
+  com o código secreto do celular e o aviso `lock` não tem versão conhecida.
+
+### Estado do app sincronizado de tempos em tempos (23/10/2026, versão 2026.10.23.1)
+
+- Pedido do responsável: "melhor sincronizado com algum atraso do que não
+  sincronizar". O TeleZapp busca no WhatsApp, a cada 90 s, as coleções
+  `regular_low` e `regular_high` (arquivar, fixar, silenciar, favoritar,
+  trancar, ler, apagar mensagem); repara sozinho a coleção que sai de
+  sincronia e, se o celular não mandar a cópia (o iPhone só manda com o
+  WhatsApp aberto na tela), repete o pedido a cada 180 s por cerca de uma hora.
+  A ponte do WinZapp busca a cada 60 s e a cada pedido da lista de conversas.
+- **Verificado ao vivo pelo responsável (23/10/2026):** com o WhatsApp aberto
+  no celular, a conversa arquivada lá se arquivou no TeleZapp; desarquivar no
+  TeleZapp chegou ao celular; reproduzir uma voz no celular apareceu como
+  ouvida "nos dois apps" (TeleZapp e WinZapp). Áudio ouvido não está no estado
+  do app: chega como recibo ao vivo (o servidor entrega os acumulados ao
+  reconectar), por isso não entra na busca periódica.
+
+### IA para redigir, resumir e corrigir (23/10/2026, versão 2026.10.23.1)
+
+- Pedido do responsável como último tema do dia, com a regra de que o que levasse muito tempo ficaria para a próxima versão. Feito o núcleo: corrigir e redigir na caixa, resumir mensagem e conversa. Reaproveita provedores, chaves, ordem e modelos da IA de mídia, como tarefa nova. Decisões: redigir nunca envia (só rascunho na caixa, Control Z volta); consentimento de texto separado do de mídia; o texto da conversa é tratado como dado (não como instrução ao modelo).
+- Mesmo dia, segunda rodada a pedido do responsável: tom (opção `ia_tom` e item para escolher na hora), tradução (caixa e mensagem, seis idiomas) e resumo das não lidas, este só disparado manualmente.
+- **Não feito / a decidir:** resumo automático, mais idiomas, ligar a redação ao atalho de enviar. **Não verificado com provedor real nem ao vivo.**
+
+### Digitar numa lista (23/10/2026, versão 2026.10.23.1)
+
+- Pedido do responsável: manter o pulo por inicial e permitir, por opção, ir direto ao campo de texto vizinho (caixa de mensagem; busca de conversas). Padrão: pular. **Não verificado ao vivo:** o EVT_CHAR de ListBox/ListCtrl no Windows e o foco com o leitor de tela.
+
+### Dispositivos de som (23/10/2026, versão 2026.10.23.1)
+
+- Pedido do responsável: um slot de atalho para definir o dispositivo de som.
+  Escopo escolhido por ele: tudo (tocar, gravar e chamadas). Uma janela única,
+  "Dispositivos de som", com Saída de som e Microfone, "Padrão do Windows"
+  primeiro; o item de Mídias nasce sem combinação de teclas.
+- A escolha usa as mesmas chaves das chamadas (`chamada_microfone`,
+  `chamada_saida`) para ter uma só fonte. Nomes são comparados por prefixo
+  porque a API de som padrão do Windows corta os nomes; dispositivo que sumiu
+  cai no padrão em silêncio. O som do computador captura a saída escolhida.
+- **Não verificado ao vivo:** ouvir um áudio, gravar e ligar com outro
+  dispositivo; só os testes automáticos (sounddevice falso) e a listagem real
+  da máquina (um microfone, uma saída).
+
+### Gravar o som do computador com o microfone (23/10/2026, versão 2026.10.23.1)
+
+- Pedido de usuários, esclarecido pelo responsável: a gravação do computador
+  deve poder levar também o microfone. Janela "Gravar o som do computador"
+  com a caixa "Gravar também o microfone" (padrão ligado, opção em
+  Configurações, Mídias), ligável e desligável durante a gravação; atalho novo
+  `gravar_som_mic` (Ctrl+Shift+B) para a gravação rápida dos dois. O
+  Ctrl+Shift+S continua só com o som. Sem microfone: grava só o som e avisa.
+- **Verificado ao vivo pelo responsável (23/10/2026):** gravação do som do
+  computador com o microfone, pela janela e pelo atalho Control Shift B:
+  "tudo uma maravilha".
+
+### "Não avisar mais nesta versão" (23/10/2026, versão 2026.10.23.1)
+
+- Pedido do responsável: depois do Não na janela de versão nova, uma pergunta
+  separada, em vez de uma caixa de verificação na janela; a janela continua
+  como era. Os botões da pergunta têm frases próprias (não "Sim" e "Não", que
+  confundiam): "Não me avise mais sobre essa versão" (não avisa mais dessa
+  versão ao abrir, só quando sair outra) e "Talvez mais tarde", o padrão (avisa
+  de novo na próxima abertura). O aviso automático deixou de
+  ser "uma vez por versão": passa a ser a cada abertura, até atualizar ou
+  responder Sim. Guarda `atualizacao_ignorada` (a versão).
+- Primeira versão, com uma caixa de verificação na janela, foi testada ao vivo
+  com um lançador que finge a versão 2099.1.1.0 e depois trocada pela pergunta,
+  como o responsável queria. **A pergunta ainda não foi vista ao vivo.**
+
+### Banco de dados corrompido e recuperado (23/10/2026)
+
+- Ao abrir uma cópia de teste, o TeleZapp não iniciou: `database disk image is
+  malformed` em `telezapp.db` (páginas referenciadas duas vezes, linhas fora
+  de ordem). Causa não provada; havia dois processos do TeleZapp abertos ao
+  mesmo tempo mais cedo e registros de quedas anteriores.
+- Recuperado lendo as linhas legíveis para um banco novo (integridade `ok`):
+  106.584 mensagens (o índice do banco ruim dizia 109.152), 354 conversas (58
+  linhas de conversa recriadas a partir das mensagens, com o nome vindo dos
+  contatos), todos os recibos, contatos, status e apagadas; índice de mídias
+  2.002 de 2.179. Trocado com o consentimento do responsável. Cópias do
+  original ficam em `%APPDATA%\TeleZapp`: `telezapp.db.corrompido-20261023` e
+  `telezapp.db.antes-da-troca` (podem ser apagadas depois de alguns dias).
 
 ## Chamadas de voz do WhatsApp: fase 0 (21/10/2026)
 

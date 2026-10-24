@@ -157,6 +157,8 @@ class DialogoConfiguracoes(wx.Dialog):
         if categoria != CATEGORIA_BUSCA:
             for grupo in self.modelo.grupos(categoria):
                 self._criar_botao_grupo(categoria, grupo)
+        if categoria == "Interface" and not self.modelo.busca.strip():
+            self._criar_botao_lista_conversas()
         if categoria == "Privacidade" and self.privacidade is not None \
                 and not self.modelo.busca.strip():
             self._criar_privacidade_conta()
@@ -486,6 +488,25 @@ class DialogoConfiguracoes(wx.Dialog):
         b.Bind(wx.EVT_BUTTON, lambda e: self._abrir_grupo(categoria, grupo))
         self.lay_painel.Add(b, 0, wx.ALL, 8)
         self.controles["grupo:" + grupo] = b
+
+    def _criar_botao_lista_conversas(self):
+        """Botao que abre o que a lista de conversas mostra e a ordem."""
+        b = wx.Button(self.painel, label="Lista de conversas")
+        b.Bind(wx.EVT_BUTTON, lambda e: self._abrir_lista_conversas())
+        self.lay_painel.Add(b, 0, wx.ALL, 8)
+        self.controles["lista_conversas"] = b
+
+    def _abrir_lista_conversas(self):
+        from telezapp.interface.lista_conversas import DialogoListaConversas
+        dlg = DialogoListaConversas(self, self.modelo.lista_em_uso,
+                                    self.modelo.lista_definir, self.fala)
+        try:
+            dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+        b = self.controles.get("lista_conversas")
+        if b:
+            b.SetFocus()
 
     def _abrir_grupo(self, categoria, grupo):
         dlg = DialogoGrupoOpcoes(

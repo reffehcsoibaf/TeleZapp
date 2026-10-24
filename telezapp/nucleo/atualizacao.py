@@ -108,6 +108,14 @@ def e_mais_nova(lancamento, atual=VERSAO):
     return nova is not None and velha is not None and nova > velha
 
 
+def deve_avisar_ao_abrir(lancamento, ignorada):
+    """Ao abrir o programa: avisa de uma versao nova a cada abertura, ate a
+    pessoa atualizar ou marcar "Nao avisar mais nesta versao" (`ignorada` e
+    a versao marcada). Uma versao mais nova que a ignorada volta a avisar."""
+    return bool(lancamento) and e_mais_nova(lancamento) and \
+        lancamento.versao != (ignorada or "")
+
+
 def _buscar_json(url, tempo=10):
     pedido = urllib.request.Request(url, headers={
         "Accept": "application/vnd.github+json",

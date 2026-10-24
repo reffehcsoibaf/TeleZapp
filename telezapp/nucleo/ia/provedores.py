@@ -173,6 +173,40 @@ def montar_pedido(provedor, modelo, chave, midia, instrucoes, pergunta,
                 {"type": "text", "text": pergunta}, parte]}]})
 
 
+def montar_pedido_de_texto(provedor, modelo, chave, instrucoes, pergunta):
+    """Pedido so de texto (redigir, resumir, corrigir): sem arquivo."""
+    if provedor not in cat.PROVEDORES or not cat.aceita(provedor, "texto"):
+        raise ErroIA("nao_aceita", "Este provedor não faz isso com texto.")
+    tokens = cat.MAX_TOKENS["texto"]
+    if provedor == "openai":
+        return Pedido(
+            _OPENAI + "/responses", {"Authorization": "Bearer " + chave},
+            {"model": modelo, "store": False, "instructions": instrucoes,
+             "input": [{"role": "user", "content": [
+                 {"type": "input_text", "text": pergunta}]}],
+             "max_output_tokens": tokens})
+    if provedor == "gemini":
+        return Pedido(
+            "%s/models/%s:generateContent" % (_GEMINI, modelo),
+            {"x-goog-api-key": chave},
+            {"systemInstruction": {"parts": [{"text": instrucoes}]},
+             "contents": [{"role": "user", "parts": [{"text": pergunta}]}],
+             "generationConfig": {"maxOutputTokens": tokens}})
+    if provedor == "claude":
+        return Pedido(
+            _CLAUDE, {"x-api-key": chave, "anthropic-version": "2023-06-01"},
+            {"model": modelo, "max_tokens": tokens, "system": instrucoes,
+             "messages": [{"role": "user", "content": pergunta}]})
+    campo_tokens = ("max_completion_tokens" if provedor == "groq"
+                    else "max_tokens")
+    return Pedido(
+        _CHAT[provedor] + "/chat/completions",
+        {"Authorization": "Bearer " + chave},
+        {"model": modelo, campo_tokens: tokens, "messages": [
+            {"role": "system", "content": instrucoes},
+            {"role": "user", "content": pergunta}]})
+
+
 def _transcricao(provedor, chave, midia):
     """Pedido multipart. O idioma fica por conta da deteccao do modelo: forcar
     um idioma estragaria uma mensagem em outro."""

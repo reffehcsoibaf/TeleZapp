@@ -845,23 +845,10 @@ def opcoes_de_conta(contas):
     return opcoes
 
 
-def rotulo_conversa(c):
-    base = "%s, %s" % (c.nome, SERVICOS.get(c.servico, c.servico))
-    if c.fixada:
-        base += ", fixada"
-    if c.silenciada():
-        base += ", silenciada"
-    if c.tipo == "status":
-        if c.nao_lidas == 1:
-            return base + ", 1 não visto"
-        if c.nao_lidas > 1:
-            return base + ", %d não vistos" % c.nao_lidas
-        return base
-    if c.nao_lidas == 1:
-        return base + ", 1 não lida"
-    if c.nao_lidas > 1:
-        return base + ", %d não lidas" % c.nao_lidas
-    return base
+def rotulo_conversa(c, lista=None, previa=""):
+    """A linha da conversa na lista (ver nucleo/lista_conversas.py)."""
+    from telezapp.nucleo import lista_conversas
+    return lista_conversas.rotulo(c, lista, previa)
 
 
 _LINK = re.compile(r"(?:https?://|www\.)[^\s<>\"']+", re.IGNORECASE)

@@ -99,7 +99,7 @@ def abrir(pai, msg, caminho, fala, nome_conversa="", cfg=None):
 
 
 def salvar_copia(pai, msg, caminho, fala=None):
-    dlg = wx.FileDialog(pai, "Salvar uma cópia da mídia",
+    dlg = wx.FileDialog(pai, "Salvar a mídia em um arquivo",
                         defaultFile=nome_para_salvar(msg, caminho),
                         style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT)
     try:
@@ -167,7 +167,7 @@ def _imagem(pai, msg, caminho, texto, fala):
                         wx.IMAGE_QUALITY_HIGH)
     dlg = _janela(
         pai, "Imagem", texto, rotulo="Imagem",
-        botoes_extra=(("&Salvar uma cópia...",
+        botoes_extra=(("&Salvar em um arquivo...",
                        lambda d: salvar_copia(d, msg, caminho, fala)),),
         corpo=lambda d: wx.StaticBitmap(d, bitmap=wx.Bitmap(img)))
     dlg.ShowModal()
@@ -184,7 +184,7 @@ def _texto(pai, msg, caminho, texto):
         conteudo = bruto.decode("latin-1")
     dlg = _janela(pai, "Documento", texto + "\n\n" + conteudo,
                   rotulo="Texto do documento",
-                  botoes_extra=(("&Salvar uma cópia...",
+                  botoes_extra=(("&Salvar em um arquivo...",
                                  lambda d: salvar_copia(d, msg, caminho)),))
     dlg.ShowModal()
     dlg.Destroy()
@@ -205,7 +205,7 @@ def _documento(pai, msg, caminho, texto):
         botoes_extra=(
             ("&Abrir com o programa do Windows",
              lambda d: _abrir_no_windows(caminho)),
-            ("&Salvar uma cópia...",
+            ("&Salvar em um arquivo...",
              lambda d: salvar_copia(d, msg, caminho))))
     dlg.ShowModal()
     dlg.Destroy()
@@ -426,8 +426,8 @@ def _reproducao(pai, msg, caminho, texto, fala, motor, video, cfg=None):
             if not ctrl.Load(caminho):
                 wx.MessageBox(
                     "O Windows não conseguiu reproduzir este arquivo dentro "
-                    "do app (pode faltar o codec). Use Salvar uma cópia da "
-                    "mídia, no menu Mensagem, se quiser abri-lo em outro "
+                    "do app (pode faltar o codec). Use Salvar a mídia em um arquivo, no "
+                    "menu Mensagem, se quiser abri-lo em outro "
                     "programa.", NOME, wx.OK | wx.ICON_WARNING, dlg)
                 dlg.EndModal(wx.ID_CANCEL)
             return

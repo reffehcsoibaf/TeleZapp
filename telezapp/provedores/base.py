@@ -25,6 +25,15 @@ class ErroPrivacidade(Exception):
     """Nao deu para mudar a privacidade; o texto e dito a pessoa."""
 
 
+class ErroBloqueio(Exception):
+    """Nao deu para bloquear, desbloquear ou ler os bloqueados; o texto e
+    dito a pessoa."""
+
+
+class ErroPerfil(Exception):
+    """Nao deu para ler ou mudar o perfil; o texto e dito a pessoa."""
+
+
 class DownloadCancelado(Exception):
     """A pessoa cancelou o download."""
 
@@ -57,8 +66,9 @@ class Provedor(ABC):
         """Busca as ultimas mensagens -> MensagensCarregadas."""
 
     @abstractmethod
-    def enviar_texto(self, conversa_id, texto, resposta_a=""):
-        """Envia -> MensagemNova(enviada_daqui=True) ou EnvioFalhou."""
+    def enviar_texto(self, conversa_id, texto, resposta_a="", mencoes=None):
+        """Envia -> MensagemNova(enviada_daqui=True) ou EnvioFalhou.
+        `mencoes`: quem foi mencionado com @ (ver nucleo.mencoes)."""
 
     @abstractmethod
     def marcar_como_lida(self, conversa_id):
@@ -95,9 +105,12 @@ class Provedor(ABC):
         """Avisa o servico que a pessoa tocou esta voz ou audio recebido
         (a marca de ouvida tambem aparece no celular)."""
 
-    def enviar_arquivo(self, conversa_id, anexo, legenda=""):
+    def enviar_arquivo(self, conversa_id, anexo, legenda="", resposta_a="",
+                       mencoes=None):
         """Envia foto, video, audio, documento ou nota de voz (`anexo`, ver
-        midia.envio). Volta na hora; o upload roda fora da fila de texto.
+        midia.envio), citando a mensagem `resposta_a` quando houver e com as
+        `mencoes` (ver nucleo.mencoes) da legenda. Volta na hora; o upload
+        roda fora da fila de texto.
         Publica MensagemNova(enviada_daqui=True) ou EnvioFalhou."""
         raise NotImplementedError
 
@@ -305,6 +318,43 @@ class Provedor(ABC):
         """(tipo, quantas) de quem pode ver o status: contacts, blacklist
         ou whitelist; None se nao souber."""
         return None
+
+    # True nos servicos em que da para editar o proprio perfil; o sobrenome
+    # existe so em alguns (PERFIL_SOBRENOME)
+    PODE_EDITAR_PERFIL = False
+    PERFIL_SOBRENOME = False
+
+    def meu_perfil(self):
+        """{'nome', 'sobrenome', 'recado'} do proprio perfil (as chaves que o
+        servico nao tem ficam de fora). Espera o servico (thread propria).
+        Levanta ErroPerfil."""
+        raise ErroPerfil("Esta conta não edita o perfil por aqui.")
+
+    def salvar_perfil(self, mudancas, foto=None):
+        """Grava no servico os campos de `mudancas` ({'nome', 'sobrenome',
+        'recado'}: so os que mudaram) e a `foto` (bytes JPEG), se houver.
+        Espera o servico (thread propria). Devolve ([campos salvos],
+        [(campo, motivo)]); levanta ErroPerfil se nem tentou (conta
+        desconectada)."""
+        raise ErroPerfil("Esta conta não edita o perfil por aqui.")
+
+    # True nos servicos em que da para bloquear e desbloquear pessoas
+    PODE_BLOQUEAR = False
+
+    def bloqueados(self):
+        """[(id, nome, telefone)] das pessoas que a conta bloqueou. Espera o
+        servico (thread propria). Levanta ErroBloqueio."""
+        return []
+
+    def esta_bloqueado(self, conversa_id):
+        """True se a pessoa da conversa esta bloqueada. Espera o servico
+        (thread propria). Levanta ErroBloqueio."""
+        return False
+
+    def bloquear(self, conversa_id, bloquear=True):
+        """Bloqueia a pessoa da conversa (ou desbloqueia, com `bloquear`
+        falso). Espera o servico (thread propria). Levanta ErroBloqueio."""
+        raise ErroBloqueio("Esta conta não bloqueia pessoas por aqui.")
 
     def resolver_destinatario(self, texto):
         """(conversa_id, nome) de quem o texto (@usuario, telefone) indica,

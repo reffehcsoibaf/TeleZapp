@@ -15,11 +15,13 @@ import time
 from telezapp import NOME, VERSAO, config
 from telezapp.midia import armazem
 from telezapp.nucleo import eventos as ev
+from telezapp.nucleo import mencoes as nucleo_mencoes
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import previa_links
 from telezapp.provedores.base import (PEDIR_CODIGO, PEDIR_SENHA,
                                       PEDIR_TELEFONE, DownloadCancelado,
-                                      ErroMidia, ErroPrivacidade, Provedor)
+                                      ErroBloqueio, ErroMidia, ErroPerfil,
+                                      ErroPrivacidade, Provedor)
 
 log = logging.getLogger("telezapp.telegram")
 
@@ -650,6 +652,157 @@ class ProvedorTelegram(Provedor):
             raise ErroPrivacidade("Esta opção não existe no Telegram.")
         await self.cliente(functions.account.SetPrivacyRequest(
             key=tipo(), rules=[regra()]))
+
+    # ------------------------------------------------------------ perfil
+    PODE_EDITAR_PERFIL = True
+    PERFIL_SOBRENOME = True
+
+    def _executar_perfil(self, corotina, falha):
+        """Como _executar, mas todo erro vira ErroPerfil com o texto `falha`."""
+        try:
+            return self._executar(corotina)
+        except ErroPerfil:
+            raise
+        except ErroPrivacidade as e:          # conta nao conectada
+            raise ErroPerfil(str(e)) from e
+        except Exception as e:
+            log.exception("perfil do Telegram")
+            raise ErroPerfil(falha) from e
+
+    def meu_perfil(self):
+        return self._executar_perfil(
+            self._ler_perfil(), "Não consegui ler o seu perfil no Telegram.")
+
+    async def _ler_perfil(self):
+        from telethon.tl import functions, types
+        eu = await self.cliente.get_me()
+        completo = await self.cliente(functions.users.GetFullUserRequest(
+            types.InputUserSelf()))
+        return {"nome": getattr(eu, "first_name", "") or "",
+                "sobrenome": getattr(eu, "last_name", "") or "",
+                "recado": getattr(completo.full_user, "about", "") or ""}
+
+    def salvar_perfil(self, mudancas, foto=None):
+        return self._executar_perfil(
+            self._gravar_perfil(mudancas, foto),
+            "Não consegui salvar o perfil no Telegram.")
+
+    async def _gravar_perfil(self, mudancas, foto):
+        import io
+        from telethon import errors
+        from telethon.tl import functions
+        feitos, erros = [], []
+        campos = {"nome": "first_name", "sobrenome": "last_name",
+                  "recado": "about"}
+        pedido = {campos[c]: mudancas[c] for c in campos if c in mudancas}
+        if pedido:
+            try:
+                await self.cliente(functions.account.UpdateProfileRequest(
+                    **pedido))
+                feitos += [c for c in campos if c in mudancas]
+            except errors.FirstNameInvalidError:
+                erros.append(("nome", "o Telegram não aceitou esse nome."))
+            except errors.AboutTooLongError:
+                erros.append(("recado", "passou do limite do Telegram (70 "
+                              "caracteres; 140 com Premium)."))
+            except errors.FloodWaitError as e:
+                erros.append(("nome", "o Telegram pediu para esperar %d "
+                              "segundos." % e.seconds))
+            except Exception as e:
+                log.warning("perfil do Telegram: %s", type(e).__name__)
+                erros.append(("nome", "o Telegram não aceitou (%s)."
+                              % type(e).__name__))
+        if foto:
+            try:
+                arquivo = io.BytesIO(foto)
+                arquivo.name = "foto.jpg"
+                enviado = await self.cliente.upload_file(arquivo)
+                await self.cliente(functions.photos.UploadProfilePhotoRequest(
+                    file=enviado))
+                feitos.append("foto")
+            except (errors.PhotoInvalidError, errors.ImageProcessFailedError):
+                erros.append(("foto", "o Telegram não aceitou essa imagem."))
+            except Exception as e:
+                log.warning("foto do Telegram: %s", type(e).__name__)
+                erros.append(("foto", "o Telegram não aceitou (%s)."
+                              % type(e).__name__))
+        return feitos, erros
+
+    # ------------------------------------------------------- bloqueados
+    PODE_BLOQUEAR = True
+
+    def _executar_bloqueio(self, corotina, falha):
+        """Como _executar, mas todo erro vira ErroBloqueio com o texto
+        `falha` (ou o proprio texto, quando ja e um ErroBloqueio)."""
+        try:
+            return self._executar(corotina)
+        except ErroBloqueio:
+            raise
+        except ErroPrivacidade as e:          # conta nao conectada
+            raise ErroBloqueio(str(e)) from e
+        except Exception as e:
+            log.exception("bloqueados do Telegram")
+            raise ErroBloqueio(falha) from e
+
+    def bloqueados(self):
+        return self._executar_bloqueio(
+            self._ler_bloqueados(),
+            "Não consegui ler a lista de bloqueados do Telegram.")
+
+    async def _ler_bloqueados(self):
+        from telethon.tl import functions
+        achados, vistos, inicio = [], set(), 0
+        while True:
+            r = await self.cliente(functions.contacts.GetBlockedRequest(
+                offset=inicio, limit=100))
+            bloqueados = getattr(r, "blocked", None) or []
+            por_id = {u.id: u for u in getattr(r, "users", None) or []}
+            for b in bloqueados:
+                u = por_id.get(getattr(b.peer_id, "user_id", None))
+                if u is None or str(u.id) in vistos:
+                    continue
+                vistos.add(str(u.id))
+                fone = getattr(u, "phone", "") or ""
+                achados.append((str(u.id), nome_de(u) or str(u.id),
+                                "+" + fone if fone else ""))
+            inicio += len(bloqueados)
+            if not bloqueados or inicio >= getattr(r, "count", inicio):
+                return achados
+
+    def _id_de_pessoa(self, conversa_id):
+        """Id numerico do usuario da conversa; so pessoas se bloqueiam."""
+        try:
+            id_ = int(conversa_id)
+        except ValueError:
+            id_ = 0
+        if id_ <= 0:
+            raise ErroBloqueio("Só dá para bloquear pessoas.")
+        return id_
+
+    def esta_bloqueado(self, conversa_id):
+        self._id_de_pessoa(conversa_id)
+        return self._executar_bloqueio(
+            self._ver_se_bloqueado(conversa_id),
+            "Não consegui ver se a pessoa está bloqueada no Telegram.")
+
+    async def _ver_se_bloqueado(self, conversa_id):
+        from telethon.tl import functions
+        completo = await self.cliente(functions.users.GetFullUserRequest(
+            await self._entidade(conversa_id)))
+        return bool(getattr(completo.full_user, "blocked", False))
+
+    def bloquear(self, conversa_id, bloquear=True):
+        self._id_de_pessoa(conversa_id)
+        self._executar_bloqueio(
+            self._mudar_bloqueio(conversa_id, bloquear),
+            "O Telegram não aceitou %s a pessoa."
+            % ("bloquear" if bloquear else "desbloquear"))
+
+    async def _mudar_bloqueio(self, conversa_id, bloquear):
+        from telethon.tl import functions
+        pedido = functions.contacts.BlockRequest if bloquear \
+            else functions.contacts.UnblockRequest
+        await self.cliente(pedido(id=await self._entidade(conversa_id)))
 
     def _avisar(self, texto, grave=False):
         self.barramento.publicar(ev.Aviso(self.conta.id, texto, grave))
@@ -1846,17 +1999,44 @@ class ProvedorTelegram(Provedor):
         finally:
             f.close()
 
-    def enviar_texto(self, conversa_id, texto, resposta_a=""):
-        self._agendar(self._enviar(conversa_id, texto, resposta_a))
+    def enviar_texto(self, conversa_id, texto, resposta_a="", mencoes=None):
+        self._agendar(self._enviar(conversa_id, texto, resposta_a, mencoes))
 
-    async def _enviar(self, conversa_id, texto, resposta_a):
+    async def _com_mencoes(self, texto, mencoes):
+        """(texto, entidades): quem tem @usuario vira '@usuario' no texto; os
+        demais viram mencao por entidade, que o Telegram mostra como o nome."""
+        if not mencoes:
+            return texto, None
+        from telethon.tl import types
+        entidades = []
+
+        def trocar(men):
+            return men.get("usuario") or "@" + men.get("nome", "")
+        novo, posicoes = nucleo_mencoes.aplicar(texto, mencoes, trocar)
+        for i, f, men in posicoes:
+            if men.get("usuario"):
+                continue
+            try:
+                usuario = await self.cliente.get_input_entity(int(men["id"]))
+            except Exception:
+                log.info("não consegui mencionar alguém sem @usuario")
+                continue
+            comeco = len(novo[:i].encode("utf-16-le")) // 2
+            tamanho = len(novo[i:f].encode("utf-16-le")) // 2
+            entidades.append(types.InputMessageEntityMentionName(
+                comeco, tamanho, usuario))
+        return novo, entidades or None
+
+    async def _enviar(self, conversa_id, texto, resposta_a, mencoes=None):
         inicio = time.perf_counter()
         try:
             ent = await self._entidade(conversa_id)
+            enviar, entidades = await self._com_mencoes(texto, mencoes)
             enviada = await self.cliente.send_message(
-                ent, texto, reply_to=self._resposta_em(
+                ent, enviar, reply_to=self._resposta_em(
                     conversa_id, resposta_a),
-                link_preview=previa_links.LIGADAS["enviar"])
+                link_preview=previa_links.LIGADAS["enviar"],
+                **({"formatting_entities": entidades} if entidades else {}))
         except Exception as e:
             log.warning("envio falhou: %s", type(e).__name__)
             self.barramento.publicar(ev.EnvioFalhou(
@@ -1865,24 +2045,29 @@ class ProvedorTelegram(Provedor):
         log.info("texto enviado em %.2fs", time.perf_counter() - inicio)
         await self._registrar_enviada(enviada, conversa_id)
 
-    def enviar_arquivo(self, conversa_id, anexo, legenda=""):
-        self._agendar(self._enviar_arquivo(conversa_id, anexo, legenda))
+    def enviar_arquivo(self, conversa_id, anexo, legenda="", resposta_a="",
+                       mencoes=None):
+        self._agendar(self._enviar_arquivo(conversa_id, anexo, legenda,
+                                           resposta_a, mencoes))
 
-    async def _enviar_arquivo(self, conversa_id, anexo, legenda):
+    async def _enviar_arquivo(self, conversa_id, anexo, legenda,
+                              resposta_a="", mencoes=None):
         from telethon.tl import types
         inicio = time.perf_counter()
         try:
             ent = await self._entidade(conversa_id)
-            extra = {}
+            texto_legenda, entidades = await self._com_mencoes(legenda,
+                                                               mencoes)
+            extra = {"formatting_entities": entidades} if entidades else {}
             if anexo.tipo == m.VOZ:
-                extra = dict(voice_note=True, attributes=[
+                extra.update(voice_note=True, attributes=[
                     types.DocumentAttributeAudio(duration=anexo.segundos,
                                                  voice=True)])
             elif anexo.tipo == m.AUDIO:
-                extra = dict(attributes=[types.DocumentAttributeAudio(
+                extra.update(attributes=[types.DocumentAttributeAudio(
                     duration=anexo.segundos, title=anexo.nome)])
             elif anexo.tipo == m.VIDEO:
-                extra = dict(attributes=[types.DocumentAttributeVideo(
+                extra.update(attributes=[types.DocumentAttributeVideo(
                     duration=anexo.segundos, w=anexo.largura,
                     h=anexo.altura, supports_streaming=True)])
             ultimo = [-1]
@@ -1894,8 +2079,8 @@ class ProvedorTelegram(Provedor):
                     self.barramento.publicar(ev.ProgressoEnvio(
                         self.conta.id, conversa_id, pct))
             enviada = await self.cliente.send_file(
-                ent, anexo.caminho, caption=legenda or None,
-                reply_to=self._resposta_em(conversa_id, ""),
+                ent, anexo.caminho, caption=texto_legenda or None,
+                reply_to=self._resposta_em(conversa_id, resposta_a),
                 force_document=anexo.tipo == m.DOCUMENTO,
                 progress_callback=andamento, **extra)
             self.barramento.publicar(ev.ProgressoEnvio(

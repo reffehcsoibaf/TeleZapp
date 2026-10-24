@@ -27,9 +27,11 @@ from telezapp import config
 from telezapp.midia import armazem, envio
 from telezapp.nucleo import chamadas as ch
 from telezapp.nucleo import eventos as ev
+from telezapp.nucleo import mencoes as nucleo_mencoes
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import previa_links
-from telezapp.provedores.base import DownloadCancelado, ErroMidia, Provedor
+from telezapp.provedores.base import (DownloadCancelado, ErroBloqueio,
+                                      ErroMidia, ErroPerfil, Provedor)
 
 log = logging.getLogger("telezapp.whatsapp")
 
@@ -810,6 +812,15 @@ COLECAO_DO_TIPO = {1: "critical_block", 2: "critical_unblock_low",
                    3: "regular_low", 4: "regular_high", 5: "regular"}
 
 
+def colecao_fora_de_sincronia(texto):
+    """Nome da colecao do estado do app que o whatsmeow nao conseguiu ler
+    numa notificacao ("mismatching LTHash"), ou None se o texto e outro."""
+    if "mismatching LTHash" not in texto:
+        return None
+    achado = re.search(r"failed to decode app state (\w+) patches", texto)
+    return achado.group(1) if achado else None
+
+
 def fim_do_silencio(valor, ms=False):
     """Fim do silencio como o WhatsApp manda (segundos, ou milissegundos
     com ms=True; -1 ou um numero enorme = para sempre) -> 0.0 (com som),
@@ -956,6 +967,7 @@ class ProvedorWhatsApp(Provedor):
         self._observadas = {}       # JID da conversa observada -> conversa_id
         self._presenca_cid = None   # a conversa aberta com presenca
         self._ouvinte = None
+        self._ultimo_reparo = {}
         self._nao_reconectar = False  # banida ou aberta em outro lugar
         self._lid_para_numero = {}  # do pacote de historico
         self._apelidos = {}         # jid -> nome de perfil (pushname)
@@ -980,6 +992,8 @@ class ProvedorWhatsApp(Provedor):
         self._arquivada_vista = {}  # conversa -> arquivada, como o celular disse
         self._ajustes_vistos = {}   # (conversa, campo) -> fixada/silenciada
         self._recuperando = set()   # colecoes do estado em recuperacao
+        self._busca_ativa = False   # laco da busca periodica do estado
+        self._em_nova_tentativa = set()   # colecoes que o laco de novas tentativas cuida
         self._ultima_conferencia = 0.0
         self._sincronizando = False
         self._progresso_historico = 0   # 0 = nada em andamento
@@ -1172,9 +1186,13 @@ class ProvedorWhatsApp(Provedor):
 
         class Ouvinte(logging.Handler):
             def emit(self, registro):
+                texto = registro.getMessage()
+                colecao = colecao_fora_de_sincronia(texto)
+                if colecao:
+                    provedor._reparar_em_segundo_plano(colecao)
+                    return
                 if not provedor._pareando:
                     return
-                texto = registro.getMessage()
                 if "Failed to handle code pair notification" in texto:
                     metodo = "codigo"
                 elif "Failed to pair device" in texto:
@@ -1262,6 +1280,7 @@ class ProvedorWhatsApp(Provedor):
         self._estado(ev.CONECTADA)
         self._publicar_conversas()
         self._fila.put(self._conferir_estado)
+        self._iniciar_busca_periodica()
 
     def _conferir_estado(self):
         """Confere as colecoes do estado do aplicativo. Se uma saiu de
@@ -1274,6 +1293,59 @@ class ProvedorWhatsApp(Provedor):
     def _conferir_colecoes(self):
         for nome in COLECOES_DE_ESTADO:
             self._reparar_colecao(nome, forcar=False)
+
+    INTERVALO_DA_BUSCA = 90         # segundos entre duas buscas do estado
+    COLECOES_DA_BUSCA = ("regular_low", "regular_high")
+
+    def _iniciar_busca_periodica(self):
+        """De tempos em tempos busca no WhatsApp as mudancas de estado que o
+        celular fez (arquivar, fixar, silenciar, favoritar, trancar, ler,
+        apagar mensagem) e o aviso ao vivo deixou passar. Melhor chegar com
+        atraso do que nao chegar. Um laco so, mesmo reconectando."""
+        with self._trava:
+            if self._busca_ativa:
+                return
+            self._busca_ativa = True
+
+        def laco():
+            try:
+                while not self._parar.wait(self.INTERVALO_DA_BUSCA):
+                    self._buscar_mudancas_de_estado()
+            finally:
+                with self._trava:
+                    self._busca_ativa = False
+        threading.Thread(target=laco, daemon=True,
+                         name="estado-busca-periodica").start()
+
+    def _buscar_mudancas_de_estado(self):
+        """Uma rodada: fetch_app_state das colecoes das conversas e mensagens.
+        As mudancas novas viram os mesmos avisos do ao vivo. Pula a colecao que
+        ja esta em reparo (nao acumula pedidos ao celular)."""
+        if self.cliente is None or not self._conectada:
+            return
+        for nome in self.COLECOES_DA_BUSCA:
+            with self._trava:
+                if nome in self._recuperando or nome in self._em_nova_tentativa:
+                    continue
+            self._reparar_colecao(nome, forcar=False)
+
+    INTERVALO_DE_REPARO = 120       # segundos entre dois reparos da mesma colecao
+
+    def _reparar_em_segundo_plano(self, nome):
+        """O whatsmeow avisou no registro que nao leu uma mudanca do celular:
+        a colecao saiu de sincronia (acontece quando outro aparelho conectado
+        tambem escreve no estado). Baixa de novo, e pede a copia ao celular
+        se precisar, fora da thread do registro."""
+        agora = time.monotonic()
+        with self._trava:
+            if agora - self._ultimo_reparo.get(nome, -1e9) < \
+                    self.INTERVALO_DE_REPARO:
+                return
+            self._ultimo_reparo[nome] = agora
+        log.warning("estado %s fora de sincronia numa notificacao: "
+                    "reparando", nome)
+        threading.Thread(target=self._reparar_colecao, args=(nome,),
+                         daemon=True, name="reparo-estado").start()
 
     def _reparar_colecao(self, nome, forcar=True):
         """Sincroniza a colecao. Se nao bate: baixa tudo de novo e, se ainda
@@ -1302,10 +1374,51 @@ class ProvedorWhatsApp(Provedor):
     ESPERA_DA_RECUPERACAO = 90      # segundos, no total
     PASSO_DA_RECUPERACAO = 5        # segundos entre as conferencias
 
-    def _recuperar_colecao(self, nome):
+    ESPERA_ENTRE_TENTATIVAS = 180   # segundos entre uma nova tentativa e outra
+    TENTATIVAS_DE_NOVO = 20         # cerca de uma hora
+
+    def _tentar_de_novo(self, nome):
+        """O celular nao mandou a copia do estado (o iPhone so manda com o
+        WhatsApp aberto na tela): de tempos em tempos confere se a colecao ja
+        voltou e, se nao, pede a copia outra vez. Um laco so por colecao."""
+        with self._trava:
+            if nome in self._em_nova_tentativa:
+                return
+            self._em_nova_tentativa.add(nome)
+
+        def laco():
+            try:
+                for n in range(1, self.TENTATIVAS_DE_NOVO + 1):
+                    if self._parar.wait(self.ESPERA_ENTRE_TENTATIVAS):
+                        return
+                    if not self._conectada or self.cliente is None:
+                        continue
+                    try:
+                        self.cliente.fetch_app_state(nome)
+                        log.info("estado %s voltou a sincronizar "
+                                 "(tentativa %d)", nome, n)
+                        return
+                    except Exception as e:
+                        if "LTHash" not in str(e):
+                            log.warning("estado %s: %s", nome, e)
+                            return
+                    # ainda fora de sincronia: pede a copia de novo, agora que
+                    # o WhatsApp do celular pode estar aberto
+                    if self._recuperar_colecao(nome, reagendar=False):
+                        return
+                log.warning("desisti de recuperar o estado %s depois de %d "
+                            "tentativas; reiniciar o TeleZapp tenta de novo",
+                            nome, self.TENTATIVAS_DE_NOVO)
+            finally:
+                with self._trava:
+                    self._em_nova_tentativa.discard(nome)
+        threading.Thread(target=laco, daemon=True,
+                         name="estado-nova-tentativa").start()
+
+    def _recuperar_colecao(self, nome, reagendar=True):
         """Pede ao celular a copia do estado e espera ela chegar. O iPhone so
         responde com o WhatsApp aberto, entao, se nao vier, a pessoa e
-        avisada."""
+        avisada (uma vez) e o TeleZapp tenta de novo de tempos em tempos."""
         with self._trava:
             if nome in self._recuperando:
                 return False
@@ -1332,11 +1445,13 @@ class ProvedorWhatsApp(Provedor):
                         return False
             log.warning("o celular não respondeu ao pedido do estado %s",
                         nome)
-            self._avisar(
-                "Para as mudanças do celular (favoritar, apagar, silenciar) "
-                "voltarem a chegar, abra o WhatsApp no celular e deixe-o "
-                "aberto por um minuto; o TeleZapp tenta de novo ao "
-                "reconectar.", False)
+            if reagendar:
+                self._avisar(
+                    "Para as mudanças do celular (favoritar, apagar, "
+                    "silenciar, arquivar) voltarem a chegar, abra o WhatsApp "
+                    "no celular e deixe-o aberto por um minuto; o TeleZapp "
+                    "tenta de novo a cada poucos minutos.", False)
+                self._tentar_de_novo(nome)
             return False
         finally:
             with self._trava:
@@ -1587,6 +1702,23 @@ class ProvedorWhatsApp(Provedor):
         return self._enviar_estado(
             "pin_v1", 5, PatchInfo.REGULAR_LOW,
             SyncActionValue(pinAction=PinAction(pinned=bool(fixar))),
+            conversa_id)
+
+    def arquivar_conversa(self, conversa_id, arquivar):
+        """Arquiva (ou desarquiva) a conversa no celular: o aviso de estado
+        `archive`, o mesmo que o celular manda aos outros aparelhos."""
+        from neonize.proto.Neonize_pb2 import PatchInfo
+        from neonize.proto.waSyncAction.WAWebProtobufSyncAction_pb2 import (
+            ArchiveChatAction, SyncActionMessageRange, SyncActionValue)
+        with self._trava:
+            conv = self._conversas.get(conversa_id)
+            ultima = int(conv.data) if conv is not None and conv.data else                 int(time.time())
+        return self._enviar_estado(
+            "archive", 3, PatchInfo.REGULAR_LOW,
+            SyncActionValue(archiveChatAction=ArchiveChatAction(
+                archived=bool(arquivar),
+                messageRange=SyncActionMessageRange(
+                    lastMessageTimestamp=ultima))),
             conversa_id)
 
     def silenciar_conversa(self, conversa_id, silenciar, segundos=0):
@@ -2331,6 +2463,123 @@ class ProvedorWhatsApp(Provedor):
         tipo = {1: "contacts", 2: "blacklist", 3: "whitelist"}.get(
             padrao.Type, "contacts")
         return tipo, len(padrao.List)
+
+    # ------------------------------------------------------------ perfil
+    PODE_EDITAR_PERFIL = True
+
+    def meu_perfil(self):
+        if self.cliente is None or not self._conectada:
+            raise ErroPerfil("A conta do WhatsApp não está conectada.")
+        try:
+            eu = self.cliente.get_me()
+            perfil = {"nome": eu.PushName or ""}
+        except Exception as e:
+            log.exception("não consegui ler o perfil")
+            raise ErroPerfil("Não consegui ler o seu perfil no WhatsApp.") \
+                from e
+        try:
+            for u in self.cliente.get_user_info(eu.JID):
+                perfil["recado"] = u.UserInfo.Status or ""
+                break
+        except Exception:
+            # o recado nao veio: o campo aparece vazio e so muda se a pessoa
+            # escrever algo
+            log.info("sem o recado do próprio perfil")
+            perfil["recado"] = ""
+        return perfil
+
+    def salvar_perfil(self, mudancas, foto=None):
+        if self.cliente is None or not self._conectada:
+            raise ErroPerfil("A conta do WhatsApp não está conectada.")
+        passos = []
+        if "nome" in mudancas:
+            passos.append(("nome", lambda: self.cliente.set_profile_name(
+                mudancas["nome"])))
+        if "recado" in mudancas:
+            passos.append(("recado", lambda: self.cliente.set_status_message(
+                mudancas["recado"])))
+        if foto:
+            passos.append(("foto", lambda: self.cliente.set_profile_photo(
+                foto)))
+        feitos, erros = [], []
+        for campo, fazer in passos:
+            try:
+                fazer()
+                feitos.append(campo)
+            except Exception as e:
+                log.warning("perfil, %s: %s: %s", campo, type(e).__name__,
+                            str(e)[:200])
+                erros.append((campo, "o WhatsApp não aceitou (%s)."
+                              % type(e).__name__))
+        return feitos, erros
+
+    # ------------------------------------------------------- bloqueados
+    PODE_BLOQUEAR = True
+
+    def _lista_de_bloqueio(self):
+        """Os JIDs da lista de bloqueio da conta, como o servico os guarda."""
+        if self.cliente is None or not self._conectada:
+            raise ErroBloqueio("A conta do WhatsApp não está conectada.")
+        try:
+            return list(self.cliente.get_blocklist().JIDs)
+        except Exception as e:
+            log.exception("não consegui ler a lista de bloqueados")
+            raise ErroBloqueio("Não consegui ler a lista de bloqueados do "
+                               "WhatsApp.") from e
+
+    def bloqueados(self):
+        achados, vistos = [], set()
+        for jid in self._lista_de_bloqueio():
+            alvo = self._numero_do_jid(jid)
+            id_ = jid_texto(alvo)
+            if id_ in vistos:
+                continue
+            vistos.add(id_)
+            telefone = "+" + alvo.User if alvo.Server == "s.whatsapp.net" \
+                and alvo.User else ""
+            achados.append((id_, self._nome_contato(jid), telefone))
+        return achados
+
+    def _jid_da_pessoa(self, conversa_id):
+        if "@" not in conversa_id or conversa_id.endswith("@g.us"):
+            raise ErroBloqueio("Só dá para bloquear pessoas.")
+        usuario, servidor = jid_de_texto(conversa_id)
+        return _jid_obj(usuario, servidor)
+
+    def _entrada_da_lista(self, conversa_id):
+        """O JID da lista de bloqueio que e dessa pessoa (o WhatsApp pode
+        guardar o telefone ou o endereco LID), ou None."""
+        alvo = jid_texto(self._numero_do_jid(self._jid_da_pessoa(conversa_id)))
+        for jid in self._lista_de_bloqueio():
+            if jid_texto(self._numero_do_jid(jid)) == alvo or \
+                    jid_texto(jid) == conversa_id:
+                return jid
+        return None
+
+    def esta_bloqueado(self, conversa_id):
+        return self._entrada_da_lista(conversa_id) is not None
+
+    def bloquear(self, conversa_id, bloquear=True):
+        from neonize.utils.enum import BlocklistAction
+        if bloquear:
+            if self.cliente is None or not self._conectada:
+                raise ErroBloqueio("A conta do WhatsApp não está conectada.")
+            jid = self._numero_do_jid(self._jid_da_pessoa(conversa_id))
+        else:
+            # desbloqueia pelo endereco que consta na lista
+            jid = self._entrada_da_lista(conversa_id)
+            if jid is None:
+                return
+        try:
+            self.cliente.update_blocklist(
+                jid, BlocklistAction.BLOCK if bloquear
+                else BlocklistAction.UNBLOCK)
+        except Exception as e:
+            log.exception("não consegui %s", "bloquear" if bloquear
+                          else "desbloquear")
+            raise ErroBloqueio(
+                "O WhatsApp não aceitou %s a pessoa."
+                % ("bloquear" if bloquear else "desbloquear")) from e
 
     def id_do_telefone(self, telefone):
         digitos = re.sub(r"\D", "", telefone or "")
@@ -3261,12 +3510,18 @@ class ProvedorWhatsApp(Provedor):
     def _votar_enquete(self, msg, escolhas):
         cid = msg.conversa_id
         enq = m.enquete_de(msg)
+        if cid.endswith("@newsletter"):
+            # canal: a mensagem nao tem a chave secreta das enquetes comuns
+            # e o neonize nao sabe votar nelas ("original message secret
+            # key not found" no log de 23/10/2026)
+            self._avisar("O TeleZapp ainda não vota em enquetes de canais "
+                         "do WhatsApp. Vote pelo celular.", False)
+            return
         try:
             if not self._conectada or self.cliente is None:
                 raise ConnectionError("sem conexão")
             if not enq:
                 raise ValueError("não é uma enquete")
-            from neonize.proto.Neonize_pb2 import MessageInfo, MessageSource
             eu = self.cliente.get_me().JID
             if msg.minha:
                 autor = eu
@@ -3277,10 +3532,9 @@ class ProvedorWhatsApp(Provedor):
                     raise ValueError("sem o remetente da enquete")
                 autor = _jid_obj(*jid_de_texto(rem))
             chat = self._jid(cid)
-            origem = MessageSource(Chat=chat, Sender=autor,
-                                   IsFromMe=bool(msg.minha),
-                                   IsGroup=cid.endswith("@g.us"))
-            enquete_info = MessageInfo(MessageSource=origem, ID=msg.id)
+            enquete_info = info_da_mensagem(
+                chat, autor, msg.id, bool(msg.minha),
+                cid.endswith("@g.us"))
             nomes = [enq["opcoes"][i] for i in escolhas]
             self.cliente.send_message(
                 chat, self.cliente.build_poll_vote(enquete_info, nomes))
@@ -3519,15 +3773,31 @@ class ProvedorWhatsApp(Provedor):
             # pode ir a rede: nunca na abertura da conversa
             self._fila.put(lambda: self._rever_mencoes_do_grupo(conversa_id))
 
-    def enviar_texto(self, conversa_id, texto, resposta_a=""):
-        self._fila.put(lambda: self._enviar(conversa_id, texto, resposta_a))
+    def enviar_texto(self, conversa_id, texto, resposta_a="", mencoes=None):
+        self._fila.put(lambda: self._enviar(conversa_id, texto, resposta_a,
+                                            mencoes=mencoes))
 
     def _jid(self, conversa_id):
         from neonize.utils.jid import build_jid
         usuario, servidor = conversa_id.split("@", 1)
         return build_jid(usuario, servidor)
 
-    def _mensagem_de_texto(self, conversa_id, texto, resposta_a, previa=None):
+    def _mencoes_no_texto(self, texto, mencoes):
+        """(texto, [JID de quem foi mencionado]): cada '@Nome' escolhido na
+        caixa vira '@numero', que e como o WhatsApp mostra a mencao."""
+        if not mencoes:
+            return texto, []
+        jids = []
+
+        def trocar(men):
+            usuario, servidor = jid_de_texto(men.get("id", ""))
+            jids.append(jid_texto(_jid_obj(usuario, servidor)))
+            return "@" + usuario
+        novo, _ = nucleo_mencoes.aplicar(texto, mencoes, trocar)
+        return novo, jids
+
+    def _mensagem_de_texto(self, conversa_id, texto, resposta_a, previa=None,
+                           mencoes=None):
         from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (
             ContextInfo, ExtendedTextMessage, Message)
         campos = {}
@@ -3535,14 +3805,26 @@ class ProvedorWhatsApp(Provedor):
             campos = {"matchedText": previa.get("url", ""),
                       "title": previa.get("titulo", ""),
                       "description": previa.get("descricao", "")}
+        texto, jids = self._mencoes_no_texto(texto, mencoes)
         if not resposta_a:
-            if campos:
+            if campos or jids:
                 return Message(extendedTextMessage=ExtendedTextMessage(
-                    text=texto, **campos))
+                    text=texto, contextInfo=ContextInfo(
+                        mentionedJID=jids) if jids else None, **campos))
             return Message(conversation=texto)
         if resposta_a.startswith(RESPOSTA_A_STATUS):
             return self._resposta_a_status(
                 conversa_id, texto, resposta_a[len(RESPOSTA_A_STATUS):])
+        ctx = self._contexto_da_resposta(conversa_id, resposta_a)
+        if jids:
+            ctx.mentionedJID.extend(jids)
+        return Message(extendedTextMessage=ExtendedTextMessage(
+            text=texto, contextInfo=ctx, **campos))
+
+    def _contexto_da_resposta(self, conversa_id, resposta_a):
+        """O ContextInfo que cita a mensagem `resposta_a` da conversa."""
+        from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (
+            ContextInfo, Message)
         remetente, citado = self._remetentes.get(resposta_a, ("", ""))
         if not remetente or not citado:
             # mensagem de antes desta abertura do app: busca no banco
@@ -3573,8 +3855,7 @@ class ProvedorWhatsApp(Provedor):
             ctx.participant = remetente
         if grupo_de_origem:
             ctx.remoteJID = grupo_de_origem
-        return Message(extendedTextMessage=ExtendedTextMessage(
-            text=texto, contextInfo=ctx, **campos))
+        return ctx
 
     def _resposta_a_status(self, autor_id, texto, status_id):
         from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (
@@ -3693,7 +3974,7 @@ class ProvedorWhatsApp(Provedor):
             return resp
 
     def _enviar(self, conversa_id, texto, resposta_a, construir=None,
-                descricao_acao=""):
+                descricao_acao="", mencoes=None):
         inicio = time.perf_counter()
         previa = {}
         try:
@@ -3706,7 +3987,7 @@ class ProvedorWhatsApp(Provedor):
                 resp = self.cliente.send_message(
                     self._jid(conversa_id),
                     com_expiracao(self._mensagem_de_texto(
-                        conversa_id, texto, resposta_a, previa),
+                        conversa_id, texto, resposta_a, previa, mencoes),
                         self._prazo_da_conversa(conversa_id)))
             else:
                 resp = self._enviar_variantes(construir())
@@ -3788,11 +4069,39 @@ class ProvedorWhatsApp(Provedor):
         return msg
 
     # ------------------------------------------------------ arquivos
-    def enviar_arquivo(self, conversa_id, anexo, legenda=""):
+    def enviar_arquivo(self, conversa_id, anexo, legenda="", resposta_a="",
+                       mencoes=None):
         # thread propria: um upload grande nao pode travar a fila de texto
         threading.Thread(
-            target=self._enviar_arquivo, args=(conversa_id, anexo, legenda),
+            target=self._enviar_arquivo,
+            args=(conversa_id, anexo, legenda, resposta_a, mencoes),
             daemon=True, name="whatsapp-envio").start()
+
+    def _contexto_da_midia(self, conversa_id, legenda, resposta_a, mencoes):
+        """(legenda, ContextInfo ou None) de uma midia enviada como resposta
+        e/ou com mencoes na legenda."""
+        legenda, jids = self._mencoes_no_texto(legenda, mencoes)
+        if resposta_a.startswith(RESPOSTA_A_STATUS):
+            resposta_a = ""         # status so recebe resposta de texto
+        if not resposta_a and not jids:
+            return legenda, None
+        from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import ContextInfo
+        ctx = self._contexto_da_resposta(conversa_id, resposta_a) \
+            if resposta_a else ContextInfo()
+        ctx.mentionedJID.extend(jids)
+        return legenda, ctx
+
+    @staticmethod
+    def _com_contexto(mensagem, ctx):
+        """Poe o ContextInfo (citacao, mencoes) na midia ja montada."""
+        if ctx is None:
+            return mensagem
+        for nome in ("imageMessage", "videoMessage", "audioMessage",
+                     "documentMessage"):
+            if mensagem.HasField(nome):
+                getattr(mensagem, nome).contextInfo.MergeFrom(ctx)
+                break
+        return mensagem
 
     def _enviar_por_arquivo(self, conversa_id, anexo, legenda):
         """Sobe o arquivo direto do disco, publicando o avanco, e devolve a
@@ -3881,25 +4190,31 @@ class ProvedorWhatsApp(Provedor):
                             exc_info=True)
         return envio.como_documento(anexo)
 
-    def _enviar_arquivo(self, conversa_id, anexo, legenda):
+    def _enviar_arquivo(self, conversa_id, anexo, legenda, resposta_a="",
+                        mencoes=None):
         inicio = time.perf_counter()
+        original = legenda
         try:
             if not self._conectada or self.cliente is None:
                 raise ConnectionError("sem conexão")
             anexo = self._anexo_que_o_whatsapp_toca(anexo)
             jid = self._jid(conversa_id)
             prazo = self._prazo_da_conversa(conversa_id)
+            legenda, ctx = self._contexto_da_midia(
+                conversa_id, legenda, resposta_a, mencoes)
             if anexo.tamanho >= LIMITE_ENVIO_POR_ARQUIVO and \
                     self._tem_transferencias():
                 resp = self.cliente.send_message(
-                    jid, com_expiracao(self._enviar_por_arquivo(
-                        conversa_id, anexo, legenda), prazo))
-            elif prazo:
-                # com mensagens temporarias a mensagem e montada a mao, para
-                # levar o prazo
+                    jid, com_expiracao(self._com_contexto(
+                        self._enviar_por_arquivo(conversa_id, anexo, legenda),
+                        ctx), prazo))
+            elif prazo or ctx is not None:
+                # com mensagens temporarias, resposta ou mencao a mensagem e
+                # montada a mao, para levar o prazo e o contexto
                 resp = self.cliente.send_message(
-                    jid, com_expiracao(self._mensagem_de_midia(
-                        anexo, legenda), prazo))
+                    jid, com_expiracao(self._com_contexto(
+                        self._mensagem_de_midia(anexo, legenda), ctx),
+                        prazo))
             elif anexo.tipo == m.FOTO:
                 resp = self.cliente.send_image(jid, anexo.caminho,
                                                caption=legenda or None)
@@ -3916,14 +4231,16 @@ class ProvedorWhatsApp(Provedor):
             motivo = "sem conexão" if isinstance(e, ConnectionError) else \
                 "erro do WhatsApp (%s)" % type(e).__name__
             self.barramento.publicar(ev.EnvioFalhou(
-                self.conta.id, conversa_id, legenda, motivo,
+                self.conta.id, conversa_id, original, motivo,
                 devolver_texto=False, tipo=anexo.tipo))
             return
         log.info("%s enviado em %.2fs (%d bytes, %s, %ds)", anexo.tipo,
                  time.perf_counter() - inicio, anexo.tamanho, anexo.mime,
                  anexo.segundos)
         self._registrar_enviada(
-            resp, conversa_id, legenda, tipo=anexo.tipo,
+            resp, conversa_id, original, tipo=anexo.tipo,
+            resposta_a="" if resposta_a.startswith(RESPOSTA_A_STATUS)
+            else resposta_a,
             segundos=anexo.segundos, nome_arquivo=anexo.nome,
             tamanho=anexo.tamanho,
             arquivo=(anexo.caminho, anexo.temporario))
@@ -4166,6 +4483,13 @@ class ProvedorWhatsApp(Provedor):
             origem = e.MessageSource
             cid = self._id_da_conversa(origem.Chat)
             tipo = int(e.Type)
+            # com a confirmacao de leitura ligada, o celular avisa os outros
+            # aparelhos com um recibo de leitura comum cujo remetente sou eu
+            # (nao com o tipo "lida por mim"): ler no celular vem assim
+            if origem.IsFromMe and tipo == RECIBO_LIDO:
+                tipo = RECIBO_LIDO_POR_MIM
+            elif origem.IsFromMe and tipo == RECIBO_OUVIDO:
+                tipo = RECIBO_OUVIDO_POR_MIM
             if tipo in (RECIBO_LIDO_POR_MIM, RECIBO_OUVIDO_POR_MIM):
                 log.info("recibo de outro aparelho meu: %s (%d mensagens)",
                          "lida" if tipo == RECIBO_LIDO_POR_MIM else "ouvida",
@@ -4354,3 +4678,16 @@ def caminho_sessao(pasta, conta_id):
 def _jid_obj(usuario, servidor):
     from neonize.utils.jid import build_jid
     return build_jid(usuario, servidor)
+
+
+def info_da_mensagem(chat, remetente, id_, minha, grupo):
+    """MessageInfo que o neonize aceita serializar: todos os campos do
+    protobuf sao obrigatorios, entao os que o envio nao usa vao vazios."""
+    from neonize.proto.Neonize_pb2 import MessageInfo, MessageSource
+    origem = MessageSource(
+        Chat=chat, Sender=remetente, IsFromMe=minha, IsGroup=grupo,
+        SenderAlt=_jid_obj("", ""), RecipientAlt=_jid_obj("", ""),
+        BroadcastListOwner=_jid_obj("", ""))
+    return MessageInfo(
+        MessageSource=origem, ID=id_, ServerID=0, Type="", Pushname="",
+        Timestamp=0, Category="", Multicast=False, MediaType="", Edit="")
