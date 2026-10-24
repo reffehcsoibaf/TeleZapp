@@ -13,10 +13,12 @@ import sys
 import threading
 import time
 import traceback
+import webbrowser
 
 import wx
 
-from telezapp import NOME, VERSAO, config
+from telezapp import (NOME, PAGINA_DE_RELATOS, PAGINA_DO_PROJETO, VERSAO,
+                      config)
 from telezapp.acessibilidade.fala import Fala, bipe, definir_sons
 from telezapp.interface import colagem, dialogos, visualizadores
 from telezapp.interface import emojis as ui_emojis
@@ -507,6 +509,7 @@ class Janela(wx.Frame):
         item(m_novo, "novo_grupo", "Novo &grupo...")
         item(m_novo, "novo_canal", "Novo c&anal...")
         item(m_novo, "nova_comunidade", "Nova comuni&dade...")
+        item(m_novo, "entrar_por_link", "Entrar em um grupo por &link...")
 
         m_ir = wx.Menu()
         item(m_ir, "ir_conv", "Ir para a lista de &conversas\tAlt+1")
@@ -532,6 +535,7 @@ class Janela(wx.Frame):
         m_conv = wx.Menu()
         item(m_conv, "nao_lidas", "Mensagens &não lidas (marcador ou próxima "
                                   "conversa)\tAlt+2")
+        item(m_conv, "marcar_lida", "Marcar a conversa como &lida")
         m_conv.AppendSeparator()
         item(m_conv, "abrir_conv", "&Abrir a conversa selecionada")
         item(m_conv, "arquivar", "Ar&quivar ou desarquivar a conversa")
@@ -678,6 +682,9 @@ class Janela(wx.Frame):
         item(m_aj, "guia", "&Guia de uso\tF1")
         item(m_aj, "ajuda", "&Teclas de atalho\tShift+F1")
         item(m_aj, "novidades", "&Novidades desta versão")
+        item(m_aj, "pagina_projeto", "&Página do projeto na internet")
+        item(m_aj, "feedback", "&Feedback: entrar em contato pelo "
+                               "formulário...")
         item(m_aj, "atualizacoes", "&Verificar atualizações...")
         item(m_aj, "logs", "Abrir a pasta de &logs")
         item(m_aj, "pasta_sons", "Abrir a pasta de s&ons")
@@ -772,9 +779,11 @@ class Janela(wx.Frame):
             "novo_grupo": lambda e: self._nova_conversa("grupo"),
             "novo_canal": lambda e: self._nova_conversa("canal"),
             "nova_comunidade": lambda e: self._nova_conversa("comunidade"),
+            "entrar_por_link": lambda e: self._entrar_por_link(),
             "ver_enquete": lambda e: self._abrir_enquete(),
             "nova_enquete": lambda e: self._nova_enquete(),
             "abrir_conv": lambda e: self._abrir_selecionada_na_lista(),
+            "marcar_lida": lambda e: self._marcar_conversa_lida(),
             "arquivar": lambda e: self._arquivar_conversa(),
             "fixar": lambda e: self._fixar_conversa(),
             "silenciar": lambda e: self._silenciar_conversa(),
@@ -844,6 +853,9 @@ class Janela(wx.Frame):
             "midias_limpar": lambda e: self._limpar_midias(),
             "guia": lambda e: self._abrir_pagina("guia.html"),
             "novidades": lambda e: self._abrir_pagina("novidades.html"),
+            "pagina_projeto": lambda e: self._abrir_na_internet(
+                PAGINA_DO_PROJETO),
+            "feedback": lambda e: self._abrir_na_internet(PAGINA_DE_RELATOS),
             "atualizacoes": lambda e: self._verificar_atualizacoes(),
             "instalar": lambda e: self._instalar(),
             "criar_portatil": lambda e: self._criar_portatil(),
@@ -2040,6 +2052,8 @@ class Janela(wx.Frame):
         convs = self._marcadas_conv()
         n = self._plural(len(convs), "conversa", "conversas")
         return [
+            ("Marcar %s como %s" % (n, "lida" if len(convs) == 1 else "lidas"),
+             lambda: self._massa_conversas("lidas")),
             ("%s %s" % ("Desarquivar" if all(c.arquivada for c in convs)
                         else "Arquivar", n),
              lambda: self._massa_conversas("arquivar")),
@@ -2076,7 +2090,16 @@ class Janela(wx.Frame):
             return
         n = len(convs)
         quantas = self._plural(n, "conversa", "conversas")
-        if acao == "arquivar":
+        if acao == "lidas":
+            com_nao_lidas = [c for c in convs if c.nao_lidas]
+            for c in com_nao_lidas:
+                self._avisar_leitura(c)
+            texto = ("%s %s." % (self._plural(
+                len(com_nao_lidas), "conversa", "conversas"),
+                "marcada como lida" if len(com_nao_lidas) == 1
+                else "marcadas como lidas")) if com_nao_lidas else \
+                "Nenhuma das conversas tinha mensagens não lidas."
+        elif acao == "arquivar":
             arquivar = not all(c.arquivada for c in convs)
             so_aqui = False
             for c in convs:
@@ -2276,6 +2299,32 @@ class Janela(wx.Frame):
             if 0 <= i < len(self._chaves_conv):
                 conv = self.indice.get(self._chaves_conv[i])
         return conv
+
+    def _avisar_leitura(self, conv):
+        """Tira as nao lidas da conversa aqui e avisa a conta, que manda a
+        confirmacao de leitura como se a pessoa tivesse aberto a conversa."""
+        prov = self.contas.provedor(conv.conta_id)
+        try:
+            if prov is not None:
+                prov.marcar_como_lida(conv.id)
+        except Exception:
+            log.exception("erro ao marcar como lida na conta")
+        conv.nao_lidas = 0
+
+    def _marcar_conversa_lida(self, conv=None):
+        """Marca como lida a conversa em foco (ou a do menu de contexto) sem
+        abri-la."""
+        conv = conv or self._conversa_em_foco()
+        if conv is None:
+            self.fala.falar("Nenhuma conversa selecionada.")
+            return
+        if not conv.nao_lidas:
+            self.fala.falar("Esta conversa não tem mensagens não lidas.",
+                            interromper=True)
+            return
+        self._avisar_leitura(conv)
+        self._depois_de_mudar_conversa(conv)
+        self.fala.falar("Conversa marcada como lida.", interromper=True)
 
     def _arquivar_conversa(self, conv=None):
         """Arquiva a conversa em foco, ou a tira dos arquivados. A conta
@@ -4606,6 +4655,52 @@ class Janela(wx.Frame):
             return
         self.fala.falar("Texto salvo.")
 
+    def _entrar_por_link(self):
+        """Menu Novo, Entrar em um grupo por link: pergunta o link de convite
+        e segue o mesmo caminho do botao "Entrar no grupo" das mensagens."""
+        from telezapp.nucleo import grupo as ng
+        contas = []
+        for dados in self.cfg.contas():
+            p = self.contas.provedor(dados["id"]) if self.contas else None
+            if p is not None and getattr(p, "ENTRA_POR_LINK", False) and                     self.estados.get(dados["id"]) == ev.CONECTADA:
+                contas.append((dados["id"], dados.get("nome") or dados.get(
+                    "telefone") or dados["id"]))
+        if not contas:
+            bipe("erro")
+            self.fala.falar("Nenhuma conta conectada entra em grupos por "
+                            "link.", interromper=True)
+            return
+        conta_id = contas[0][0]
+        if len(contas) > 1:
+            dlg = wx.SingleChoiceDialog(
+                self, "Com qual conta entrar no grupo?", "Entrar em um grupo",
+                [nome for _, nome in contas])
+            try:
+                if dlg.ShowModal() != wx.ID_OK:
+                    return
+                conta_id = contas[dlg.GetSelection()][0]
+            finally:
+                dlg.Destroy()
+        dlg = wx.TextEntryDialog(
+            self, "Cole o link de convite (chat.whatsapp.com/...):",
+            "Entrar em um grupo por link")
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            texto = dlg.GetValue()
+        finally:
+            dlg.Destroy()
+        codigo = ng.codigo_do_convite(texto)
+        if not codigo:
+            bipe("erro")
+            self.fala.falar("Isso não parece um link de convite de grupo.",
+                            interromper=True)
+            wx.MessageBox("Isso não parece um link de convite de grupo.",
+                          NOME, wx.OK | wx.ICON_WARNING, self)
+            return
+        self._entrar_no_grupo(None, {"codigo": codigo},
+                              self.contas.provedor(conta_id))
+
     def _entrar_no_grupo(self, x, acao, prov):
         """Botao "Entrar no grupo": mostra o que o convite diz e, se a pessoa
         confirmar, entra. As consultas ao servico rodam fora da janela."""
@@ -5704,6 +5799,8 @@ class Janela(wx.Frame):
                             "canal": "Detalhes do canal"}.get(
                                 conv.tipo, "Detalhes da conversa"),
                            lambda: self._detalhes_da_conversa(conv)))
+        opcoes.append(("Marcar como lida",
+                       lambda: self._marcar_conversa_lida(conv)))
         opcoes.append(("Desarquivar" if conv.arquivada else "Arquivar",
                        lambda: self._arquivar_conversa(conv)))
         opcoes.append(("Desafixar" if conv.fixada else "Fixar",
@@ -6986,6 +7083,17 @@ class Janela(wx.Frame):
             os.startfile(caminho)
         else:
             self.fala.falar(caminho)
+
+    def _abrir_na_internet(self, endereco):
+        """Abre um endereco da internet no navegador padrao."""
+        try:
+            aberto = webbrowser.open(endereco)
+        except Exception:
+            log.exception("erro ao abrir %s", endereco)
+            aberto = False
+        if not aberto:
+            wx.MessageBox("Não consegui abrir o navegador. O endereço é:\n%s"
+                          % endereco, NOME, wx.OK | wx.ICON_WARNING, self)
 
     def _abrir_logs(self):
         self._abrir_pasta("logs")

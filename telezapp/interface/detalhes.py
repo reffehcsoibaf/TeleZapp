@@ -5,6 +5,8 @@ midias com filtro, os membros, os grupos em comum e as ferramentas de
 administrador. `ControleDetalhes` junta a janela principal, os provedores e
 o banco; as janelas daqui so desenham e chamam de volta."""
 import logging
+import os
+import tempfile
 import threading
 import time
 import traceback
@@ -187,12 +189,17 @@ class DialogoAdministrar(wx.Dialog):
             "trancado", self.trancado.GetValue()))
         lay.Add(self.trancado, 0, wx.LEFT | wx.RIGHT, 10)
         linha = wx.WrapSizer(wx.HORIZONTAL)
-        for rotulo, funcao in (
-                ("&Adicionar participante...", self._adicionar),
-                ("&Link de convite", lambda: self._acao("link")),
-                ("&Revogar o link de convite",
-                 lambda: self._acao("revogar_link")),
-                ("&Sair do grupo", self._sair)):
+        botoes = [("&Adicionar participante...", self._adicionar),
+                  ("&Link de convite e QR Code...",
+                   lambda: ctl.convite(self))]
+        if getattr(ctl.prov, "FOTO_DO_GRUPO", False):
+            botoes.append(("Trocar a &foto do grupo...",
+                           lambda: ctl.trocar_foto(self)))
+        if getattr(ctl.prov, "PEDIDOS_DE_ENTRADA", False):
+            botoes.append(("&Pedidos de entrada...",
+                           lambda: ctl.pedidos(self)))
+        botoes.append(("&Sair do grupo", self._sair))
+        for rotulo, funcao in botoes:
             b = wx.Button(self, label=rotulo)
             b.Bind(wx.EVT_BUTTON, lambda e, f=funcao: f())
             linha.Add(b, 0, wx.RIGHT | wx.TOP, 6)
@@ -434,15 +441,22 @@ class ControleDetalhes:
             botoes.append(("&Editar contato", self.editar_contato))
             botoes.append(("&Mídias", self.midias))
             botoes.append(("&Grupos em comum", self.em_comum))
+            if getattr(self.prov, "LISTA_GRUPOS_ADMIN", False):
+                botoes.append(("&Adicionar a um grupo...",
+                               self.adicionar_a_grupo))
         elif conv.tipo == "grupo":
             n = len(d.get("participantes", [])) if d else 0
             botoes.append(("Ver &membros%s" % (" (%d)" % n if n else ""),
                            self.membros))
             botoes.append(("&Mídias", self.midias))
+            if getattr(self.prov, "FOTO_DO_GRUPO", False):
+                botoes.append(("Ver a &foto do grupo", self.ver_foto))
             if d.get("comunidade"):
                 botoes.append(("&Grupos da comunidade", self.subgrupos))
             if d.get("sou_admin"):
                 botoes.append(("&Administrar grupo", self.administrar_grupo))
+                if getattr(self.prov, "PEDIDOS_DE_ENTRADA", False):
+                    botoes.append(("&Pedidos de entrada...", self.pedidos))
         else:
             botoes.append(("&Mídias", self.midias))
             if d.get("link"):
@@ -661,6 +675,167 @@ class ControleDetalhes:
         self._sub(DialogoLista(self.dlg, titulo, "Grupos (Menu abre as "
                                "ações)", (), itens, menu))
 
+    # ---- convite, foto, pedidos de entrada
+    def _em_segundo_plano(self, nome, trabalho, depois):
+        """Roda trabalho() fora da interface e entrega o resultado a
+        depois(resultado) na thread da interface (None se deu erro)."""
+        def rodar():
+            try:
+                resultado = trabalho()
+            except Exception:
+                log.error("%s:\n%s", nome, traceback.format_exc())
+                resultado = None
+            wx.CallAfter(depois, resultado)
+        threading.Thread(target=rodar, daemon=True, name=nome).start()
+
+    def convite(self, pai=None):
+        """Link de convite do grupo, com QR Code."""
+        jan = self.jan
+        jan.fala.falar("Pedindo o link de convite...", interromper=True)
+
+        def depois(resultado):
+            if self.dlg is None:
+                return
+            if not resultado or not resultado[0]:
+                texto = resultado[1] if resultado else "Não consegui o link."
+                jan.fala.falar(texto, interromper=True)
+                wx.MessageBox(texto, "Link de convite",
+                              wx.OK | wx.ICON_WARNING, pai or self.dlg)
+                return
+            from telezapp.interface.grupo_extras import DialogoConvite
+            dlg = DialogoConvite(
+                pai or self.dlg, resultado[1], jan._copiar_texto,
+                lambda: self.prov.administrar_grupo(
+                    self.conv.id, "revogar_link"), jan.fala)
+            try:
+                dlg.ShowModal()
+            finally:
+                dlg.Destroy()
+        self._em_segundo_plano(
+            "convite", lambda: self.prov.administrar_grupo(
+                self.conv.id, "link"), depois)
+
+    def pedidos(self, pai=None):
+        """Pedidos de entrada: aprovar ou recusar."""
+        from telezapp.interface.grupo_extras import DialogoPedidos
+        dlg = DialogoPedidos(pai or self.dlg, self.prov, self.conv.id,
+                             self.conv.nome, self.jan.fala)
+        try:
+            dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+
+    def ver_foto(self):
+        """Baixa a foto do grupo e abre no programa de imagens do Windows."""
+        jan = self.jan
+        jan.fala.falar("Baixando a foto do grupo...", interromper=True)
+
+        def depois(resultado):
+            if not resultado or not resultado[0]:
+                texto = resultado[1] if resultado else "Não consegui a foto."
+                jan.fala.falar(texto, interromper=True)
+                if self.dlg is not None:
+                    wx.MessageBox(texto, "Foto do grupo",
+                                  wx.OK | wx.ICON_INFORMATION, self.dlg)
+                return
+            from telezapp.nucleo import grupo as ng
+            try:
+                pasta = os.path.join(tempfile.gettempdir(), "TeleZapp-fotos")
+                os.makedirs(pasta, exist_ok=True)
+                caminho = os.path.join(pasta, "grupo-%s%s" % (
+                    "".join(c for c in self.conv.id if c.isalnum()),
+                    ng.extensao_da_imagem(resultado[1])))
+                with open(caminho, "wb") as f:
+                    f.write(resultado[1])
+                if os.name != "nt":
+                    jan.fala.falar(caminho)
+                    return
+                os.startfile(caminho)
+            except OSError:
+                log.error("foto do grupo:\n%s", traceback.format_exc())
+                jan.fala.falar("Não consegui abrir a foto.",
+                               interromper=True)
+                return
+            jan.fala.falar("Foto aberta.", interromper=True)
+        self._em_segundo_plano(
+            "foto-do-grupo", lambda: self.prov.foto_do_grupo(self.conv.id),
+            depois)
+
+    def trocar_foto(self, pai=None):
+        """Escolhe uma imagem e a poe como foto do grupo."""
+        from telezapp.interface.perfil import FILTRO_DE_IMAGENS
+        from telezapp.nucleo import perfil as np_
+        alvo = pai or self.dlg
+        dlg = wx.FileDialog(alvo, "Escolher a foto do grupo",
+                            wildcard=FILTRO_DE_IMAGENS,
+                            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST)
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            caminho = dlg.GetPath()
+        finally:
+            dlg.Destroy()
+        try:
+            foto = np_.preparar_foto(caminho)
+        except ValueError as e:
+            wx.MessageBox(str(e), "Foto do grupo", wx.OK | wx.ICON_WARNING,
+                          alvo)
+            return
+        r = wx.MessageBox("Usar %s como foto do grupo %s?" % (
+            os.path.basename(caminho), self.conv.nome), "Foto do grupo",
+            wx.YES_NO | wx.ICON_QUESTION, alvo)
+        if r == wx.YES:
+            self.administrar("foto", foto, pai)
+
+    def adicionar_a_grupo(self):
+        """Da conversa com uma pessoa: escolhe um grupo que a conta
+        administra e a adiciona nele."""
+        jan = self.jan
+        jan.fala.falar("Procurando os grupos que você administra...",
+                       interromper=True)
+
+        def depois(grupos):
+            if self.dlg is None:
+                return
+            if not grupos:
+                jan.fala.falar("Você não administra nenhum grupo.",
+                               interromper=True)
+                wx.MessageBox("Você não administra nenhum grupo.",
+                              "Adicionar a um grupo",
+                              wx.OK | wx.ICON_INFORMATION, self.dlg)
+                return
+            dlg = wx.SingleChoiceDialog(
+                self.dlg, "Em qual grupo adicionar %s?" % self.conv.nome,
+                "Adicionar a um grupo", [nome for _, nome in grupos])
+            try:
+                if dlg.ShowModal() != wx.ID_OK:
+                    return
+                cid, nome = grupos[dlg.GetSelection()]
+            finally:
+                dlg.Destroy()
+            self._adicionar_em(cid, nome)
+        self._em_segundo_plano("grupos-admin", self.prov.grupos_que_administro,
+                               depois)
+
+    def _adicionar_em(self, cid, nome):
+        jan = self.jan
+        jan.fala.falar("Adicionando ao grupo...", interromper=True)
+        pessoa = self.conv.id
+
+        def depois(resultado):
+            ok, texto = resultado or (False, "Não consegui adicionar.")
+            if ok:
+                texto = "%s foi adicionado ao grupo %s." % (
+                    self.conv.nome, nome)
+            jan.fala.falar(texto, interromper=True)
+            if self.dlg is not None:
+                wx.MessageBox(texto, "Adicionar a um grupo", wx.OK | (
+                    wx.ICON_INFORMATION if ok else wx.ICON_WARNING),
+                    self.dlg)
+        self._em_segundo_plano(
+            "adicionar-ao-grupo", lambda: self.prov.administrar_grupo(
+                cid, "adicionar", pessoa), depois)
+
     # ---- administracao
     def administrar_grupo(self):
         if not self.dados:
@@ -689,12 +864,7 @@ class ControleDetalhes:
         jan = self.jan
         jan.fala.falar(texto, interromper=True)
         alvo = pai or self.dlg
-        if acao in ("link", "revogar_link") and ok:
-            jan._copiar_texto(texto)
-            wx.MessageBox("Link de convite (já copiado):\n%s" % texto,
-                          "Link de convite", wx.OK | wx.ICON_INFORMATION,
-                          alvo)
-        elif not ok:
+        if not ok:
             wx.MessageBox(texto, "Administrar grupo",
                           wx.OK | wx.ICON_WARNING, alvo)
         if ok and acao == "sair":

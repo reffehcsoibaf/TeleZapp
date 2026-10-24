@@ -18,6 +18,8 @@ LB_SINGLE = LB_HSCROLL = TE_MULTILINE = TE_PASSWORD = TE_READONLY = 0
 VERTICAL = HORIZONTAL = EXPAND = ALL = BOTTOM = TOP = LEFT = RIGHT = 0
 ALIGN_RIGHT = ALIGN_CENTER = RA_SPECIFY_COLS = 0
 TE_PROCESS_ENTER = 1024
+LB_EXTENDED = FD_SAVE = FD_OPEN = FD_OVERWRITE_PROMPT = 0
+FD_FILE_MUST_EXIST = 0
 EVT_RADIOBOX = EVT_SIZE = object()
 EVT_TEXT_ENTER, EVT_TEXT_PASTE = object(), object()
 TE_CENTER = 0
@@ -72,6 +74,9 @@ class Janela:
 
     def Layout(self):
         pass
+
+    def SetName(self, nome):
+        self.nome_acessivel = nome
 
     def Close(self, *a):
         self.vivo = False
