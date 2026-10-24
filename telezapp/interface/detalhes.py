@@ -904,13 +904,30 @@ class ControleDetalhes:
         threading.Thread(target=trabalho, daemon=True,
                          name="canal").start()
 
+    def _manter_ou_apagar_canal(self):
+        """Depois de deixar de seguir: manter o canal na lista ou apagar a
+        conversa e as mensagens guardadas aqui."""
+        jan, conv = self.jan, self.conv
+        r = wx.MessageBox(
+            "Você deixou de seguir o canal %s.\n\nApagar a conversa da "
+            "lista e as mensagens guardadas no TeleZapp? Sim apaga; Não "
+            "mantém o canal na lista." % conv.nome, "Canal deixado de seguir",
+            wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self.dlg)
+        if r != wx.YES:
+            return
+        if conv.chave in jan.indice:
+            jan._remover_conversa_local(conv)
+        jan.fala.falar("Conversa apagada da lista.", interromper=True)
+
     def _resultado_canal(self, acao, ok, texto):
         self.jan.fala.falar(texto, interromper=True)
         if not ok:
             wx.MessageBox(texto, "Canal", wx.OK | wx.ICON_WARNING, self.dlg)
             return
-        if acao == "deixar_de_seguir" and self.dlg is not None:
-            self.dlg.EndModal(wx.ID_OK)
+        if acao == "deixar_de_seguir":
+            self._manter_ou_apagar_canal()
+            if self.dlg is not None:
+                self.dlg.EndModal(wx.ID_OK)
             return
         if self.dlg is not None:
             self._atualizar()
