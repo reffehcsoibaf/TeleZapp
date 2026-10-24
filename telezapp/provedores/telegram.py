@@ -1321,6 +1321,17 @@ class ProvedorTelegram(Provedor):
         return True, aviso.strip(), (
             id_do_topico(cid, TOPICO_GERAL) if grupo and topicos else cid)
 
+    @staticmethod
+    def _canal_silenciado(cheio):
+        try:
+            ate = cheio.full_chat.notify_settings.mute_until
+        except AttributeError:
+            return False
+        if not ate:
+            return False
+        ate = ate.timestamp() if hasattr(ate, "timestamp") else float(ate)
+        return ate > time.time()
+
     def detalhes_do_canal(self, conversa_id):
         async def ler():
             from telethon.tl import functions
@@ -1333,7 +1344,7 @@ class ProvedorTelegram(Provedor):
                 "nome": nome_de(ent), "descricao": cheio.full_chat.about or "",
                 "seguidores": int(cheio.full_chat.participants_count or 0),
                 "verificado": bool(getattr(ent, "verified", False)),
-                "silenciado": False, "papel": (
+                "silenciado": self._canal_silenciado(cheio), "papel": (
                     "dono" if getattr(ent, "creator", False) else
                     "administrador" if direitos else "seguidor"),
                 "criado_em": ent.date.timestamp() if getattr(
