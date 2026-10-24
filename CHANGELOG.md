@@ -3,6 +3,11 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## Próxima versão (ainda sem número: segue o dia do lançamento)
+
+- "Não consegui consultar o GitHub" agora diz o motivo (`atualizacao.motivo_da_falha`): limite de consultas do GitHub por endereço de internet (HTTP 403 ou 429, comum em rede compartilhada), certificado não confiável (data e hora do computador ou antivírus), tempo esgotado, DNS ou resposta inesperada; o log registra a causa. Quando a API recusa, `atualizacao._pelo_site` descobre a versão mais nova pelo endereço `releases/latest` do próprio site do GitHub (sem o limite da API) e monta os endereços do zip e do hash; as novidades dessa versão, nesse caso, só na página dela. Motivo: relato de um usuário da 2026.10.21.0 que não conseguia atualizar por Ajuda, Verificar atualizações ("não conectou ao GitHub"); a causa exata dele não foi vista.
+- `ferramentas/publicar.py --publicar` cria a Release comum (`--latest`); `--prerelease` cria o pré-lançamento (antes era o contrário, com `--final`, que continua aceito e não faz nada).
+
 ## 2026.10.24.0
 
 - Excluir conta: `DialogoContas._clicou_excluir` não desabilita mais Excluir e Renomear quando não sobra conta (fecha o diálogo antes), devolve o foco à lista quando sobra e `Janela._gerenciar_contas` põe o foco em `lista_conv` ao fechar; antes o foco ficava num botão desabilitado e o NVDA dizia "janela indisponível". Não verificado com leitor de tela.

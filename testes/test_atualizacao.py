@@ -147,3 +147,68 @@ def test_pergunta_depois_do_nao_diz_a_versao_e_as_duas_respostas():
     # os botoes da pergunta (com a tecla de acesso) sao esses dois
     assert janela.BOTAO_NAO_AVISAR == "&Não me avise mais sobre essa versão"
     assert janela.BOTAO_MAIS_TARDE == "&Talvez mais tarde"
+
+
+def test_motivos_da_falha_da_consulta_em_palavras():
+    import socket
+    import ssl
+    http = urllib.error.HTTPError("u", 403, "rate limit", {}, None)
+    assert "limitou as consultas" in at.motivo_da_falha(http)
+    assert "erro 500" in at.motivo_da_falha(
+        urllib.error.HTTPError("u", 500, "x", {}, None))
+    assert "certificado" in at.motivo_da_falha(
+        urllib.error.URLError(ssl.SSLCertVerificationError("falhou")))
+    assert "demorou" in at.motivo_da_falha(
+        urllib.error.URLError(socket.timeout()))
+    assert "endereço do GitHub" in at.motivo_da_falha(
+        urllib.error.URLError(socket.gaierror(11001, "sem dns")))
+    assert "formato inesperado" in at.motivo_da_falha(ValueError("x"))
+
+
+def test_consultar_diz_o_motivo_quando_tudo_falha():
+    def limite(url):
+        raise urllib.error.HTTPError(url, 403, "rate limit", {}, None)
+
+    def site_fora():
+        raise urllib.error.URLError("sem rede")
+    with pytest.raises(at.ErroAtualizacao) as e:
+        at.consultar(limite, site_fora)
+    assert "limitou as consultas" in str(e.value)
+
+
+def test_consultar_usa_o_site_quando_a_api_recusa():
+    def limite(url):
+        raise urllib.error.HTTPError(url, 403, "rate limit", {}, None)
+    achado = at.Lancamento("2026.10.24.0", "", "pag", False, "TeleZapp.zip",
+                           "https://github.com/x/TeleZapp.zip",
+                           "https://github.com/x/TeleZapp.zip.sha256")
+    assert at.consultar(limite, lambda: achado) is achado
+
+
+def test_plano_b_le_a_versao_do_endereco_da_ultima_release(monkeypatch):
+    class Resposta:
+        def __init__(self, url):
+            self._url = url
+
+        def geturl(self):
+            return self._url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+    visto = []
+    monkeypatch.setattr(at.urllib.request, "urlopen", lambda p, timeout=0: (
+        visto.append(p.full_url) or Resposta(
+            at.SITE + "/releases/tag/2026.10.24.0")))
+    lanc = at._pelo_site()
+    assert visto == [at.SITE + "/releases/latest"]
+    assert lanc.versao == "2026.10.24.0" and not lanc.pre
+    assert lanc.url_zip == at.SITE + \
+        "/releases/download/2026.10.24.0/TeleZapp.zip"
+    assert lanc.url_hash == lanc.url_zip + ".sha256"
+    monkeypatch.setattr(at.urllib.request, "urlopen", lambda p, timeout=0:
+                        Resposta(at.SITE + "/releases"))   # sem tag
+    with pytest.raises(ValueError):
+        at._pelo_site()
