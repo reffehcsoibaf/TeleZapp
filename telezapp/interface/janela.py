@@ -533,6 +533,7 @@ class Janela(wx.Frame):
         m_conv = wx.Menu()
         item(m_conv, "nao_lidas", "Mensagens &não lidas (marcador ou próxima "
                                   "conversa)\tAlt+2")
+        item(m_conv, "marcar_lida", "Marcar a conversa como &lida")
         m_conv.AppendSeparator()
         item(m_conv, "abrir_conv", "&Abrir a conversa selecionada")
         item(m_conv, "arquivar", "Ar&quivar ou desarquivar a conversa")
@@ -777,6 +778,7 @@ class Janela(wx.Frame):
             "ver_enquete": lambda e: self._abrir_enquete(),
             "nova_enquete": lambda e: self._nova_enquete(),
             "abrir_conv": lambda e: self._abrir_selecionada_na_lista(),
+            "marcar_lida": lambda e: self._marcar_conversa_lida(),
             "arquivar": lambda e: self._arquivar_conversa(),
             "fixar": lambda e: self._fixar_conversa(),
             "silenciar": lambda e: self._silenciar_conversa(),
@@ -2042,6 +2044,8 @@ class Janela(wx.Frame):
         convs = self._marcadas_conv()
         n = self._plural(len(convs), "conversa", "conversas")
         return [
+            ("Marcar %s como %s" % (n, "lida" if len(convs) == 1 else "lidas"),
+             lambda: self._massa_conversas("lidas")),
             ("%s %s" % ("Desarquivar" if all(c.arquivada for c in convs)
                         else "Arquivar", n),
              lambda: self._massa_conversas("arquivar")),
@@ -2078,7 +2082,16 @@ class Janela(wx.Frame):
             return
         n = len(convs)
         quantas = self._plural(n, "conversa", "conversas")
-        if acao == "arquivar":
+        if acao == "lidas":
+            com_nao_lidas = [c for c in convs if c.nao_lidas]
+            for c in com_nao_lidas:
+                self._avisar_leitura(c)
+            texto = ("%s %s." % (self._plural(
+                len(com_nao_lidas), "conversa", "conversas"),
+                "marcada como lida" if len(com_nao_lidas) == 1
+                else "marcadas como lidas")) if com_nao_lidas else \
+                "Nenhuma das conversas tinha mensagens não lidas."
+        elif acao == "arquivar":
             arquivar = not all(c.arquivada for c in convs)
             so_aqui = False
             for c in convs:
@@ -2278,6 +2291,32 @@ class Janela(wx.Frame):
             if 0 <= i < len(self._chaves_conv):
                 conv = self.indice.get(self._chaves_conv[i])
         return conv
+
+    def _avisar_leitura(self, conv):
+        """Tira as nao lidas da conversa aqui e avisa a conta, que manda a
+        confirmacao de leitura como se a pessoa tivesse aberto a conversa."""
+        prov = self.contas.provedor(conv.conta_id)
+        try:
+            if prov is not None:
+                prov.marcar_como_lida(conv.id)
+        except Exception:
+            log.exception("erro ao marcar como lida na conta")
+        conv.nao_lidas = 0
+
+    def _marcar_conversa_lida(self, conv=None):
+        """Marca como lida a conversa em foco (ou a do menu de contexto) sem
+        abri-la."""
+        conv = conv or self._conversa_em_foco()
+        if conv is None:
+            self.fala.falar("Nenhuma conversa selecionada.")
+            return
+        if not conv.nao_lidas:
+            self.fala.falar("Esta conversa não tem mensagens não lidas.",
+                            interromper=True)
+            return
+        self._avisar_leitura(conv)
+        self._depois_de_mudar_conversa(conv)
+        self.fala.falar("Conversa marcada como lida.", interromper=True)
 
     def _arquivar_conversa(self, conv=None):
         """Arquiva a conversa em foco, ou a tira dos arquivados. A conta
@@ -5752,6 +5791,8 @@ class Janela(wx.Frame):
                             "canal": "Detalhes do canal"}.get(
                                 conv.tipo, "Detalhes da conversa"),
                            lambda: self._detalhes_da_conversa(conv)))
+        opcoes.append(("Marcar como lida",
+                       lambda: self._marcar_conversa_lida(conv)))
         opcoes.append(("Desarquivar" if conv.arquivada else "Arquivar",
                        lambda: self._arquivar_conversa(conv)))
         opcoes.append(("Desafixar" if conv.fixada else "Fixar",

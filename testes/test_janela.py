@@ -5292,3 +5292,59 @@ def test_entrar_em_grupo_por_link_segue_o_caminho_do_botao(j, monkeypatch):
     j.contas.p.ENTRA_POR_LINK = False
     j._entrar_por_link()
     assert ditas[-1] == "Nenhuma conta conectada entra em grupos por link."
+
+
+# ------------------------------------------------- marcar a conversa como lida
+def _conversas_com_nao_lidas(j):
+    a, b = conv("c1", "Zelda", nao_lidas=3), conv("c2", "Bia", nao_lidas=0)
+    j.indice[a.chave], j.indice[b.chave] = a, b
+    j._ordenar()
+    j._preencher_conversas()
+    return a, b
+
+
+def test_marcar_conversa_como_lida_sem_abrir(j):
+    a, _ = _conversas_com_nao_lidas(j)
+    j._marcar_conversa_lida(a)
+    assert a.nao_lidas == 0 and j.atual is None
+    assert ("lida", "c1") in j.contas.p.pedidos
+    assert not any("Zelda" in t and "não lida" in t for t in j.lista_conv.itens)
+
+
+def test_marcar_como_lida_quando_nao_ha_nao_lidas_so_avisa(j):
+    _, b = _conversas_com_nao_lidas(j)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._marcar_conversa_lida(b)
+    assert ("lida", "c2") not in j.contas.p.pedidos
+    assert any("não tem mensagens não lidas" in t for t in ditas)
+
+
+def test_menu_de_contexto_da_conversa_tem_marcar_como_lida(j):
+    a, _ = _conversas_com_nao_lidas(j)
+    rotulos = [r for r, _ in j._opcoes_da_conversa(a)]
+    assert "Marcar como lida" in rotulos
+    assert rotulos.index("Marcar como lida") < rotulos.index("Arquivar")
+
+
+def test_slot_de_atalho_de_marcar_como_lida_nasce_sem_atalho(j):
+    assert "marcar_lida" in j.atalhos.acoes
+    assert j.atalhos.efetivo("marcar_lida") == ""
+    j._aplicar_opcao("atalhos", {"marcar_lida": "Ctrl+Alt+L"})
+    assert j.itens["marcar_lida"].rotulo.endswith("	Ctrl+Alt+L")
+
+
+def test_selecao_em_massa_marca_como_lidas(j):
+    a, b = _conversas_com_nao_lidas(j)
+    c = conv("c3", "Caio", nao_lidas=2)
+    j.indice[c.chave] = c
+    j._ordenar()
+    j._preencher_conversas()
+    j.marc_conv = {a.chave, b.chave, c.chave}
+    j.modo_conv = True
+    rotulos = [r for r, _ in j._opcoes_em_massa_conv()]
+    assert "Marcar 3 conversas como lidas" in rotulos
+    j._massa_conversas("lidas")
+    assert a.nao_lidas == 0 and c.nao_lidas == 0
+    assert {("lida", "c1"), ("lida", "c3")} <= set(j.contas.p.pedidos)
+    assert ("lida", "c2") not in j.contas.p.pedidos
