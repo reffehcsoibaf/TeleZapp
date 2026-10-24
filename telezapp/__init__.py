@@ -10,6 +10,9 @@ NOME = "TeleZapp"
 # mesmo dia (2026.10.13.0, 2026.10.13.1...)
 VERSAO = "2026.10.24.1"
 SITE = "https://github.com/reffehcsoibaf/TeleZapp"
+# a pagina do projeto e o formulario de relatos (pasta site/, no GitHub Pages)
+PAGINA_DO_PROJETO = "https://reffehcsoibaf.github.io/TeleZapp/"
+PAGINA_DE_RELATOS = PAGINA_DO_PROJETO + "relatar.html"
 
 
 def versao_valida(texto):

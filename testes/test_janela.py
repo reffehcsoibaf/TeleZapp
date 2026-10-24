@@ -5348,3 +5348,28 @@ def test_selecao_em_massa_marca_como_lidas(j):
     assert a.nao_lidas == 0 and c.nao_lidas == 0
     assert {("lida", "c1"), ("lida", "c3")} <= set(j.contas.p.pedidos)
     assert ("lida", "c2") not in j.contas.p.pedidos
+
+
+def test_menu_ajuda_abre_a_pagina_do_projeto_e_o_feedback(j, monkeypatch):
+    from telezapp import PAGINA_DE_RELATOS, PAGINA_DO_PROJETO
+    abertos = []
+    monkeypatch.setattr(jm.webbrowser, "open", lambda url: abertos.append(url) or True)
+    assert "pagina_projeto" in j.itens and "feedback" in j.itens
+    assert j.atalhos.efetivo("pagina_projeto") == ""        # slots sem atalho
+    assert j.atalhos.efetivo("feedback") == ""
+    j._abrir_na_internet(PAGINA_DO_PROJETO)
+    j._abrir_na_internet(PAGINA_DE_RELATOS)
+    assert abertos == [PAGINA_DO_PROJETO, PAGINA_DE_RELATOS]
+    assert "Página do projeto" in j.itens["pagina_projeto"].rotulo
+    assert "Feedback" in j.itens["feedback"].rotulo
+    assert PAGINA_DE_RELATOS.startswith(PAGINA_DO_PROJETO)
+
+
+def test_sem_navegador_o_endereco_e_mostrado(j, monkeypatch):
+    avisos = []
+    monkeypatch.setattr(jm.webbrowser, "open", lambda url: False)
+    monkeypatch.setattr(jm.wx, "MessageBox",
+                        lambda texto, *a, **k: avisos.append(texto),
+                        raising=False)
+    j._abrir_na_internet("https://exemplo.test/")
+    assert avisos and "https://exemplo.test/" in avisos[0]

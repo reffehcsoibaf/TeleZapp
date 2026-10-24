@@ -13,10 +13,12 @@ import sys
 import threading
 import time
 import traceback
+import webbrowser
 
 import wx
 
-from telezapp import NOME, VERSAO, config
+from telezapp import (NOME, PAGINA_DE_RELATOS, PAGINA_DO_PROJETO, VERSAO,
+                      config)
 from telezapp.acessibilidade.fala import Fala, bipe, definir_sons
 from telezapp.interface import colagem, dialogos, visualizadores
 from telezapp.interface import emojis as ui_emojis
@@ -680,6 +682,9 @@ class Janela(wx.Frame):
         item(m_aj, "guia", "&Guia de uso\tF1")
         item(m_aj, "ajuda", "&Teclas de atalho\tShift+F1")
         item(m_aj, "novidades", "&Novidades desta versão")
+        item(m_aj, "pagina_projeto", "&Página do projeto na internet")
+        item(m_aj, "feedback", "&Feedback: relatar um problema ou sugerir "
+                               "algo...")
         item(m_aj, "atualizacoes", "&Verificar atualizações...")
         item(m_aj, "logs", "Abrir a pasta de &logs")
         item(m_aj, "pasta_sons", "Abrir a pasta de s&ons")
@@ -848,6 +853,9 @@ class Janela(wx.Frame):
             "midias_limpar": lambda e: self._limpar_midias(),
             "guia": lambda e: self._abrir_pagina("guia.html"),
             "novidades": lambda e: self._abrir_pagina("novidades.html"),
+            "pagina_projeto": lambda e: self._abrir_na_internet(
+                PAGINA_DO_PROJETO),
+            "feedback": lambda e: self._abrir_na_internet(PAGINA_DE_RELATOS),
             "atualizacoes": lambda e: self._verificar_atualizacoes(),
             "instalar": lambda e: self._instalar(),
             "criar_portatil": lambda e: self._criar_portatil(),
@@ -7075,6 +7083,17 @@ class Janela(wx.Frame):
             os.startfile(caminho)
         else:
             self.fala.falar(caminho)
+
+    def _abrir_na_internet(self, endereco):
+        """Abre um endereco da internet no navegador padrao."""
+        try:
+            aberto = webbrowser.open(endereco)
+        except Exception:
+            log.exception("erro ao abrir %s", endereco)
+            aberto = False
+        if not aberto:
+            wx.MessageBox("Não consegui abrir o navegador. O endereço é:\n%s"
+                          % endereco, NOME, wx.OK | wx.ICON_WARNING, self)
 
     def _abrir_logs(self):
         self._abrir_pasta("logs")
