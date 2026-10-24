@@ -683,8 +683,8 @@ class Janela(wx.Frame):
         item(m_aj, "ajuda", "&Teclas de atalho\tShift+F1")
         item(m_aj, "novidades", "&Novidades desta versão")
         item(m_aj, "pagina_projeto", "&Página do projeto na internet")
-        item(m_aj, "feedback", "&Feedback: relatar um problema ou sugerir "
-                               "algo...")
+        item(m_aj, "feedback", "&Feedback: entrar em contato pelo "
+                               "formulário...")
         item(m_aj, "atualizacoes", "&Verificar atualizações...")
         item(m_aj, "logs", "Abrir a pasta de &logs")
         item(m_aj, "pasta_sons", "Abrir a pasta de s&ons")
