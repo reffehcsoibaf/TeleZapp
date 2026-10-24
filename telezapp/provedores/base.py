@@ -213,9 +213,32 @@ class Provedor(ABC):
 
     def administrar_grupo(self, conversa_id, acao, valor=None):
         """Ferramentas de administrador (nome, descricao, anuncio, trancado,
-        adicionar, remover, promover, rebaixar, link, revogar_link, sair).
+        adicionar, remover, promover, rebaixar, foto (bytes JPEG), link, revogar_link, sair).
         Devolve (ok, texto)."""
         return False, "Esta conta não administra grupos por aqui."
+
+    # True nos servicos com pedidos de entrada em grupo e foto do grupo
+    PEDIDOS_DE_ENTRADA = False
+    FOTO_DO_GRUPO = False
+    LISTA_GRUPOS_ADMIN = False
+    ENTRA_POR_LINK = False       # "Entrar em um grupo por link"
+
+    def pedidos_de_entrada(self, conversa_id):
+        """Pedidos pendentes para entrar no grupo: (True, [{'id', 'nome',
+        'telefone', 'quando'}]) ou (False, texto). Espera o servico."""
+        return False, "Esta conta não gerencia pedidos de entrada."
+
+    def responder_pedidos(self, conversa_id, ids, aprovar):
+        """Aprova (ou recusa) pedidos de entrada. (ok, texto)."""
+        return False, "Esta conta não gerencia pedidos de entrada."
+
+    def foto_do_grupo(self, conversa_id):
+        """Baixa a foto atual do grupo: (True, bytes) ou (False, texto)."""
+        return False, "Esta conta não mostra a foto do grupo."
+
+    def grupos_que_administro(self):
+        """[(conversa_id, nome)] dos grupos em que a conta e administradora."""
+        return []
 
     def administrar_canal(self, conversa_id, acao, valor=None):
         """Ferramentas do canal (silenciar, deixar_de_seguir). (ok, texto)."""

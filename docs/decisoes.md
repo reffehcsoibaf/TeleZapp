@@ -800,6 +800,14 @@ Conferido o plano de 13/10 contra o código. Decisões do responsável:
 
 - **Formulário de relatos (23/10/2026):** `site/relatar.html` envia para o Worker `telezapp-relatos` (pasta `relatos/`, KV, relatos guardados 90 dias, leitura em `/admin` com senha, aviso por notificação do ntfy). **Verificado ao vivo pelo responsável (23/10/2026):** um relato de teste mandado direto ao Worker apareceu na lista do `/admin` e a notificação chegou ao celular. A página foi publicada (PR #25) e o envio por ela, com um log anexado, chegou ao Worker (visto por mim com um relato de teste, depois apagado); o responsável confirmou em 23/10/2026 que "tudo funcionou na página de relatos". O endereço do `/admin` com a senha ficou guardado por ele fora da pasta do projeto.
 
+## Versão 2026.10.24.0 (24/10/2026): ferramentas de grupo do WhatsApp
+
+- Pedido do responsável: o que o WinZapp tem em grupos e o TeleZapp não tem, feito em paralelo ("se foi possível para o TeleZapp deve ser possível para o WinZapp"). Auditoria primeiro: o TeleZapp já tinha detalhes, membros, promover/rebaixar/remover/adicionar por telefone, nome, descrição, só administradores enviam/editam, link (numa caixa de mensagem), sair, grupos em comum, criar grupo/comunidade e entrar pelo botão da mensagem. Faltavam: pedidos de entrada (listar, aprovar, recusar), foto do grupo (ver e trocar), convite com QR Code, entrar por link digitado e adicionar uma pessoa a um grupo pela conversa dela. Todos feitos. O TeleZapp não mostrava nenhuma foto de perfil, só trocava a própria.
+- Não viável hoje: modo de aprovação de entrada e "só administradores adicionam membros" (o `GroupInfo` do neonize não tem os campos nem há função que os mude; exigem mexer na DLL); remover a foto do grupo (o neonize não documenta foto vazia; não tentado).
+- Aprovar e recusar usam `client.update_group_request_participants`, só existente na DLL de teste `0.5.2-winzapp-teste.2` (contrato combinado com a sessão que a recompila). Sem a função, a mensagem diz que precisa da DLL de teste nova; a lista de pedidos funciona com o neonize atual.
+- Sem opção nova em `config.OPCOES` (nada ajustável); o item de menu "Entrar em um grupo por link" nasce sem combinação de teclas.
+- **Não verificado ao vivo:** nada disto foi visto com conta real, só testes automáticos com cliente simulado. A conferir: a foto baixar e abrir; trocar a foto do grupo; o QR salvo ser lido pelo celular; o pedido de entrada aparecer com nome e telefone e, com a DLL nova, aprovar e recusar.
+
 ## Próximos passos sugeridos
 
 1. ~~Grupo 1 do plano acima~~ (concluído).

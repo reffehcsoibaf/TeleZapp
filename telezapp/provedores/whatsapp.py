@@ -1908,9 +1908,114 @@ class ProvedorWhatsApp(Provedor):
                     break
         return sorted(achados, key=lambda g: g[1].lower())
 
+    # ---- pedidos de entrada, foto e grupos que administro
+    PEDIDOS_DE_ENTRADA = True
+    FOTO_DO_GRUPO = True
+    LISTA_GRUPOS_ADMIN = True
+    ENTRA_POR_LINK = True
+
+    def pedidos_de_entrada(self, conversa_id):
+        """Quem pediu para entrar no grupo (que exige aprovacao). Devolve
+        (True, [{'id', 'nome', 'telefone', 'quando'}]) ou (False, texto).
+        Bloqueia ate o WhatsApp responder."""
+        if self.cliente is None or not self._conectada:
+            return False, "Sem conexão com o WhatsApp."
+        usuario, servidor = jid_de_texto(conversa_id)
+        try:
+            lista = list(self.cliente.get_group_request_participants(
+                _jid_obj(usuario, servidor)))
+        except Exception as e:
+            log.warning("pedidos de entrada falhou: %s", type(e).__name__)
+            return False, ("Não consegui ler os pedidos de entrada (só "
+                           "administradores veem).")
+        pedidos = []
+        for r in lista:
+            alvo = r.Participant
+            pessoa = self._numero_do_jid(alvo)
+            tel = ("+" + pessoa.User) if pessoa.Server == "s.whatsapp.net"                 and pessoa.User else ""
+            nome = self._nome_contato(pessoa)
+            pedidos.append({"id": jid_texto(alvo), "nome": nome or tel,
+                            "telefone": tel,
+                            "quando": float(r.TimeAt or 0)})
+        pedidos.sort(key=lambda x: x["quando"])
+        return True, pedidos
+
+    def responder_pedidos(self, conversa_id, ids, aprovar):
+        """Aprova ou recusa pedidos de entrada. Devolve (ok, texto). Precisa
+        de client.update_group_request_participants, so na DLL de teste."""
+        if self.cliente is None or not self._conectada:
+            return False, "Sem conexão com o WhatsApp."
+        if not hasattr(self.cliente, "update_group_request_participants"):
+            return False, ("Aprovar ou recusar pedidos precisa da DLL de "
+                           "teste nova do neonize (0.5.2-winzapp-teste.2). "
+                           "Veja a Ajuda.")
+        from neonize.utils.enum import ParticipantRequestChange
+        usuario, servidor = jid_de_texto(conversa_id)
+        alvos = [_jid_obj(*jid_de_texto(i)) for i in ids]
+        if not alvos:
+            return False, "Nenhum pedido escolhido."
+        mudanca = ParticipantRequestChange.APPROVE if aprovar             else ParticipantRequestChange.REJECT
+        try:
+            resp = self.cliente.update_group_request_participants(
+                _jid_obj(usuario, servidor), alvos, mudanca)
+        except Exception as e:
+            log.warning("responder pedidos falhou: %s", type(e).__name__,
+                        exc_info=True)
+            return False, "O WhatsApp não aceitou (%s)." % type(e).__name__
+        erros = [r for r in (resp or []) if getattr(r, "Error", 0)]
+        feitos = len(alvos) - len(erros)
+        if erros and not feitos:
+            return False, "O WhatsApp recusou (erro %s)." % erros[0].Error
+        verbo = "aprovado" if aprovar else "recusado"
+        texto = "%d pedido%s %s%s." % (
+            feitos, "" if feitos == 1 else "s", verbo,
+            "" if feitos == 1 else "s")
+        if erros:
+            texto += " %d não deu certo." % len(erros)
+        return True, texto
+
+    def foto_do_grupo(self, conversa_id):
+        """Baixa a foto atual do grupo. Devolve (True, bytes) ou (False,
+        texto). Sem foto, ou foto escondida, o WhatsApp responde igual."""
+        if self.cliente is None or not self._conectada:
+            return False, "Sem conexão com o WhatsApp."
+        usuario, servidor = jid_de_texto(conversa_id)
+        try:
+            info = self.cliente.get_profile_picture(
+                _jid_obj(usuario, servidor))
+            url = info.URL if info is not None else ""
+        except Exception as e:
+            log.info("foto do grupo: %s", type(e).__name__)
+            url = ""
+        if not url:
+            return False, "Este grupo não tem foto (ou ela não está visível)."
+        try:
+            import urllib.request
+            with urllib.request.urlopen(url, timeout=20) as r:
+                dados = r.read(20 * 1024 * 1024)
+        except Exception as e:
+            log.warning("baixar foto do grupo: %s", type(e).__name__)
+            return False, "Não consegui baixar a foto."
+        return (True, dados) if dados else (False, "A foto veio vazia.")
+
+    def grupos_que_administro(self):
+        """[(conversa_id, nome)] dos grupos em que esta conta e administradora
+        (nao inclui comunidades). Bloqueia ate o WhatsApp responder."""
+        if self.cliente is None or not self._conectada:
+            return []
+        achados = []
+        for g in self.cliente.get_joined_groups():
+            if g.GroupParent.IsParent:
+                continue
+            eu = self._eu(g)
+            if eu is not None and (eu.IsAdmin or eu.IsSuperAdmin):
+                achados.append((jid_texto(g.JID), g.GroupName.Name
+                                or "Grupo"))
+        return sorted(achados, key=lambda x: x[1].lower())
+
     def _jid_do_convite(self, msg, acao):
         grupo = acao.get("grupo") or ""
-        convidou = msg.remetente or msg.conversa_id
+        convidou = (msg.remetente or msg.conversa_id) if msg is not None             else ""
         return (_jid_obj(*jid_de_texto(grupo)) if grupo else None,
                 _jid_obj(*jid_de_texto(convidou)) if convidou else None)
 
@@ -1984,7 +2089,9 @@ class ProvedorWhatsApp(Provedor):
                 return True, ("Agora só administradores editam o grupo."
                               if valor else "Agora todos editam o grupo.")
             if acao in ("adicionar", "remover", "promover", "rebaixar"):
-                if acao == "adicionar":
+                if acao == "adicionar" and "@" in str(valor):
+                    alvo = _jid_obj(*jid_de_texto(valor))
+                elif acao == "adicionar":
                     digitos = "".join(c for c in str(valor) if c.isdigit())
                     if len(digitos) < 8:
                         return False, "Digite o número com DDD e país."
@@ -2006,6 +2113,9 @@ class ProvedorWhatsApp(Provedor):
                               "promover": "Agora é administrador.",
                               "rebaixar": "Deixou de ser administrador."
                               }[acao]
+            if acao == "foto":
+                self.cliente.set_group_photo(jid, valor)
+                return True, "Foto do grupo mudada."
             if acao in ("link", "revogar_link"):
                 return True, self.cliente.get_group_invite_link(
                     jid, acao == "revogar_link")
