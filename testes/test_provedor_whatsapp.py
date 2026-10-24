@@ -3165,3 +3165,8 @@ def test_busca_periodica_do_estado_pula_a_colecao_em_reparo(tmp_path):
     p._buscar_mudancas_de_estado()
     assert buscadas == []
     banco.fechar()
+
+
+def test_nao_marca_as_mensagens_enviadas_como_de_bot(amb):
+    # sem isto o neonize poe <bot biz_bot="1"/> e o destinatario ve "IA"
+    assert os.environ.get("NEONIZE_BOT_TAG") == "off"
