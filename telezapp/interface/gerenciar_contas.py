@@ -69,9 +69,13 @@ class DialogoContas(wx.Dialog):
     def _clicou_excluir(self, evt):
         conta_id, n = self._atual()
         if conta_id and self._ao_excluir(conta_id):
-            self._preencher(n)
-            if not self._ids:
+            if not self._itens():
+                # Sem contas: fecha sem desabilitar o botão que tem o foco
+                # (o leitor de tela perderia a janela).
                 self.EndModal(wx.ID_CANCEL)
+                return
+            self.lista.SetFocus()
+            self._preencher(n)
 
     def _clicou_renomear(self, evt):
         conta_id, n = self._atual()

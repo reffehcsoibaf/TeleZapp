@@ -3,6 +3,11 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.24.0
+
+- Excluir conta: `DialogoContas._clicou_excluir` não desabilita mais Excluir e Renomear quando não sobra conta (fecha o diálogo antes), devolve o foco à lista quando sobra e `Janela._gerenciar_contas` põe o foco em `lista_conv` ao fechar; antes o foco ficava num botão desabilitado e o NVDA dizia "janela indisponível". Não verificado com leitor de tela.
+- Atualização com "Continuar em segundo plano": `Janela._atualizacao_pronta` marca `_saindo` antes de `Close()` (senão `_ao_fechar` vetava e só escondia na bandeja, e `atualizador.aplicar` nunca rodava); desfaz a marca se a pessoa desistir de fechar.
+
 ## 2026.10.23.1
 
 - IA de texto: tom, tradução e resumo das não lidas. `catalogo.TONS`/`IDIOMAS`; `prompts.TRADUZIR` e `_TOM` (o tom vale ao redigir); `preparar_texto`/`executar_texto`/`executar_texto_em_ordem` ganham `tom` e `destino`. Opção `ia_tom` (Inteligência artificial); `ia_idioma_traducao` guarda o último idioma. Janela: `_ia_redigir(escolher_tom=)`, `_ia_traduzir_caixa`, `_ia_traduzir_mensagem`, `_ia_resumir_nao_lidas` (usa `marcador_n` ou `nao_lidas`; só manual) e `_escolher_da_lista`; slots `ia_redigir_tom`, `ia_traduzir`, `ia_traduzir_msg`, `ia_resumir_nao_lidas`. Testes em `test_ia.py` e `test_janela.py`.
