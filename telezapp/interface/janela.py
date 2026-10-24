@@ -507,6 +507,7 @@ class Janela(wx.Frame):
         item(m_novo, "novo_grupo", "Novo &grupo...")
         item(m_novo, "novo_canal", "Novo c&anal...")
         item(m_novo, "nova_comunidade", "Nova comuni&dade...")
+        item(m_novo, "entrar_por_link", "Entrar em um grupo por &link...")
 
         m_ir = wx.Menu()
         item(m_ir, "ir_conv", "Ir para a lista de &conversas\tAlt+1")
@@ -772,6 +773,7 @@ class Janela(wx.Frame):
             "novo_grupo": lambda e: self._nova_conversa("grupo"),
             "novo_canal": lambda e: self._nova_conversa("canal"),
             "nova_comunidade": lambda e: self._nova_conversa("comunidade"),
+            "entrar_por_link": lambda e: self._entrar_por_link(),
             "ver_enquete": lambda e: self._abrir_enquete(),
             "nova_enquete": lambda e: self._nova_enquete(),
             "abrir_conv": lambda e: self._abrir_selecionada_na_lista(),
@@ -4605,6 +4607,52 @@ class Janela(wx.Frame):
             self.fala.falar("Não consegui salvar o arquivo.")
             return
         self.fala.falar("Texto salvo.")
+
+    def _entrar_por_link(self):
+        """Menu Novo, Entrar em um grupo por link: pergunta o link de convite
+        e segue o mesmo caminho do botao "Entrar no grupo" das mensagens."""
+        from telezapp.nucleo import grupo as ng
+        contas = []
+        for dados in self.cfg.contas():
+            p = self.contas.provedor(dados["id"]) if self.contas else None
+            if p is not None and getattr(p, "ENTRA_POR_LINK", False) and                     self.estados.get(dados["id"]) == ev.CONECTADA:
+                contas.append((dados["id"], dados.get("nome") or dados.get(
+                    "telefone") or dados["id"]))
+        if not contas:
+            bipe("erro")
+            self.fala.falar("Nenhuma conta conectada entra em grupos por "
+                            "link.", interromper=True)
+            return
+        conta_id = contas[0][0]
+        if len(contas) > 1:
+            dlg = wx.SingleChoiceDialog(
+                self, "Com qual conta entrar no grupo?", "Entrar em um grupo",
+                [nome for _, nome in contas])
+            try:
+                if dlg.ShowModal() != wx.ID_OK:
+                    return
+                conta_id = contas[dlg.GetSelection()][0]
+            finally:
+                dlg.Destroy()
+        dlg = wx.TextEntryDialog(
+            self, "Cole o link de convite (chat.whatsapp.com/...):",
+            "Entrar em um grupo por link")
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            texto = dlg.GetValue()
+        finally:
+            dlg.Destroy()
+        codigo = ng.codigo_do_convite(texto)
+        if not codigo:
+            bipe("erro")
+            self.fala.falar("Isso não parece um link de convite de grupo.",
+                            interromper=True)
+            wx.MessageBox("Isso não parece um link de convite de grupo.",
+                          NOME, wx.OK | wx.ICON_WARNING, self)
+            return
+        self._entrar_no_grupo(None, {"codigo": codigo},
+                              self.contas.provedor(conta_id))
 
     def _entrar_no_grupo(self, x, acao, prov):
         """Botao "Entrar no grupo": mostra o que o convite diz e, se a pessoa

@@ -2450,7 +2450,8 @@ def test_menu_unico_com_submenus_na_ordem_pedida(j):
     assert nomes(menus["Novo"]) == [
         "Nova mensagem...", "Nova chamada...", "Nova enquete...",
         "Novo contato...", "Novo status ou história...", "Nova conta...",
-        "Novo grupo...", "Novo canal...", "Nova comunidade..."]
+        "Novo grupo...", "Novo canal...", "Nova comunidade...",
+        "Entrar em um grupo por link..."]
     for antigo in ("Mensagens", "Conversas"):
         assert "Nova mensagem..." not in nomes(menus[antigo])
     # Ir para junta as idas a um lugar da janela
@@ -5256,3 +5257,38 @@ def test_slots_novos_da_ia_de_texto(j):
     for chave in ("ia_redigir_tom", "ia_traduzir", "ia_traduzir_msg",
                   "ia_resumir_nao_lidas"):
         assert chave in j.atalhos.acoes and j.atalhos.efetivo(chave) == ""
+
+
+def test_entrar_em_grupo_por_link_segue_o_caminho_do_botao(j, monkeypatch):
+    j.contas.p.ENTRA_POR_LINK = True
+    j.estados["t1"] = ev.CONECTADA
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    entradas = []
+    monkeypatch.setattr(j, "_entrar_no_grupo", lambda x, acao, prov:
+                        entradas.append((x, acao, prov)))
+    digitado = ["https://chat.whatsapp.com/AbCdEfGhIjKl"]
+
+    class Pergunta:
+        def __init__(self, *a, **k):
+            pass
+
+        def ShowModal(self):
+            return jm.wx.ID_OK
+
+        def GetValue(self):
+            return digitado[0]
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(jm.wx, "TextEntryDialog", Pergunta, raising=False)
+    j._entrar_por_link()
+    assert entradas == [(None, {"codigo": "AbCdEfGhIjKl"}, j.contas.p)]
+    digitado[0] = "isso nao e um convite"
+    j._entrar_por_link()
+    assert len(entradas) == 1
+    assert "não parece um link" in ditas[-1]
+    # conta que nao entra por link: avisa e nem pergunta
+    j.contas.p.ENTRA_POR_LINK = False
+    j._entrar_por_link()
+    assert ditas[-1] == "Nenhuma conta conectada entra em grupos por link."
