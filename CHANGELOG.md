@@ -14,6 +14,7 @@ Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 
 ## 2026.10.24.0
 
+- Corrigido: Deixar de seguir e Silenciar o canal não faziam nada no Telegram. `ProvedorTelegram` não tinha `administrar_canal`, e o padrão de `Provedor` respondia que a conta não gerencia canais. Agora `_administrar_canal` usa `channels.LeaveChannelRequest` (ou `delete_dialog` fora de canais) e `account.UpdateNotifySettingsRequest`. Depois de deixar de seguir, `ControleDetalhes._manter_ou_apagar_canal` pergunta (Não é o padrão) se mantém o canal na lista ou apaga a conversa e as mensagens locais (`Janela._remover_conversa_local`). Teste com cliente simulado; não verificado com conta real.
 - Excluir conta: `DialogoContas._clicou_excluir` não desabilita mais Excluir e Renomear quando não sobra conta (fecha o diálogo antes), devolve o foco à lista quando sobra e `Janela._gerenciar_contas` põe o foco em `lista_conv` ao fechar; antes o foco ficava num botão desabilitado e o NVDA dizia "janela indisponível". Não verificado com leitor de tela.
 - Atualização com "Continuar em segundo plano": `Janela._atualizacao_pronta` marca `_saindo` antes de `Close()` (senão `_ao_fechar` vetava e só escondia na bandeja, e `atualizador.aplicar` nunca rodava); desfaz a marca se a pessoa desistir de fechar.
 

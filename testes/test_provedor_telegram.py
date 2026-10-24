@@ -1380,3 +1380,34 @@ def test_criar_grupo_e_canal_no_telegram_monta_os_pedidos(ambiente,
         assert pedido.broadcast and not pedido.megagroup and not pedido.forum
     finally:
         p.parar()
+
+
+def test_deixar_de_seguir_e_silenciar_canal_do_telegram():
+    import asyncio
+    from telethon.tl import functions, types as T
+    canal = T.Channel(id=1, title="C", photo=T.ChatPhotoEmpty(), date=DATA,
+                      broadcast=True, access_hash=5)
+    pedidos = []
+
+    class Cliente:
+        async def __call__(self, req):
+            pedidos.append(req)
+
+        async def get_entity(self, quem):
+            return canal
+
+        async def get_input_entity(self, e):
+            return T.InputPeerChannel(1, 5)
+    p = tg.ProvedorTelegram.__new__(tg.ProvedorTelegram)
+    p.cliente = Cliente()
+
+    def rodar(acao, valor=None):
+        return asyncio.run(p._administrar_canal("1", acao, valor))
+    assert rodar("deixar_de_seguir") == (
+        True, "Você deixou de seguir o canal.")
+    assert isinstance(pedidos[-1], functions.channels.LeaveChannelRequest)
+    assert rodar("silenciar", True)[0]
+    assert pedidos[-1].settings.mute_until > 0
+    assert rodar("silenciar", False)[0]
+    assert pedidos[-1].settings.mute_until == 0
+    assert rodar("xyz") == (False, "Ação desconhecida.")

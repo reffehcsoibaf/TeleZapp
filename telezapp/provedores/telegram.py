@@ -1269,6 +1269,36 @@ class ProvedorTelegram(Provedor):
             return False, "O Telegram não aceitou (%s)." % type(e).__name__
         return False, "Ação desconhecida."
 
+    def administrar_canal(self, conversa_id, acao, valor=None):
+        resposta = self._sincrono(
+            self._administrar_canal(conversa_id, acao, valor), 45)
+        return resposta or (False, "O Telegram não respondeu.")
+
+    async def _administrar_canal(self, cid, acao, valor):
+        from telethon.tl import functions, types as T
+        try:
+            ent = await self.cliente.get_entity(self._chat_id(cid))
+            peer = await self.cliente.get_input_entity(ent)
+            if acao == "silenciar":
+                await self.cliente(functions.account.UpdateNotifySettingsRequest(
+                    peer=T.InputNotifyPeer(peer=peer),
+                    settings=T.InputPeerNotifySettings(
+                        mute_until=2 ** 31 - 1 if valor else 0)))
+                return True, ("Canal silenciado." if valor
+                              else "Som do canal reativado.")
+            if acao == "deixar_de_seguir":
+                if isinstance(ent, T.Channel):
+                    await self.cliente(functions.channels.LeaveChannelRequest(
+                        peer))
+                else:
+                    await self.cliente.delete_dialog(ent)
+                return True, "Você deixou de seguir o canal."
+        except Exception as e:
+            log.warning("administrar canal (%s) falhou: %s", acao,
+                        type(e).__name__)
+            return False, "O Telegram não aceitou (%s)." % type(e).__name__
+        return False, "Ação desconhecida."
+
     CRIA = ("grupo", "canal")
 
     def criar_conversa(self, tipo, nome, descricao="", participantes=(),
