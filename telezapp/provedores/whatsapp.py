@@ -812,6 +812,15 @@ COLECAO_DO_TIPO = {1: "critical_block", 2: "critical_unblock_low",
                    3: "regular_low", 4: "regular_high", 5: "regular"}
 
 
+def colecao_fora_de_sincronia(texto):
+    """Nome da colecao do estado do app que o whatsmeow nao conseguiu ler
+    numa notificacao ("mismatching LTHash"), ou None se o texto e outro."""
+    if "mismatching LTHash" not in texto:
+        return None
+    achado = re.search(r"failed to decode app state (\w+) patches", texto)
+    return achado.group(1) if achado else None
+
+
 def fim_do_silencio(valor, ms=False):
     """Fim do silencio como o WhatsApp manda (segundos, ou milissegundos
     com ms=True; -1 ou um numero enorme = para sempre) -> 0.0 (com som),
@@ -958,6 +967,7 @@ class ProvedorWhatsApp(Provedor):
         self._observadas = {}       # JID da conversa observada -> conversa_id
         self._presenca_cid = None   # a conversa aberta com presenca
         self._ouvinte = None
+        self._ultimo_reparo = {}
         self._nao_reconectar = False  # banida ou aberta em outro lugar
         self._lid_para_numero = {}  # do pacote de historico
         self._apelidos = {}         # jid -> nome de perfil (pushname)
@@ -982,6 +992,8 @@ class ProvedorWhatsApp(Provedor):
         self._arquivada_vista = {}  # conversa -> arquivada, como o celular disse
         self._ajustes_vistos = {}   # (conversa, campo) -> fixada/silenciada
         self._recuperando = set()   # colecoes do estado em recuperacao
+        self._busca_ativa = False   # laco da busca periodica do estado
+        self._em_nova_tentativa = set()   # colecoes que o laco de novas tentativas cuida
         self._ultima_conferencia = 0.0
         self._sincronizando = False
         self._progresso_historico = 0   # 0 = nada em andamento
@@ -1174,9 +1186,13 @@ class ProvedorWhatsApp(Provedor):
 
         class Ouvinte(logging.Handler):
             def emit(self, registro):
+                texto = registro.getMessage()
+                colecao = colecao_fora_de_sincronia(texto)
+                if colecao:
+                    provedor._reparar_em_segundo_plano(colecao)
+                    return
                 if not provedor._pareando:
                     return
-                texto = registro.getMessage()
                 if "Failed to handle code pair notification" in texto:
                     metodo = "codigo"
                 elif "Failed to pair device" in texto:
@@ -1264,6 +1280,7 @@ class ProvedorWhatsApp(Provedor):
         self._estado(ev.CONECTADA)
         self._publicar_conversas()
         self._fila.put(self._conferir_estado)
+        self._iniciar_busca_periodica()
 
     def _conferir_estado(self):
         """Confere as colecoes do estado do aplicativo. Se uma saiu de
@@ -1276,6 +1293,59 @@ class ProvedorWhatsApp(Provedor):
     def _conferir_colecoes(self):
         for nome in COLECOES_DE_ESTADO:
             self._reparar_colecao(nome, forcar=False)
+
+    INTERVALO_DA_BUSCA = 90         # segundos entre duas buscas do estado
+    COLECOES_DA_BUSCA = ("regular_low", "regular_high")
+
+    def _iniciar_busca_periodica(self):
+        """De tempos em tempos busca no WhatsApp as mudancas de estado que o
+        celular fez (arquivar, fixar, silenciar, favoritar, trancar, ler,
+        apagar mensagem) e o aviso ao vivo deixou passar. Melhor chegar com
+        atraso do que nao chegar. Um laco so, mesmo reconectando."""
+        with self._trava:
+            if self._busca_ativa:
+                return
+            self._busca_ativa = True
+
+        def laco():
+            try:
+                while not self._parar.wait(self.INTERVALO_DA_BUSCA):
+                    self._buscar_mudancas_de_estado()
+            finally:
+                with self._trava:
+                    self._busca_ativa = False
+        threading.Thread(target=laco, daemon=True,
+                         name="estado-busca-periodica").start()
+
+    def _buscar_mudancas_de_estado(self):
+        """Uma rodada: fetch_app_state das colecoes das conversas e mensagens.
+        As mudancas novas viram os mesmos avisos do ao vivo. Pula a colecao que
+        ja esta em reparo (nao acumula pedidos ao celular)."""
+        if self.cliente is None or not self._conectada:
+            return
+        for nome in self.COLECOES_DA_BUSCA:
+            with self._trava:
+                if nome in self._recuperando or nome in self._em_nova_tentativa:
+                    continue
+            self._reparar_colecao(nome, forcar=False)
+
+    INTERVALO_DE_REPARO = 120       # segundos entre dois reparos da mesma colecao
+
+    def _reparar_em_segundo_plano(self, nome):
+        """O whatsmeow avisou no registro que nao leu uma mudanca do celular:
+        a colecao saiu de sincronia (acontece quando outro aparelho conectado
+        tambem escreve no estado). Baixa de novo, e pede a copia ao celular
+        se precisar, fora da thread do registro."""
+        agora = time.monotonic()
+        with self._trava:
+            if agora - self._ultimo_reparo.get(nome, -1e9) < \
+                    self.INTERVALO_DE_REPARO:
+                return
+            self._ultimo_reparo[nome] = agora
+        log.warning("estado %s fora de sincronia numa notificacao: "
+                    "reparando", nome)
+        threading.Thread(target=self._reparar_colecao, args=(nome,),
+                         daemon=True, name="reparo-estado").start()
 
     def _reparar_colecao(self, nome, forcar=True):
         """Sincroniza a colecao. Se nao bate: baixa tudo de novo e, se ainda
@@ -1304,10 +1374,51 @@ class ProvedorWhatsApp(Provedor):
     ESPERA_DA_RECUPERACAO = 90      # segundos, no total
     PASSO_DA_RECUPERACAO = 5        # segundos entre as conferencias
 
-    def _recuperar_colecao(self, nome):
+    ESPERA_ENTRE_TENTATIVAS = 180   # segundos entre uma nova tentativa e outra
+    TENTATIVAS_DE_NOVO = 20         # cerca de uma hora
+
+    def _tentar_de_novo(self, nome):
+        """O celular nao mandou a copia do estado (o iPhone so manda com o
+        WhatsApp aberto na tela): de tempos em tempos confere se a colecao ja
+        voltou e, se nao, pede a copia outra vez. Um laco so por colecao."""
+        with self._trava:
+            if nome in self._em_nova_tentativa:
+                return
+            self._em_nova_tentativa.add(nome)
+
+        def laco():
+            try:
+                for n in range(1, self.TENTATIVAS_DE_NOVO + 1):
+                    if self._parar.wait(self.ESPERA_ENTRE_TENTATIVAS):
+                        return
+                    if not self._conectada or self.cliente is None:
+                        continue
+                    try:
+                        self.cliente.fetch_app_state(nome)
+                        log.info("estado %s voltou a sincronizar "
+                                 "(tentativa %d)", nome, n)
+                        return
+                    except Exception as e:
+                        if "LTHash" not in str(e):
+                            log.warning("estado %s: %s", nome, e)
+                            return
+                    # ainda fora de sincronia: pede a copia de novo, agora que
+                    # o WhatsApp do celular pode estar aberto
+                    if self._recuperar_colecao(nome, reagendar=False):
+                        return
+                log.warning("desisti de recuperar o estado %s depois de %d "
+                            "tentativas; reiniciar o TeleZapp tenta de novo",
+                            nome, self.TENTATIVAS_DE_NOVO)
+            finally:
+                with self._trava:
+                    self._em_nova_tentativa.discard(nome)
+        threading.Thread(target=laco, daemon=True,
+                         name="estado-nova-tentativa").start()
+
+    def _recuperar_colecao(self, nome, reagendar=True):
         """Pede ao celular a copia do estado e espera ela chegar. O iPhone so
         responde com o WhatsApp aberto, entao, se nao vier, a pessoa e
-        avisada."""
+        avisada (uma vez) e o TeleZapp tenta de novo de tempos em tempos."""
         with self._trava:
             if nome in self._recuperando:
                 return False
@@ -1334,11 +1445,13 @@ class ProvedorWhatsApp(Provedor):
                         return False
             log.warning("o celular não respondeu ao pedido do estado %s",
                         nome)
-            self._avisar(
-                "Para as mudanças do celular (favoritar, apagar, silenciar) "
-                "voltarem a chegar, abra o WhatsApp no celular e deixe-o "
-                "aberto por um minuto; o TeleZapp tenta de novo ao "
-                "reconectar.", False)
+            if reagendar:
+                self._avisar(
+                    "Para as mudanças do celular (favoritar, apagar, "
+                    "silenciar, arquivar) voltarem a chegar, abra o WhatsApp "
+                    "no celular e deixe-o aberto por um minuto; o TeleZapp "
+                    "tenta de novo a cada poucos minutos.", False)
+                self._tentar_de_novo(nome)
             return False
         finally:
             with self._trava:
@@ -1589,6 +1702,23 @@ class ProvedorWhatsApp(Provedor):
         return self._enviar_estado(
             "pin_v1", 5, PatchInfo.REGULAR_LOW,
             SyncActionValue(pinAction=PinAction(pinned=bool(fixar))),
+            conversa_id)
+
+    def arquivar_conversa(self, conversa_id, arquivar):
+        """Arquiva (ou desarquiva) a conversa no celular: o aviso de estado
+        `archive`, o mesmo que o celular manda aos outros aparelhos."""
+        from neonize.proto.Neonize_pb2 import PatchInfo
+        from neonize.proto.waSyncAction.WAWebProtobufSyncAction_pb2 import (
+            ArchiveChatAction, SyncActionMessageRange, SyncActionValue)
+        with self._trava:
+            conv = self._conversas.get(conversa_id)
+            ultima = int(conv.data) if conv is not None and conv.data else                 int(time.time())
+        return self._enviar_estado(
+            "archive", 3, PatchInfo.REGULAR_LOW,
+            SyncActionValue(archiveChatAction=ArchiveChatAction(
+                archived=bool(arquivar),
+                messageRange=SyncActionMessageRange(
+                    lastMessageTimestamp=ultima))),
             conversa_id)
 
     def silenciar_conversa(self, conversa_id, silenciar, segundos=0):
@@ -4353,6 +4483,13 @@ class ProvedorWhatsApp(Provedor):
             origem = e.MessageSource
             cid = self._id_da_conversa(origem.Chat)
             tipo = int(e.Type)
+            # com a confirmacao de leitura ligada, o celular avisa os outros
+            # aparelhos com um recibo de leitura comum cujo remetente sou eu
+            # (nao com o tipo "lida por mim"): ler no celular vem assim
+            if origem.IsFromMe and tipo == RECIBO_LIDO:
+                tipo = RECIBO_LIDO_POR_MIM
+            elif origem.IsFromMe and tipo == RECIBO_OUVIDO:
+                tipo = RECIBO_OUVIDO_POR_MIM
             if tipo in (RECIBO_LIDO_POR_MIM, RECIBO_OUVIDO_POR_MIM):
                 log.info("recibo de outro aparelho meu: %s (%d mensagens)",
                          "lida" if tipo == RECIBO_LIDO_POR_MIM else "ouvida",

@@ -3066,9 +3066,11 @@ def test_menu_do_membro_traz_os_itens_da_lista_de_conversas(j):
     rotulos = [r for r, _ in c._menu_membro(membro)]
     assert rotulos[0] == "Iniciar conversa"
     for esperado in ("Detalhes da conversa", "Arquivar", "Fixar", "Silenciar",
-                     "Trancar", "Apagar conversa...", "Salvar como contato...",
+                     "Apagar conversa...", "Salvar como contato...",
                      "Promover a administrador", "Remover do grupo..."):
         assert esperado in rotulos
+    # trancar e destrancar so pelo celular: o TeleZapp nao tem o comando
+    assert "Trancar" not in rotulos and "Destrancar" not in rotulos
     assert c._menu_membro(dict(membro, eu=True)) == []
     sem_admin = _controle(j, "grupo", {"sou_admin": False})
     assert "Remover do grupo..." not in [
@@ -4826,3 +4828,17 @@ def test_gerenciar_contatos_busca_por_nome_e_telefone(monkeypatch):
     g.busca.SetValue("")
     g._preencher()
     assert len(g._itens) == 3
+
+
+def test_tranca_local_de_versao_anterior_e_desfeita_ao_carregar(j):
+    """O celular e quem tranca: a tranca feita aqui, de antes, e esvaziada e a
+    conversa volta a destrancada; a que o celular trancou continua."""
+    local = m.Conversa("t1", "5551@s.whatsapp.net", "Ana", "whatsapp",
+                       "privada", trancada=True)
+    celular = m.Conversa("t1", "5552@s.whatsapp.net", "Bia", "whatsapp",
+                         "privada", trancada=True)
+    j.cfg.set("trancadas_locais", [list(local.chave)])
+    j._juntar_conversas("t1", [local, celular])
+    assert not local.trancada and celular.trancada
+    assert j.cfg.get("trancadas_locais") == []
+    assert not hasattr(j, "_trancar_conversa")

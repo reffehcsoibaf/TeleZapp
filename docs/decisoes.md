@@ -635,7 +635,8 @@ Conferido o plano de 13/10 contra o código. Decisões do responsável:
 
 - Feito nos dois serviços: `Provedor.bloqueados`, `esta_bloqueado` e `bloquear`; janela "Contatos bloqueados" (menu Contatos) e "Bloquear ou desbloquear" (menu Contatos e menu de contexto da conversa privada). Só pessoas; grupos e canais não.
 - Decisões: o item da conversa **inverte o estado atual** (confere o serviço antes e pergunta), em vez de um rótulo que muda, porque o estado só se sabe indo à rede e o menu de contexto não pode esperar; na lista, Desbloquear age direto (Enter também) e Bloquear alguém pergunta antes.
-- **Ainda sem teste ao vivo**: tudo. Pontos de atenção no WhatsApp: a lista de bloqueio pode guardar o endereço LID (o código compara pelo número e desbloqueia pelo endereço da lista) e o bloqueio por telefone novo usa o JID do número; se o serviço recusar, o erro aparece na fala e numa mensagem.
+- **Verificado ao vivo pelo responsável (23/10/2026):** "tudo se comportou conforme eu esperava" (dito depois de testar o bloqueio, o perfil e a lista de conversas; ele não detalhou caso a caso, então não se sabe se testou os dois serviços em cada função). Os pontos de atenção abaixo ficam como foram escritos, sem relato de problema.
+- Pontos de atenção no WhatsApp (antes do teste): a lista de bloqueio pode guardar o endereço LID (o código compara pelo número e desbloqueia pelo endereço da lista) e o bloqueio por telefone novo usa o JID do número; se o serviço recusar, o erro aparece na fala e numa mensagem.
 - Junto veio a correção do voto em enquete do WhatsApp (`EncodeError` do `MessageInfo`, visto no log de 23/10 às 13:27 e 13:27:50). No Telegram não há falha de voto nesse log; o relato do responsável sobre o Telegram por volta das 13h28 não bate com as linhas do log, que são do WhatsApp.
 
 - **Voto em enquete de canal do WhatsApp: adiado (23/10/2026).** O whatsmeow só tem reação e "visto" para canais (conferido em `newsletter.go`), e o neonize não vota; o TeleZapp avisa que não vota e manda votar pelo celular. Implementar exigiria descobrir o formato do voto em canal e mexer na DLL. Só voltar ao assunto se virar demanda.
@@ -644,7 +645,7 @@ Conferido o plano de 13/10 contra o código. Decisões do responsável:
 
 - Feito nos dois serviços: nome, recado e foto (e o sobrenome no Telegram), em Ferramentas, "Editar o meu perfil". Envia só o que mudou e diz o que ficou salvo e o que o serviço recusou.
 - Decisões: a foto é preparada pelo TeleZapp (centro em quadrado, 640 px, JPEG) para o responsável poder escolher qualquer imagem; **sem remover a foto** por ora (o neonize não tem e o Telegram pediria outra chamada); o recado do Telegram aceita até 140 no formulário (Premium) e o serviço recusa acima de 70 sem Premium, com a frase explicada.
-- **Ainda sem teste ao vivo**: tudo. Pontos de atenção: o `set_profile_name` do neonize grava o nome de exibição (push name) e não confirmei que o WhatsApp o mostra na hora a quem já tem a conversa aberta; ler o recado próprio no WhatsApp depende de `get_user_info` do próprio JID.
+- **Verificado ao vivo pelo responsável (23/10/2026):** "tudo se comportou conforme eu esperava" (ver a nota do bloqueio acima: ele não detalhou). Pontos de atenção (antes do teste): o `set_profile_name` do neonize grava o nome de exibição (push name) e não confirmei que o WhatsApp o mostra na hora a quem já tem a conversa aberta; ler o recado próprio no WhatsApp depende de `get_user_info` do próprio JID.
 
 ### Lista de conversas configurável (23/10/2026, versão 2026.10.23.1)
 
@@ -652,7 +653,62 @@ Conferido o plano de 13/10 contra o código. Decisões do responsável:
 - Onde: botão "Lista de conversas" na categoria Interface (valor pendente até OK ou Aplicar, como as outras configurações) e submenu "Lista de conversas" em Exibir (efeito imediato).
 - Decisões: pelo menos um item sempre ativado (a tentativa de tirar o último é recusada e falada); **o trecho vem desligado por padrão** (a leitura da lista segue como sempre foi); fixada e silenciada aparecem sempre, depois do serviço (ou do nome); se os itens ativados não têm nada a mostrar numa conversa (sem não lidas e sem trecho, por exemplo), mostra o nome. Trecho: até 80 caracteres, "Você:" nas minhas e o autor nos grupos.
 - O trecho vem do banco numa consulta só, em segundo plano, quando o item está ligado, e depois acompanha as mensagens novas, editadas e apagadas.
-- **Ainda sem teste ao vivo.** A janela de ordem foi aberta com o wx de verdade (sem mostrar) e funciona; falta ver com o leitor de tela e com muitas conversas (o tempo da consulta do trecho num banco grande).
+- **Verificado ao vivo pelo responsável (23/10/2026):** "tudo se comportou conforme eu esperava" (ver a nota do bloqueio acima). Antes disso, a janela de ordem foi aberta com o wx de verdade (sem mostrar) e funciona; falta ver com o leitor de tela e com muitas conversas (o tempo da consulta do trecho num banco grande).
+
+### Arquivar avisa o celular (23/10/2026, versão 2026.10.23.1)
+
+- Arquivar e desarquivar uma conversa do WhatsApp no TeleZapp nunca avisava o
+  celular (a fala dizia "só no TeleZapp"; o comentário dizia que a biblioteca
+  não deixava). Depois do conserto do `send_app_state` (17/10) fixar,
+  silenciar e apagar passaram a avisar, mas arquivar ficou sem código. Agora
+  `ProvedorWhatsApp.arquivar_conversa` manda o aviso de estado `archive`
+  (coleção `regular_low`, versão 3, `ArchiveChatAction` com a hora da última
+  mensagem), pelo mesmo `_enviar_estado`.
+- **Verificado ao vivo pelo responsável (23/10/2026):** arquivar no celular já
+  chegava ao TeleZapp; arquivar e desarquivar no TeleZapp agora "refletiu no
+  celular".
+
+### Ler no celular zera as não lidas (23/10/2026, versão 2026.10.23.1)
+
+- Com a confirmação de leitura ligada, o celular avisa os outros aparelhos com
+  um recibo de leitura comum (tipo `READ`) cujo `MessageSource.IsFromMe` é
+  verdadeiro, não com `READ_SELF`. `_ao_recibo` descartava esse recibo. Agora
+  `READ` e `PLAYED` com `IsFromMe` valem como "li" e "ouvi no celular".
+  Descoberto no registro bruto da ponte do WinZapp (36 recibos `read` com o
+  próprio identificador como participante).
+- **Verificado ao vivo pelo responsável (23/10/2026):** "telezapp marcou como
+  lida" depois da correção. O aviso só chega com o aparelho conectado.
+
+### Trancar e destrancar só pelo celular (23/10/2026, versão 2026.10.23.1)
+
+- **Decisão do responsável:** trancar e destrancar é coisa sensível para fazer
+  no computador, então só vale pelo celular, no TeleZapp e no WinZapp. No
+  TeleZapp a tranca só local "não faz sentido" e saiu: o comando de menu, o
+  atalho, a opção da seleção em massa, o item do menu de contexto e
+  `Janela._trancar_conversa`. Continua tudo que mostra o que o celular trancou:
+  o tipo Trancadas, o código secreto e o aviso `ChatLockEv`
+  (celular → TeleZapp, conferido: trancar e destrancar no celular chegam).
+  A tranca local de versões anteriores (`trancadas_locais`) é esvaziada ao
+  carregar a lista.
+- No WinZapp o cofre que o Gabriel fez fica como está (tranca local).
+- Descartado: avisar o celular a partir do TeleZapp. O WhatsApp guarda a tranca
+  com o código secreto do celular e o aviso `lock` não tem versão conhecida.
+
+### Estado do app sincronizado de tempos em tempos (23/10/2026, versão 2026.10.23.1)
+
+- Pedido do responsável: "melhor sincronizado com algum atraso do que não
+  sincronizar". O TeleZapp busca no WhatsApp, a cada 90 s, as coleções
+  `regular_low` e `regular_high` (arquivar, fixar, silenciar, favoritar,
+  trancar, ler, apagar mensagem); repara sozinho a coleção que sai de
+  sincronia e, se o celular não mandar a cópia (o iPhone só manda com o
+  WhatsApp aberto na tela), repete o pedido a cada 180 s por cerca de uma hora.
+  A ponte do WinZapp busca a cada 60 s e a cada pedido da lista de conversas.
+- **Verificado ao vivo pelo responsável (23/10/2026):** com o WhatsApp aberto
+  no celular, a conversa arquivada lá se arquivou no TeleZapp; desarquivar no
+  TeleZapp chegou ao celular; reproduzir uma voz no celular apareceu como
+  ouvida "nos dois apps" (TeleZapp e WinZapp). Áudio ouvido não está no estado
+  do app: chega como recibo ao vivo (o servidor entrega os acumulados ao
+  reconectar), por isso não entra na busca periódica.
 
 ## Chamadas de voz do WhatsApp: fase 0 (21/10/2026)
 

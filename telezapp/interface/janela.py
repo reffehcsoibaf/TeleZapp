@@ -532,7 +532,6 @@ class Janela(wx.Frame):
         item(m_conv, "salvar_conv", "Sal&var o conteúdo da conversa...")
         item(m_conv, "detalhes_conv", "Detalhes da con&versa..." + chr(9) +
              "Ctrl+I")
-        item(m_conv, "trancar", "Tra&ncar ou destrancar a conversa")
         item(m_conv, "fixar", "&Fixar ou desafixar a conversa")
         item(m_conv, "silenciar", "Sile&nciar ou reativar o som da conversa")
         item(m_conv, "ler_ultima", "&Ouvir a última mensagem\tCtrl+R")
@@ -754,7 +753,6 @@ class Janela(wx.Frame):
             "nova_enquete": lambda e: self._nova_enquete(),
             "abrir_conv": lambda e: self._abrir_selecionada_na_lista(),
             "arquivar": lambda e: self._arquivar_conversa(),
-            "trancar": lambda e: self._trancar_conversa(),
             "fixar": lambda e: self._fixar_conversa(),
             "silenciar": lambda e: self._silenciar_conversa(),
             "nao_lidas": lambda e: self._ir_nao_lidas(),
@@ -1679,6 +1677,7 @@ class Janela(wx.Frame):
         conversas = [c for c in conversas
                      if not c.id.endswith("@broadcast")
                      and not self.banco.conversa_apagada(c)]
+        antigas_locais = []
         for c in conversas:
             if c.tipo == "privada":
                 c.nome = self.banco.nome_de_contato(
@@ -1686,8 +1685,12 @@ class Janela(wx.Frame):
             if c.chave == aberta:
                 c.nao_lidas = 0   # a pessoa esta lendo esta conversa
             if list(c.chave) in (self.cfg.get("trancadas_locais") or []):
-                c.trancada = True     # trancada pelo TeleZapp
+                c.trancada = False    # tranca feita aqui, de versao anterior
+                antigas_locais.append(c)
             self.indice[c.chave] = c
+        if antigas_locais:     # a tranca so vale pelo celular: limpa as de antes
+            self.banco.salvar_conversas(antigas_locais)
+            self.cfg.set("trancadas_locais", [])
         novas = {c.chave for c in conversas}
         for chave in [k for k in self.indice
                       if k[0] == conta_id and k not in novas and k != aberta]:
@@ -2008,9 +2011,6 @@ class Janela(wx.Frame):
             ("%s %s" % ("Reativar o som de" if all(
                 c.silenciada() for c in convs) else "Silenciar", n),
              lambda: self._massa_conversas("silenciar")),
-            ("%s %s" % ("Destrancar" if all(c.trancada for c in convs)
-                        else "Trancar", n),
-             lambda: self._massa_conversas("trancar")),
             ("Apagar %s..." % n, lambda: self._massa_conversas("apagar")),
             ("Desfazer a seleção",
              lambda: self._sair_selecao(self.lista_conv))]
@@ -2083,24 +2083,12 @@ class Janela(wx.Frame):
                     "O serviço não aceitou. A mudança ficou só no TeleZapp.")
             texto = "%s %s." % (quantas, "silenciadas" if silenciar
                                 else "com o som reativado")
-        elif acao == "trancar":
-            trancar = not all(c.trancada for c in convs)
-            chaves = {c.chave for c in convs}
-            locais = [k for k in (self.cfg.get("trancadas_locais") or [])
-                      if tuple(k) not in chaves]
-            for c in convs:
-                c.trancada = trancar
-                if trancar:
-                    locais.append(list(c.chave))
-            self.cfg.set("trancadas_locais", locais)
-            texto = "%s %s, só no TeleZapp." % (
-                quantas, "trancadas" if trancar else "destrancadas")
         else:
             if not self._apagar_varias_conversas(convs, quantas):
                 return
             self._sair_selecao(self.lista_conv, falar=False)
             return
-        if acao in ("arquivar", "trancar") and self.atual in {
+        if acao == "arquivar" and self.atual in {
                 c.chave for c in convs}:
             self._fechar_conversa()
         self.banco.salvar_conversas(convs)
@@ -2252,9 +2240,8 @@ class Janela(wx.Frame):
         return conv
 
     def _arquivar_conversa(self, conv=None):
-        """Arquiva a conversa em foco, ou a tira dos arquivados. No Telegram
-        a conta tambem e avisada; no WhatsApp a biblioteca nao deixa, entao
-        vale so no TeleZapp."""
+        """Arquiva a conversa em foco, ou a tira dos arquivados. A conta
+        tambem e avisada (no WhatsApp, pelo aviso de estado `archive`)."""
         conv = conv or self._conversa_em_foco()
         if conv is None:
             self.fala.falar("Nenhuma conversa selecionada.")
@@ -2275,36 +2262,6 @@ class Janela(wx.Frame):
         self.fala.falar("%s%s." % (
             "Conversa arquivada" if arquivar else "Conversa desarquivada",
             "" if na_conta else ", só no TeleZapp"), interromper=True)
-
-    def _trancar_conversa(self, conv=None):
-        """Tranca a conversa em foco, ou a destranca. Vale so no TeleZapp: o
-        WhatsApp nao deixa a biblioteca trancar no celular. A conversa trancada
-        some das listas e so aparece no tipo Trancadas."""
-        conv = conv or self._conversa_em_foco()
-        if conv is None:
-            self.fala.falar("Nenhuma conversa selecionada.")
-            return
-        trancar = not conv.trancada
-        locais = [k for k in (self.cfg.get("trancadas_locais") or [])
-                  if tuple(k) != conv.chave]
-        if trancar:
-            locais.append(list(conv.chave))
-        self.cfg.set("trancadas_locais", locais)
-        conv.trancada = trancar
-        self.banco.salvar_conversas([conv])
-        if self.atual == conv.chave:
-            self._fechar_conversa()
-        self._montar_tipos()
-        self._ordenar()
-        self._preencher_conversas()
-        if not trancar:
-            texto = "Conversa destrancada, só no TeleZapp."
-        elif self.cfg.get("trancadas_exigir_codigo") and                 not self.cfg.get("codigo_trancadas"):
-            texto = ("Conversa trancada, só no TeleZapp. Ela fica escondida "
-                     "até você definir um código secreto em Configurações.")
-        else:
-            texto = "Conversa trancada, só no TeleZapp. Veja no tipo Trancadas."
-        self.fala.falar(texto, interromper=True)
 
     def _depois_de_mudar_conversa(self, conv):
         self.banco.salvar_conversas([conv])
@@ -5400,8 +5357,6 @@ class Janela(wx.Frame):
                        lambda: self._fixar_conversa(conv)))
         opcoes.append(("Reativar o som" if conv.silenciada() else "Silenciar",
                        lambda: self._silenciar_conversa(conv)))
-        opcoes.append(("Destrancar" if conv.trancada else "Trancar",
-                       lambda: self._trancar_conversa(conv)))
         opcoes.append(("Salvar o conteúdo da conversa...",
                        lambda: self._salvar_conversa(conv)))
         opcoes.append((

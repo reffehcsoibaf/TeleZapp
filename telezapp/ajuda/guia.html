@@ -29,6 +29,7 @@
 <li><a href="#chamadas">Chamadas de voz</a></li>
 <li><a href="#configuracoes">Configurações</a></li>
 <li><a href="#lista-de-conversas">O que a lista de conversas mostra</a></li>
+<li><a href="#arquivadas-trancadas">Conversas arquivadas e trancadas</a></li>
 <li><a href="#detalhes">Dados de uma mensagem</a></li>
 <li><a href="#depurar">Depurar: ver o que o WhatsApp mandou</a></li>
 <li><a href="#dados">Onde ficam os seus dados</a></li>
@@ -68,7 +69,7 @@
 <li>Control R: ouvir a última mensagem da conversa aberta.</li>
 <li>F5: atualizar a lista de conversas.</li>
 <li>Salvar o conteúdo da conversa (menu de contexto da conversa, ou Conversas): grava um .zip com o texto das mensagens e as mídias já baixadas.</li>
-<li>Control Espaço, na lista de conversas ou na de mensagens: liga o modo de seleção e já marca o item em foco. Depois, Espaço marca ou desmarca os outros itens (o leitor de tela diz "Marcada" e quantas há). A tecla Aplicativos ou Shift F10 mostra as ações para todos os marcados: nas conversas, arquivar, fixar, silenciar, trancar e apagar; nas mensagens, favoritar, copiar o texto e apagar. Esc desfaz as marcas e sai do modo.</li>
+<li>Control Espaço, na lista de conversas ou na de mensagens: liga o modo de seleção e já marca o item em foco. Depois, Espaço marca ou desmarca os outros itens (o leitor de tela diz "Marcada" e quantas há). A tecla Aplicativos ou Shift F10 mostra as ações para todos os marcados: nas conversas, arquivar, fixar, silenciar e apagar; nas mensagens, favoritar, copiar o texto e apagar. Esc desfaz as marcas e sai do modo.</li>
 <li>Delete: apaga a conversa selecionada, na lista de conversas, ou a mensagem selecionada, na lista de mensagens. O TeleZapp sempre pergunta antes.</li>
 <li>Responder em particular: no menu de contexto de uma mensagem de outra pessoa num grupo, abre a conversa particular com ela e cita a mensagem do grupo na resposta (WhatsApp).</li>
 <li>Control I: detalhes da conversa selecionada (pessoa, grupo ou canal): dados, uso de espaço, mídias com filtro por tipo, membros, grupos em comum e, para administradores de grupo do WhatsApp, as ferramentas de administração. Esc volta de cada lista para a janela de detalhes.</li>
@@ -163,6 +164,11 @@
 <p>Cada linha da lista de conversas pode mostrar quatro informações: o nome da conversa, o serviço a que ela pertence, a quantidade de mensagens não lidas e o trecho da última mensagem (com "Você:" se foi sua e, nos grupos, o nome de quem enviou). Por padrão aparecem as três primeiras, nesta ordem, e o trecho vem desligado. Se a conversa estiver fixada ou silenciada, isso é dito sempre, logo depois do serviço.</p>
 <p>Para mudar, abra Configurações, categoria Interface, botão "Lista de conversas": uma lista com as quatro informações, na ordem em que aparecem. Enter ou Espaço ativa e desativa o item em foco (o TeleZapp fala "ativado" ou "desativado"), e os botões "Mover para cima" e "Mover para baixo" mudam a ordem. Pelo menos um item fica sempre ativado, para a lista nunca ficar vazia. "Restaurar o padrão" volta ao começo. Como as demais configurações, as mudanças só valem ao apertar OK ou Aplicar.</p>
 <p>O mesmo está no menu Exibir, submenu "Lista de conversas": uma caixa de marcar para cada informação e "Ordem das informações", que abre a mesma lista de ordem; ali as mudanças valem na hora. A escolha entra no backup, junto com as configurações.</p>
+<h2 id="arquivadas-trancadas">Conversas arquivadas e trancadas</h2>
+<p>Arquivadas: em Conversas, "Arquivar ou desarquivar a conversa" (também no menu de contexto da lista e na seleção em massa) tira a conversa da lista principal e a põe no tipo Arquivadas. A mudança vale também na sua conta, no WhatsApp e no Telegram, e o que você arquiva ou desarquiva no celular aparece no TeleZapp.</p>
+<p>Trancadas: conversas trancadas só se trancam e se destrancam pelo celular (no WhatsApp, "Trancar conversa"). O TeleZapp não tranca nem destranca: ele mostra o que o celular trancou. Uma conversa trancada no celular sai das listas e fica escondida atrás de um código secreto. Defina o código em Configurações, Privacidade (marque a caixa e preencha o código novo duas vezes). Depois, digite o código no campo Buscar conversa (Control F) e o tipo Trancadas no celular aparece no fim da caixa de tipos. Trocar de filtro, Control Shift T, minimizar a janela ou reabrir o TeleZapp escondem de novo: para vê-las outra vez, digite o código na busca. Mudar o código ou desligar a exigência pede o código atual. Não há como recuperar um código esquecido: o único jeito de recomeçar é parear o WhatsApp de novo, o que apaga o código. O código só esconde as conversas dentro do programa, não cifra os arquivos.</p>
+<p>Conversas arquivadas e trancadas não emitem aviso de mensagem nova (nem som, nem fala), nem de reação, edição ou mensagem apagada, a menos que estejam abertas.</p>
+
 <h2 id="detalhes">Dados de uma mensagem</h2>
 <p>Alt Enter mostra, num texto que você lê com as setas, a conversa, o autor, a data, o tipo e o texto completo. Nas mensagens que você enviou pelo WhatsApp, aparece também quando cada pessoa recebeu e leu. No Telegram, em grupos, só se sabe até que mensagem alguém leu, sem a hora.</p>
 
