@@ -1321,6 +1321,17 @@ class ProvedorTelegram(Provedor):
         return True, aviso.strip(), (
             id_do_topico(cid, TOPICO_GERAL) if grupo and topicos else cid)
 
+    @staticmethod
+    def _canal_silenciado(cheio):
+        try:
+            ate = cheio.full_chat.notify_settings.mute_until
+        except AttributeError:
+            return False
+        if not ate:
+            return False
+        ate = ate.timestamp() if hasattr(ate, "timestamp") else float(ate)
+        return ate > time.time()
+
     def detalhes_do_canal(self, conversa_id):
         async def ler():
             from telethon.tl import functions
@@ -1333,7 +1344,7 @@ class ProvedorTelegram(Provedor):
                 "nome": nome_de(ent), "descricao": cheio.full_chat.about or "",
                 "seguidores": int(cheio.full_chat.participants_count or 0),
                 "verificado": bool(getattr(ent, "verified", False)),
-                "silenciado": False, "papel": (
+                "silenciado": self._canal_silenciado(cheio), "papel": (
                     "dono" if getattr(ent, "creator", False) else
                     "administrador" if direitos else "seguidor"),
                 "criado_em": ent.date.timestamp() if getattr(
@@ -1341,6 +1352,35 @@ class ProvedorTelegram(Provedor):
                 "link": ("https://t.me/" + usuario) if usuario else "",
                 "sou_admin": bool(getattr(ent, "creator", False) or direitos)}
         return self._sincrono(ler(), 30)
+
+    def administrar_canal(self, conversa_id, acao, valor=None):
+        resposta = self._sincrono(
+            self._administrar_canal(conversa_id, acao, valor), 45)
+        return resposta or (False, "O Telegram não respondeu.")
+
+    async def _administrar_canal(self, cid, acao, valor):
+        from telethon.tl import functions
+        from telethon.tl.types import InputNotifyPeer, InputPeerNotifySettings
+        try:
+            ent = await self.cliente.get_entity(self._chat_id(cid))
+            if acao == "silenciar":
+                ate = 2 ** 31 - 1 if valor else 0
+                peer = await self.cliente.get_input_entity(ent)
+                await self.cliente(
+                    functions.account.UpdateNotifySettingsRequest(
+                        peer=InputNotifyPeer(peer=peer),
+                        settings=InputPeerNotifySettings(mute_until=ate)))
+                return True, ("Canal silenciado." if valor
+                              else "Som do canal reativado.")
+            if acao == "deixar_de_seguir":
+                await self.cliente.delete_dialog(ent)
+                self._agendar(self._atualizar_conversas())
+                return True, "Você deixou de seguir o canal."
+        except Exception as e:
+            log.warning("administrar canal (%s) falhou: %s", acao,
+                        type(e).__name__)
+            return False, "O Telegram não aceitou (%s)." % type(e).__name__
+        return False, "Ação desconhecida."
 
     JANELA_EDICAO = 48 * 3600     # o Telegram deixa editar por 48 horas
 
