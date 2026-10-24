@@ -565,8 +565,13 @@ class Janela(wx.Frame):
         item(m_ia, "ia_corrigir", "&Corrigir o texto digitado")
         item(m_ia, "ia_redigir",
              "&Redigir a mensagem a partir do que digitei")
+        item(m_ia, "ia_redigir_tom",
+             "Redigir com um &tom à escolha...")
+        item(m_ia, "ia_traduzir", "&Traduzir o texto digitado...")
+        item(m_ia, "ia_traduzir_msg", "Traduzir a mensagem sele&cionada...")
         item(m_ia, "ia_resumir_msg", "Resumir a &mensagem selecionada...")
         item(m_ia, "ia_resumir_conv", "Resumir a c&onversa...")
+        item(m_ia, "ia_resumir_nao_lidas", "Resumir as mensagens &não lidas")
         m_msg.AppendSubMenu(m_ia, "Inteligência a&rtificial")
         item(m_msg, "apagar_msg", "&Apagar mensagem...")
         m_msg.AppendSeparator()
@@ -800,6 +805,10 @@ class Janela(wx.Frame):
             "dispositivos_som": lambda e: self._escolher_dispositivos(),
             "ia_corrigir": lambda e: self._ia_corrigir(),
             "ia_redigir": lambda e: self._ia_redigir(),
+            "ia_redigir_tom": lambda e: self._ia_redigir(escolher_tom=True),
+            "ia_traduzir": lambda e: self._ia_traduzir_caixa(),
+            "ia_traduzir_msg": lambda e: self._ia_traduzir_mensagem(),
+            "ia_resumir_nao_lidas": lambda e: self._ia_resumir_nao_lidas(),
             "ia_resumir_msg": lambda e: self._ia_resumir_mensagem(),
             "ia_resumir_conv": lambda e: self._ia_resumir_conversa(),
             "gravar_pausa": lambda e: self._pausar_gravacao_rapida(),
@@ -4262,7 +4271,8 @@ class Janela(wx.Frame):
                         interromper=True)
 
     # ---- redigir, resumir e corrigir textos
-    def _ia_texto(self, operacao, texto, pronto, contexto=""):
+    def _ia_texto(self, operacao, texto, pronto, contexto="",
+                  tom="natural", destino=prompts_ia.IDIOMA):
         """Manda o texto (e, ao redigir, o final da conversa como contexto)
         aos provedores da tarefa "texto", na ordem escolhida. `pronto(r)`
         roda na janela com o Resultado."""
@@ -4321,7 +4331,7 @@ class Janela(wx.Frame):
             try:
                 r, erro = servico_ia.executar_texto_em_ordem(
                     operacao, texto, com_chave, chaves.get, modelos,
-                    contexto), None
+                    contexto, tom=tom, destino=destino), None
             except ErroIA as e:
                 r, erro = None, e.texto
             except Exception:
@@ -4369,9 +4379,33 @@ class Janela(wx.Frame):
             self._ia_colocar_na_caixa(original, r.texto, "Texto corrigido")
         self._ia_texto(prompts_ia.CORRIGIR, original, pronto)
 
+    def _escolher_da_lista(self, titulo, mensagem, escolhas, atual):
+        """Lista curta de (valor, rotulo); devolve o valor ou None."""
+        dlg = wx.SingleChoiceDialog(self, mensagem, titulo,
+                                    [r for _, r in escolhas])
+        try:
+            dlg.SetSelection(next((n for n, (v, _) in enumerate(escolhas)
+                                   if v == atual), 0))
+            if dlg.ShowModal() != wx.ID_OK:
+                return None
+            return escolhas[dlg.GetSelection()][0]
+        finally:
+            dlg.Destroy()
+
     @seguro
-    def _ia_redigir(self):
+    def _ia_redigir(self, escolher_tom=False):
         original = self.caixa.GetValue()
+        tom = self.cfg.get("ia_tom") or "natural"
+        if escolher_tom:
+            if not original.strip():
+                bipe("erro")
+                self.fala.falar("Não há texto para isso.", interromper=True)
+                return
+            tom = self._escolher_da_lista(
+                "Tom da mensagem", "Em que tom a IA deve escrever?",
+                cat_ia.TONS, tom)
+            if tom is None:
+                return
         contexto = ""
         if self.atual is not None:
             conv = self.indice.get(self.atual)
@@ -4381,7 +4415,80 @@ class Janela(wx.Frame):
         def pronto(r):
             self._ia_colocar_na_caixa(
                 original, r.texto, "Rascunho na caixa, ainda não enviado")
-        self._ia_texto(prompts_ia.REDIGIR, original, pronto, contexto)
+        self._ia_texto(prompts_ia.REDIGIR, original, pronto, contexto,
+                       tom=tom)
+
+    def _idioma_de_traducao(self):
+        """Pergunta o idioma de destino (lembra o ultimo) ou None."""
+        escolhido = self._escolher_da_lista(
+            "Traduzir para", "Traduzir para qual idioma?", cat_ia.IDIOMAS,
+            self.cfg.get("ia_idioma_traducao"))
+        if escolhido is not None:
+            self.cfg.set("ia_idioma_traducao", escolhido)
+        return escolhido
+
+    @seguro
+    def _ia_traduzir_caixa(self):
+        original = self.caixa.GetValue()
+        if not original.strip():
+            bipe("erro")
+            self.fala.falar("Não há texto para isso.", interromper=True)
+            return
+        destino = self._idioma_de_traducao()
+        if destino is None:
+            return
+
+        def pronto(r):
+            self._ia_colocar_na_caixa(original, r.texto, "Texto traduzido")
+        self._ia_texto(prompts_ia.TRADUZIR, original, pronto, destino=destino)
+
+    @seguro
+    def _ia_traduzir_mensagem(self):
+        x = self._mensagem_selecionada()
+        texto = self._texto_para_ia(x)
+        if not texto:
+            bipe("erro")
+            self.fala.falar("Selecione uma mensagem com texto para traduzir.",
+                            interromper=True)
+            return
+        destino = self._idioma_de_traducao()
+        if destino is None:
+            return
+
+        def pronto(r):
+            dialogos.mostrar_texto(self, "Tradução da mensagem", r.texto,
+                                   "Tradução")
+        self._ia_texto(prompts_ia.TRADUZIR, texto, pronto, destino=destino)
+
+    def _texto_para_ia(self, x):
+        """O texto de uma mensagem para a IA: o dela ou, numa mídia, o que a
+        IA já escreveu sobre ela. Vazio se não há."""
+        if x is None:
+            return ""
+        texto = x.texto if x.tipo == m.TEXTO else (
+            m.extras_de(x)["ia"].get("texto") or x.texto)
+        return (texto or "").strip()
+
+    @seguro
+    def _ia_resumir_nao_lidas(self):
+        """Resume só as mensagens não lidas (as que chegaram depois do
+        marcador), pedido pela pessoa."""
+        if self.atual is None:
+            self.fala.falar(TEXTO_SEM_CONVERSA, interromper=True)
+            return
+        conv = self.indice.get(self.atual)
+        n = max(self.marcador_n or 0, getattr(conv, "nao_lidas", 0) or 0)
+        if n <= 0:
+            self.fala.falar("Não há mensagens não lidas nesta conversa.",
+                            interromper=True)
+            return
+        texto = self._linhas_da_conversa(
+            self._mensagens_atuais()[-min(n, MAXIMO_RESUMO):], conv)
+
+        def pronto(r):
+            dialogos.mostrar_texto(self, "Resumo das não lidas", r.texto,
+                                   "Resumo")
+        self._ia_texto(prompts_ia.RESUMIR_CONVERSA, texto, pronto)
 
     def _linhas_da_conversa(self, msgs, conv):
         return "\n".join(
@@ -4396,9 +4503,8 @@ class Janela(wx.Frame):
             self.fala.falar("Selecione uma mensagem para resumir.",
                             interromper=True)
             return
-        texto = x.texto if x.tipo == m.TEXTO else (
-            m.extras_de(x)["ia"].get("texto") or x.texto)
-        if not (texto or "").strip():
+        texto = self._texto_para_ia(x)
+        if not texto:
             bipe("erro")
             self.fala.falar("Esta mensagem não tem texto para resumir. Para "
                             "áudio, imagem, vídeo ou PDF, use o item de "

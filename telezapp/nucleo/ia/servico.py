@@ -299,7 +299,8 @@ def _executar_em_ordem(genero, caminho, ordem, chave_de, modelos, perfil,
                              "Configurações, Inteligência artificial.")
 
 
-def preparar_texto(operacao, texto, contexto=""):
+def preparar_texto(operacao, texto, contexto="", tom="natural",
+                   destino=prompts.IDIOMA):
     """Corta o que passa do limite (fica o final, o mais recente) e monta a
     instrucao e a pergunta. Texto vazio e erro."""
     texto = (texto or "").strip()
@@ -310,12 +311,14 @@ def preparar_texto(operacao, texto, contexto=""):
     sobra = limite - len(texto)
     contexto = (contexto or "").strip()
     contexto = contexto[-sobra:] if sobra > 0 else ""
-    return (prompts.instrucoes_de_texto(operacao),
+    return (prompts.instrucoes_de_texto(operacao, tom=tom,
+                                        destino=destino),
             prompts.pergunta_de_texto(operacao, texto, contexto))
 
 
 def executar_texto(operacao, texto, provedor, chave, modelo, contexto="",
-                   enviar=enviar_pela_rede):
+                   enviar=enviar_pela_rede, tom="natural",
+                   destino=prompts.IDIOMA):
     """Corrige, redige ou resume o texto. `modelo` e um nome ou uma lista, em
     ordem, como em `executar`. Devolve o Resultado."""
     if provedor not in cat.PROVEDORES:
@@ -328,7 +331,8 @@ def executar_texto(operacao, texto, provedor, chave, modelo, contexto="",
     if not cat.aceita(provedor, "texto"):
         raise ErroIA("nao_aceita", "%s não faz isso com texto." %
                      cat.PROVEDORES[provedor].nome)
-    instrucoes, pergunta = preparar_texto(operacao, texto, contexto)
+    instrucoes, pergunta = preparar_texto(operacao, texto, contexto, tom,
+                                          destino)
     modelos = [modelo] if isinstance(modelo, str) else list(modelo)
     for i, atual in enumerate(modelos):
         pedido = prov.montar_pedido_de_texto(provedor, atual, chave,
@@ -345,7 +349,8 @@ def executar_texto(operacao, texto, provedor, chave, modelo, contexto="",
 
 
 def executar_texto_em_ordem(operacao, texto, ordem, chave_de, modelos,
-                            contexto="", enviar=enviar_pela_rede):
+                            contexto="", enviar=enviar_pela_rede,
+                            tom="natural", destino=prompts.IDIOMA):
     """Como `executar_em_ordem`, para texto: o primeiro provedor da ordem que
     tem chave e funciona."""
     preparar_texto(operacao, texto, contexto)       # texto vazio: erro logo
@@ -360,7 +365,8 @@ def executar_texto_em_ordem(operacao, texto, ordem, chave_de, modelos,
         try:
             return executar_texto(
                 operacao, texto, provedor, chave,
-                cat.cadeia_de_modelos(provedor, modelos), contexto, enviar)
+                cat.cadeia_de_modelos(provedor, modelos), contexto, enviar,
+                tom, destino)
         except ErroIA as e:
             if e.codigo not in PROXIMO_PROVEDOR:
                 raise

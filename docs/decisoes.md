@@ -713,7 +713,8 @@ Conferido o plano de 13/10 contra o código. Decisões do responsável:
 ### IA para redigir, resumir e corrigir (23/10/2026, versão 2026.10.23.1)
 
 - Pedido do responsável como último tema do dia, com a regra de que o que levasse muito tempo ficaria para a próxima versão. Feito o núcleo: corrigir e redigir na caixa, resumir mensagem e conversa. Reaproveita provedores, chaves, ordem e modelos da IA de mídia, como tarefa nova. Decisões: redigir nunca envia (só rascunho na caixa, Control Z volta); consentimento de texto separado do de mídia; o texto da conversa é tratado como dado (não como instrução ao modelo).
-- **Não feito / a decidir:** tom escolhido por opção (formal, amigável...), traduzir, resumir só as não lidas por botão próprio, resumo automático, ligar a redação ao atalho de enviar. **Não verificado com provedor real nem ao vivo.**
+- Mesmo dia, segunda rodada a pedido do responsável: tom (opção `ia_tom` e item para escolher na hora), tradução (caixa e mensagem, seis idiomas) e resumo das não lidas, este só disparado manualmente.
+- **Não feito / a decidir:** resumo automático, mais idiomas, ligar a redação ao atalho de enviar. **Não verificado com provedor real nem ao vivo.**
 
 ### Digitar numa lista (23/10/2026, versão 2026.10.23.1)
 

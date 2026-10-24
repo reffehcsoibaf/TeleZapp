@@ -598,6 +598,12 @@ def _opcoes_de_ia():
               "artificial", "medio", "Quanto o provedor escreve ao descrever "
               "imagens, figurinhas e vídeos. Transcrições e PDFs sempre "
               "saem completos.", tuple(catalogo.PERFIS)),
+        Opcao("ia_tom", "Tom ao redigir com a IA", "Inteligência "
+              "artificial", "natural", "O tom da mensagem que a IA escreve "
+              "em Mensagem, Inteligência artificial, Redigir a mensagem. "
+              "Natural deixa a IA seguir o tom da conversa. O item Redigir "
+              "com um tom à escolha pergunta o tom na hora, sem mudar esta "
+              "opção.", tuple(catalogo.TONS)),
         Opcao("ia_linha_descricao", "Tamanho da descrição na lista de "
               "mensagens", "Inteligência artificial", 0, "Quantas letras da "
               "descrição de uma foto, figurinha ou vídeo a linha da mensagem "
@@ -655,6 +661,7 @@ PADROES.update({
     "lista_conversas": {"ordem": ["nome", "servico", "nao_lidas", "previa"],
                         "ocultos": ["previa"]},  # o que cada linha mostra
     "ia_automatica_conversas": [],  # [conta, conversa] com a IA automatica
+    "ia_idioma_traducao": "English",  # ultimo idioma de destino da traducao
     "ia_consentimento_texto": [],  # provedores que podem receber seu texto
     "ia_consentimento": [],  # provedores que a pessoa autorizou a receber midia
     "contas": [],            # [{"id", "servico", "telefone", "nome"}]

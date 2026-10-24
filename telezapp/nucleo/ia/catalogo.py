@@ -75,6 +75,17 @@ MAX_CARACTERES = {"audio": 50_000, "imagem": 12_000, "figurinha": 12_000,
                   "video": 12_000, "pdf": 100_000, "texto": 20_000}
 MAX_TOKENS = {"audio": 8000, "imagem": 1800, "figurinha": 1200,
               "video": 2200, "pdf": 16000, "texto": 4000}
+# O tom ao redigir (chave, o que a pessoa le) e os idiomas da traducao (nome
+# em ingles, que vai ao provedor, e o que a pessoa le)
+TONS = (("natural", "Natural, no tom da conversa"),
+        ("amigavel", "Amigável e simpático"),
+        ("formal", "Formal e educado"),
+        ("direto", "Direto e objetivo"),
+        ("descontraido", "Descontraído, com leveza"))
+IDIOMAS = (("Brazilian Portuguese", "Português do Brasil"),
+           ("English", "Inglês"), ("Spanish", "Espanhol"),
+           ("French", "Francês"), ("German", "Alemão"),
+           ("Italian", "Italiano"))
 # Mais que isso do texto da pessoa ou da conversa nao viaja (fica o final)
 MAX_ENTRADA_TEXTO = 24_000
 MAX_RESPOSTA_BYTES = 8 * 1024 * 1024

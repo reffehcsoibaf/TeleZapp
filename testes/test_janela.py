@@ -5063,9 +5063,12 @@ def ia_texto(j, monkeypatch):
     j.cfg.set("ia_consentimento_texto", ["gemini"])
     chamadas = []
 
+    j.ia_extras = []
+
     def falso(operacao, texto, ordem, chave_de, modelos, contexto="",
-              enviar=None):
+              enviar=None, tom="natural", destino="Brazilian Portuguese"):
         chamadas.append((operacao, texto, contexto))
+        j.ia_extras.append((tom, destino))
         return servico_ia.Resultado("RESPOSTA", "Google Gemini", "m")
 
     monkeypatch.setattr(servico_ia, "executar_texto_em_ordem", falso)
@@ -5187,3 +5190,69 @@ def test_slots_de_atalho_da_ia_de_texto_nascem_sem_atalho(j):
                   "ia_resumir_conv"):
         assert chave in j.atalhos.acoes, chave
         assert j.atalhos.efetivo(chave) == ""
+
+
+def test_redigir_usa_o_tom_da_opcao_e_o_da_escolha(j, ia_texto, monkeypatch):
+    j.cfg.set("ia_tom", "formal")
+    j.caixa.SetValue("peça desculpas")
+    j._ia_redigir()
+    assert j.ia_extras[-1][0] == "formal"
+    monkeypatch.setattr(j, "_escolher_da_lista",
+                        lambda *a: "descontraido")
+    j.caixa.SetValue("peça desculpas")
+    j._ia_redigir(escolher_tom=True)
+    assert j.ia_extras[-1][0] == "descontraido"
+    assert j.cfg.get("ia_tom") == "formal"       # a opção não muda
+    monkeypatch.setattr(j, "_escolher_da_lista", lambda *a: None)
+    j.caixa.SetValue("peça desculpas")
+    antes = len(ia_texto)
+    j._ia_redigir(escolher_tom=True)
+    assert len(ia_texto) == antes                # cancelou: nada enviado
+
+
+def test_traduzir_o_texto_digitado_lembra_o_idioma(j, ia_texto, monkeypatch):
+    monkeypatch.setattr(j, "_escolher_da_lista", lambda *a: "Spanish")
+    j.caixa.SetValue("bom dia")
+    j._ia_traduzir_caixa()
+    assert ia_texto[-1][:2] == ("traduzir", "bom dia")
+    assert j.ia_extras[-1][1] == "Spanish"
+    assert j.caixa.GetValue() == "RESPOSTA"
+    assert j.cfg.get("ia_idioma_traducao") == "Spanish"
+
+
+def test_traduzir_a_mensagem_selecionada_abre_a_traducao(j, ia_texto,
+                                                         monkeypatch):
+    x = m.Mensagem("t1", "c1", "1", autor="Ana", texto="hello", data=AGORA)
+    monkeypatch.setattr(j, "_mensagem_selecionada", lambda: x)
+    monkeypatch.setattr(j, "_escolher_da_lista", lambda *a: "French")
+    mostrados = []
+    monkeypatch.setattr(jm.dialogos, "mostrar_texto",
+                        lambda *a, **k: mostrados.append(a))
+    j._ia_traduzir_mensagem()
+    assert ia_texto[-1][:2] == ("traduzir", "hello")
+    assert j.ia_extras[-1][1] == "French" and mostrados[0][2] == "RESPOSTA"
+
+
+def test_resumir_nao_lidas_so_manda_as_nao_lidas(j, ia_texto, monkeypatch):
+    j.indice[("t1", "c1")] = conv("c1", "Ana")
+    j.atual = ("t1", "c1")
+    j.marcador_n = 2
+    j.cache[j.atual] = [
+        m.Mensagem("t1", "c1", str(i), autor="Ana", texto="msg%d" % i,
+                   data=AGORA) for i in range(5)]
+    monkeypatch.setattr(jm.dialogos, "mostrar_texto", lambda *a, **k: None)
+    j._ia_resumir_nao_lidas()
+    texto = ia_texto[-1][1]
+    assert "msg4" in texto and "msg3" in texto and "msg2" not in texto
+    j.marcador_n = 0
+    j.indice[j.atual].nao_lidas = 0
+    antes = len(ia_texto)
+    j._ia_resumir_nao_lidas()
+    assert len(ia_texto) == antes
+    assert any("Não há mensagens não lidas" in t for t in j.ditas)
+
+
+def test_slots_novos_da_ia_de_texto(j):
+    for chave in ("ia_redigir_tom", "ia_traduzir", "ia_traduzir_msg",
+                  "ia_resumir_nao_lidas"):
+        assert chave in j.atalhos.acoes and j.atalhos.efetivo(chave) == ""

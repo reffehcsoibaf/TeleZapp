@@ -536,3 +536,17 @@ def test_executar_texto_sem_chave_ou_provedor_levanta_erro():
     with pytest.raises(ErroIA) as e:
         servico.executar_texto("corrigir", "oi", "openai", "", "m")
     assert e.value.codigo == "chave"
+
+
+def test_tom_e_traducao_entram_na_instrucao():
+    assert "formal, polite" in prompts.instrucoes_de_texto("redigir",
+                                                           tom="formal")
+    assert "formal, polite" not in prompts.instrucoes_de_texto("redigir")
+    assert "into Spanish" in prompts.instrucoes_de_texto(
+        "traduzir", destino="Spanish")
+    assert "only the translation" in prompts.instrucoes_de_texto("traduzir")
+    assert prompts.pergunta_de_texto("traduzir", "oi").endswith("oi")
+    instr, _ = servico.preparar_texto("redigir", "oi", tom="direto")
+    assert "direct" in instr
+    assert {t for t, _ in cat.TONS} >= {"natural", "formal"}
+    assert ("English", "Inglês") in cat.IDIOMAS
