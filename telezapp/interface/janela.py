@@ -7415,7 +7415,11 @@ class Janela(wx.Frame):
             wx.MessageBox(erro, NOME, wx.OK | wx.ICON_WARNING, self)
             return
         bipe("tarefa_pronta")
+        # Com "Continuar em segundo plano" ligado, Close() so esconderia a
+        # janela na bandeja e a troca nunca aconteceria: sai de verdade.
+        self._saindo = True
         if not self.Close():
+            self._saindo = False
             return              # a pessoa desistiu de fechar
         atualizador.aplicar(programa, nova)
 
