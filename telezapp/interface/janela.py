@@ -1420,6 +1420,8 @@ class Janela(wx.Frame):
             dlg.ShowModal()
         finally:
             dlg.Destroy()
+        # A conta em foco pode ter sido excluída: devolve o foco à janela.
+        self.lista_conv.SetFocus()
 
     def _marcar_conta(self, conta_id, ativa):
         """Liga ou desliga uma conta e diz o que aconteceu."""
