@@ -1081,6 +1081,9 @@ class ProvedorWhatsApp(Provedor):
         Devolve False se houve erro que nao adianta repetir."""
         try:
             import neonize.events as nev
+            # O neonize poe <bot biz_bot="1"/> em toda mensagem de conversa
+            # privada, e o destinatario ve o selo "IA" com botoes de avaliacao
+            os.environ["NEONIZE_BOT_TAG"] = "off"
             self.cliente = self.fabrica_cliente()
             self._preparar_chamadas()
             registros = {

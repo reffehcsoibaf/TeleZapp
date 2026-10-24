@@ -3,6 +3,11 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.24.2
+
+- Corrigido: as mensagens enviadas no WhatsApp chegavam ao destinatário com o selo "IA" e botões de avaliação. O neonize põe o nó `<bot biz_bot="1"/>` em toda mensagem de conversa privada (`shouldAddBotNode`, em `goneonize/main.go`); `ProvedorWhatsApp._uma_conexao` agora define `NEONIZE_BOT_TAG=off` antes de criar o cliente, o que desliga o nó sem recompilar a DLL (a original 0.5.2 já tem a chave).
+- Corrigido: Deixar de seguir e Silenciar o canal não faziam nada no Telegram. `ProvedorTelegram` não tinha `administrar_canal`, e o padrão de `Provedor` respondia que a conta não gerencia canais. Agora `_administrar_canal` usa `channels.LeaveChannelRequest` (ou `delete_dialog` fora de canais) e `account.UpdateNotifySettingsRequest`. Depois de deixar de seguir, `ControleDetalhes._manter_ou_apagar_canal` pergunta (Não é o padrão) se mantém o canal na lista ou apaga a conversa e as mensagens locais (`Janela._remover_conversa_local`). Teste com cliente simulado; não verificado com conta real.
+
 ## 2026.10.24.1
 
 - Menu Ajuda: `pagina_projeto` (abre `PAGINA_DO_PROJETO`, o GitHub Pages do projeto) e `feedback` (abre `PAGINA_DE_RELATOS`, o formulário `site/relatar.html`), por `Janela._abrir_na_internet` (`webbrowser.open`; se não abrir, mostra o endereço). Slots de atalho sem combinação. Testes `test_menu_ajuda_abre_a_pagina_do_projeto_e_o_feedback` e `test_sem_navegador_o_endereco_e_mostrado`.

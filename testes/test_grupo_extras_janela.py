@@ -188,3 +188,26 @@ def test_adicionar_a_um_grupo_escolhido_chama_administrar(monkeypatch):
     ctl.adicionar_a_grupo()
     assert chamadas == [("7@g.us", "adicionar", "5@s.whatsapp.net")]
     assert "Alvo foi adicionado ao grupo Turma." in wx_falso.mensagens
+
+
+def _canal_deixado(resposta):
+    removidos = []
+    ctl = _controle(types.SimpleNamespace(), "canal", {})
+    ctl.conv = m.Conversa("w1", "c@newsletter", "Canal", "whatsapp", "canal")
+    ctl.jan.indice = {ctl.conv.chave: ctl.conv}
+    ctl.jan._remover_conversa_local = removidos.append
+    ctl.dlg = types.SimpleNamespace(EndModal=lambda i: None)
+    wx_falso.resposta_messagebox[0] = resposta
+    ctl._resultado_canal("deixar_de_seguir", True, "Você deixou de seguir.")
+    return removidos, ctl
+
+
+def test_deixar_de_seguir_pergunta_e_apaga_se_a_pessoa_quiser():
+    removidos, ctl = _canal_deixado(wx_falso.YES)
+    assert removidos == [ctl.conv]
+    assert "Apagar a conversa" in wx_falso.mensagens[-1]
+
+
+def test_deixar_de_seguir_mantem_na_lista_por_padrao():
+    removidos, _ = _canal_deixado(wx_falso.NO)
+    assert removidos == []
