@@ -13,6 +13,7 @@ Esc nao desliga (e facil apertar sem querer): so lembra do botao.
 """
 import wx
 
+from telezapp.midia.dispositivos import parecem_o_mesmo
 from telezapp.nucleo import chamadas as ch
 
 
@@ -51,8 +52,9 @@ class DialogoChamada(wx.Dialog):
                                      (self.escolha_saida, self.saidas,
                                       saida)):
             if lista:
-                escolha.SetSelection(lista.index(nome)
-                                     if nome in lista else 0)
+                escolha.SetSelection(next(
+                    (n for n, d in enumerate(lista)
+                     if parecem_o_mesmo(nome, d)), 0))
 
         lay = wx.BoxSizer(wx.VERTICAL)
         lay.Add(self.situacao, 0, wx.ALL, 12)

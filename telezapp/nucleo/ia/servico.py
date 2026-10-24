@@ -299,6 +299,82 @@ def _executar_em_ordem(genero, caminho, ordem, chave_de, modelos, perfil,
                              "Configurações, Inteligência artificial.")
 
 
+def preparar_texto(operacao, texto, contexto=""):
+    """Corta o que passa do limite (fica o final, o mais recente) e monta a
+    instrucao e a pergunta. Texto vazio e erro."""
+    texto = (texto or "").strip()
+    if not texto:
+        raise ErroIA("vazia", "Não há texto para isso.")
+    limite = cat.MAX_ENTRADA_TEXTO
+    texto = texto[-limite:]
+    sobra = limite - len(texto)
+    contexto = (contexto or "").strip()
+    contexto = contexto[-sobra:] if sobra > 0 else ""
+    return (prompts.instrucoes_de_texto(operacao),
+            prompts.pergunta_de_texto(operacao, texto, contexto))
+
+
+def executar_texto(operacao, texto, provedor, chave, modelo, contexto="",
+                   enviar=enviar_pela_rede):
+    """Corrige, redige ou resume o texto. `modelo` e um nome ou uma lista, em
+    ordem, como em `executar`. Devolve o Resultado."""
+    if provedor not in cat.PROVEDORES:
+        raise ErroIA("provedor", "Escolha um provedor em Configurações, "
+                                 "Inteligência artificial.")
+    if not chave:
+        raise ErroIA("chave", "Falta a chave de %s em Configurações, "
+                              "Inteligência artificial." %
+                     cat.PROVEDORES[provedor].nome)
+    if not cat.aceita(provedor, "texto"):
+        raise ErroIA("nao_aceita", "%s não faz isso com texto." %
+                     cat.PROVEDORES[provedor].nome)
+    instrucoes, pergunta = preparar_texto(operacao, texto, contexto)
+    modelos = [modelo] if isinstance(modelo, str) else list(modelo)
+    for i, atual in enumerate(modelos):
+        pedido = prov.montar_pedido_de_texto(provedor, atual, chave,
+                                             instrucoes, pergunta)
+        try:
+            resposta = prov.ler_resposta(provedor, enviar(pedido), "texto")
+        except ErroIA as e:
+            if e.codigo in ("pedido", "limite") and i + 1 < len(modelos):
+                log.info("modelo %s recusado (%s); tentando o próximo", atual,
+                         e.codigo)
+                continue
+            raise
+        return Resultado(resposta, cat.PROVEDORES[provedor].nome, atual)
+
+
+def executar_texto_em_ordem(operacao, texto, ordem, chave_de, modelos,
+                            contexto="", enviar=enviar_pela_rede):
+    """Como `executar_em_ordem`, para texto: o primeiro provedor da ordem que
+    tem chave e funciona."""
+    preparar_texto(operacao, texto, contexto)       # texto vazio: erro logo
+    ultimo = None
+    for provedor in ordem:
+        if provedor not in cat.PROVEDORES or not cat.aceita(provedor,
+                                                            "texto"):
+            continue
+        chave = chave_de(provedor)
+        if not chave:
+            continue
+        try:
+            return executar_texto(
+                operacao, texto, provedor, chave,
+                cat.cadeia_de_modelos(provedor, modelos), contexto, enviar)
+        except ErroIA as e:
+            if e.codigo not in PROXIMO_PROVEDOR:
+                raise
+            log.info("%s falhou (%s); tentando o próximo da ordem", provedor,
+                     e.codigo)
+            ultimo = ErroIA(e.codigo, "%s: %s" % (
+                cat.PROVEDORES[provedor].nome, e.texto))
+    if ultimo is not None:
+        raise ultimo
+    raise ErroIA("provedor", "Nenhum provedor com chave está ligado para "
+                             "isso. Escolha e ordene os provedores em "
+                             "Configurações, Inteligência artificial.")
+
+
 def listar_modelos(provedor, chave, enviar=enviar_pela_rede):
     """Os modelos que o provedor oferece a essa chave."""
     if not chave:

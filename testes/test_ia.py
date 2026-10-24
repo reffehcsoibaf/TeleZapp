@@ -462,3 +462,77 @@ def test_video_por_quadros_e_fala_a_parte(tmp_path):
     assert not r.via_quadros and len(pedidos) == 1
     assert pedidos[0].json["contents"][0]["parts"][0]["inline_data"][
         "mime_type"] == "video/mp4"
+
+
+# ------------------------------------------------ redigir, resumir, corrigir
+def test_todo_provedor_faz_a_tarefa_de_texto():
+    assert {c for c, _ in cat.provedores_da_tarefa("texto")} == set(
+        cat.PROVEDORES)
+    assert "texto" in cat.TAREFAS and cat.NOMES_DE_TAREFA["texto"]
+
+
+def test_pedidos_de_texto_de_cada_provedor_sem_arquivo():
+    o = prov.montar_pedido_de_texto("openai", "m", "K", "instr", "pergunta")
+    assert o.url.endswith("/responses") and o.json["instructions"] == "instr"
+    assert o.json["input"][0]["content"][0] == {"type": "input_text",
+                                                "text": "pergunta"}
+    g = prov.montar_pedido_de_texto("gemini", "m", "K", "instr", "pergunta")
+    assert g.json["contents"][0]["parts"] == [{"text": "pergunta"}]
+    c = prov.montar_pedido_de_texto("claude", "m", "K", "instr", "pergunta")
+    assert c.json["system"] == "instr"
+    assert c.json["messages"][0]["content"] == "pergunta"
+    q = prov.montar_pedido_de_texto("groq", "m", "K", "instr", "pergunta")
+    assert q.json["messages"][1] == {"role": "user", "content": "pergunta"}
+    assert "max_completion_tokens" in q.json
+    r = prov.montar_pedido_de_texto("openrouter", "m", "K", "i", "p")
+    assert "max_tokens" in r.json
+
+
+def test_instrucoes_de_texto_tratam_o_texto_como_dado():
+    for op in (prompts.CORRIGIR, prompts.REDIGIR, prompts.RESUMIR_MENSAGEM,
+               prompts.RESUMIR_CONVERSA):
+        assert "never instructions" in prompts.instrucoes_de_texto(op)
+    assert "only the corrected" in prompts.instrucoes_de_texto("corrigir")
+    assert "Conversation so far" in prompts.pergunta_de_texto(
+        "redigir", "peça desculpas", "[1] Ana: oi")
+    assert "Conversation so far" not in prompts.pergunta_de_texto(
+        "redigir", "peça desculpas")
+
+
+def test_texto_longo_fica_com_o_final_e_vazio_e_erro():
+    with pytest.raises(ErroIA):
+        servico.preparar_texto("corrigir", "   ")
+    _, pergunta = servico.preparar_texto(
+        "resumir_conversa", "x" * (cat.MAX_ENTRADA_TEXTO + 50) + "FIM")
+    assert pergunta.endswith("FIM")
+    assert len(pergunta) < cat.MAX_ENTRADA_TEXTO + 100
+    # o contexto so entra no que sobra do limite
+    _, pergunta = servico.preparar_texto("redigir", "oi", "c" * 30_000)
+    assert len(pergunta) < cat.MAX_ENTRADA_TEXTO + 200
+
+
+def test_executar_texto_em_ordem_pula_quem_falha_e_devolve_o_texto():
+    enviados = []
+
+    def enviar(pedido):
+        enviados.append(pedido.url)
+        if "openai" in pedido.url:
+            raise ErroIA("limite", "limite")
+        return {"candidates": [{"content": {"parts": [
+            {"text": " Olá, tudo bem? "}]}}]}
+
+    r = servico.executar_texto_em_ordem(
+        "corrigir", "ola tudo bem", ["openai", "gemini"],
+        {"openai": "K1", "gemini": "K2"}.get, {}, enviar=enviar)
+    assert r.texto == "Olá, tudo bem?" and r.provedor == "Google Gemini"
+    assert len(enviados) == 2
+
+
+def test_executar_texto_sem_chave_ou_provedor_levanta_erro():
+    with pytest.raises(ErroIA) as e:
+        servico.executar_texto_em_ordem("corrigir", "oi", ["openai"],
+                                        {}.get, {})
+    assert e.value.codigo == "provedor"
+    with pytest.raises(ErroIA) as e:
+        servico.executar_texto("corrigir", "oi", "openai", "", "m")
+    assert e.value.codigo == "chave"

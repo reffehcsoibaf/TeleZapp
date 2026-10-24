@@ -120,3 +120,30 @@ def test_texto_da_janela_de_atualizacao():
     assert "Deseja baixar e instalar" in t
     sem = texto_da_atualizacao(lanc, "2026.10.19.0", False, "D:/dados")
     assert "Deseja baixar" not in sem and "página de download" in sem
+
+
+def test_aviso_ao_abrir_repete_ate_atualizar_ou_marcar_nao_avisar():
+    nova = at.Lancamento("2026.11.1.0", "", "p", False)
+    assert at.deve_avisar_ao_abrir(nova, "")             # nunca marcou
+    assert at.deve_avisar_ao_abrir(nova, None)
+    assert at.deve_avisar_ao_abrir(nova, "")             # abriu de novo: avisa
+    # marcou "nao avisar mais nesta versao": nao avisa dessa
+    assert not at.deve_avisar_ao_abrir(nova, "2026.11.1.0")
+    # saiu outra versao: avisa de novo
+    mais_nova = at.Lancamento("2026.11.2.0", "", "p", False)
+    assert at.deve_avisar_ao_abrir(mais_nova, "2026.11.1.0")
+    # nada novo (ja atualizado, ou a consulta nao trouxe versao): nao avisa
+    velha = at.Lancamento("2020.1.1.0", "", "p", False)
+    assert not at.deve_avisar_ao_abrir(velha, "")
+    assert not at.deve_avisar_ao_abrir(None, "")
+
+
+def test_pergunta_depois_do_nao_diz_a_versao_e_as_duas_respostas():
+    from telezapp.interface import atualizacao as janela
+    t = janela.texto_da_pergunta("2026.11.1.0")
+    assert "2026.11.1.0" in t and "Talvez mais tarde:" in t
+    assert "Não me avise mais sobre essa versão:" in t
+    assert "próxima vez que você abrir" in t and "outra versão" in t
+    # os botoes da pergunta (com a tecla de acesso) sao esses dois
+    assert janela.BOTAO_NAO_AVISAR == "&Não me avise mais sobre essa versão"
+    assert janela.BOTAO_MAIS_TARDE == "&Talvez mais tarde"

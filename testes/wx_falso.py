@@ -82,6 +82,9 @@ class Janela:
     def SetFocus(self):
         _foco[0] = self
 
+    def IsEnabled(self):
+        return getattr(self, "ativo", True)
+
     def HasFocus(self):
         return _foco[0] is self
 
@@ -387,7 +390,12 @@ class TextCtrl(Janela):
     def Clear(self):
         self.valor = ""
 
+    def SelectAll(self):
+        self.tudo_selecionado = True
+
     def WriteText(self, texto):
+        if getattr(self, "tudo_selecionado", False):
+            self.valor, self.tudo_selecionado = "", False
         self.valor += texto
 
     def SetInsertionPoint(self, i):

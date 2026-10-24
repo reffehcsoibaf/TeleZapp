@@ -28,11 +28,13 @@ from telezapp.interface.progresso import JanelaDeProgresso
 from telezapp.interface.publicar_status import DialogoPublicarStatus
 from telezapp.interface.detalhes import ControleDetalhes, ControleRecibos
 from telezapp.interface.chamada import DialogoChamada
+from telezapp.interface import dispositivos as ui_dispositivos
 from telezapp.midia import armazem
+from telezapp.midia import dispositivos
 from telezapp.midia import envio
 from telezapp.midia import velocidade as vel
-from telezapp.midia.gravador import (MICROFONE, SOM_INTERNO, ErroGravacao,
-                                     Gravador)
+from telezapp.midia.gravador import (MICROFONE, SOM_E_MICROFONE,
+                                     SOM_INTERNO, ErroGravacao, Gravador)
 from telezapp.midia.reprodutor import (FormatoNaoSuportado, Reprodutor,
                                        formatar_tempo)
 from telezapp.nucleo import chamadas as ch
@@ -43,6 +45,7 @@ from telezapp.nucleo import inicializacao
 from telezapp.nucleo import atalhos as nucleo_atalhos
 from telezapp.nucleo.ia import catalogo as cat_ia
 from telezapp.nucleo.ia import cofre as cofre_ia
+from telezapp.nucleo.ia import prompts as prompts_ia
 from telezapp.nucleo.ia import servico as servico_ia
 from telezapp.nucleo.ia.provedores import ErroIA
 from telezapp.nucleo import backup
@@ -73,6 +76,8 @@ TEXTO_FILTRO_VAZIO = "Nenhuma conversa neste filtro."
 TEXTO_SEM_CONTAS ="Nenhuma conversa ainda. Aperte Alt e use Novo, Nova conta, no " \
                    "menu, para adicionar uma conta do Telegram ou do WhatsApp."
 MAX_BOTOES_ACAO = 12     # botoes de resposta que cabem na ordem de Tab
+MENSAGENS_DE_CONTEXTO = 12   # final da conversa que vai junto ao redigir com a IA
+MAXIMO_RESUMO = 300      # mensagens da conversa que o resumo com IA le
 MAX_BOTOES_LINK = 12     # links e botoes de endereco, tambem na ordem de Tab
 LIMITE_ROTULO_LINK = 80  # caracteres do rotulo de um botao de link
 LIMITE_CACHE = 100        # mensagens lidas do banco ao abrir a conversa
@@ -399,6 +404,7 @@ class Janela(wx.Frame):
             os.path.join(config.pasta_dados(), "ia_chaves.json"))
         self._ia_pendentes = {}   # chave da mensagem -> esperando o download
         self._ia_ocupadas = set()  # mensagens que a IA esta processando
+        self._ia_texto_ocupada = False     # redigir, resumir, corrigir
         self._ia_vagas = threading.Semaphore(2)    # pedidos automaticos
         self.avisos_de_chamada = {}   # (conta, chamada) -> janela de aviso
         self.presenca = None      # ev.Presenca (online / visto) da aberta
@@ -555,11 +561,18 @@ class Janela(wx.Frame):
         item(m_msg, "encaminhar", "&Encaminhar...	Ctrl+Shift+E")
         item(m_msg, "favoritar_msg",
              "&Favoritar ou desfavoritar a mensagem\tCtrl+Shift+F")
+        m_ia = wx.Menu()
+        item(m_ia, "ia_corrigir", "&Corrigir o texto digitado")
+        item(m_ia, "ia_redigir",
+             "&Redigir a mensagem a partir do que digitei")
+        item(m_ia, "ia_resumir_msg", "Resumir a &mensagem selecionada...")
+        item(m_ia, "ia_resumir_conv", "Resumir a c&onversa...")
+        m_msg.AppendSubMenu(m_ia, "Inteligência a&rtificial")
         item(m_msg, "apagar_msg", "&Apagar mensagem...")
         m_msg.AppendSeparator()
         item(m_msg, "abrir_midia", "&Abrir mídia\tCtrl+O")
         item(m_msg, "baixar_midia", "&Baixar mídia sem abrir\tCtrl+B")
-        item(m_msg, "salvar_midia", "Salvar c&ópia da mídia...")
+        item(m_msg, "salvar_midia", "Salvar a mídia em um ar&quivo...")
 
         m_cham = wx.Menu()
         item(m_cham, "ligar", "&Ligar para esta conversa\tCtrl+Shift+L")
@@ -585,6 +598,9 @@ class Janela(wx.Frame):
                                   "novo envia)\tCtrl+Shift+M")
         item(m_mid, "gravar_som", "Gravar o &som do computador (começa; "
                                   "apertar de novo envia)\tCtrl+Shift+S")
+        item(m_mid, "gravar_som_mic", "Gravar o som do computador e o "
+                                      "microfone (começa; apertar de novo "
+                                      "envia)\tCtrl+Shift+B")
         item(m_mid, "gravar_pausa",
              "Pausar ou continuar a gravação por atalho")
         item(m_mid, "gravar_descartar",
@@ -594,6 +610,8 @@ class Janela(wx.Frame):
         item(m_mid, "gravar_som_janela",
              "Gravar o som do computador em uma ja&nela...")
         m_mid.AppendSeparator()
+        item(m_mid, "dispositivos_som",
+             "&Dispositivos de som (saída e microfone)...")
         item(m_mid, "audio_janela",
              "Ao tocar um áudio: só tocar ou abrir o &player...")
         item(m_mid, "audio_sequencia",
@@ -778,6 +796,12 @@ class Janela(wx.Frame):
             "anexar": lambda e: self._anexar_arquivo(),
             "gravar_mic": lambda e: self._gravar_rapido(MICROFONE),
             "gravar_som": lambda e: self._gravar_rapido(SOM_INTERNO),
+            "gravar_som_mic": lambda e: self._gravar_rapido(SOM_E_MICROFONE),
+            "dispositivos_som": lambda e: self._escolher_dispositivos(),
+            "ia_corrigir": lambda e: self._ia_corrigir(),
+            "ia_redigir": lambda e: self._ia_redigir(),
+            "ia_resumir_msg": lambda e: self._ia_resumir_mensagem(),
+            "ia_resumir_conv": lambda e: self._ia_resumir_conversa(),
             "gravar_pausa": lambda e: self._pausar_gravacao_rapida(),
             "gravar_descartar": lambda e: self._descartar_gravacao_rapida(),
             "abrir_atalhos": lambda e: self._configuracoes("Atalhos"),
@@ -819,6 +843,7 @@ class Janela(wx.Frame):
         }
         for chave, tratador in ligacoes.items():
             self.Bind(wx.EVT_MENU, seguro(tratador), self.itens[chave])
+        dispositivos.definir(*self._dispositivos_da_chamada()[:2])
         self.banco.depuracao = bool(self.cfg.get("depuracao"))
         self.itens["depuracao"].Check(self.banco.depuracao)
         self.Bind(wx.EVT_MENU,
@@ -1087,6 +1112,8 @@ class Janela(wx.Frame):
         self.lista_conv.Bind(wx.EVT_CONTEXT_MENU, seguro(self._menu_conversa))
         self.lista_msgs.Bind(wx.EVT_CONTEXT_MENU, seguro(self._menu_mensagem))
         self.lista_msgs.Bind(wx.EVT_KEY_DOWN, self._tecla_mensagens)
+        self.lista_msgs.Bind(wx.EVT_CHAR, self._digitou_na_lista)
+        self.lista_conv.Bind(wx.EVT_CHAR, self._digitou_na_lista)
         self.lista_msgs.Bind(wx.EVT_LISTBOX,
                              seguro(lambda e: self._atualizar_botoes()))
         self.caixa.Bind(wx.EVT_TEXT_PASTE, self._ao_colar)
@@ -3254,11 +3281,36 @@ class Janela(wx.Frame):
                         interromper=True)
 
     @seguro
+    def _escolher_dispositivos(self):
+        """Janela de dispositivos de som: vale para tocar, gravar e ligar."""
+        mic, saida = self._dispositivos_da_chamada()
+        escolha = ui_dispositivos.escolher(self, mic, saida)
+        if escolha is None:
+            return
+        mic, saida = escolha
+        self._guardar_dispositivos(mic, saida)
+        c = self.chamada
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if p is not None and c.estado == ch.EM_CHAMADA:
+            p.trocar_dispositivos(c.conversa_id, mic, saida)
+        self.fala.falar("Dispositivos de som guardados. Saída: %s. "
+                        "Microfone: %s." % (saida or "padrão do Windows",
+                                            mic or "padrão do Windows"),
+                        interromper=True)
+
+    def _guardar_dispositivos(self, microfone, saida):
+        self.cfg.set("chamada_microfone", microfone)
+        self.cfg.set("chamada_saida", saida)
+        dispositivos.definir(microfone, saida)
+
+    @seguro
     def _trocar_dispositivos(self, microfone, saida):
+        # a janela da chamada so lista dispositivos de verdade (nunca vazio)
         if microfone:
             self.cfg.set("chamada_microfone", microfone)
         if saida:
             self.cfg.set("chamada_saida", saida)
+        dispositivos.definir(*self._dispositivos_da_chamada())
         c = self.chamada
         p = self._provedor_de_chamada(c.conta_id) if c else None
         if p is not None and c.estado == ch.EM_CHAMADA:
@@ -3440,6 +3492,34 @@ class Janela(wx.Frame):
         else:
             self.caixa.WriteText(marca)
         self.fala.falar("Mencionado %s." % nome)
+
+    def _digitou_na_lista(self, evt):
+        """Caractere digitado numa lista: pula para o item com a inicial (o
+        padrao do Windows) ou, se a pessoa preferir, vai ao campo de texto
+        ao lado, levando o caractere junto."""
+        try:
+            lista = evt.GetEventObject()
+            campo = self._campo_da_lista(lista)
+            c = evt.GetUnicodeKey()
+            if (campo is not None and c > 32 and c != wx.WXK_DELETE
+                    and not (evt.ControlDown() or evt.AltDown())
+                    and self.cfg.get("digitar_na_lista") == "campo"
+                    and not (self.modo_conv if lista is self.lista_conv
+                             else self.modo_msg)):
+                campo.SetFocus()
+                campo.WriteText(chr(c))
+                return
+        except Exception:
+            log.error("erro ao digitar na lista:\n%s", traceback.format_exc())
+        evt.Skip()
+
+    def _campo_da_lista(self, lista):
+        """O campo de texto que acompanha a lista, ou None."""
+        if lista is self.lista_conv:
+            return self.campo_busca
+        if lista is self.lista_msgs and self.atual is not None                 and self.caixa.IsEnabled():
+            return self.caixa
+        return None
 
     def _tecla_mensagens(self, evt):
         # a pessoa mexeu na lista: nao mover a selecao sozinho
@@ -4006,7 +4086,7 @@ class Janela(wx.Frame):
         opcoes = [(self.ROTULOS_ABRIR.get(x.tipo, "Abrir a mídia"),
                    lambda: self._abrir_midia(True, x))]
         if self.midias.caminho(x):
-            opcoes.append(("Salvar cópia da mídia...", self._salvar_midia))
+            opcoes.append(("Salvar a mídia em um arquivo...", self._salvar_midia))
         else:
             opcoes.append(("Baixar a mídia sem abrir",
                            lambda: self._abrir_midia(False, x)))
@@ -4180,6 +4260,171 @@ class Janela(wx.Frame):
             return
         self.fala.falar("%s: %s" % (m.rotulo_da_ia(x).capitalize(), texto),
                         interromper=True)
+
+    # ---- redigir, resumir e corrigir textos
+    def _ia_texto(self, operacao, texto, pronto, contexto=""):
+        """Manda o texto (e, ao redigir, o final da conversa como contexto)
+        aos provedores da tarefa "texto", na ordem escolhida. `pronto(r)`
+        roda na janela com o Resultado."""
+        if not (texto or "").strip():
+            bipe("erro")
+            self.fala.falar("Não há texto para isso.", interromper=True)
+            return
+        if self._ia_texto_ocupada:
+            self.fala.falar("Ainda estou esperando a resposta anterior.",
+                            interromper=True)
+            return
+        ordem = [p for p in (self.cfg.get("ia_ordem") or {}).get(
+            cat_ia.TEXTO, []) if cat_ia.aceita(p, "texto")]
+        if not ordem:
+            bipe("erro")
+            self.fala.falar(
+                "Marque e ordene os provedores para %s em Configurações, "
+                "Inteligência artificial." %
+                cat_ia.NOMES_DE_TAREFA[cat_ia.TEXTO].lower(),
+                interromper=True)
+            self._configuracoes("Inteligência artificial")
+            return
+        com_chave = [p for p in ordem if self.cofre_ia.tem(p)]
+        if not com_chave:
+            bipe("erro")
+            self.fala.falar(
+                "Nenhum dos provedores marcados tem chave. Digite a chave em "
+                "Configurações, Inteligência artificial.", interromper=True)
+            self._configuracoes("Inteligência artificial")
+            return
+        consentidos = self.cfg.get("ia_consentimento_texto") or []
+        novos = [p for p in com_chave if p not in consentidos]
+        if novos:
+            nomes = ", ".join(cat_ia.PROVEDORES[p].nome for p in novos)
+            r = wx.MessageBox(
+                "Para isso o TeleZapp envia o texto (o que você digitou, a "
+                "mensagem ou o final da conversa aberta) para %s, serviço%s "
+                "de terceiros, com a sua chave, na ordem escolhida. O que "
+                "eles fazem com os dados depende da política de cada um (o "
+                "botão de privacidade, em Configurações, abre a página). "
+                "Continuar e lembrar esta escolha para %s?" % (
+                    nomes, "" if len(novos) == 1 else "s", nomes),
+                "Enviar texto para a inteligência artificial",
+                wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
+            if r != wx.YES:
+                return
+            self.cfg.set("ia_consentimento_texto", list(consentidos) + novos)
+        modelos = dict(self.cfg.get("ia_modelos") or {})
+        chaves = {p: self.cofre_ia.obter(p) for p in com_chave}
+        self._ia_texto_ocupada = True
+        self.fala.falar("Enviando para %s. Aviso quando terminar." %
+                        cat_ia.PROVEDORES[com_chave[0]].nome,
+                        interromper=True)
+
+        def trabalho():
+            try:
+                r, erro = servico_ia.executar_texto_em_ordem(
+                    operacao, texto, com_chave, chaves.get, modelos,
+                    contexto), None
+            except ErroIA as e:
+                r, erro = None, e.texto
+            except Exception:
+                log.exception("inteligência artificial (texto)")
+                r, erro = None, "Algo deu errado ao falar com o provedor."
+            wx.CallAfter(self._ia_texto_pronto, r, erro, pronto)
+        threading.Thread(target=trabalho, daemon=True,
+                         name="inteligencia-artificial-texto").start()
+
+    def _ia_texto_pronto(self, resultado, erro, pronto):
+        self._ia_texto_ocupada = False
+        if erro:
+            bipe("erro")
+            self.fala.falar(erro, interromper=True)
+            wx.MessageBox(erro, NOME, wx.OK | wx.ICON_WARNING, self)
+            return
+        bipe("tarefa_pronta")
+        pronto(resultado)
+
+    def _ia_colocar_na_caixa(self, original, novo, aviso):
+        """Troca o que estava digitado pelo texto novo (Control Z volta),
+        a menos que a pessoa tenha mexido na caixa enquanto esperava."""
+        if self.caixa.GetValue() != original:
+            dialogos.mostrar_texto(
+                self, "Texto da inteligência artificial",
+                "Você mudou a caixa de mensagem enquanto eu esperava, então "
+                "não troquei o que está lá. O texto pronto é:\n\n" + novo,
+                "Texto pronto")
+            return
+        self.caixa.SelectAll()
+        self.caixa.WriteText(novo)
+        self.caixa.SetFocus()
+        self.fala.falar("%s: %s. Control Z desfaz." % (aviso, novo),
+                        interromper=True)
+
+    @seguro
+    def _ia_corrigir(self):
+        original = self.caixa.GetValue()
+
+        def pronto(r):
+            if r.texto.strip() == original.strip():
+                self.fala.falar("Não achei nada para corrigir.",
+                                interromper=True)
+                return
+            self._ia_colocar_na_caixa(original, r.texto, "Texto corrigido")
+        self._ia_texto(prompts_ia.CORRIGIR, original, pronto)
+
+    @seguro
+    def _ia_redigir(self):
+        original = self.caixa.GetValue()
+        contexto = ""
+        if self.atual is not None:
+            conv = self.indice.get(self.atual)
+            contexto = self._linhas_da_conversa(
+                self._mensagens_atuais()[-MENSAGENS_DE_CONTEXTO:], conv)
+
+        def pronto(r):
+            self._ia_colocar_na_caixa(
+                original, r.texto, "Rascunho na caixa, ainda não enviado")
+        self._ia_texto(prompts_ia.REDIGIR, original, pronto, contexto)
+
+    def _linhas_da_conversa(self, msgs, conv):
+        return "\n".join(
+            exportar.linha(x, autor=m.quem_enviou(
+                x, conv, self._nome_do_remetente))
+            for x in msgs if not x.id.startswith("local-"))
+
+    @seguro
+    def _ia_resumir_mensagem(self):
+        x = self._mensagem_selecionada()
+        if x is None:
+            self.fala.falar("Selecione uma mensagem para resumir.",
+                            interromper=True)
+            return
+        texto = x.texto if x.tipo == m.TEXTO else (
+            m.extras_de(x)["ia"].get("texto") or x.texto)
+        if not (texto or "").strip():
+            bipe("erro")
+            self.fala.falar("Esta mensagem não tem texto para resumir. Para "
+                            "áudio, imagem, vídeo ou PDF, use o item de "
+                            "transcrever ou descrever.", interromper=True)
+            return
+
+        def pronto(r):
+            dialogos.mostrar_texto(self, "Resumo da mensagem", r.texto,
+                                   "Resumo")
+        self._ia_texto(prompts_ia.RESUMIR_MENSAGEM, texto, pronto)
+
+    @seguro
+    def _ia_resumir_conversa(self):
+        if self.atual is None:
+            self.fala.falar(TEXTO_SEM_CONVERSA, interromper=True)
+            return
+        conv = self.indice.get(self.atual)
+        quantas = min(max(self.marcador_n or 0, MENSAGENS_DE_CONTEXTO * 4),
+                      MAXIMO_RESUMO)
+        texto = self._linhas_da_conversa(self._mensagens_atuais()[-quantas:],
+                                         conv)
+
+        def pronto(r):
+            dialogos.mostrar_texto(
+                self, "Resumo da conversa", r.texto, "Resumo")
+        self._ia_texto(prompts_ia.RESUMIR_CONVERSA, texto, pronto)
 
     # ---- transcricao e descricao automaticas, conversa por conversa
     def _ia_auto_ligada(self, chave):
@@ -5723,14 +5968,18 @@ class Janela(wx.Frame):
             self.fala.falar(str(e), interromper=True)
             return
         self._gravacao_rapida = {"gravador": g, "origem": origem}
-        chave = "gravar_mic" if origem == MICROFONE else "gravar_som"
+        chave = {MICROFONE: "gravar_mic", SOM_INTERNO: "gravar_som",
+                 SOM_E_MICROFONE: "gravar_som_mic"}[origem]
         atalho = self.atalhos.efetivo(chave)
         self.SetStatusText("Gravando...")
+        sem_mic = (" Não achei um microfone: gravando só o som do "
+                   "computador." if origem == SOM_E_MICROFONE and
+                   not g.microfone_disponivel else "")
         self.fala.falar(
-            "Gravando. %s Esc descarta." % (
+            "Gravando.%s %s Esc descarta." % (sem_mic, (
                 "Aperte %s de novo para parar e enviar." %
                 nucleo_atalhos.texto_falado(atalho) if atalho else
-                "Pare pelo menu Mídias."), interromper=True)
+                "Pare pelo menu Mídias.")), interromper=True)
 
     def _pausar_gravacao_rapida(self):
         """Pausa ou continua a gravacao feita por atalho. O trecho da pausa
@@ -5802,14 +6051,22 @@ class Janela(wx.Frame):
         else:
             titulo = "Gravar o som do computador"
             instrucao = ("Vai ser gravado tudo o que o computador tocar, "
-                         "inclusive a voz do leitor de tela, se ele falar. "
-                         "Aperte Enter em Gravar para começar. Gravando, "
-                         "Enter para e Pausar faz uma pausa; depois você "
-                         "pode ouvir, gravar de novo ou enviar. Esc "
-                         "descarta.")
+                         "inclusive a voz do leitor de tela, se ele falar, "
+                         "e também o seu microfone, se a caixa estiver "
+                         "marcada (dá para ligar e desligar durante a "
+                         "gravação). Aperte Enter em Gravar para começar. "
+                         "Gravando, Enter para e Pausar faz uma pausa; "
+                         "depois você pode ouvir, gravar de novo ou enviar. "
+                         "Esc descarta.")
+        if origem == SOM_INTERNO:
+            origem_gravada = SOM_E_MICROFONE
+            microfone = bool(self.cfg.get("gravar_som_com_microfone"))
+        else:
+            origem_gravada, microfone = origem, None
         gravacao = dialogos.gravar_voz(
-            self, lambda: Gravador(pasta, origem, maximo_segundos=3600),
-            titulo, instrucao, self.fala)
+            self, lambda: Gravador(pasta, origem_gravada,
+                                   maximo_segundos=3600),
+            titulo, instrucao, self.fala, microfone=microfone)
         if gravacao is None:
             return
         log.info("gravação (%s) de %.0fs pronta para enviar", origem,
@@ -6950,10 +7207,15 @@ class Janela(wx.Frame):
                 self.fala.falar(texto, interromper=True)
                 wx.MessageBox(texto, NOME, wx.OK | wx.ICON_INFORMATION, self)
             return
-        if not manual:
-            if self.cfg.get("atualizacao_avisada") == lanc.versao:
-                return
-            self.cfg.set("atualizacao_avisada", lanc.versao)
+        ignorada = self.cfg.get("atualizacao_ignorada") or ""
+        avisar = manual or atualizacao.deve_avisar_ao_abrir(lanc, ignorada)
+        log.info("versão nova %s (%s): %s%s", lanc.versao,
+                 "pedida" if manual else "ao abrir",
+                 "abrindo a janela" if avisar else "não avisa",
+                 " (marcada para não avisar)" if ignorada == lanc.versao
+                 else "")
+        if not avisar:
+            return
         bipe("tarefa_pronta")
         from telezapp.interface.atualizacao import DialogoAtualizacao
         pode = bool(getattr(sys, "frozen", False) and lanc.url_zip
@@ -6965,6 +7227,18 @@ class Janela(wx.Frame):
             escolha = dlg.escolha
         finally:
             dlg.Destroy()
+        if escolha == "nao":
+            # quem recusou escolhe: nao avisar mais desta versao, ou talvez mais
+            # tarde, avisando de novo na proxima vez que abrir (o padrao)
+            from telezapp.interface import atualizacao as janela_versao
+            nao_avisar = janela_versao.perguntar_nao_avisar(self, lanc.versao)
+            self.cfg.set("atualizacao_ignorada",
+                         lanc.versao if nao_avisar else "")
+            log.info("versão nova %s: %s", lanc.versao,
+                     "não avisa mais" if nao_avisar
+                     else "avisa de novo ao abrir")
+        elif escolha == "instalar":
+            self.cfg.set("atualizacao_ignorada", "")
         if escolha == "instalar":
             wx.CallAfter(self._atualizar, lanc)
         elif escolha == "pagina":

@@ -710,6 +710,69 @@ Conferido o plano de 13/10 contra o código. Decisões do responsável:
   do app: chega como recibo ao vivo (o servidor entrega os acumulados ao
   reconectar), por isso não entra na busca periódica.
 
+### IA para redigir, resumir e corrigir (23/10/2026, versão 2026.10.23.1)
+
+- Pedido do responsável como último tema do dia, com a regra de que o que levasse muito tempo ficaria para a próxima versão. Feito o núcleo: corrigir e redigir na caixa, resumir mensagem e conversa. Reaproveita provedores, chaves, ordem e modelos da IA de mídia, como tarefa nova. Decisões: redigir nunca envia (só rascunho na caixa, Control Z volta); consentimento de texto separado do de mídia; o texto da conversa é tratado como dado (não como instrução ao modelo).
+- **Não feito / a decidir:** tom escolhido por opção (formal, amigável...), traduzir, resumir só as não lidas por botão próprio, resumo automático, ligar a redação ao atalho de enviar. **Não verificado com provedor real nem ao vivo.**
+
+### Digitar numa lista (23/10/2026, versão 2026.10.23.1)
+
+- Pedido do responsável: manter o pulo por inicial e permitir, por opção, ir direto ao campo de texto vizinho (caixa de mensagem; busca de conversas). Padrão: pular. **Não verificado ao vivo:** o EVT_CHAR de ListBox/ListCtrl no Windows e o foco com o leitor de tela.
+
+### Dispositivos de som (23/10/2026, versão 2026.10.23.1)
+
+- Pedido do responsável: um slot de atalho para definir o dispositivo de som.
+  Escopo escolhido por ele: tudo (tocar, gravar e chamadas). Uma janela única,
+  "Dispositivos de som", com Saída de som e Microfone, "Padrão do Windows"
+  primeiro; o item de Mídias nasce sem combinação de teclas.
+- A escolha usa as mesmas chaves das chamadas (`chamada_microfone`,
+  `chamada_saida`) para ter uma só fonte. Nomes são comparados por prefixo
+  porque a API de som padrão do Windows corta os nomes; dispositivo que sumiu
+  cai no padrão em silêncio. O som do computador captura a saída escolhida.
+- **Não verificado ao vivo:** ouvir um áudio, gravar e ligar com outro
+  dispositivo; só os testes automáticos (sounddevice falso) e a listagem real
+  da máquina (um microfone, uma saída).
+
+### Gravar o som do computador com o microfone (23/10/2026, versão 2026.10.23.1)
+
+- Pedido de usuários, esclarecido pelo responsável: a gravação do computador
+  deve poder levar também o microfone. Janela "Gravar o som do computador"
+  com a caixa "Gravar também o microfone" (padrão ligado, opção em
+  Configurações, Mídias), ligável e desligável durante a gravação; atalho novo
+  `gravar_som_mic` (Ctrl+Shift+B) para a gravação rápida dos dois. O
+  Ctrl+Shift+S continua só com o som. Sem microfone: grava só o som e avisa.
+- **Verificado ao vivo pelo responsável (23/10/2026):** gravação do som do
+  computador com o microfone, pela janela e pelo atalho Control Shift B:
+  "tudo uma maravilha".
+
+### "Não avisar mais nesta versão" (23/10/2026, versão 2026.10.23.1)
+
+- Pedido do responsável: depois do Não na janela de versão nova, uma pergunta
+  separada, em vez de uma caixa de verificação na janela; a janela continua
+  como era. Os botões da pergunta têm frases próprias (não "Sim" e "Não", que
+  confundiam): "Não me avise mais sobre essa versão" (não avisa mais dessa
+  versão ao abrir, só quando sair outra) e "Talvez mais tarde", o padrão (avisa
+  de novo na próxima abertura). O aviso automático deixou de
+  ser "uma vez por versão": passa a ser a cada abertura, até atualizar ou
+  responder Sim. Guarda `atualizacao_ignorada` (a versão).
+- Primeira versão, com uma caixa de verificação na janela, foi testada ao vivo
+  com um lançador que finge a versão 2099.1.1.0 e depois trocada pela pergunta,
+  como o responsável queria. **A pergunta ainda não foi vista ao vivo.**
+
+### Banco de dados corrompido e recuperado (23/10/2026)
+
+- Ao abrir uma cópia de teste, o TeleZapp não iniciou: `database disk image is
+  malformed` em `telezapp.db` (páginas referenciadas duas vezes, linhas fora
+  de ordem). Causa não provada; havia dois processos do TeleZapp abertos ao
+  mesmo tempo mais cedo e registros de quedas anteriores.
+- Recuperado lendo as linhas legíveis para um banco novo (integridade `ok`):
+  106.584 mensagens (o índice do banco ruim dizia 109.152), 354 conversas (58
+  linhas de conversa recriadas a partir das mensagens, com o nome vindo dos
+  contatos), todos os recibos, contatos, status e apagadas; índice de mídias
+  2.002 de 2.179. Trocado com o consentimento do responsável. Cópias do
+  original ficam em `%APPDATA%\TeleZapp`: `telezapp.db.corrompido-20261023` e
+  `telezapp.db.antes-da-troca` (podem ser apagadas depois de alguns dias).
+
 ## Chamadas de voz do WhatsApp: fase 0 (21/10/2026)
 
 - Experimento em `experimentos/10-chamada-whatsapp-meowcaller/` (Go, meowcaller sobre o hypermeow) com a ponte de voz em Python (`experimentos/chamada_whatsapp.py`, microfone e alto-falante por socket local). Ainda fora do app.

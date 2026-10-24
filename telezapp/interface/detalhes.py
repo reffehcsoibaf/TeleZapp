@@ -506,7 +506,7 @@ class ControleDetalhes:
         elif "contato" in classes:
             opcoes.append(("Ver o contato", lambda: jan._mostrar_texto(x)))
         if x.tipo in det.BAIXAVEIS_TIPOS:
-            opcoes.append(("Salvar cópia...", lambda: jan._salvar_copia_de(x)))
+            opcoes.append(("Salvar em um arquivo...", lambda: jan._salvar_copia_de(x)))
         for tipo, rotulo, valor in m.conteudos_copiaveis(x):
             opcoes.append((rotulo, lambda t=tipo, v=valor:
                            jan._copiar_conteudo(x, t, v)))

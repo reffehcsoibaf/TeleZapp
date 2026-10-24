@@ -80,3 +80,30 @@ class DialogoAtualizacao(wx.Dialog):
     def _fechar(self, escolha):
         self.escolha = escolha
         self.EndModal(wx.ID_OK)
+
+
+BOTAO_NAO_AVISAR = "&Não me avise mais sobre essa versão"
+BOTAO_MAIS_TARDE = "&Talvez mais tarde"
+
+
+def texto_da_pergunta(versao):
+    """O que a pergunta depois do Nao diz. Pura, para poder ser testada."""
+    return ("Você não instalou a versão %s agora.\n\n"
+            "Talvez mais tarde: o %s avisa de novo na próxima vez que você "
+            "abrir.\n"
+            "Não me avise mais sobre essa versão: ele só volta a avisar "
+            "quando sair outra versão. Em Ajuda, Verificar atualizações, você "
+            "ainda pode instalar quando quiser." % (versao, NOME))
+
+
+def perguntar_nao_avisar(pai, versao):
+    """Depois do Nao na janela de versao nova: True se a pessoa escolheu "Nao me
+    avise mais sobre essa versao", False em "Talvez mais tarde" (o padrao)."""
+    dlg = wx.MessageDialog(pai, texto_da_pergunta(versao),
+                           "Versão nova do %s" % NOME,
+                           wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION)
+    dlg.SetYesNoLabels(BOTAO_NAO_AVISAR, BOTAO_MAIS_TARDE)
+    try:
+        return dlg.ShowModal() == wx.ID_YES
+    finally:
+        dlg.Destroy()

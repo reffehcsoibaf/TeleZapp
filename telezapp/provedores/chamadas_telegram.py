@@ -63,11 +63,17 @@ def disponivel():
 
 
 def _escolher(dispositivos, nome):
-    """O dispositivo com esse nome; senao o primeiro (o padrao do Windows)."""
+    """O dispositivo com esse nome (o Windows corta os nomes que a janela de
+    dispositivos mostra, entao vale tambem o nome que comeca igual); senao o
+    primeiro (o padrao do Windows)."""
     if not dispositivos:
         return None
     for d in dispositivos:
         if d.title == nome:
+            return d
+    from telezapp.midia.dispositivos import parecem_o_mesmo
+    for d in dispositivos:
+        if parecem_o_mesmo(nome, d.title):
             return d
     return dispositivos[0]
 

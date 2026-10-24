@@ -233,7 +233,8 @@ def mostrar_texto(pai, titulo, texto, rotulo, links=(), botoes=(),
     return escolhida[0]
 
 
-def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala):
+def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
+               microfone=None):
     """Deixa gravar, pausar, ouvir e devolve a Gravacao que a pessoa quer
     enviar, ou None se ela descartar.
 
@@ -241,10 +242,18 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala):
     comeca quando a pessoa aperta o botao. Gravando, o foco fica em "Parar de
     gravar" (Enter), ao lado de "Pausar"; depois de parar, em "Enviar". Esc
     descarta em qualquer fase. `nova_gravacao()` devolve um Gravador novo
-    (usado tambem em "Gravar de novo")."""
+    (usado tambem em "Gravar de novo"). `microfone` (True ou False) mostra a
+    caixa "Gravar também o microfone" com esse valor inicial, que liga e
+    desliga o microfone ate durante a gravacao (so na gravacao do som do
+    computador); None = sem caixa."""
     dlg = wx.Dialog(pai, title=titulo, style=wx.DEFAULT_DIALOG_STYLE)
     explicacao = wx.StaticText(dlg, label=instrucao)
     explicacao.Wrap(420)
+    c_microfone = None
+    if microfone is not None:
+        c_microfone = wx.CheckBox(dlg, wx.ID_ANY,
+                                  "Gravar também o &microfone")
+        c_microfone.SetValue(bool(microfone))
     situacao = wx.StaticText(dlg, label="Pronto para gravar.", name="Situação")
     b_gravar = wx.Button(dlg, wx.ID_ANY, "&Gravar")
     b_parar = wx.Button(dlg, wx.ID_ANY, "&Parar de gravar")
@@ -255,6 +264,8 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala):
     b_descartar = wx.Button(dlg, wx.ID_CANCEL, "&Descartar")
     lay = wx.BoxSizer(wx.VERTICAL)
     lay.Add(explicacao, 0, wx.ALL, 10)
+    if c_microfone is not None:
+        lay.Add(c_microfone, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
     lay.Add(situacao, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
     linha = wx.BoxSizer(wx.HORIZONTAL)
     for b in (b_gravar, b_parar, b_pausar, b_enviar, b_ouvir, b_refazer,
@@ -293,8 +304,24 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala):
                 pass
         b_ouvir.SetLabel("&Ouvir")
 
+    def microfone_mudou(_e=None):
+        """A caixa liga e desliga o microfone, tambem com a gravacao rolando."""
+        ligado = c_microfone.GetValue()
+        g = est["gravador"]
+        if g is not None:
+            g.microfone_ligado = ligado
+            if ligado and not g.microfone_disponivel:
+                c_microfone.SetValue(False)
+                ligado = False
+                fala.falar("Não achei um microfone.", interromper=True)
+                return
+        fala.falar("Microfone ligado." if ligado else "Microfone desligado.",
+                   interromper=True)
+
     def comecar(_e=None):
         g = nova_gravacao()
+        if c_microfone is not None:
+            g.microfone_ligado = c_microfone.GetValue()
         bipe("gravando")
         time.sleep(0.4)     # o bipe nao pode entrar na gravacao
         try:
@@ -305,9 +332,17 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala):
             mostrar("inicio")
             return False
         est["gravador"] = g
+        aviso_mic = ""
+        if c_microfone is not None:
+            if not g.microfone_disponivel:
+                c_microfone.SetValue(False)
+                aviso_mic = (" Não achei um microfone: gravando só o som do "
+                             "computador.")
+            else:
+                g.microfone_ligado = c_microfone.GetValue()
         situacao.SetLabel("Gravando: 0:00")
         mostrar("gravando")
-        fala.falar("Gravando.", interromper=True)
+        fala.falar("Gravando." + aviso_mic, interromper=True)
         temporizador.Start(500)
         return True
 
@@ -401,6 +436,8 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala):
         fechar_player()
         dlg.EndModal(wx.ID_OK)
 
+    if c_microfone is not None:
+        c_microfone.Bind(wx.EVT_CHECKBOX, microfone_mudou)
     b_gravar.Bind(wx.EVT_BUTTON, comecar)
     b_parar.Bind(wx.EVT_BUTTON, parar)
     b_pausar.Bind(wx.EVT_BUTTON, pausar)
