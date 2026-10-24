@@ -105,6 +105,28 @@ partir dos experimentos, ainda a confirmar.
    chamada recebida, vídeo, queda de rede, microfone Bluetooth. Sem janela
    nem tecla de atender/recusar/mudo: só existe o experimento.
 
+Pendente (24/10/2026): selo "IA" nas mensagens enviadas pelo TeleZapp. Usuários
+   relataram que o destinatário, no WhatsApp Business, vê nas mensagens enviadas
+   pelo TeleZapp um selo "IA" com botões de avaliação (captura no relato do
+   Gerônimo). Segundo todos os relatos, só acontece com mensagens do TeleZapp.
+   Apurado até agora: nada no TeleZapp ou no caminho de texto da whatsmeow
+   (código atual, não o da DLL do neonize 0.5.2) põe robô/IA na mensagem; o nó
+   `<bot>` só entra para JIDs de robô e o `<biz>` só para botões e listas. Um
+   texto comum sai como `Message(conversation=texto)`, sem `messageContextInfo`
+   (o app oficial manda `deviceListMetadata` e `messageSecret` de 32 bytes em
+   toda mensagem; o neonize só os liga com `add_msg_secret`, que o TeleZapp usa
+   só em variantes de resposta com botões). Hipótese, **não verificada**: a falta
+   desse bloco faz o destinatário classificar a mensagem como automatizada.
+   Hipótese do responsável, também não verificada: a Meta pede avaliação de
+   clientes desconhecidos e, com muitas negativas, investiga e bane. Sabido: os
+   Termos do WhatsApp proíbem clientes não oficiais, então o risco de ban existe
+   de qualquer modo. Se os relatos continuarem ou piorarem: (1) pedir o teste de
+   comparação (mesma frase pelo TeleZapp e pelo celular) e o log com "Registro
+   técnico detalhado do WhatsApp"; (2) acrescentar `messageContextInfo` com
+   `messageSecret` e `deviceListMetadata` aos textos e mídias, de início como
+   opção experimental desligada, e pedir que o Gerônimo teste com um destinatário
+   que viu o selo.
+
 ## Plano do projeto (lista de ideias do responsável, 13/10/2026)
 
 Aprovado pelo responsável. As ideias foram divididas pelo efeito na base.
