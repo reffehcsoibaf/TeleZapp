@@ -323,9 +323,10 @@ OPCOES = (
           "mudados em Configurações, Atalhos."),
     Opcao("segundo_plano", "Continuar em segundo plano ao fechar a janela",
           "Sistema", False,
-          "Fechar a janela (o botão de fechar ou Alt F4) só a esconde: o "
-          "TeleZapp segue conectado, dando os avisos de mensagens, e um "
-          "ícone fica na área de notificação do Windows. Para voltar, use o "
+          "Fechar a janela (o botão de fechar ou Alt F4) só a minimiza: o "
+          "TeleZapp segue conectado, dando os avisos de mensagens, o botão "
+          "continua na barra de tarefas e um ícone fica na área de "
+          "notificação do Windows. Para voltar, use a barra de tarefas, o "
           "ícone ou o atalho de chamar o TeleZapp (Configurações, Atalhos, "
           "\"Chamar o TeleZapp\"). Para encerrar de verdade, use Sair, em "
           "Ferramentas (Control Q), o botão Sair ou o menu do ícone."),
@@ -333,7 +334,7 @@ OPCOES = (
           "Sistema", False,
           "Abre o TeleZapp sozinho quando você entra na sua conta do "
           "Windows. Com \"Continuar em segundo plano\" ligado, ele abre "
-          "escondido na área de notificação, sem tirar o foco do que você "
+          "minimizado na barra de tarefas, sem tirar o foco do que você "
           "está fazendo."),
     Opcao("enter_envia", "Enter na caixa de digitar envia a mensagem",
           "Mensagens", True,
@@ -658,8 +659,10 @@ PADROES.update({
     "ia_modelos": {},        # provedor -> modelo escolhido ("" = o padrao)
     "pacote_de_sons": "padrao",   # padrao, telezapp ou p:<nome>
     "sons_desativados": {},      # pacote -> eventos sem som
-    "lista_conversas": {"ordem": ["nome", "servico", "nao_lidas", "previa"],
-                        "ocultos": ["previa"]},  # o que cada linha mostra
+    "lista_conversas": {"ordem": ["nome", "servico", "nao_lidas", "previa",
+                                  "reacoes", "quem_reagiu"],
+                        "ocultos": ["previa", "reacoes",
+                                    "quem_reagiu"]},  # o que cada linha mostra
     "ia_automatica_conversas": [],  # [conta, conversa] com a IA automatica
     "ia_idioma_traducao": "English",  # ultimo idioma de destino da traducao
     "ia_consentimento_texto": [],  # provedores que podem receber seu texto

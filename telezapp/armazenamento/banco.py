@@ -17,7 +17,7 @@ from telezapp.nucleo.modelos import ORDEM_ESTADOS, Conversa, Mensagem
 
 log = logging.getLogger("telezapp.banco")
 
-VERSAO_ESQUEMA = 11
+VERSAO_ESQUEMA = 12
 
 ESQUEMA = """
 CREATE TABLE IF NOT EXISTS conversas (
@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS conversas (
     silenciada_ate REAL NOT NULL DEFAULT 0,
     somente_leitura INTEGER NOT NULL DEFAULT 0,
     temporaria_s INTEGER NOT NULL DEFAULT 0,
+    citacoes INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (conta_id, id)
 );
 CREATE TABLE IF NOT EXISTS mensagens (
@@ -198,6 +199,9 @@ class Banco:
         if "temporaria_s" not in conv:
             self._con.execute("ALTER TABLE conversas ADD COLUMN "
                               "temporaria_s INTEGER NOT NULL DEFAULT 0")
+        if "citacoes" not in conv:
+            self._con.execute("ALTER TABLE conversas ADD COLUMN "
+                              "citacoes INTEGER NOT NULL DEFAULT 0")
         colunas = {linha[1] for linha in self._con.execute(
             "PRAGMA table_info(mensagens)")}
         if "remetente" not in colunas:

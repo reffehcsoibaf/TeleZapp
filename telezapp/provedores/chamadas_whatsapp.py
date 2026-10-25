@@ -24,6 +24,7 @@ import threading
 import time
 
 from telezapp.nucleo import chamadas as ch
+from telezapp.midia import prioridade
 from telezapp.nucleo import eventos as ev
 
 log = logging.getLogger("telezapp.chamadas")
@@ -33,6 +34,7 @@ TAXA = 16000
 AMOSTRAS = 960
 ESPERA_ATENDER_S = 45            # chamando sem ninguem atender
 FIM_DA_CHAMADA = -2              # retorno da DLL: a chamada acabou
+LIMITE_DE_FALHAS = 20            # erros seguidos do som ate desistir
 
 
 class Ponte:
@@ -448,55 +450,103 @@ class ChamadasWhatsApp:
             lig.threads.append(t)
             t.start()
 
+    def _abrir(self, abrir, nome, o_que):
+        """Abre o microfone ou a saida pelo nome escolhido; se o dispositivo
+        nao abrir, tenta o padrao do Windows (sem o som a chamada ficaria
+        muda dos dois lados, sem a pessoa saber por que)."""
+        try:
+            fluxo = abrir(nome)
+            log.info("%s aberto (%s)", o_que, nome or "padrão do Windows")
+            return fluxo
+        except Exception:
+            if not nome:
+                raise
+            log.exception("%s '%s' não abriu; usando o padrão do Windows",
+                          o_que, nome)
+            fluxo = abrir("")
+            log.info("%s aberto (padrão do Windows)", o_que)
+            return fluxo
+
+    def _fechar(self, fluxo):
+        if fluxo is None:
+            return
+        try:
+            fluxo.stop()
+            fluxo.close()
+        except Exception:
+            pass
+
     def _enviar(self, lig):
-        """Microfone -> DLL. Silenciado, manda silencio (o ritmo continua)."""
+        """Microfone -> DLL. Silenciado, manda silencio (o ritmo continua).
+        Um erro passageiro do microfone ou da DLL nao derruba o envio: so a
+        chamada que acabou (ou erros demais seguidos) o encerra."""
         silencio = bytes(BYTES_POR_QUADRO)
-        fluxo = None
+        fluxo, falhas, enviados = None, 0, 0
+        ident = prioridade.thread_de_audio()
         try:
             while not lig.parar.is_set():
-                if fluxo is None or lig.trocar_mic.is_set():
-                    if fluxo is not None:
-                        fluxo.stop()
-                        fluxo.close()
-                    lig.trocar_mic.clear()
-                    fluxo = self.audio.abrir_microfone(lig.mic)
-                dados, _ = fluxo.read(AMOSTRAS)
-                if lig.chamada.mudo:
-                    dados = silencio
-                if not self.ponte.escrever_quadro(lig.call_id, bytes(dados)):
-                    break
-        except Exception:
-            log.exception("erro no microfone da chamada")
-        finally:
-            if fluxo is not None:
                 try:
-                    fluxo.stop()
-                    fluxo.close()
+                    if fluxo is None or lig.trocar_mic.is_set():
+                        self._fechar(fluxo)
+                        fluxo = None
+                        lig.trocar_mic.clear()
+                        fluxo = self._abrir(self.audio.abrir_microfone,
+                                            lig.mic, "microfone")
+                    dados, _ = fluxo.read(AMOSTRAS)
+                    if lig.chamada.mudo:
+                        dados = silencio
+                    if not self.ponte.escrever_quadro(lig.call_id,
+                                                      bytes(dados)):
+                        falhas += 1
+                        if falhas >= LIMITE_DE_FALHAS:
+                            break
+                        continue
+                    falhas = 0
+                    enviados += 1
                 except Exception:
-                    pass
+                    falhas += 1
+                    log.exception("erro no microfone da chamada")
+                    self._fechar(fluxo)
+                    fluxo = None
+                    if falhas >= LIMITE_DE_FALHAS:
+                        break
+                    lig.parar.wait(0.5)
+        finally:
+            self._fechar(fluxo)
+            prioridade.soltar_thread(ident)
+            log.info("microfone da chamada encerrado (%d quadros enviados)",
+                     enviados)
 
     def _receber(self, lig):
-        """DLL -> alto-falante."""
-        fluxo = None
+        """DLL -> alto-falante, com a mesma tolerancia a erros do envio."""
+        fluxo, falhas, tocados = None, 0, 0
+        ident = prioridade.thread_de_audio()
         try:
             while not lig.parar.is_set():
-                if fluxo is None or lig.trocar_saida.is_set():
-                    if fluxo is not None:
-                        fluxo.stop()
-                        fluxo.close()
-                    lig.trocar_saida.clear()
-                    fluxo = self.audio.abrir_saida(lig.saida)
-                quadro = self.ponte.ler_quadro(lig.call_id, 100)
-                if quadro is False:
-                    break
-                if quadro:
-                    fluxo.write(quadro)
-        except Exception:
-            log.exception("erro no alto-falante da chamada")
-        finally:
-            if fluxo is not None:
                 try:
-                    fluxo.stop()
-                    fluxo.close()
+                    if fluxo is None or lig.trocar_saida.is_set():
+                        self._fechar(fluxo)
+                        fluxo = None
+                        lig.trocar_saida.clear()
+                        fluxo = self._abrir(self.audio.abrir_saida,
+                                            lig.saida, "alto-falante")
+                    quadro = self.ponte.ler_quadro(lig.call_id, 100)
+                    if quadro is False:
+                        break
+                    if quadro:
+                        fluxo.write(quadro)
+                        tocados += 1
+                    falhas = 0
                 except Exception:
-                    pass
+                    falhas += 1
+                    log.exception("erro no alto-falante da chamada")
+                    self._fechar(fluxo)
+                    fluxo = None
+                    if falhas >= LIMITE_DE_FALHAS:
+                        break
+                    lig.parar.wait(0.5)
+        finally:
+            self._fechar(fluxo)
+            prioridade.soltar_thread(ident)
+            log.info("alto-falante da chamada encerrado (%d quadros "
+                     "tocados)", tocados)

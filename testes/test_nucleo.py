@@ -816,3 +816,29 @@ def test_modulo_de_credenciais_embutidas_e_lido(monkeypatch):
     assert config.credenciais_embutidas() == (42, "0123456789abcdef")
     falso.API_HASH = "curto"
     assert config.credenciais_embutidas() is None
+
+
+def test_filtro_mencoes_e_respostas_so_de_grupo_com_citacao_nao_lida():
+    grupo = m.Conversa("c", "g1", "Time", "whatsapp", "grupo")
+    assert any(t == "citacoes" for t, _ in m.FILTROS_TIPO)
+    assert not m.passa_filtro(grupo, "citacoes")
+    grupo.contar_nova()
+    assert not m.passa_filtro(grupo, "citacoes")      # nao citou
+    grupo.contar_nova(cita_voce=True)
+    assert m.passa_filtro(grupo, "citacoes") and grupo.nao_lidas == 2
+    grupo.nao_lidas = 0                               # a pessoa leu
+    assert not m.passa_filtro(grupo, "citacoes")
+    grupo.contar_nova()                  # a contagem antiga nao volta
+    assert grupo.citacoes == 0 and not m.passa_filtro(grupo, "citacoes")
+    privada = m.Conversa("c", "p1", "Ana", "whatsapp", "privada",
+                         nao_lidas=1, citacoes=1)
+    assert not m.passa_filtro(privada, "citacoes")
+
+
+def test_citacoes_da_conversa_voltam_do_banco(tmp_path):
+    from telezapp.armazenamento.banco import Banco
+    banco = Banco(str(tmp_path / "t.db"))
+    banco.salvar_conversas([m.Conversa("c", "g1", "Time", "whatsapp",
+                                       "grupo", nao_lidas=3, citacoes=2)])
+    assert banco.conversas("c")[0].citacoes == 2
+    banco.fechar()

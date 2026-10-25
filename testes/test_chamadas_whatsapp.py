@@ -263,3 +263,43 @@ def test_ponte_sem_a_dll_nao_esta_disponivel():
     class SemChamadas:
         pass
     assert cw.Ponte.disponivel(SemChamadas()) is False
+
+
+def test_dispositivo_que_nao_abre_cai_no_padrao_do_windows(mundo):
+    v, ponte, bus, audio = mundo
+    abrir_mic, abrir_saida = audio.abrir_microfone, audio.abrir_saida
+
+    def mic(nome):
+        if nome == "Mic quebrado":
+            raise OSError("não abriu")
+        return abrir_mic(nome)
+
+    def saida(nome):
+        if nome == "Saida quebrada":
+            raise OSError("não abriu")
+        return abrir_saida(nome)
+    audio.abrir_microfone, audio.abrir_saida = mic, saida
+    v.ligar(CID, "Mic quebrado", "Saida quebrada")
+    assert esperar(lambda: ponte.ligadas)
+    ponte.fila.put({"ev": "ready", "call": "C1"})
+    assert esperar(lambda: audio.microfones_abertos == [""])
+    assert esperar(lambda: audio.saidas_abertas == [""])
+    assert esperar(lambda: ponte.escritos > 3)       # o microfone segue
+
+
+def test_erro_passageiro_no_som_nao_derruba_a_chamada(mundo):
+    v, ponte, bus, audio = mundo
+    abrir_mic = audio.abrir_microfone
+    tentativas = []
+
+    def mic(nome):
+        tentativas.append(nome)
+        if len(tentativas) == 1:
+            raise OSError("dispositivo ocupado")
+        return abrir_mic(nome)
+    audio.abrir_microfone = mic
+    v.ligar(CID)
+    assert esperar(lambda: ponte.ligadas)
+    ponte.fila.put({"ev": "ready", "call": "C1"})
+    assert esperar(lambda: ponte.escritos > 3, 5.0)  # voltou sozinho
+    assert len(tentativas) >= 2

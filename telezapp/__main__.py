@@ -137,11 +137,12 @@ def main():
     janela.midias = GerenteMidias(cfg, banco, barramento,
                                   janela.contas.provedor)
     # aberto pelo Windows ao entrar na conta (--segundo-plano): com a opcao
-    # de segundo plano ligada, fica so no icone da bandeja
-    escondida = ("--segundo-plano" in sys.argv[1:]
-                 and bool(cfg.get("segundo_plano")))
-    if not escondida:
-        janela.Show()
+    # de segundo plano ligada, abre minimizada na barra de tarefas
+    minimizada = ("--segundo-plano" in sys.argv[1:]
+                  and bool(cfg.get("segundo_plano")))
+    if minimizada:
+        janela.Iconize(True)
+    janela.Show()
     if cfg.get("iniciar_com_windows"):
         from telezapp.nucleo import inicializacao
         inicializacao.definir(True)      # mantem o caminho em dia

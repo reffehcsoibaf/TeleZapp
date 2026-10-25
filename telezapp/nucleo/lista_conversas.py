@@ -3,7 +3,7 @@
 """O que cada linha da lista de conversas mostra, e em que ordem.
 
 Sem wx, para testar em qualquer sistema. A escolha vive em `lista_conversas`
-(config): {"ordem": [as quatro chaves, na ordem], "ocultos": [chaves que
+(config): {"ordem": [as chaves de ITENS, na ordem], "ocultos": [chaves que
 ficam de fora]}. Sempre sobra pelo menos um item ativado.
 """
 from telezapp.nucleo import modelos as m
@@ -13,20 +13,23 @@ ITENS = (
     ("servico", "Serviço a que a conversa pertence"),
     ("nao_lidas", "Quantidade de mensagens não lidas"),
     ("previa", "Trecho da última mensagem"),
+    ("reacoes", "Reações às minhas mensagens"),
+    ("quem_reagiu", "Quem reagiu às minhas mensagens"),
 )
 CHAVES = tuple(c for c, _ in ITENS)
 ROTULOS = dict(ITENS)
-# o trecho da ultima mensagem vem desligado: a leitura da lista segue como
-# sempre foi ate a pessoa ligar
-PADRAO = {"ordem": list(CHAVES), "ocultos": ["previa"]}
+# o trecho da ultima mensagem e as reacoes vem desligados: a leitura da lista
+# segue como sempre foi ate a pessoa ligar
+PADRAO = {"ordem": list(CHAVES), "ocultos": ["previa", "reacoes", "quem_reagiu"]}
 TAMANHO_DA_PREVIA = 80
 MENSAGEM_DO_MINIMO = "Pelo menos um item precisa ficar ativado."
 
 
 def normalizar(valor):
-    """O valor guardado, corrigido: as quatro chaves uma vez cada (as
-    desconhecidas saem, as que faltam entram no fim), ocultos so entre elas
-    e pelo menos um ativado (se tudo estiver oculto, voltam todos)."""
+    """O valor guardado, corrigido: as chaves uma vez cada (as desconhecidas
+    saem, as que faltam entram no fim, ocultas se o padrao as oculta), ocultos
+    so entre elas e pelo menos um ativado (se tudo estiver oculto, voltam
+    todos)."""
     if not isinstance(valor, dict):
         return {"ordem": list(PADRAO["ordem"]),
                 "ocultos": list(PADRAO["ocultos"])}
@@ -34,8 +37,11 @@ def normalizar(valor):
     for c in valor.get("ordem") or []:
         if c in CHAVES and c not in ordem:
             ordem.append(c)
-    ordem += [c for c in CHAVES if c not in ordem]
-    ocultos = [c for c in ordem if c in (valor.get("ocultos") or [])]
+    novos = [c for c in CHAVES if c not in ordem]
+    ordem += novos
+    escondidos = list(valor.get("ocultos") or []) + [
+        c for c in novos if c in PADRAO["ocultos"]]
+    ocultos = [c for c in ordem if c in escondidos]
     if len(ocultos) >= len(ordem):
         ocultos = []
     return {"ordem": ordem, "ocultos": ocultos}
@@ -111,17 +117,44 @@ def _nao_lidas(c):
     return "1 não lida" if c.nao_lidas == 1 else "%d não lidas" % c.nao_lidas
 
 
-def rotulo(c, valor=None, previa=""):
+def texto_das_reacoes(n):
+    """"1 reação nova à sua mensagem" para n reacoes recebidas e ainda nao
+    vistas (vazio se n for 0)."""
+    if n <= 0:
+        return ""
+    return "1 reação nova à sua mensagem" if n == 1 \
+        else "%d reações novas às suas mensagens" % n
+
+
+def texto_de_quem_reagiu(pessoas, maximo=3):
+    """"Ana reagiu com 👍" ou "Ana (👍) e Bia (❤) reagiram", para a lista
+    [(quem, emoji)] de quem reagiu desde a ultima vez que a conversa foi
+    aberta (vazio se ninguem)."""
+    if not pessoas:
+        return ""
+    if len(pessoas) == 1:
+        return "%s reagiu com %s" % pessoas[0]
+    nomes = ["%s (%s)" % p for p in pessoas[:maximo]]
+    if len(pessoas) > maximo:
+        nomes.append("mais %d" % (len(pessoas) - maximo))
+    return "%s e %s reagiram" % (", ".join(nomes[:-1]), nomes[-1])
+
+
+def rotulo(c, valor=None, previa="", reacoes=0, quem_reagiu=()):
     """A linha da conversa na lista. Fixada e silenciada aparecem sempre,
     logo depois do servico (ou do nome, se o servico estiver de fora). Se os
     itens ativados nao tiverem nada para mostrar nesta conversa (sem nao
-    lidas e sem mensagem, por exemplo), vale o nome."""
+    lidas e sem mensagem, por exemplo), vale o nome. reacoes: quantas
+    reacoes as mensagens minhas receberam desde que a conversa foi aberta
+    pela ultima vez; quem_reagiu: [(quem, emoji)] dessas reacoes."""
     partes = []
     for chave in ativos(valor):
         texto = {"nome": c.nome,
                  "servico": m.SERVICOS.get(c.servico, c.servico),
                  "nao_lidas": _nao_lidas(c),
-                 "previa": previa}[chave]
+                 "previa": previa,
+                 "reacoes": texto_das_reacoes(reacoes),
+                 "quem_reagiu": texto_de_quem_reagiu(quem_reagiu)}[chave]
         if texto:
             partes.append((chave, texto))
     marcas = (["fixada"] if c.fixada else []) + (

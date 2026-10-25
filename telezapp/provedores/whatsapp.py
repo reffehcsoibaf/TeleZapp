@@ -2899,6 +2899,16 @@ class ProvedorWhatsApp(Provedor):
         return any(jid_de_texto(men.get("jid") or "")[0] in meus
                    for men in mencoes)
 
+    def _responde_a_mim(self, msg):
+        """A mensagem de grupo responde a uma mensagem minha?"""
+        if not msg.resposta_a:
+            return False
+        try:
+            return any(x.minha for x in self.banco.mensagens_por_id(
+                msg.conta_id, [msg.resposta_a], msg.conversa_id))
+        except Exception:
+            return False
+
     @staticmethod
     def _mencao_sem_nome(men):
         nome = men.get("nome") or ""
@@ -3347,7 +3357,8 @@ class ProvedorWhatsApp(Provedor):
                 if len(self._vistas) > MAX_GUARDADAS:
                     self._vistas = set(list(self._vistas)[-MAX_GUARDADAS // 2:])
             self._enriquecer_mencoes(msg)
-            if grupo and not msg.minha and self._cita_voce(msg):
+            if grupo and not msg.minha and (
+                    self._cita_voce(msg) or self._responde_a_mim(msg)):
                 m.atualizar_extras(msg, citou_voce=True)
             if self.banco.depuracao:
                 self.banco.guardar_depuracao(
@@ -3384,7 +3395,8 @@ class ProvedorWhatsApp(Provedor):
                 if conv.temporaria_s != prazo:
                     conv.temporaria_s = prazo
                 if not msg.minha:
-                    conv.nao_lidas += 1
+                    conv.contar_nova(grupo and
+                                     m.extras_de(msg)["citou_voce"])
                     self._nao_lidas.setdefault(cid, []).append(
                         (msg.id, origem.Sender))
                     if silenciosa:

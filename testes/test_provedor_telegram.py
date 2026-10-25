@@ -1398,8 +1398,14 @@ def test_deixar_de_seguir_e_silenciar_canal_do_telegram():
 
         async def get_input_entity(self, e):
             return T.InputPeerChannel(1, 5)
+
+        async def delete_dialog(self, e):
+            # o que o Telethon faz num canal: sair dele
+            await self(functions.channels.LeaveChannelRequest(
+                T.InputChannel(1, 5)))
     p = tg.ProvedorTelegram.__new__(tg.ProvedorTelegram)
     p.cliente = Cliente()
+    p._agendar = lambda corotina: corotina.close()   # a atualizacao da lista
 
     def rodar(acao, valor=None):
         return asyncio.run(p._administrar_canal("1", acao, valor))
