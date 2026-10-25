@@ -1,0 +1,30 @@
+--- /dev/fd/63	2026-10-25 19:09:04.000000000 -0300
++++ /dev/fd/62	2026-10-25 19:09:04.000000000 -0300
+@@ -683,10 +683,27 @@
+ 	}
+ 	e.mu.Lock()
+ 	m.acceptPending = true
++	from, creator := m.from, m.creator
+ 	e.mu.Unlock()
+ 
+ 	c.setPhase(CallPhaseConnecting)
+ 	e.maybeStartMedia(c.id)
++	// TeleZapp: quem liga com este mesmo codigo (outro TeleZapp) nunca manda o
++	// <mute_v2> que dispara o <accept>; sem ele quem ligou nao sabe que
++	// atendemos e a chave de midia nao troca para o aparelho que atendeu. Se o
++	// <mute_v2> nao chegar logo, aceita assim mesmo (sendAccept so envia uma vez).
++	id := c.id
++	time.AfterFunc(2*time.Second, func() {
++		e.mu.Lock()
++		m := e.calls[id]
++		pending := m != nil && m.acceptPending
++		e.mu.Unlock()
++		if !pending {
++			return
++		}
++		e.c.log.Info().Str("call_id", id).Msg("no mute_v2 after Answer; sending accept anyway")
++		e.sendAccept(id, from, creator)
++	})
+ 	return nil
+ }
+ 
