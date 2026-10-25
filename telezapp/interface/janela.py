@@ -6724,6 +6724,22 @@ class Janela(wx.Frame):
         finally:
             dlg.Destroy()
 
+    def _limpar_conversa_com_opcoes(self, conv):
+        """A janela de limpeza ja filtrada nesta conversa (botao dos
+        detalhes). Devolve True se algo foi apagado."""
+        from telezapp.interface import limpeza as ui_limpeza
+        feito = []
+        dlg = ui_limpeza.DialogoLimpeza(
+            self, self.banco, [], [],
+            lambda t: self.fala.falar(t, interromper=True),
+            lambda sel: (feito.append(sel), self._ao_limpar(sel)),
+            so_a_conversa=(conv.conta_id, conv.id, conv.nome))
+        try:
+            dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+        return bool(feito)
+
     def _ao_limpar(self, selecao):
         """Depois de limpar mensagens: tira da memoria o que saiu do banco."""
         if selecao.o_que != "mensagens":
