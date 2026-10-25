@@ -800,7 +800,7 @@ Conferido o plano de 13/10 contra o código. Decisões do responsável:
 
 - **Formulário de relatos (23/10/2026):** `site/relatar.html` envia para o Worker `telezapp-relatos` (pasta `relatos/`, KV, relatos guardados 90 dias, leitura em `/admin` com senha, aviso por notificação do ntfy). **Verificado ao vivo pelo responsável (23/10/2026):** um relato de teste mandado direto ao Worker apareceu na lista do `/admin` e a notificação chegou ao celular. A página foi publicada (PR #25) e o envio por ela, com um log anexado, chegou ao Worker (visto por mim com um relato de teste, depois apagado); o responsável confirmou em 23/10/2026 que "tudo funcionou na página de relatos". O endereço do `/admin` com a senha ficou guardado por ele fora da pasta do projeto.
 
-## Versão 2026.10.25.1 (25/10/2026, ainda não publicada): chamada de saída sem som
+## Versão 2026.10.25.1 (25/10/2026): chamadas, banco de sessão e limpar a conversa
 
 - **Banco de sessão travando (25/10/2026):** o outro lado relatou nova falha de ligar ("failed to store session ... database is locked"). Reproduzi com o mesmo driver e a regra de abrir (`_foreign_keys=on`): 1177 falhas em 1800 transações concorrentes; com WAL, espera de 30 s e `_txlock=immediate`, 0 falhas. Aplicado na DLL (todas as contas WhatsApp usam esse banco). **Risco a observar:** WAL não funciona em pasta de rede; quem usar a pasta de dados num disco de rede pode ter problemas. Não verificado ao vivo.
 
