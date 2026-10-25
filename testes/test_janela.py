@@ -5415,3 +5415,43 @@ def test_quem_reagiu_entra_na_linha_e_zera_ao_abrir(j):
     assert j.lista_conv.itens[0] == "Ana, Ana (❤) e Bia (😂) reagiram"
     j._abrir_conversa(j.indice[("t1", "10")])
     assert ("t1", "10") not in j.quem_reagiu
+
+
+def test_voz_apagada_pelo_autor_nao_toca(jm_midia, monkeypatch):
+    j = jm_midia
+    MotorFalso.criados = []
+    monkeypatch.setattr(jm, "Reprodutor", MotorFalso)
+    apagada = voz("5")
+    m.atualizar_extras(apagada, apagada=True)
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [apagada]))
+    j.midias.prontas[("t1", "10", "5")] = "/p/5.ogg"      # ainda no disco
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    selecionar(j, "5")
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j._abrir_midia(x=apagada)                  # Control O tambem
+    assert not MotorFalso.criados and j.abertas == []
+    assert "Esta mensagem foi apagada pelo autor." in ditas
+    assert j._genero_ia(apagada) == ""         # nem transcrever
+
+
+def test_apagar_para_todos_para_o_audio_e_tira_o_arquivo(jm_midia,
+                                                        monkeypatch):
+    j = jm_midia
+    MotorFalso.criados = []
+    monkeypatch.setattr(jm, "Reprodutor", MotorFalso)
+    monkeypatch.setattr(jm.wx, "CallLater", lambda *a, **k: None,
+                        raising=False)
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [voz("5")]))
+    j.midias.prontas[("t1", "10", "5")] = "/p/5.ogg"
+    selecionar(j, "5")
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert MotorFalso.criados[0].tocando
+    tiradas = []
+    monkeypatch.setattr(jm.limpeza, "apagar_midia_da_mensagem",
+                        lambda banco, *chave: tiradas.append(chave))
+    apagada = voz("5")
+    m.atualizar_extras(apagada, apagada=True)
+    j.b.publicar(ev.MensagemAtualizada("t1", "10", apagada, "apagada"))
+    assert MotorFalso.criados[0].fechado and j.audio is None
+    assert tiradas == [("t1", "10", "5")]

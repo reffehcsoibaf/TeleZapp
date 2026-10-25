@@ -145,6 +145,22 @@ def apagar_mensagem(banco, conta_id, conversa_id, mensagem_id):
     return liberados
 
 
+def apagar_midia_da_mensagem(banco, conta_id, conversa_id, mensagem_id):
+    """O autor apagou a mensagem para todos: o arquivo baixado sai daqui, mas
+    a mensagem fica (marcada como apagada). Devolve os bytes liberados."""
+    reg = banco.midia(conta_id, conversa_id, mensagem_id)
+    if not reg:
+        return 0
+    liberados = 0
+    try:
+        liberados = _tamanho(*reg)
+        _apagar_arquivo(reg[0])
+    except OSError:
+        return 0
+    banco.esquecer_midia(conta_id, conversa_id, mensagem_id)
+    return liberados
+
+
 def resumo_de_espaco(banco, n_conversas):
     """Texto do espaco usado: conversas, mensagens de texto, midias baixadas
     (quantas e quanto ocupam) e o mesmo por tipo, como na limpeza."""

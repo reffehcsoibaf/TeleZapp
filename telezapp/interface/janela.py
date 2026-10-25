@@ -3104,6 +3104,19 @@ class Janela(wx.Frame):
         return conv is not None and not aberta and \
             bool(conv.arquivada or conv.trancada or conv.silenciada())
 
+    def _descartar_midia_apagada(self, msg):
+        """O autor apagou a mensagem para todos: para o audio que toca dela e
+        tira o arquivo baixado (a mensagem fica, marcada como apagada)."""
+        if msg.tipo not in armazem.BAIXAVEIS:
+            return
+        if self.audio is not None and self.audio[0] == msg.chave:
+            self._parar_audio(falar=False)
+        try:
+            limpeza.apagar_midia_da_mensagem(
+                self.banco, msg.conta_id, msg.conversa_id, msg.id)
+        except Exception:
+            log.exception("erro ao tirar a mídia de uma mensagem apagada")
+
     def _ev_atualizada(self, e):
         """Reacao, edicao ou mensagem apagada pelo autor."""
         chave = (e.conta_id, e.conversa_id)
@@ -3119,6 +3132,8 @@ class Janela(wx.Frame):
             quem = [p for p in self.quem_reagiu.get(chave, [])
                     if p[0] != e.quem]
             self.quem_reagiu[chave] = quem + [(e.quem, e.emoji)]
+        if e.motivo == "apagada":
+            self._descartar_midia_apagada(e.mensagem)
         if self._atualizar_previa_se_for_a_ultima(chave, e.mensagem) or (
                 nova_reacao and {"reacoes", "quem_reagiu"} & set(
                     lista_conv_nucleo.ativos(self._lista_em_uso()))):
@@ -4148,7 +4163,7 @@ class Janela(wx.Frame):
     def _genero_ia(x):
         """O que a IA faz com a mensagem: audio, imagem, figurinha, video ou
         pdf; vazio se nada."""
-        if x.id.startswith("local-"):
+        if x.id.startswith("local-") or m.extras_de(x)["apagada"]:
             return ""
         if x.tipo in (m.VOZ, m.AUDIO):
             return "audio"
@@ -6419,6 +6434,11 @@ class Janela(wx.Frame):
             return
         if x.id.startswith("local-"):
             return
+        if m.extras_de(x)["apagada"]:
+            bipe("erro")
+            self.fala.falar("Esta mensagem foi apagada pelo autor.",
+                            interromper=True)
+            return
         if self.banco.foi_limpa(x.conta_id, x.conversa_id, x.id):
             bipe("erro")
             self.fala.falar(TEXTO_LIMPA, interromper=True)
@@ -6546,7 +6566,8 @@ class Janela(wx.Frame):
                     or x.id.startswith("local-")):
                 return False
             if achou and x.tipo in (m.VOZ, m.AUDIO) and \
-                    not x.id.startswith("local-"):
+                    not x.id.startswith("local-") and \
+                    not m.extras_de(x)["apagada"]:
                 # o "Próximo áudio" vai junto do anuncio de quem fala, em
                 # _tocar_sem_janela: falar os dois separados cortava o
                 # primeiro (cada fala interrompe a anterior)
@@ -6606,7 +6627,7 @@ class Janela(wx.Frame):
     def _salvar_midia(self):
         x = self._mensagem_selecionada()
         if x is None or self.midias is None or \
-                x.tipo not in armazem.BAIXAVEIS:
+                x.tipo not in armazem.BAIXAVEIS or m.extras_de(x)["apagada"]:
             return
         caminho = self.midias.caminho(x)
         if not caminho:
