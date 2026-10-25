@@ -23,6 +23,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,6 +31,9 @@ import (
 	"unsafe"
 
 	"github.com/purpshell/meowcaller"
+	"github.com/rs/zerolog"
+	"go.mau.fi/whatsmeow/types/events"
+	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
 const (
@@ -49,8 +53,66 @@ var (
 	chamadasMu      sync.Mutex
 	chamadasCliente = map[string]*meowcaller.Client{}
 	chamadasEventos = map[string]chan string{}
+	chamadasLogs    = map[string]waLog.Logger{} // log do cliente, para registrar()
 	chamadasAtivas  = map[string]*chamadaAtiva{} // chave: id do cliente + "|" + id da chamada
 )
+
+// O log vai em relatos: telefones e enderecos aparecem so com os 4 ultimos
+// digitos.
+var reEndereco = regexp.MustCompile(`\d{5,}((?::\d+)?@[A-Za-z.]+)`)
+
+func mascarar(s string) string {
+	return reEndereco.ReplaceAllStringFunc(s, func(m string) string {
+		i := strings.IndexAny(m, ":@")
+		numero := m[:i]
+		return "..." + numero[len(numero)-4:] + m[i:]
+	})
+}
+
+func mascararNumero(s string) string {
+	if strings.Contains(s, "@") || len(s) <= 4 {
+		return mascarar(s)
+	}
+	return "..." + s[len(s)-4:]
+}
+
+// logChamadas leva o que o meowcaller escreve (zerolog, JSON) para o log do
+// cliente, que chega ao Python. Sai tudo como aviso (WARN) com o prefixo
+// "chamadas:", porque o Python so grava avisos do whatsmeow por padrao. Uma
+// mensagem que se repete aparece nas 8 primeiras vezes e depois a cada 200.
+type logChamadas struct {
+	log    waLog.Logger
+	mu     sync.Mutex
+	vistos map[string]int
+}
+
+func (w *logChamadas) Write(p []byte) (int, error) {
+	linha := strings.TrimSpace(string(p))
+	var campos map[string]any
+	chave := linha
+	if json.Unmarshal(p, &campos) == nil {
+		chave = fmt.Sprint(campos["level"], "|", campos["message"])
+	}
+	w.mu.Lock()
+	w.vistos[chave]++
+	n := w.vistos[chave]
+	w.mu.Unlock()
+	if n <= 8 || n%200 == 0 {
+		w.log.Warnf("chamadas: meowcaller %s", mascarar(linha))
+	}
+	return len(p), nil
+}
+
+// registrar escreve uma linha de diagnostico das chamadas no log do cliente.
+func registrar(cliente, formato string, args ...any) {
+	chamadasMu.Lock()
+	l := chamadasLogs[cliente]
+	chamadasMu.Unlock()
+	if l == nil {
+		return
+	}
+	l.Warnf("chamadas: %s", mascarar(fmt.Sprintf(formato, args...)))
+}
 
 // chamadaAtiva liga uma chamada do meowcaller as filas de audio do Python.
 type chamadaAtiva struct {
@@ -65,6 +127,9 @@ type chamadaAtiva struct {
 	saida chan []byte
 	fim   chan struct{}
 	uma   sync.Once
+	// quadros que passaram, para o log dizer se o som chegou ou saiu
+	recebidos atomic.Int64 // do outro lado (WriteFrame)
+	enviados  atomic.Int64 // do nosso microfone (ReadFrame)
 }
 
 func (c *chamadaAtiva) encerrar() { c.uma.Do(func() { close(c.fim) }) }
@@ -75,6 +140,7 @@ func (c *chamadaAtiva) ReadFrame() ([]float32, error) {
 	f := make([]float32, meowcaller.FrameSamples)
 	select {
 	case b := <-c.saida:
+		c.enviados.Add(1)
 		for i := range f {
 			f[i] = float32(int16(uint16(b[i*2])|uint16(b[i*2+1])<<8)) / 32768
 		}
@@ -86,6 +152,7 @@ func (c *chamadaAtiva) ReadFrame() ([]float32, error) {
 }
 
 func (c *chamadaAtiva) WriteFrame(frame []float32) error {
+	c.recebidos.Add(1)
 	b := make([]byte, len(frame)*2)
 	for i, v := range frame {
 		if v > 1 {
@@ -153,13 +220,38 @@ func ligarChamada(cliente string, c *meowcaller.Call, entrante bool) *chamadaAti
 	chamadasMu.Unlock()
 	c.Receive(a)
 	c.Play(a)
+	inicio := time.Now()
+	go func() { // a cada 5 s: quantos quadros ja passaram
+		t := time.NewTicker(5 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-a.fim:
+				return
+			case <-t.C:
+				registrar(cliente, "chamada %s, %.0fs: quadros do outro lado=%d, do microfone=%d",
+					id, time.Since(inicio).Seconds(), a.recebidos.Load(), a.enviados.Load())
+			}
+		}
+	}()
+	registrar(cliente, "chamada %s criada (entrante=%v, com=%s)", id, entrante, c.Peer())
 	c.OnStateChange(func(p meowcaller.CallPhase) {
+		registrar(cliente, "chamada %s: fase %d depois de %.1fs", id, int(p), time.Since(inicio).Seconds())
 		emitirEvento(cliente, map[string]any{"ev": "state", "call": id, "phase": int(p)})
 	})
+	// so a chamada de saida: o outro lado atendeu (a fase Connecting do
+	// meowcaller vem antes, quando o relay e alocado, e nao quer dizer isso)
+	c.OnPeerAccept(func() {
+		registrar(cliente, "chamada %s: a outra pessoa atendeu, depois de %.1fs", id, time.Since(inicio).Seconds())
+		emitirEvento(cliente, map[string]any{"ev": "accepted", "call": id})
+	})
 	c.OnReady(func() {
+		registrar(cliente, "chamada %s: som do outro lado chegou (primeiro RTP) depois de %.1fs", id, time.Since(inicio).Seconds())
 		emitirEvento(cliente, map[string]any{"ev": "ready", "call": id})
 	})
 	c.OnEnd(func(motivo string) {
+		registrar(cliente, "chamada %s encerrada (%s) depois de %.1fs: quadros do outro lado=%d, do microfone=%d",
+			id, motivo, time.Since(inicio).Seconds(), a.recebidos.Load(), a.enviados.Load())
 		a.encerrar()
 		chamadasMu.Lock()
 		delete(chamadasAtivas, chaveChamada(cliente, id))
@@ -179,7 +271,32 @@ func instalarChamadas(id string) {
 	if cli == nil {
 		return
 	}
-	mc := meowcaller.NewClient(cli)
+	registro := &logChamadas{log: cli.Log.Sub("Chamadas"), vistos: map[string]int{}}
+	chamadasMu.Lock()
+	chamadasLogs[id] = registro.log
+	chamadasMu.Unlock()
+	logger := zerolog.New(registro).Level(zerolog.InfoLevel)
+	mc := meowcaller.NewClient(cli, meowcaller.WithLogger(logger))
+	// o que o WhatsApp mandou sobre chamadas, antes de o meowcaller tratar:
+	// mostra se o "atendeu" chegou, de que aparelho e por que a chamada acabou
+	cli.AddEventHandler(func(evt any) {
+		switch v := evt.(type) {
+		case *events.CallOffer:
+			registrar(id, "sinal: oferta %s de %s", v.CallID, v.CallCreator)
+		case *events.CallPreAccept:
+			registrar(id, "sinal: pre-aceite %s de %s (%s)", v.CallID, v.From, v.RemotePlatform)
+		case *events.CallAccept:
+			registrar(id, "sinal: ACEITE %s de %s (%s)", v.CallID, v.From, v.RemotePlatform)
+		case *events.CallTransport:
+			registrar(id, "sinal: transporte %s de %s", v.CallID, v.From)
+		case *events.CallReject:
+			registrar(id, "sinal: recusada %s de %s", v.CallID, v.From)
+		case *events.CallTerminate:
+			registrar(id, "sinal: encerrada %s de %s (%s)", v.CallID, v.From, v.Reason)
+		case *events.UnknownCallEvent:
+			registrar(id, "sinal: desconhecido %s", v.Node.Tag)
+		}
+	})
 	chamadasMu.Lock()
 	chamadasCliente[id] = mc
 	chamadasEventos[id] = make(chan string, eventosNaFila)
@@ -195,6 +312,7 @@ func removerChamadas(id string) {
 	defer chamadasMu.Unlock()
 	delete(chamadasCliente, id)
 	delete(chamadasEventos, id)
+	delete(chamadasLogs, id)
 	for k, a := range chamadasAtivas {
 		if strings.HasPrefix(k, id+"|") {
 			a.encerrar()
@@ -308,8 +426,10 @@ func CallDial(id *C.char, target *C.char, buf *C.char, cap C.int) C.int {
 			break
 		}
 	}
+	registrar(cliente, "ligando para %s (pedido: %s)", mascararNumero(destino), mascararNumero(numero))
 	c, err := mc.Call(ctx, destino)
 	if err != nil {
+		registrar(cliente, "a ligacao para %s falhou: %v", mascararNumero(destino), err)
 		return erro(err)
 	}
 	ligarChamada(cliente, c, false)
@@ -326,6 +446,7 @@ func CallAnswer(id *C.char, call *C.char) C.int {
 		return erroSemChamada
 	}
 	if err := a.call.Answer(); err != nil {
+		registrar(C.GoString(id), "atender %s falhou: %v", C.GoString(call), err)
 		return -1
 	}
 	a.atendida.Store(true)

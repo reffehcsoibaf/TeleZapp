@@ -276,6 +276,30 @@ class Choice(Janela):
         self.sel = i
 
 
+class SpinCtrl(Janela):
+    def __init__(self, *a, initial=0, **k):
+        super().__init__()
+        self.valor = initial
+
+    def GetValue(self):
+        return self.valor
+
+    def SetValue(self, v):
+        self.valor = v
+
+
+class CheckBox(Janela):
+    def __init__(self, *a, **k):
+        super().__init__()
+        self.marcado = False
+
+    def GetValue(self):
+        return self.marcado
+
+    def SetValue(self, v):
+        self.marcado = bool(v)
+
+
 class StaticText(Janela):
     def __init__(self, pai=None, label="", **k):
         super().__init__()

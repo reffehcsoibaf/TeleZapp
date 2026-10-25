@@ -3033,7 +3033,8 @@ def test_detalhes_de_pessoa_mostra_dados_do_contato_e_botoes(j):
     assert "Nome de usuário: @ana" in texto and "Nome no perfil: Ana S." in texto
     assert "Mensagens guardadas: 2." in texto and "Fotos: 1" in texto
     assert [r for r, _ in c._botoes()] == [
-        "&Editar contato", "&Mídias", "&Grupos em comum"]
+        "&Editar contato", "&Mídias", "&Grupos em comum",
+        "&Limpar a conversa..."]
 
 
 def test_detalhes_de_grupo_mostram_membros_e_so_admin_ve_administrar(j):
@@ -3051,7 +3052,8 @@ def test_detalhes_de_grupo_mostram_membros_e_so_admin_ve_administrar(j):
     assert "Você não é administrador." in texto
     assert "Criador: Ana" in texto
     rotulos = [r for r, _ in c._botoes()]
-    assert rotulos == ["Ver &membros (2)", "&Mídias"]
+    assert rotulos == ["Ver &membros (2)", "&Mídias",
+                       "&Limpar a conversa..."]
     dados["sou_admin"] = True
     assert "&Administrar grupo" in [r for r, _ in c._botoes()]
     dados["comunidade"] = True
@@ -5455,3 +5457,31 @@ def test_apagar_para_todos_para_o_audio_e_tira_o_arquivo(jm_midia,
     j.b.publicar(ev.MensagemAtualizada("t1", "10", apagada, "apagada"))
     assert MotorFalso.criados[0].fechado and j.audio is None
     assert tiradas == [("t1", "10", "5")]
+
+
+def test_botao_limpar_a_conversa_abre_a_limpeza_so_dela(j, monkeypatch):
+    from telezapp.interface import limpeza as ui_limpeza
+    c = _controle(j, "privada", {})
+    assert ("&Limpar a conversa...", c.limpar) in [
+        (r, f) for r, f in c._botoes()] or any(
+        r == "&Limpar a conversa..." for r, _ in c._botoes())
+    abertas = []
+
+    class Falsa:
+        def __init__(self, pai, banco, contas, conversas, falar, ao_limpar,
+                     so_a_conversa=None):
+            abertas.append(so_a_conversa)
+            self.ao_limpar = ao_limpar
+
+        def ShowModal(self):
+            from telezapp.nucleo import limpeza as nl
+            self.ao_limpar(nl.Selecao(nl.MIDIAS))
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(ui_limpeza, "DialogoLimpeza", Falsa)
+    atualizou = []
+    c._atualizar = lambda: atualizou.append(True)
+    c.limpar()
+    assert abertas == [(c.conv.conta_id, c.conv.id, c.conv.nome)]
+    assert atualizou == [True]            # algo saiu: refaz os detalhes

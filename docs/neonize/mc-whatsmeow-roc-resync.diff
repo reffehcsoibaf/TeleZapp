@@ -1,0 +1,73 @@
+--- /dev/fd/63	2026-10-25 19:59:38.000000000 -0300
++++ /dev/fd/62	2026-10-25 19:59:38.000000000 -0300
+@@ -167,6 +167,7 @@
+ 	sendRoc      srtp.RocTracker
+ 	recvMu       sync.Mutex
+ 	recvRoc      srtp.RecvRocTracker
++	unprotectBad atomic.Int64 // pacotes de audio que nao autenticaram (para o log)
+ 	packetsSent  atomic.Uint32
+ 	octetsSent   atomic.Uint32
+ 	rtpTimestamp atomic.Uint32
+@@ -353,9 +354,38 @@
+ 	roc := p.recvRoc.EstimateRoc(header.SequenceNumber)
+ 	tag := packet[len(withoutTag):]
+ 	if !srtp.VerifyWarpMITag(p.recvKeys.AuthKey[:], withoutTag, roc, p.warpMITagLen, tag, p.log) {
+-		p.recvMu.Unlock()
+-		p.log.Debug().Uint32("ssrc", header.Ssrc).Uint16("seq", header.SequenceNumber).Uint32("roc", roc).Msg("unprotect: WARP MI authentication failed")
+-		return rtp.RtpHeader{}, nil, false
++		// TeleZapp: o estimador pode ter perdido o ROC (rolagem da sequencia, perda
++		// grande). Tenta os vizinhos; se um autentica, o pacote e valido e o
++		// estimador volta a acompanhar. A etiqueta de autenticacao garante que nao
++		// aceita pacote falso.
++		estimado := roc
++		resync := false
++		for _, cand := range []uint32{estimado + 1, estimado - 1, estimado + 2} {
++			if cand > estimado+2 || (cand < estimado && estimado == 0) {
++				continue
++			}
++			if srtp.VerifyWarpMITag(p.recvKeys.AuthKey[:], withoutTag, cand, p.warpMITagLen, tag, p.log) {
++				p.recvRoc.Resync(cand, header.SequenceNumber)
++				roc = cand
++				resync = true
++				break
++			}
++		}
++		if resync {
++			p.log.Info().Uint32("ssrc", header.Ssrc).Uint16("seq", header.SequenceNumber).
++				Uint32("roc_estimado", estimado).Uint32("roc_certo", roc).Msg("recv roc resynchronized")
++		} else {
++			n := p.unprotectBad.Add(1)
++			if n <= 3 || n%200 == 0 {
++				r, sL, ini := p.recvRoc.Snapshot()
++				p.log.Warn().Uint32("ssrc", header.Ssrc).Uint16("seq", header.SequenceNumber).
++					Uint32("roc_estimado", estimado).Uint32("roc_atual", r).Uint16("ultima_seq", sL).
++					Bool("iniciado", ini).Int64("falhas", n).Msg("unprotect: authentication failed")
++			}
++			p.recvMu.Unlock()
++			p.log.Debug().Uint32("ssrc", header.Ssrc).Uint16("seq", header.SequenceNumber).Uint32("roc", roc).Msg("unprotect: WARP MI authentication failed")
++			return rtp.RtpHeader{}, nil, false
++		}
+ 	}
+ 	p.recvRoc.CommitRoc(roc, header.SequenceNumber)
+ 	plain, err := srtp.CryptPayload(&p.recvKeys, header.Ssrc, header.SequenceNumber, roc, withoutTag[headerLen:])
+--- /dev/fd/63	2026-10-25 19:59:38.000000000 -0300
++++ /dev/fd/62	2026-10-25 19:59:38.000000000 -0300
+@@ -312,6 +312,18 @@
+ 	lg.Trace().Uint16("seq", seq).Uint32("committed_roc", v).Uint32("roc", t.roc).Msg("recv roc committed")
+ }
+ 
++// Snapshot devolve o estado do estimador (para o log): ROC, maior sequencia vista e
++// se ja foi iniciado.
++func (t *RecvRocTracker) Snapshot() (uint32, uint16, bool) {
++	return t.roc, t.sL, t.initialized
++}
++
++// Resync fixa o ROC e a sequencia a partir de um pacote que passou na autenticacao
++// com um ROC diferente do estimado (perda grande, reinicio de sequencia).
++func (t *RecvRocTracker) Resync(roc uint32, seq uint16) {
++	t.roc, t.sL, t.initialized = roc, seq, true
++}
++
+ // GuessRoc estimates and commits seq in one step.
+ func (t *RecvRocTracker) GuessRoc(seq uint16, log ...zerolog.Logger) uint32 {
+ 	// Source of truth: https://github.com/oxidezap/whatsapp-rust/blob/2f001b5a3d6374cc5cf7177792c2a81f87a54080/wacore/src/voip/e2e_srtp.rs#L190-L198

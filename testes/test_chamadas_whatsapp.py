@@ -303,3 +303,54 @@ def test_erro_passageiro_no_som_nao_derruba_a_chamada(mundo):
     ponte.fila.put({"ev": "ready", "call": "C1"})
     assert esperar(lambda: ponte.escritos > 3, 5.0)  # voltou sozinho
     assert len(tentativas) >= 2
+
+
+def test_atendida_mostra_conectando_e_abre_o_som_antes_do_ready(mundo):
+    v, ponte, bus, audio = mundo
+    v.ligar(CID, "Mic B", "Saida A")
+    assert esperar(lambda: ponte.ligadas)
+    # a fase 3 da saida vem com o relay, ainda tocando: nao muda nada
+    ponte.fila.put({"ev": "state", "call": "C1", "phase": 3})
+    time.sleep(0.2)
+    assert (ch.CONECTANDO, "") not in bus.estados() and not         audio.microfones_abertos
+    ponte.fila.put({"ev": "accepted", "call": "C1"})
+    assert esperar(lambda: (ch.CONECTANDO, "") in bus.estados())
+    assert esperar(lambda: audio.microfones_abertos == ["Mic B"])
+    ponte.fila.put({"ev": "ready", "call": "C1"})
+    assert esperar(lambda: (ch.EM_CHAMADA, "") in bus.estados())
+    assert audio.microfones_abertos == ["Mic B"]    # nao abriu duas vezes
+
+
+def test_atendida_sem_som_do_outro_lado_encerra_explicando(mundo):
+    v, ponte, bus, audio = mundo
+    v.espera_audio_s = 0.3
+    v.ligar(CID)
+    assert esperar(lambda: ponte.ligadas)
+    ponte.fila.put({"ev": "accepted", "call": "C1"})
+    assert esperar(lambda: ponte.desligadas == ["C1"], 3.0)
+    ponte.fila.put({"ev": "end", "call": "C1", "reason": "hangup"})
+    assert esperar(lambda: (ch.ENCERRADA, ch.FALHA) in bus.estados())
+    final = [e for e in bus.eventos if isinstance(e, ev.EstadoChamada)][-1]
+    assert "som do outro lado não chegou" in final.erro
+
+
+def test_saida_que_so_esta_tocando_nao_e_encerrada_pelo_vigia(mundo):
+    v, ponte, bus, audio = mundo
+    v.espera_audio_s = 0.2
+    v.espera_s = 5.0                      # o tempo de tocar e outro
+    v.ligar(CID)
+    assert esperar(lambda: ponte.ligadas)
+    ponte.fila.put({"ev": "state", "call": "C1", "phase": 3})
+    time.sleep(0.6)                       # bem mais que o prazo do som
+    assert not ponte.desligadas
+    assert (ch.ENCERRADA, ch.FALHA) not in bus.estados()
+
+
+def test_entrada_atendida_sem_som_encerra_explicando(mundo):
+    v, ponte, bus, audio = mundo
+    v.espera_audio_s = 0.3
+    chamada_recebida(ponte, bus)
+    v.atender(CID)
+    assert esperar(lambda: ponte.desligadas == ["R1"], 3.0)
+    ponte.fila.put({"ev": "end", "call": "R1", "reason": "hangup"})
+    assert esperar(lambda: (ch.ENCERRADA, ch.FALHA) in bus.estados())

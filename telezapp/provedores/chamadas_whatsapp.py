@@ -35,6 +35,12 @@ AMOSTRAS = 960
 ESPERA_ATENDER_S = 45            # chamando sem ninguem atender
 FIM_DA_CHAMADA = -2              # retorno da DLL: a chamada acabou
 LIMITE_DE_FALHAS = 20            # erros seguidos do som ate desistir
+ESPERA_AUDIO_S = 20              # atendida, mas sem som do outro lado
+FASE_CONECTANDO = 3              # CallPhase do meowcaller: Connecting
+SEM_AUDIO = ("A chamada foi atendida, mas o som do outro lado não chegou. "
+             "Pode ser a rede ou o firewall do Windows bloqueando o áudio "
+             "da chamada. Veja se o TeleZapp está liberado no firewall e "
+             "tente de novo.")
 
 
 class Ponte:
@@ -195,6 +201,9 @@ class _Ligacao:
         self.intencao = ""              # motivo se fomos nos a encerrar
         self.rejeitada = False          # a DLL disse "rejected"
         self.mic = self.saida = ""
+        self.erro = ""                  # explicacao se a intencao for FALHA
+        self.audio_iniciado = False
+        self.vigia_audio = False
         self.parar = threading.Event()
         self.trocar_mic = threading.Event()
         self.trocar_saida = threading.Event()
@@ -203,7 +212,8 @@ class _Ligacao:
 
 class ChamadasWhatsApp:
     def __init__(self, ponte, conta_id, barramento, conversa_do_peer,
-                 nome_de, destino_de, audio=None, espera_s=ESPERA_ATENDER_S):
+                 nome_de, destino_de, audio=None, espera_s=ESPERA_ATENDER_S,
+                 espera_audio_s=ESPERA_AUDIO_S):
         """conversa_do_peer(peer) -> id da conversa; nome_de(cid) -> nome;
         destino_de(cid) -> texto para ligar (numero ou endereco)."""
         self.ponte = ponte
@@ -214,6 +224,7 @@ class ChamadasWhatsApp:
         self.destino_de = destino_de
         self.audio = audio or Audio()
         self.espera_s = espera_s
+        self.espera_audio_s = espera_audio_s
         self.ligacoes = {}              # id da conversa -> _Ligacao
         self._trava = threading.RLock()
         self._parar = threading.Event()
@@ -297,15 +308,61 @@ class ChamadasWhatsApp:
         tipo, call_id = e.get("ev"), e.get("call", "")
         if tipo == "incoming":
             self._ao_receber(call_id, e.get("peer", ""))
+        elif tipo == "state":
+            fase = e.get("phase")
+            log.info("chamada %s: fase %s", call_id, fase)
+            cid, lig = self._achar(call_id)
+            # na chamada de saida a fase Connecting vem quando o relay e
+            # alocado, ainda tocando: so a de entrada (que atendemos) conta
+            if lig is not None and fase == FASE_CONECTANDO and                     lig.chamada.entrante:
+                self._ao_conectar(cid, lig)
+        elif tipo == "accepted":
+            cid, lig = self._achar(call_id)
+            if lig is not None and not lig.chamada.entrante:
+                log.info("chamada %s: a outra pessoa atendeu", call_id)
+                self._ao_conectar(cid, lig)
         elif tipo == "ready":
             cid, lig = self._achar(call_id)
             if lig is not None:
+                log.info("chamada %s: som do outro lado chegando", call_id)
                 self._mudar(cid, ch.EM_CHAMADA)
                 self._iniciar_audio(cid, lig)
         elif tipo == "end":
             cid, lig = self._achar(call_id)
             if lig is not None:
                 self._ao_terminar(cid, lig, e.get("reason", ""))
+
+    def _ao_conectar(self, cid, lig):
+        """A chamada foi atendida (por nos ou pelo outro lado) e o som esta
+        sendo aberto. Mostra
+        "conectando" em vez de seguir chamando, abre o microfone e o
+        alto-falante ja e, se o som do outro lado nao chegar a tempo, encerra
+        explicando (sem isso a chamada ficava tocando para sempre enquanto a
+        outra pessoa ja estava em chamada)."""
+        if lig.chamada.estado == ch.CHAMANDO:
+            self._mudar(cid, ch.CONECTANDO)
+        self._iniciar_audio(cid, lig)
+        self._vigiar_audio(cid, lig)
+
+    def _vigiar_audio(self, cid, lig):
+        with self._trava:
+            if lig.vigia_audio:
+                return
+            lig.vigia_audio = True
+
+        def vigia():
+            fim = time.monotonic() + self.espera_audio_s
+            while time.monotonic() < fim:
+                if lig.parar.wait(0.5):
+                    return
+            if lig.chamada.estado == ch.CONECTANDO:
+                log.warning("chamada atendida, mas sem som do outro lado "
+                            "em %ds; encerrando", self.espera_audio_s)
+                lig.intencao, lig.erro = ch.FALHA, SEM_AUDIO
+                if not self.ponte.desligar(lig.call_id):
+                    self._mudar(cid, ch.ENCERRADA, ch.FALHA, SEM_AUDIO)
+        threading.Thread(target=vigia, name="chamada-vigia-audio",
+                         daemon=True).start()
 
     def _ao_receber(self, call_id, peer):
         cid = self.conversa_do_peer(peer)
@@ -328,7 +385,7 @@ class ChamadasWhatsApp:
     def _ao_terminar(self, cid, lig, razao):
         c = lig.chamada
         if lig.intencao:
-            motivo, erro = lig.intencao, ""
+            motivo, erro = lig.intencao, lig.erro
         elif razao.startswith("server"):
             motivo, erro = ch.FALHA, ("O WhatsApp recusou a chamada (%s)."
                                       % razao)
@@ -398,6 +455,7 @@ class ChamadasWhatsApp:
                 return
             lig.mic, lig.saida = microfone, saida
         self._mudar(cid, ch.CONECTANDO)
+        self._vigiar_audio(cid, lig)
         if not self.ponte.atender(lig.call_id):
             self._mudar(cid, ch.ENCERRADA, ch.FALHA,
                         "Não foi possível atender a chamada.")
@@ -443,6 +501,10 @@ class ChamadasWhatsApp:
 
     # ----------------------------------------------------------- audio
     def _iniciar_audio(self, cid, lig):
+        with self._trava:
+            if lig.audio_iniciado:
+                return
+            lig.audio_iniciado = True
         for alvo, nome in ((self._enviar, "chamada-mic"),
                            (self._receber, "chamada-voz")):
             t = threading.Thread(target=alvo, args=(lig,), name=nome,

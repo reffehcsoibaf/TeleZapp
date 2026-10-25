@@ -13,6 +13,17 @@
 </header>
 <main>
 <section>
+<h2>Versão 2026.10.25.1</h2>
+<ul>
+<li>Chamadas de voz do WhatsApp entre duas pessoas que usam o TeleZapp: quem ligava continuava vendo "chamando" depois de a outra pessoa atender, e ninguém ouvia o outro. Agora o atendimento é percebido e a conversa funciona.</li>
+<li>Chamadas de voz: se a pessoa atende e o som dela não chega em 20 segundos, o TeleZapp encerra a chamada e explica que o áudio não chegou (a causa pode estar na rede ou no firewall do Windows), em vez de ficar tocando para sempre. Ainda estamos investigando por que isso acontece em alguns casos de ligações do TeleZapp para o celular.</li>
+<li>Chamadas de voz que paravam de repente: o TeleZapp agora tenta recuperar o som quando ele deixa de ser reconhecido no meio da chamada. Se ela ainda for interrompida com você, mande o relato em Ajuda, Feedback com o log anexado.</li>
+<li>Corrigido: erros "database is locked" no banco de sessão do WhatsApp, que apareciam logo depois de parear uma conta ou com muita atividade e faziam falhar o ato de ligar e a leitura de algumas mensagens. O banco agora usa o modo WAL e espera mais tempo por uma trava. Você pode notar dois arquivos novos, terminados em -wal e -shm, ao lado dos arquivos de sessão; eles fazem parte do funcionamento.</li>
+<li>O log do TeleZapp agora registra o passo a passo de cada chamada de voz do WhatsApp, inclusive se o som do outro lado chegou. Os telefones aparecem só com os quatro últimos dígitos.</li>
+<li>Nos detalhes da conversa (pessoa, grupo ou canal) há o botão "Limpar a conversa...". Ele abre a janela de limpeza com as mesmas opções de Limpar mídias e mensagens (só as mídias ou as mensagens também, tipo de mídia, há quantos dias, tamanho e manter as favoritas), mas valendo só para aquela conversa. O total aparece antes de você confirmar.</li>
+</ul>
+</section>
+<section>
 <h2>Versão 2026.10.25.0</h2>
 <ul>
 <li>Novo tipo de conversa, "Menções e respostas": mostra os grupos em que alguém mencionou você ou respondeu a uma mensagem sua e você ainda não leu. Escolha em Tipo de conversa, depois de "Não lidas". No WhatsApp ele conta as mensagens que chegarem a partir de agora; no Telegram já traz também as de antes.</li>
