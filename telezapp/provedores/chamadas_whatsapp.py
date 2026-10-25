@@ -312,7 +312,14 @@ class ChamadasWhatsApp:
             fase = e.get("phase")
             log.info("chamada %s: fase %s", call_id, fase)
             cid, lig = self._achar(call_id)
-            if lig is not None and fase == FASE_CONECTANDO:
+            # na chamada de saida a fase Connecting vem quando o relay e
+            # alocado, ainda tocando: so a de entrada (que atendemos) conta
+            if lig is not None and fase == FASE_CONECTANDO and                     lig.chamada.entrante:
+                self._ao_conectar(cid, lig)
+        elif tipo == "accepted":
+            cid, lig = self._achar(call_id)
+            if lig is not None and not lig.chamada.entrante:
+                log.info("chamada %s: a outra pessoa atendeu", call_id)
                 self._ao_conectar(cid, lig)
         elif tipo == "ready":
             cid, lig = self._achar(call_id)
@@ -326,7 +333,8 @@ class ChamadasWhatsApp:
                 self._ao_terminar(cid, lig, e.get("reason", ""))
 
     def _ao_conectar(self, cid, lig):
-        """O outro lado atendeu e o som esta sendo aberto. Mostra
+        """A chamada foi atendida (por nos ou pelo outro lado) e o som esta
+        sendo aberto. Mostra
         "conectando" em vez de seguir chamando, abre o microfone e o
         alto-falante ja e, se o som do outro lado nao chegar a tempo, encerra
         explicando (sem isso a chamada ficava tocando para sempre enquanto a

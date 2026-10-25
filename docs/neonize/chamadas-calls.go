@@ -32,6 +32,7 @@ import (
 
 	"github.com/purpshell/meowcaller"
 	"github.com/rs/zerolog"
+	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
@@ -238,6 +239,12 @@ func ligarChamada(cliente string, c *meowcaller.Call, entrante bool) *chamadaAti
 		registrar(cliente, "chamada %s: fase %d depois de %.1fs", id, int(p), time.Since(inicio).Seconds())
 		emitirEvento(cliente, map[string]any{"ev": "state", "call": id, "phase": int(p)})
 	})
+	// so a chamada de saida: o outro lado atendeu (a fase Connecting do
+	// meowcaller vem antes, quando o relay e alocado, e nao quer dizer isso)
+	c.OnPeerAccept(func() {
+		registrar(cliente, "chamada %s: a outra pessoa atendeu, depois de %.1fs", id, time.Since(inicio).Seconds())
+		emitirEvento(cliente, map[string]any{"ev": "accepted", "call": id})
+	})
 	c.OnReady(func() {
 		registrar(cliente, "chamada %s: som do outro lado chegou (primeiro RTP) depois de %.1fs", id, time.Since(inicio).Seconds())
 		emitirEvento(cliente, map[string]any{"ev": "ready", "call": id})
@@ -270,6 +277,26 @@ func instalarChamadas(id string) {
 	chamadasMu.Unlock()
 	logger := zerolog.New(registro).Level(zerolog.InfoLevel)
 	mc := meowcaller.NewClient(cli, meowcaller.WithLogger(logger))
+	// o que o WhatsApp mandou sobre chamadas, antes de o meowcaller tratar:
+	// mostra se o "atendeu" chegou, de que aparelho e por que a chamada acabou
+	cli.AddEventHandler(func(evt any) {
+		switch v := evt.(type) {
+		case *events.CallOffer:
+			registrar(id, "sinal: oferta %s de %s", v.CallID, v.CallCreator)
+		case *events.CallPreAccept:
+			registrar(id, "sinal: pre-aceite %s de %s (%s)", v.CallID, v.From, v.RemotePlatform)
+		case *events.CallAccept:
+			registrar(id, "sinal: ACEITE %s de %s (%s)", v.CallID, v.From, v.RemotePlatform)
+		case *events.CallTransport:
+			registrar(id, "sinal: transporte %s de %s", v.CallID, v.From)
+		case *events.CallReject:
+			registrar(id, "sinal: recusada %s de %s", v.CallID, v.From)
+		case *events.CallTerminate:
+			registrar(id, "sinal: encerrada %s de %s (%s)", v.CallID, v.From, v.Reason)
+		case *events.UnknownCallEvent:
+			registrar(id, "sinal: desconhecido %s", v.Node.Tag)
+		}
+	})
 	chamadasMu.Lock()
 	chamadasCliente[id] = mc
 	chamadasEventos[id] = make(chan string, eventosNaFila)
