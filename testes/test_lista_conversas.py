@@ -14,7 +14,8 @@ from telezapp.nucleo import lista_conversas as lc             # noqa: E402
 from telezapp.nucleo import modelos as m                      # noqa: E402
 from telezapp.nucleo.configuracoes import ModeloConfiguracoes  # noqa: E402
 
-TODOS = {"ordem": ["nome", "servico", "nao_lidas", "previa"], "ocultos": []}
+TODOS = {"ordem": ["nome", "servico", "nao_lidas", "previa", "reacoes", "quem_reagiu"],
+         "ocultos": []}
 
 
 def conv(**k):
@@ -32,12 +33,20 @@ def msg(texto="oi", minha=False, autor="", **k):
 # ---------------------------------------------------------------- regras
 def test_normalizar_corrige_o_que_veio_guardado():
     assert lc.normalizar(None) == {
-        "ordem": ["nome", "servico", "nao_lidas", "previa"],
-        "ocultos": ["previa"]}                           # o padrao
+        "ordem": ["nome", "servico", "nao_lidas", "previa", "reacoes",
+                  "quem_reagiu"],
+        "ocultos": ["previa", "reacoes", "quem_reagiu"]}                # o padrao
     assert lc.normalizar({"ordem": ["previa", "x", "nome", "nome"],
                           "ocultos": ["y", "previa"]}) == {
-        "ordem": ["previa", "nome", "servico", "nao_lidas"],
-        "ocultos": ["previa"]}
+        "ordem": ["previa", "nome", "servico", "nao_lidas", "reacoes",
+                  "quem_reagiu"],
+        "ocultos": ["previa", "reacoes", "quem_reagiu"]}
+    # item novo que falta no que estava guardado entra desligado
+    assert lc.normalizar({"ordem": ["nome", "servico", "nao_lidas",
+                                    "previa"], "ocultos": []}) == {
+        "ordem": ["nome", "servico", "nao_lidas", "previa", "reacoes",
+                  "quem_reagiu"],
+        "ocultos": ["reacoes", "quem_reagiu"]}
     # tudo oculto deixaria a lista vazia: voltam todos
     assert lc.normalizar({"ordem": list(lc.CHAVES),
                           "ocultos": list(lc.CHAVES)})["ocultos"] == []
@@ -48,7 +57,7 @@ def test_normalizar_corrige_o_que_veio_guardado():
 
 def test_nunca_deixa_a_lista_sem_item_ativado():
     lay = {"ordem": list(lc.CHAVES), "ocultos": ["servico", "nao_lidas",
-                                                  "previa"]}
+                                                  "previa", "reacoes", "quem_reagiu"]}
     novo, ativado = lc.alternar(lay, "nome")        # o unico ativado
     assert ativado is None and novo["ocultos"] == lay["ocultos"]
     novo, ativado = lc.alternar(lay, "previa")      # ligar sempre pode
@@ -62,14 +71,16 @@ def test_mover_troca_de_lugar_e_para_nas_pontas():
     lay = lc.normalizar(TODOS)
     novo, pos = lc.mover(lay, "previa", -1)
     assert pos == 2 and novo["ordem"] == ["nome", "servico", "previa",
-                                          "nao_lidas"]
+                                          "nao_lidas", "reacoes",
+                                          "quem_reagiu"]
     assert lc.mover(lay, "nome", -1) == (lay, 0)
-    assert lc.mover(lay, "previa", 1) == (lay, 3)
+    assert lc.mover(lay, "quem_reagiu", 1) == (lay, 5)
     assert lc.eh_padrao(lc.padrao()) and not lc.eh_padrao(novo)
 
 
 def test_texto_do_item_diz_se_esta_ativado():
     lay = {"ordem": list(lc.CHAVES), "ocultos": ["previa"]}
+    assert lc.texto_do_item(lay, "reacoes") ==         "Reações às minhas mensagens: ativado"
     assert lc.texto_do_item(lay, "nome") == "Nome da conversa: ativado"
     assert lc.texto_do_item(lay, "previa") == \
         "Trecho da última mensagem: desativado"
@@ -98,21 +109,42 @@ def test_linha_na_ordem_escolhida_e_com_o_trecho():
 def test_marcas_ficam_depois_do_servico_ou_do_nome():
     marcas = dict(fixada=True)
     sem_servico = {"ordem": list(lc.CHAVES), "ocultos": ["servico",
-                                                         "previa"]}
+                                                         "previa", "reacoes", "quem_reagiu"]}
     assert lc.rotulo(conv(**marcas), sem_servico) == \
         "Ana, fixada, 3 não lidas"
     so_lidas = {"ordem": list(lc.CHAVES),
-                "ocultos": ["nome", "servico", "previa"]}
+                "ocultos": ["nome", "servico", "previa", "reacoes", "quem_reagiu"]}
     assert lc.rotulo(conv(**marcas), so_lidas) == "fixada, 3 não lidas"
 
 
 def test_se_os_itens_ativados_nao_tem_nada_a_mostrar_vale_o_nome():
     so_lidas = {"ordem": list(lc.CHAVES),
-                "ocultos": ["nome", "servico", "previa"]}
+                "ocultos": ["nome", "servico", "previa", "reacoes", "quem_reagiu"]}
     assert lc.rotulo(conv(nao_lidas=0), so_lidas) == "Ana"
     so_trecho = {"ordem": list(lc.CHAVES),
-                 "ocultos": ["nome", "servico", "nao_lidas"]}
+                 "ocultos": ["nome", "servico", "nao_lidas", "reacoes"]}
     assert lc.rotulo(conv(), so_trecho, "") == "Ana"
+
+
+def test_linha_com_as_reacoes_novas():
+    lay = {"ordem": list(lc.CHAVES), "ocultos": ["previa"]}
+    assert lc.rotulo(conv(), lay, "", 1) == (
+        "Ana, Telegram, 3 não lidas, 1 reação nova à sua mensagem")
+    assert lc.rotulo(conv(nao_lidas=0), lay, "", 2) == (
+        "Ana, Telegram, 2 reações novas às suas mensagens")
+    assert lc.rotulo(conv(nao_lidas=0), lay) == "Ana, Telegram"
+    # desligado (o padrao), a linha nao muda
+    assert lc.rotulo(conv(), None, "", 2) == "Ana, Telegram, 3 não lidas"
+
+
+def test_texto_de_quem_reagiu():
+    assert lc.texto_de_quem_reagiu([]) == ""
+    assert lc.texto_de_quem_reagiu([("Ana", "👍")]) == "Ana reagiu com 👍"
+    assert lc.texto_de_quem_reagiu([("Ana", "👍"), ("Bia", "❤")]) ==         "Ana (👍) e Bia (❤) reagiram"
+    cinco = [(n, "👍") for n in "ABCDE"]
+    assert lc.texto_de_quem_reagiu(cinco) ==         "A (👍), B (👍), C (👍) e mais 2 reagiram"
+    lay = {"ordem": list(lc.CHAVES), "ocultos": ["previa", "reacoes"]}
+    assert lc.rotulo(conv(nao_lidas=0), lay, "", 1, [("Ana", "👍")]) ==         "Ana, Telegram, Ana reagiu com 👍"
 
 
 # ---------------------------------------------------------------- trecho
@@ -143,7 +175,7 @@ class Cfg:
 def test_modelo_guarda_a_lista_pendente_ate_aplicar():
     mod = ModeloConfiguracoes(Cfg())
     assert mod.lista_em_uso() == lc.padrao()
-    novo = {"ordem": ["servico", "nome", "nao_lidas", "previa"],
+    novo = {"ordem": ["servico", "nome", "nao_lidas", "previa", "reacoes", "quem_reagiu"],
             "ocultos": []}
     mod.lista_definir(novo)
     assert mod.lista_em_uso() == novo
@@ -160,7 +192,8 @@ def test_modelo_guarda_a_lista_pendente_ate_aplicar():
 def test_backup_so_leva_de_volta_uma_lista_valida():
     boas = backup.opcoes_validas({"lista_conversas": {
         "ordem": ["previa", "lixo"], "ocultos": ["nome", "servico",
-                                                  "nao_lidas", "previa"]}})
+                                                  "nao_lidas", "previa",
+                                                  "reacoes"]}})
     assert boas["lista_conversas"]["ordem"][0] == "previa"
     assert boas["lista_conversas"]["ocultos"] == []   # nao pode ficar vazia
     assert "lista_conversas" not in backup.opcoes_validas(
@@ -214,7 +247,8 @@ def dialogo(valor=None):
 
 def test_dialogo_ativa_desativa_e_recusa_o_ultimo():
     d, g, fala = dialogo({"ordem": list(lc.CHAVES),
-                          "ocultos": ["servico", "nao_lidas", "previa"]})
+                          "ocultos": ["servico", "nao_lidas", "previa",
+                                      "reacoes", "quem_reagiu"]})
     assert d.lista.itens[0] == "Nome da conversa: ativado"
     d.alternar()                                   # o unico ativado
     assert fala.ditas[-1] == lc.MENSAGEM_DO_MINIMO
@@ -233,7 +267,7 @@ def test_dialogo_muda_a_ordem_e_restaura_o_padrao():
     assert g.valor["ordem"][:3] == ["nome", "nao_lidas", "servico"]
     assert d.lista.GetSelection() == 1
     assert fala.ditas[-1] == "Quantidade de mensagens não lidas, posição 2 " \
-                             "de 4."
+                             "de 6."
     d.lista.SetSelection(0)
     d.mover(-1)
     assert fala.ditas[-1] == "Já é o primeiro item."

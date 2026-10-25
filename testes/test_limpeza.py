@@ -118,3 +118,12 @@ def test_resumo_de_espaco_conta_conversas_textos_e_midias_por_tipo(tmp_path):
     assert "Mídias baixadas: 1 no total, ocupando 2 KB." in texto
     assert "Fotos: 1, ocupando 2 KB." in texto
     assert "Vídeos: nenhuma." in texto
+
+
+def test_mensagem_apagada_pelo_autor_perde_so_o_arquivo(tmp_path):
+    b, _, arq = _banco(tmp_path)
+    assert limpeza.apagar_midia_da_mensagem(b, "c", "v", "0") == 100
+    assert not arq.exists() and b.midia("c", "v", "0") is None
+    assert len(b.mensagens("c", "v")) == 4        # a mensagem fica
+    assert b.foi_limpa("c", "v", "0") is None     # e nao vira "limpa"
+    assert limpeza.apagar_midia_da_mensagem(b, "c", "v", "0") == 0

@@ -955,6 +955,8 @@ class ProvedorTelegram(Provedor):
     async def _atualizar_conversas(self):
         inicio = time.perf_counter()
         lista = []
+        citacoes = {x.id: x.citacoes
+                    for x in self.banco.conversas(self.conta.id)}
         # O Telegram so devolve a pasta principal (0) se nao se pede a
         # pasta de arquivadas (1): sao duas buscas.
         for pasta in (0, 1):
@@ -975,6 +977,11 @@ class ProvedorTelegram(Provedor):
                     somente_leitura=somente_leitura_do_telegram(
                         getattr(d, "entity", None)),
                     temporaria_s=int(getattr(d.dialog, "ttl_period", 0) or 0))
+                # o Telegram conta as mencoes e respostas nao lidas; a conta
+                # guardada cobre o que chegou ao vivo
+                c.citacoes = max(
+                    citacoes.get(cid, 0),
+                    int(getattr(d.dialog, "unread_mentions_count", 0) or 0))
                 self._conversas[cid] = c
                 if getattr(getattr(d, "entity", None), "forum", False):
                     topicos = await self._conversas_de_topicos(d, c)
@@ -2326,7 +2333,8 @@ class ProvedorTelegram(Provedor):
                 conv.temporaria_s = prazo
             conv.data = nova.data
             if not nova.minha:
-                conv.nao_lidas += 1
+                conv.contar_nova(conv.tipo == "grupo" and
+                                 m.extras_de(nova)["citou_voce"])
             self.banco.salvar_conversas([conv])
             self.banco.salvar_mensagens([nova])
             self.barramento.publicar(ev.MensagemNova(nova, conv))

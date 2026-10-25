@@ -2136,7 +2136,8 @@ def test_lista_de_conversas_muda_a_ordem_e_os_itens(j):
         "ordem": ["nao_lidas", "nome", "servico", "previa"],
         "ocultos": ["servico", "previa"]})
     assert j.lista_conv.itens[0] == "2 não lidas, Ana"
-    assert j.cfg.get("lista_conversas")["ocultos"] == ["servico", "previa"]
+    assert j.cfg.get("lista_conversas")["ocultos"] == [
+        "servico", "previa", "reacoes", "quem_reagiu"]
     assert not j.itens["lista_servico"].marcado
     assert j.itens["lista_nome"].marcado
     j.itens["lista_servico"].Check(True)       # o menu marca antes do evento
@@ -2150,13 +2151,14 @@ def test_item_do_menu_da_lista_nao_deixa_tirar_o_ultimo(j):
     j.fala.falar = lambda t, interromper=False: ditas.append(t)
     j._aplicar_opcao("lista_conversas", {
         "ordem": ["nome", "servico", "nao_lidas", "previa"],
-        "ocultos": ["servico", "nao_lidas", "previa"]})
+        "ocultos": ["servico", "nao_lidas", "previa", "reacoes",
+                    "quem_reagiu"]})
     j.itens["lista_nome"].Check(False)         # o wx desmarca sozinho
     j._alternar_item_da_lista("nome")
     assert ditas[-1] == "Pelo menos um item precisa ficar ativado."
     assert j.itens["lista_nome"].marcado   # voltou marcado
     assert j.cfg.get("lista_conversas")["ocultos"] == [
-        "servico", "nao_lidas", "previa"]
+        "servico", "nao_lidas", "previa", "reacoes", "quem_reagiu"]
     j._alternar_item_da_lista("previa")
     assert ditas[-1] == "Trecho da última mensagem: ativado."
     assert "previa" not in j.cfg.get("lista_conversas")["ocultos"]
@@ -4345,13 +4347,13 @@ class BandejaFalsa:
         pass
 
 
-def test_fechar_com_segundo_plano_so_esconde_a_janela(j, monkeypatch):
+def test_fechar_com_segundo_plano_so_minimiza_a_janela(j, monkeypatch):
     from telezapp.interface import bandeja
     monkeypatch.setattr(bandeja, "criar", lambda janela: BandejaFalsa())
     j._aplicar_opcao("segundo_plano", True)
     assert isinstance(j._bandeja, BandejaFalsa)
     escondida = []
-    j.Hide = lambda: escondida.append(True)
+    j.Iconize = lambda v=True: escondida.append(v)
     j.fala.falar = lambda t, interromper=False: escondida.append(t)
     evento = EventoDeFechar()
     j._ao_fechar(evento)
@@ -4585,7 +4587,7 @@ def test_sons_de_esconder_e_voltar_da_bandeja(j, monkeypatch):
     monkeypatch.setattr(jm, "bipe", lambda tipo, *a: sons.append(tipo))
     from testes.test_janela import BandejaFalsa
     j._bandeja = BandejaFalsa()
-    j.Hide = lambda: None
+    j.Iconize = lambda v=True: None
     j.IsShown = lambda: False
     j.Show = lambda: None
     j.IsIconized = lambda: False
@@ -5373,3 +5375,83 @@ def test_sem_navegador_o_endereco_e_mostrado(j, monkeypatch):
                         raising=False)
     j._abrir_na_internet("https://exemplo.test/")
     assert avisos and "https://exemplo.test/" in avisos[0]
+
+
+def test_reacoes_as_minhas_mensagens_entram_na_linha_da_conversa(j):
+    j._aplicar_opcao("lista_conversas", {
+        "ordem": ["nome", "servico", "nao_lidas", "previa", "reacoes",
+                  "quem_reagiu"],
+        "ocultos": ["servico", "nao_lidas", "previa", "quem_reagiu"]})
+    minha = msg("7", "oi", minha=True, data=AGORA)
+    j.b.publicar(ev.MensagemAtualizada("t1", "10", minha, "reacao", "Ana",
+                                       "👍"))
+    assert j.lista_conv.itens[0] == "Ana, 1 reação nova à sua mensagem"
+    j.b.publicar(ev.MensagemAtualizada("t1", "10", minha, "reacao", "Bia",
+                                       "❤"))
+    assert j.lista_conv.itens[0] == "Ana, 2 reações novas às suas mensagens"
+    # a minha propria reacao e a de quem tirou nao contam
+    j.b.publicar(ev.MensagemAtualizada("t1", "10", minha, "reacao", "Você",
+                                       "👍"))
+    j.b.publicar(ev.MensagemAtualizada("t1", "10", minha, "reacao", "Ana",
+                                       ""))
+    assert j.reacoes_novas[("t1", "10")] == 2
+    j._abrir_conversa(j.indice[("t1", "10")])      # ver a conversa zera
+    assert ("t1", "10") not in j.reacoes_novas
+
+
+def test_quem_reagiu_entra_na_linha_e_zera_ao_abrir(j):
+    j._aplicar_opcao("lista_conversas", {
+        "ordem": ["nome", "servico", "nao_lidas", "previa", "reacoes",
+                  "quem_reagiu"],
+        "ocultos": ["servico", "nao_lidas", "previa", "reacoes"]})
+    minha = msg("7", "oi", minha=True, data=AGORA)
+    j.b.publicar(ev.MensagemAtualizada("t1", "10", minha, "reacao", "Ana",
+                                       "👍"))
+    assert j.lista_conv.itens[0] == "Ana, Ana reagiu com 👍"
+    j.b.publicar(ev.MensagemAtualizada("t1", "10", minha, "reacao", "Ana",
+                                       "❤"))                 # mudou de emoji
+    j.b.publicar(ev.MensagemAtualizada("t1", "10", minha, "reacao", "Bia",
+                                       "😂"))
+    assert j.lista_conv.itens[0] == "Ana, Ana (❤) e Bia (😂) reagiram"
+    j._abrir_conversa(j.indice[("t1", "10")])
+    assert ("t1", "10") not in j.quem_reagiu
+
+
+def test_voz_apagada_pelo_autor_nao_toca(jm_midia, monkeypatch):
+    j = jm_midia
+    MotorFalso.criados = []
+    monkeypatch.setattr(jm, "Reprodutor", MotorFalso)
+    apagada = voz("5")
+    m.atualizar_extras(apagada, apagada=True)
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [apagada]))
+    j.midias.prontas[("t1", "10", "5")] = "/p/5.ogg"      # ainda no disco
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    selecionar(j, "5")
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j._abrir_midia(x=apagada)                  # Control O tambem
+    assert not MotorFalso.criados and j.abertas == []
+    assert "Esta mensagem foi apagada pelo autor." in ditas
+    assert j._genero_ia(apagada) == ""         # nem transcrever
+
+
+def test_apagar_para_todos_para_o_audio_e_tira_o_arquivo(jm_midia,
+                                                        monkeypatch):
+    j = jm_midia
+    MotorFalso.criados = []
+    monkeypatch.setattr(jm, "Reprodutor", MotorFalso)
+    monkeypatch.setattr(jm.wx, "CallLater", lambda *a, **k: None,
+                        raising=False)
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [voz("5")]))
+    j.midias.prontas[("t1", "10", "5")] = "/p/5.ogg"
+    selecionar(j, "5")
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    assert MotorFalso.criados[0].tocando
+    tiradas = []
+    monkeypatch.setattr(jm.limpeza, "apagar_midia_da_mensagem",
+                        lambda banco, *chave: tiradas.append(chave))
+    apagada = voz("5")
+    m.atualizar_extras(apagada, apagada=True)
+    j.b.publicar(ev.MensagemAtualizada("t1", "10", apagada, "apagada"))
+    assert MotorFalso.criados[0].fechado and j.audio is None
+    assert tiradas == [("t1", "10", "5")]

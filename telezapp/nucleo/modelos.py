@@ -71,10 +71,25 @@ class Conversa:
                                    # grupo so de admins, grupo que saiu...)
     temporaria_s: int = 0      # mensagens temporarias: segundos ate sumirem
                                # (0 = desligado)
+    citacoes: int = 0          # grupo: das nao lidas, quantas me mencionam ou
+                               # respondem a mim (so as que chegaram ao vivo)
 
     @property
     def chave(self):
         return (self.conta_id, self.id)
+
+    def contar_nova(self, cita_voce=False):
+        """Chegou uma mensagem dos outros. A contagem de citacoes recomeca
+        quando nao havia nada por ler (as antigas ja foram lidas)."""
+        if self.nao_lidas <= 0:
+            self.citacoes = 0
+        self.nao_lidas += 1
+        if cita_voce:
+            self.citacoes += 1
+
+    def tem_citacao_nao_lida(self):
+        """Ha mensagem nao lida me mencionando ou respondendo a mim?"""
+        return min(self.citacoes, self.nao_lidas) > 0
 
     def silenciada(self, agora=None):
         """Em silencio agora? (o silencio com hora marcada expira sozinho)"""
@@ -762,6 +777,7 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None,
 
 FILTROS_TIPO = (("todas", "Todas as conversas"),
                 ("nao_lidas", "Não lidas"),
+                ("citacoes", "Menções e respostas"),
                 ("pessoais", "Pessoais"),
                 ("grupos", "Grupos"),
                 ("canais", "Canais"),
@@ -816,6 +832,8 @@ def passa_filtro(c, tipo="todas", conta=CONTA_TODAS, busca=""):
         return False
     if tipo == "nao_lidas":
         return c.nao_lidas > 0
+    if tipo == "citacoes":
+        return c.tipo == "grupo" and c.tem_citacao_nao_lida()
     if tipo == "pessoais":
         return c.tipo == "privada"
     if tipo == "grupos":
@@ -845,10 +863,11 @@ def opcoes_de_conta(contas):
     return opcoes
 
 
-def rotulo_conversa(c, lista=None, previa=""):
+def rotulo_conversa(c, lista=None, previa="", reacoes=0, quem_reagiu=()):
     """A linha da conversa na lista (ver nucleo/lista_conversas.py)."""
     from telezapp.nucleo import lista_conversas
-    return lista_conversas.rotulo(c, lista, previa)
+    return lista_conversas.rotulo(c, lista, previa, reacoes,
+                                  quem_reagiu)
 
 
 _LINK = re.compile(r"(?:https?://|www\.)[^\s<>\"']+", re.IGNORECASE)

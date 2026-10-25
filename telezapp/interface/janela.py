@@ -34,6 +34,7 @@ from telezapp.interface import dispositivos as ui_dispositivos
 from telezapp.midia import armazem
 from telezapp.midia import dispositivos
 from telezapp.midia import envio
+from telezapp.midia import prioridade
 from telezapp.midia import velocidade as vel
 from telezapp.midia.gravador import (MICROFONE, SOM_E_MICROFONE,
                                      SOM_INTERNO, ErroGravacao, Gravador)
@@ -386,7 +387,9 @@ class Janela(wx.Frame):
         self.indice = {}              # chave -> Conversa
         self.previas = {}             # chave -> (data, trecho da ultima mensagem)
         self._previas_lidas = False   # as do banco ja foram lidas?
-        self.cache = {}               # chave da conversa -> [Mensagem]
+        self.reacoes_novas = {}       # chave -> reacoes novas as minhas msgs
+        self.quem_reagiu = {}         # chave -> [(quem, emoji)] dessas reacoes
+        self.cache = {}             # chave da conversa -> [Mensagem]
         self.atual = None             # chave da conversa aberta
         self.marcador_n = 0           # nao lidas ao abrir a conversa
         self.marcador_id = None       # id da 1a nao lida (quando conhecido)
@@ -706,7 +709,7 @@ class Janela(wx.Frame):
         m_fer.AppendSeparator()
         item(m_fer, "abrir_atalhos", "Personalizar os &atalhos...")
         item(m_fer, "esconder_janela",
-             "&Esconder a janela e continuar em segundo plano")
+             "&Minimizar a janela e continuar em segundo plano")
         item(m_fer, "sair", "&Sair\tCtrl+Q")
 
         for submenu, rotulo in ((m_novo, "&Novo"), (m_ir, "&Ir para"),
@@ -757,6 +760,10 @@ class Janela(wx.Frame):
             "lista_nao_lidas": lambda e: self._alternar_item_da_lista(
                 "nao_lidas"),
             "lista_previa": lambda e: self._alternar_item_da_lista("previa"),
+            "lista_reacoes": lambda e: self._alternar_item_da_lista(
+                "reacoes"),
+            "lista_quem_reagiu": lambda e: self._alternar_item_da_lista(
+                "quem_reagiu"),
             "lista_ordem": lambda e: self._ordem_da_lista(),
             "lista_padrao": lambda e: self._aplicar_opcao(
                 "lista_conversas", lista_conv_nucleo.padrao()),
@@ -975,8 +982,9 @@ class Janela(wx.Frame):
                 pass
 
     def _esconder_na_bandeja(self):
-        """Esconde a janela; o programa segue rodando. Cria o icone se for
-        preciso, para sempre haver um jeito de voltar."""
+        """Minimiza a janela para a barra de tarefas; o programa segue
+        rodando. Cria o icone se for preciso, para sempre haver um jeito de
+        voltar."""
         if self._bandeja is None:
             from telezapp.interface import bandeja
             self._bandeja = bandeja.criar(self)
@@ -986,11 +994,12 @@ class Janela(wx.Frame):
             return
         atalho = self.atalhos.efetivo("mostrar_janela")
         bipe("escondido")
-        self.Hide()
+        self.Iconize(True)
         self.fala.falar(
             "O TeleZapp continua em segundo plano. Para voltar, %s." % (
                 "aperte %s" % nucleo_atalhos.texto_falado(atalho) if atalho
-                else "use o ícone da área de notificação"),
+                else "use a barra de tarefas ou o ícone da área de "
+                     "notificação"),
             interromper=True)
 
     def _mostrar_da_bandeja(self):
@@ -1794,7 +1803,9 @@ class Janela(wx.Frame):
     def _rotulo_da_conversa(self, c):
         """A linha da conversa, com as informacoes e a ordem escolhidas."""
         return lista_conv_nucleo.rotulo(
-            c, self._lista_em_uso(), self.previas.get(c.chave, (0, ""))[1])
+            c, self._lista_em_uso(), self.previas.get(c.chave, (0, ""))[1],
+            self.reacoes_novas.get(c.chave, 0),
+            self.quem_reagiu.get(c.chave, ()))
 
     def _atualizar_previa_se_for_a_ultima(self, chave, msg):
         """A mensagem mudou (editada, apagada...): se era a ultima da
@@ -2462,6 +2473,13 @@ class Janela(wx.Frame):
             if r == wx.ID_CANCEL:
                 return
             no_celular = r == wx.ID_YES
+            if no_celular and conv.tipo == "grupo":
+                r = wx.MessageBox(
+                    "Apagar também no celular fará você sair do grupo %s. "
+                    "Quer continuar?" % conv.nome, "Atenção",
+                    wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING, self)
+                if r != wx.YES:
+                    return
         else:
             r = wx.MessageBox(
                 texto + " A conta não é afetada.", "Apagar conversa",
@@ -3086,6 +3104,19 @@ class Janela(wx.Frame):
         return conv is not None and not aberta and \
             bool(conv.arquivada or conv.trancada or conv.silenciada())
 
+    def _descartar_midia_apagada(self, msg):
+        """O autor apagou a mensagem para todos: para o audio que toca dela e
+        tira o arquivo baixado (a mensagem fica, marcada como apagada)."""
+        if msg.tipo not in armazem.BAIXAVEIS:
+            return
+        if self.audio is not None and self.audio[0] == msg.chave:
+            self._parar_audio(falar=False)
+        try:
+            limpeza.apagar_midia_da_mensagem(
+                self.banco, msg.conta_id, msg.conversa_id, msg.id)
+        except Exception:
+            log.exception("erro ao tirar a mídia de uma mensagem apagada")
+
     def _ev_atualizada(self, e):
         """Reacao, edicao ou mensagem apagada pelo autor."""
         chave = (e.conta_id, e.conversa_id)
@@ -3093,9 +3124,20 @@ class Janela(wx.Frame):
             if x.id == e.mensagem.id:
                 self.cache[chave][i] = e.mensagem
                 break
-        if self._atualizar_previa_se_for_a_ultima(chave, e.mensagem):
-            self._preencher_conversas()
         aberta = chave == self.atual
+        nova_reacao = e.motivo == "reacao" and e.mensagem.minha and \
+            bool(e.emoji) and e.quem != "Você" and not aberta
+        if nova_reacao:
+            self.reacoes_novas[chave] = self.reacoes_novas.get(chave, 0) + 1
+            quem = [p for p in self.quem_reagiu.get(chave, [])
+                    if p[0] != e.quem]
+            self.quem_reagiu[chave] = quem + [(e.quem, e.emoji)]
+        if e.motivo == "apagada":
+            self._descartar_midia_apagada(e.mensagem)
+        if self._atualizar_previa_se_for_a_ultima(chave, e.mensagem) or (
+                nova_reacao and {"reacoes", "quem_reagiu"} & set(
+                    lista_conv_nucleo.ativos(self._lista_em_uso()))):
+            self._preencher_conversas()
         if aberta:
             self._preencher_mensagens()
         conv = self.indice.get(chave)
@@ -3231,6 +3273,8 @@ class Janela(wx.Frame):
         if not mudou:
             return
         log.info("chamada: %s %s", c.estado, c.motivo)
+        # com a janela em segundo plano o Windows poderia atrasar o som
+        prioridade.chamada_em_curso(c.ativa)
         a = ch.apresentar(c)
         self.SetStatusText(a.situacao)
         self.fala.falar(a.fala, interromper=True)
@@ -3608,6 +3652,8 @@ class Janela(wx.Frame):
         if conv is None:
             return
         self.atual = conv.chave
+        self.reacoes_novas.pop(conv.chave, None)
+        self.quem_reagiu.pop(conv.chave, None)
         self.resposta_a = None
         self.mencoes = []
         self.editando = None
@@ -4117,7 +4163,7 @@ class Janela(wx.Frame):
     def _genero_ia(x):
         """O que a IA faz com a mensagem: audio, imagem, figurinha, video ou
         pdf; vazio se nada."""
-        if x.id.startswith("local-"):
+        if x.id.startswith("local-") or m.extras_de(x)["apagada"]:
             return ""
         if x.tipo in (m.VOZ, m.AUDIO):
             return "audio"
@@ -6388,6 +6434,11 @@ class Janela(wx.Frame):
             return
         if x.id.startswith("local-"):
             return
+        if m.extras_de(x)["apagada"]:
+            bipe("erro")
+            self.fala.falar("Esta mensagem foi apagada pelo autor.",
+                            interromper=True)
+            return
         if self.banco.foi_limpa(x.conta_id, x.conversa_id, x.id):
             bipe("erro")
             self.fala.falar(TEXTO_LIMPA, interromper=True)
@@ -6515,7 +6566,8 @@ class Janela(wx.Frame):
                     or x.id.startswith("local-")):
                 return False
             if achou and x.tipo in (m.VOZ, m.AUDIO) and \
-                    not x.id.startswith("local-"):
+                    not x.id.startswith("local-") and \
+                    not m.extras_de(x)["apagada"]:
                 # o "Próximo áudio" vai junto do anuncio de quem fala, em
                 # _tocar_sem_janela: falar os dois separados cortava o
                 # primeiro (cada fala interrompe a anterior)
@@ -6575,7 +6627,7 @@ class Janela(wx.Frame):
     def _salvar_midia(self):
         x = self._mensagem_selecionada()
         if x is None or self.midias is None or \
-                x.tipo not in armazem.BAIXAVEIS:
+                x.tipo not in armazem.BAIXAVEIS or m.extras_de(x)["apagada"]:
             return
         caminho = self.midias.caminho(x)
         if not caminho:
