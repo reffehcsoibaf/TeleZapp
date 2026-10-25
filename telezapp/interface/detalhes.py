@@ -467,6 +467,7 @@ class ControleDetalhes:
                                if d.get("silenciado") else "&Silenciar o canal",
                                self.silenciar_canal))
                 botoes.append(("&Deixar de seguir", self.deixar_de_seguir))
+        botoes.append(("&Limpar a conversa...", self.limpar))
         return botoes
 
     # ------------------------------------------------------------ acoes
@@ -477,6 +478,12 @@ class ControleDetalhes:
                          self._botoes())
         threading.Thread(target=self._carregar, daemon=True,
                          name="detalhes").start()
+
+    def limpar(self):
+        """Abre a limpeza de mídias e mensagens so desta conversa; se algo
+        saiu, os detalhes (contagens e mídias) são refeitos."""
+        if self.jan._limpar_conversa_com_opcoes(self.conv):
+            self._atualizar()
 
     def editar_contato(self):
         self.jan._salvar_pessoa(self.conv)

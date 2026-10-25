@@ -16,12 +16,18 @@ TODOS = "Todos"
 
 
 class DialogoLimpeza(wx.Dialog):
-    def __init__(self, pai, banco, contas, conversas, falar, ao_limpar):
+    def __init__(self, pai, banco, contas, conversas, falar, ao_limpar,
+                 so_a_conversa=None):
         """contas: [(conta_id, rotulo)]; conversas: [(conta_id, conversa_id,
-        nome)] de todas as conversas."""
-        super().__init__(pai, title="Limpar mídias e mensagens",
-                         style=wx.DEFAULT_DIALOG_STYLE)
+        nome)] de todas as conversas. so_a_conversa: (conta_id, conversa_id,
+        nome) para limpar so uma conversa; a janela nao mostra conta nem
+        conversa e as demais opcoes seguem iguais."""
+        titulo = "Limpar mídias e mensagens"
+        if so_a_conversa:
+            titulo = "Limpar a conversa: %s" % so_a_conversa[2]
+        super().__init__(pai, title=titulo, style=wx.DEFAULT_DIALOG_STYLE)
         self.banco, self.falar, self.ao_limpar = banco, falar, ao_limpar
+        self.so_a_conversa = so_a_conversa
         self.contas = [("", "Todas as contas")] + list(contas)
         self.todas_conversas = list(conversas)
         self._conversas = []
@@ -46,10 +52,11 @@ class DialogoLimpeza(wx.Dialog):
                            "Mensagens, com as mídias delas"],
             name="O que limpar"))
         self.o_que.SetSelection(0)
-        self.conta = campo("Conta", lambda: wx.Choice(
-            self, choices=[r for _, r in self.contas], name="Conta"))
-        self.conversa = campo("Conversa", lambda: wx.Choice(
-            self, name="Conversa"))
+        if not so_a_conversa:
+            self.conta = campo("Conta", lambda: wx.Choice(
+                self, choices=[r for _, r in self.contas], name="Conta"))
+            self.conversa = campo("Conversa", lambda: wx.Choice(
+                self, name="Conversa"))
         self.tipo = campo("Tipo de mídia", lambda: wx.Choice(
             self, choices=[TODOS] + [r for r, _ in TIPOS[1:]],
             name="Tipo de mídia"))
@@ -65,10 +72,12 @@ class DialogoLimpeza(wx.Dialog):
             self, label="Manter as mensagens &favoritas")
         self.favoritas.SetValue(True)
         lay.Add(self.favoritas, 0, wx.ALL, 10)
-        self.conta.SetSelection(0)
         self.tipo.SetSelection(0)
-        self.conta.Bind(wx.EVT_CHOICE, lambda e: self._montar_conversas())
-        self._montar_conversas()
+        if not so_a_conversa:
+            self.conta.SetSelection(0)
+            self.conta.Bind(wx.EVT_CHOICE,
+                            lambda e: self._montar_conversas())
+            self._montar_conversas()
         linha = wx.BoxSizer(wx.HORIZONTAL)
         apagar = wx.Button(self, label="&Apagar...")
         linha.Add(apagar, 0, wx.RIGHT, 6)
@@ -78,7 +87,7 @@ class DialogoLimpeza(wx.Dialog):
         self.SetSizerAndFit(lay)
         self.SetEscapeId(wx.ID_CANCEL)
         self.CentreOnParent()
-        self.conta.SetFocus()
+        (self.o_que if so_a_conversa else self.conta).SetFocus()
 
     def _montar_conversas(self):
         conta = self.contas[max(self.conta.GetSelection(), 0)][0]
@@ -88,8 +97,11 @@ class DialogoLimpeza(wx.Dialog):
         self.conversa.SetSelection(0)
 
     def filtros(self):
-        conta = self.contas[max(self.conta.GetSelection(), 0)][0]
-        conv = self._conversas[max(self.conversa.GetSelection(), 0)]
+        if self.so_a_conversa:
+            conta, conv = self.so_a_conversa[0], self.so_a_conversa
+        else:
+            conta = self.contas[max(self.conta.GetSelection(), 0)][0]
+            conv = self._conversas[max(self.conversa.GetSelection(), 0)]
         i = max(self.tipo.GetSelection(), 0)
         return limpeza.Filtros(
             o_que=(limpeza.MENSAGENS if self.o_que.GetSelection() == 1
