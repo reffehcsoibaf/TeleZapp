@@ -24,6 +24,7 @@ import threading
 import time
 
 from telezapp.nucleo import chamadas as ch
+from telezapp.midia import eco as midia_eco
 from telezapp.midia import prioridade
 from telezapp.nucleo import eventos as ev
 
@@ -36,6 +37,7 @@ ESPERA_ATENDER_S = 45            # chamando sem ninguem atender
 FIM_DA_CHAMADA = -2              # retorno da DLL: a chamada acabou
 LIMITE_DE_FALHAS = 20            # erros seguidos do som ate desistir
 ESPERA_AUDIO_S = 20              # atendida, mas sem som do outro lado
+QUADROS_POR_REGISTRO = 83        # um registro do eco a cada 5 s (quadros de 60 ms)
 FASE_CONECTANDO = 3              # CallPhase do meowcaller: Connecting
 SEM_AUDIO = ("A chamada foi atendida, mas o som do outro lado não chegou. "
              "Pode ser a rede ou o firewall do Windows bloqueando o áudio "
@@ -203,6 +205,8 @@ class _Ligacao:
         self.mic = self.saida = ""
         self.erro = ""                  # explicacao se a intencao for FALHA
         self.audio_iniciado = False
+        self.eco = None                 # midia.eco.CancelaEco da chamada
+        self.quadros_mic = 0
         self.vigia_audio = False
         self.parar = threading.Event()
         self.trocar_mic = threading.Event()
@@ -505,6 +509,9 @@ class ChamadasWhatsApp:
             if lig.audio_iniciado:
                 return
             lig.audio_iniciado = True
+        if midia_eco.LIGADOS["eco"] or midia_eco.LIGADOS["ruido"]:
+            lig.eco = midia_eco.CancelaEco(midia_eco.LIGADOS["eco"],
+                                           midia_eco.LIGADOS["ruido"])
         for alvo, nome in ((self._enviar, "chamada-mic"),
                            (self._receber, "chamada-voz")):
             t = threading.Thread(target=alvo, args=(lig,), name=nome,
@@ -552,11 +559,15 @@ class ChamadasWhatsApp:
                         self._fechar(fluxo)
                         fluxo = None
                         lig.trocar_mic.clear()
+                        if lig.eco is not None:
+                            lig.eco.reiniciar()
                         fluxo = self._abrir(self.audio.abrir_microfone,
                                             lig.mic, "microfone")
                     dados, _ = fluxo.read(AMOSTRAS)
                     if lig.chamada.mudo:
                         dados = silencio
+                    elif lig.eco is not None:
+                        dados = self._sem_eco(lig, bytes(dados))
                     if not self.ponte.escrever_quadro(lig.call_id,
                                                       bytes(dados)):
                         falhas += 1
@@ -579,6 +590,23 @@ class ChamadasWhatsApp:
             log.info("microfone da chamada encerrado (%d quadros enviados)",
                      enviados)
 
+    def _sem_eco(self, lig, dados):
+        """O quadro do microfone sem eco nem ruido; qualquer problema manda o
+        quadro como veio (a chamada nunca fica muda por isso). A cada 5 s
+        registra no log quanto eco chega ao microfone e quanto sobra."""
+        try:
+            limpo = lig.eco.processar(dados)
+            if len(limpo) != len(dados):
+                return dados
+            lig.quadros_mic += 1
+            if lig.quadros_mic % QUADROS_POR_REGISTRO == 0:
+                log.info("eco da chamada: %s", lig.eco.diagnostico())
+            return limpo
+        except Exception:
+            log.exception("erro no cancelamento de eco")
+            lig.eco = None
+            return dados
+
     def _receber(self, lig):
         """DLL -> alto-falante, com a mesma tolerancia a erros do envio."""
         fluxo, falhas, tocados = None, 0, 0
@@ -590,6 +618,8 @@ class ChamadasWhatsApp:
                         self._fechar(fluxo)
                         fluxo = None
                         lig.trocar_saida.clear()
+                        if lig.eco is not None:
+                            lig.eco.reiniciar()
                         fluxo = self._abrir(self.audio.abrir_saida,
                                             lig.saida, "alto-falante")
                     quadro = self.ponte.ler_quadro(lig.call_id, 100)
@@ -598,6 +628,8 @@ class ChamadasWhatsApp:
                     if quadro:
                         fluxo.write(quadro)
                         tocados += 1
+                        if lig.eco is not None:
+                            lig.eco.referencia(quadro)
                     falhas = 0
                 except Exception:
                     falhas += 1

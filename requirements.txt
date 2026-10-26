@@ -10,5 +10,6 @@ sounddevice>=0.5
 soundcard>=0.4.6
 py-tgcalls>=3.0,<4
 numpy>=2.1
+livekit>=1.1,<2
 emoji>=2.14
 opencv-python-headless>=5.0

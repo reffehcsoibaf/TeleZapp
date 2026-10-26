@@ -255,6 +255,17 @@ OPCOES = (
           "(e confere ao abrir, para o que venceu com ele fechado). "
           "Desmarcada, as mensagens ficam guardadas aqui, marcadas como "
           "vencidas. O que o TeleZapp apaga não volta numa nova sincronia."),
+    Opcao("manter_apagadas",
+          "Manter as mensagens que quem enviou apagar para todos",
+          "Privacidade", False,
+          "Quando alguém apaga uma mensagem para todos depois de o TeleZapp "
+          "tê-la recebido, o WhatsApp e o Telegram tiram o conteúdo do "
+          "celular. Marcada, o TeleZapp guarda o que já tinha (texto, "
+          "áudio e outras mídias baixadas) e só acrescenta \"apagada pelo "
+          "autor\" na linha da mensagem. Desmarcada, ela vira Mensagem "
+          "apagada e a mídia baixada é descartada. Só vale para o que "
+          "chegar depois de marcar; o que já foi apagado não volta. As "
+          "mensagens que você mesmo apaga continuam sendo apagadas."),
     Opcao("verificar_atualizacoes",
           "Avisar quando houver versão nova do TeleZapp", "Atualizações",
           True,
@@ -321,6 +332,15 @@ OPCOES = (
           "mensagem, Control E\". Desmarcada, os nomes ficam sem o atalho "
           "e os atalhos continuam funcionando. Os atalhos podem ser "
           "mudados em Configurações, Atalhos."),
+    Opcao("ocultar_contatos_duplicados", "Ocultar contatos duplicados",
+          "Interface", True,
+          "Nas listas de contatos (Contatos e a escolha de quem recebe em "
+          "Nova mensagem e Nova chamada), mostra uma vez só a pessoa que "
+          "aparece repetida: com o mesmo telefone, ou com o mesmo nome "
+          "quando uma das cópias não tem telefone. Duas pessoas com o mesmo "
+          "nome e telefones diferentes continuam as duas. Desmarcada, a "
+          "lista mostra tudo o que está guardado. O mesmo botão está na "
+          "janela Contatos."),
     Opcao("segundo_plano", "Continuar em segundo plano ao fechar a janela",
           "Sistema", False,
           "Fechar a janela (o botão de fechar ou Alt F4) só a minimiza: o "
@@ -453,7 +473,7 @@ OPCOES = (
           "Ao tocar o primeiro áudio, falar de quem é e a duração",
           "Mídias", False,
           "Quando um áudio ou mensagem de voz começa a tocar, fala o que é, "
-          "de quem e quanto dura. Desmarcada, só diz Tocando. Vale para o "
+          "de quem e quanto dura. Desmarcada, não fala nada: o próprio áudio começa a tocar. Vale para o "
           "primeiro áudio; os que tocam depois dele, na sequência, seguem as "
           "opções \"Na sequência de áudios\" logo abaixo."),
     Opcao("seq_falar_proximo", "Na sequência de áudios, falar Próximo áudio",
@@ -487,6 +507,18 @@ OPCOES = (
           "tocar, fala Fim da sequência. Só vale se pelo menos dois áudios "
           "tocaram em sequência; um áudio sozinho não anuncia nada. "
           "Interromper o áudio com Esc também não anuncia."),
+    Opcao("chamada_eco", "Cancelar o eco nas chamadas de voz", "Mídias", True,
+          "Quando você ouve a chamada pelo alto-falante, o microfone capta "
+          "a voz da outra pessoa e ela se ouve de volta. Marcada, o TeleZapp "
+          "tira esse eco do que envia, também quando ele volta atrasado "
+          "por uma mesa de som com retorno. Use fone para o melhor "
+          "resultado. Vale a partir da próxima chamada. Desmarque se a "
+          "outra pessoa disser que sua voz sai cortada ou abafada."),
+    Opcao("chamada_ruido", "Reduzir o ruído do microfone nas chamadas de "
+          "voz", "Mídias", True,
+          "Diminui ruídos constantes captados pelo microfone, como "
+          "ventilador, ar-condicionado e chiado. Vale a partir da próxima "
+          "chamada."),
     Opcao("midias_baixar", "Quando baixar as mídias", "Mídias", "demanda",
           "Sob demanda baixa só quando você abre a mídia. Automático baixa "
           "ao receber, até o limite escolhido.",

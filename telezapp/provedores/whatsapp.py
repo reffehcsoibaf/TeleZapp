@@ -3385,8 +3385,10 @@ class ProvedorWhatsApp(Provedor):
                          "perfil=%s, nome verificado=%s",
                          "veio" if info.Pushname else "não veio",
                          "veio" if nome_verificado(info) else "não veio")
-            if not grupo and not msg.minha and not msg.autor:
-                msg.autor = conv.nome       # conversa privada: quem fala
+            if not grupo and not msg.minha:
+                # conversa privada: quem fala e o nome da conversa (o do
+                # contato salvo, senao o do perfil), igual em todas
+                msg.autor = m.nome_para_autor(conv) or msg.autor or conv.nome
             prazo = _prazo(_contexto(desembrulhar(evento.Message)))
             with self._trava:
                 conv.data = max(conv.data, msg.data)
@@ -3442,8 +3444,8 @@ class ProvedorWhatsApp(Provedor):
                 tipo=m.AGUARDANDO, estado=m.ENVIADA if minha else "",
                 remetente="" if minha else jid_texto(origem.Sender))
             conv = self._conversa(cid, origem.Chat, nome, grupo, msg.data)
-            if not grupo and not minha and not msg.autor:
-                msg.autor = conv.nome
+            if not grupo and not minha:
+                msg.autor = m.nome_para_autor(conv) or msg.autor or conv.nome
             with self._trava:
                 conv.data = max(conv.data, msg.data)
             self.banco.salvar_conversas([conv])
@@ -3490,6 +3492,11 @@ class ProvedorWhatsApp(Provedor):
             alvo = p.key.ID
             if p.type == p.REVOKE:
                 def apagar(x):
+                    if m.MANTER["apagadas"] and not x.minha:
+                        # opcao "manter as apagadas": o conteudo fica, so
+                        # marcado como apagado pelo autor
+                        m.atualizar_extras(x, apagada_pelo_autor=True)
+                        return
                     x.texto = ""
                     m.atualizar_extras(x, apagada=True, links=[], botoes=[],
                                        acoes=[], original="")
@@ -4745,8 +4752,8 @@ class ProvedorWhatsApp(Provedor):
                     conv.nao_lidas = int(c.unreadCount)
             if not grupo:
                 for x in novas:
-                    if not x.minha and not x.autor:
-                        x.autor = conv.nome
+                    if not x.minha:
+                        x.autor = m.nome_para_autor(conv) or x.autor or                             conv.nome
             if grupo and conv.nome == "Grupo" and \
                     cid not in self._nomes_grupo_pedidos:
                 self._nomes_grupo_pedidos.add(cid)

@@ -33,6 +33,7 @@ from telezapp.interface.chamada import DialogoChamada
 from telezapp.interface import dispositivos as ui_dispositivos
 from telezapp.midia import armazem
 from telezapp.midia import dispositivos
+from telezapp.midia import eco as midia_eco
 from telezapp.midia import envio
 from telezapp.midia import prioridade
 from telezapp.midia import velocidade as vel
@@ -70,6 +71,10 @@ from telezapp.nucleo.midias import TEXTO_LIMPA
 log = logging.getLogger("telezapp.janela")
 
 MARCADOR = "marcador"
+ATALHOS_GLOBAIS = ("mostrar_janela", "atender_global", "recusar_global")
+ROTULO_GLOBAL = {"mostrar_janela": "chamar o TeleZapp",
+                 "atender_global": "atender a chamada",
+                 "recusar_global": "recusar ou desligar a chamada"}
 TEXTO_SEM_CONVERSA = "Nenhuma conversa aberta. Aperte Enter numa conversa."
 TEXTO_SEM_MENSAGENS = "Esta conversa ainda não tem mensagens."
 TEXTO_SOMENTE_LEITURA = ("Esta conversa é somente leitura: você não pode "
@@ -419,6 +424,7 @@ class Janela(wx.Frame):
         self._escrita_liberada = True   # a conversa aberta aceita mensagens
         self._caiu = set()        # contas que cairam (som de reconectada)
         self._quem_cache = {}     # quem enviou, p/ mensagens sem autor
+        self._de_grupo = {}       # resposta em particular -> msg do grupo
         # modo de selecao (Control Espaco): marcas em varias conversas ou
         # mensagens para agir de uma vez pelo menu de contexto
         self.modo_conv, self.marc_conv = False, set()    # chaves de conversa
@@ -447,8 +453,12 @@ class Janela(wx.Frame):
         self._gravacao_rapida = None  # {"gravador", "origem"} gravando por atalho
         self._bandeja = None          # icone da area de notificacao
         self._saindo = False          # True: fechar e sair de verdade
-        self._id_global = (wx.NewIdRef().GetId() if hasattr(wx, "NewIdRef")
-                           else 9001)
+        # atalhos que valem em qualquer programa (RegisterHotKey), cada um
+        # com o seu id: funcao -> id
+        self._ids_globais = {
+            chave: (wx.NewIdRef().GetId() if hasattr(wx, "NewIdRef")
+                    else 9001 + n)
+            for n, chave in enumerate(ATALHOS_GLOBAIS)}
         # funcoes que aceitam atalho (os itens de menu e outras) e o que a
         # pessoa mudou; os rotulos sem atalho de cada item ficam em
         # _base_menu e o atalho entra na hora (ver _atualizar_atalhos)
@@ -461,8 +471,7 @@ class Janela(wx.Frame):
         self.CreateStatusBar()
         self.Bind(wx.EVT_CLOSE, self._ao_fechar)
         if hasattr(wx, "EVT_HOTKEY"):
-            self.Bind(wx.EVT_HOTKEY,
-                      lambda e: self._mostrar_da_bandeja())
+            self.Bind(wx.EVT_HOTKEY, self._ao_atalho_global)
         self._atualizar_bandeja()
         self._registrar_atalho_global()
         if hasattr(wx, "EVT_ICONIZE"):      # minimizar esconde as trancadas
@@ -560,6 +569,7 @@ class Janela(wx.Frame):
         item(m_msg, "responder_particular", "Responder em &particular")
         item(m_msg, "responder", "&Responder\tCtrl+Shift+R")
         item(m_msg, "copiar", "&Copiar texto\tCtrl+Shift+C")
+        item(m_msg, "copiar_ia", "Copiar a transcrição ou descrição")
         item(m_msg, "detalhes", "&Detalhes\tAlt+Enter")
         item(m_msg, "editar_msg", "Edi&tar mensagem	F2")
         item(m_msg, "reagir", "Re&agir à mensagem...\tCtrl+Shift+G")
@@ -738,6 +748,13 @@ class Janela(wx.Frame):
         self.atalhos.registrar(
             "mostrar_janela", "Chamar o TeleZapp quando ele está em segundo "
             "plano (atalho global)", "Geral", "")
+        self.atalhos.registrar(
+            "atender_global", "Atender a chamada que está tocando (atalho "
+            "global, vale em qualquer programa)", "Chamadas", "")
+        self.atalhos.registrar(
+            "recusar_global", "Recusar a chamada que está tocando ou desligar "
+            "a chamada em andamento (atalho global, vale em qualquer "
+            "programa)", "Chamadas", "")
         self._atualizar_atalhos()
 
         ligacoes = {
@@ -800,6 +817,7 @@ class Janela(wx.Frame):
             "responder": lambda e: self._responder(),
             "responder_particular": lambda e: self._responder_em_particular(),
             "copiar": lambda e: self._copiar(),
+            "copiar_ia": lambda e: self._copiar_texto_ia(),
             "encaminhar": lambda e: self._encaminhar(),
             "editar_msg": lambda e: self._editar_mensagem(),
             "reagir": lambda e: self._reagir(),
@@ -942,25 +960,47 @@ class Janela(wx.Frame):
         self._registrar_atalho_global()
 
     def _registrar_atalho_global(self):
-        """(Re)liga o atalho que chama o TeleZapp de qualquer lugar."""
+        """(Re)liga os atalhos que valem de qualquer lugar: chamar o
+        TeleZapp, atender e recusar a chamada que toca."""
         if not hasattr(self, "RegisterHotKey"):
             return
-        try:
-            self.UnregisterHotKey(self._id_global)
-        except Exception:
-            pass
-        canon = self.atalhos.efetivo("mostrar_janela")
-        if not canon:
+        for chave, id_ in self._ids_globais.items():
+            try:
+                self.UnregisterHotKey(id_)
+            except Exception:
+                pass
+            canon = self.atalhos.efetivo(chave)
+            if not canon:
+                continue
+            par = ui_teclas.para_atalho_global(canon)
+            if par is None or not self.RegisterHotKey(id_, *par):
+                log.warning("atalho global %s nao registrado", canon)
+                bipe("erro")
+                self.fala.falar(
+                    "Não consegui reservar o atalho %s para %s: outro "
+                    "programa já o usa. Escolha outro em Configurações, "
+                    "Atalhos." % (nucleo_atalhos.texto_falado(canon),
+                                  ROTULO_GLOBAL[chave]),
+                    interromper=True)
+
+    def _ao_atalho_global(self, evt):
+        """Um atalho global foi apertado, em qualquer programa."""
+        chave = next((c for c, i in self._ids_globais.items()
+                      if i == evt.GetId()), "mostrar_janela")
+        if chave == "mostrar_janela":
+            self._mostrar_da_bandeja()
             return
-        par = ui_teclas.para_atalho_global(canon)
-        if par is None or not self.RegisterHotKey(self._id_global, *par):
-            log.warning("atalho global %s nao registrado", canon)
-            bipe("erro")
-            self.fala.falar(
-                "Não consegui reservar o atalho %s para chamar o TeleZapp: "
-                "outro programa já o usa. Escolha outro em Configurações, "
-                "Atalhos." % nucleo_atalhos.texto_falado(canon),
-                interromper=True)
+        c = self.chamada
+        if chave == "atender_global":
+            if c is None or c.estado != ch.TOCANDO:
+                self.fala.falar("Nenhuma chamada tocando.", interromper=True)
+                return
+            self._atender_chamada()
+        elif c is None or not c.ativa:
+            self.fala.falar("Nenhuma chamada em andamento.",
+                            interromper=True)
+        else:
+            self._desligar_chamada()      # recusa se toca, desliga se nao
 
     def _atualizar_bandeja(self):
         """Cria ou tira o icone da area de notificacao conforme a opcao de
@@ -2975,6 +3015,7 @@ class Janela(wx.Frame):
         if aberta:
             conv.nao_lidas = 0
         self.indice[chave] = conv
+        m.alinhar_autores(conv, [msg])
         self._atualizar_previa(chave, msg)
         self._ordenar()
         self._preencher_conversas()
@@ -3132,7 +3173,7 @@ class Janela(wx.Frame):
             quem = [p for p in self.quem_reagiu.get(chave, [])
                     if p[0] != e.quem]
             self.quem_reagiu[chave] = quem + [(e.quem, e.emoji)]
-        if e.motivo == "apagada":
+        if e.motivo == "apagada" and                 not m.extras_de(e.mensagem)["apagada_pelo_autor"]:
             self._descartar_midia_apagada(e.mensagem)
         if self._atualizar_previa_se_for_a_ultima(chave, e.mensagem) or (
                 nova_reacao and {"reacoes", "quem_reagiu"} & set(
@@ -3647,6 +3688,15 @@ class Janela(wx.Frame):
             return
         self._abrir_conversa(conv)
 
+    def _alinhar_autores(self, conv, msgs):
+        """Numa conversa com uma pessoa, todas as mensagens dela mostram o
+        nome da conversa (o do contato salvo vale mais que o do perfil ou o
+        telefone com que cada mensagem chegou), tambem no banco."""
+        if m.alinhar_autores(conv, msgs):
+            self.banco.renomear_autor_da_conversa(
+                conv.conta_id, conv.id, m.nome_para_autor(conv))
+            self._quem_cache.clear()
+
     def _abrir_conversa(self, conv):
         conv = self._escolher_topico(conv)
         if conv is None:
@@ -3659,6 +3709,7 @@ class Janela(wx.Frame):
         self.editando = None
         self.modo_msg, self.marc_msg = False, set()
         self._quem_cache.clear()
+        self._de_grupo.clear()
         self._descartar_anexos()
         self.marcador_n = conv.nao_lidas
         self.marcador_id = None
@@ -3668,6 +3719,7 @@ class Janela(wx.Frame):
         guardadas = self.banco.mensagens(
             conv.conta_id, conv.id, min(LIMITE_CACHE, self._limite_memoria()))
         lista = self._mesclar(conv.chave, guardadas)
+        self._alinhar_autores(conv, lista)
         if self.marcador_n > 0 or not lista:
             # o banco pode nao ter as mensagens mais novas: o marcador so e
             # posto quando o servidor responder
@@ -3853,6 +3905,7 @@ class Janela(wx.Frame):
                 m.formatar(x, self.estilo, anterior,
                            quem=self._quem_enviou(x),
                            respondida=self._original(x, porid)
+                           or self._resposta_de_grupo(x)
                            or self._motivo_do_original_ausente(x)
                            or None),
                 x.id in self.marc_msg))
@@ -3968,6 +4021,36 @@ class Janela(wx.Frame):
                 porid[o.id] = o
         return o
 
+    def _original_de_grupo(self, x):
+        """A mensagem de grupo que `x` (numa conversa com uma pessoa)
+        responde em particular: o WhatsApp guarda o id dela, e ela mora na
+        conversa do grupo. None se nao e esse caso ou nao esta guardada."""
+        if not x.resposta_a or self.banco is None or self.contas is None:
+            return None
+        chave = (x.conta_id, x.conversa_id, x.resposta_a)
+        if chave in self._de_grupo:
+            return self._de_grupo[chave]
+        achada = None
+        conv = self.indice.get((x.conta_id, x.conversa_id))
+        if conv is not None and conv.tipo == "privada" and                 self.contas.servico(x.conta_id) == "whatsapp":
+            for y in self.banco.mensagens_por_id(x.conta_id, [x.resposta_a]):
+                dono = self.indice.get((y.conta_id, y.conversa_id))
+                if y.conversa_id != x.conversa_id and dono is not None                         and dono.tipo == "grupo":
+                    achada = y
+                    break
+        self._de_grupo[chave] = achada
+        return achada
+
+    def _resposta_de_grupo(self, x):
+        """Como a linha cita a mensagem do grupo: 'Ana, no grupo Turma:
+        "texto"'. Vazio se `x` nao responde a mensagem de grupo."""
+        o = self._original_de_grupo(x)
+        if o is None:
+            return ""
+        grupo = self.indice[(o.conta_id, o.conversa_id)].nome
+        quem = "você" if o.minha else (o.autor or "mensagem")
+        return '%s, no grupo %s: "%s"' % (quem, grupo, m.citacao(o))
+
     def _chave_selecionada(self):
         i = self.lista_msgs.GetSelection()
         return self.mapa[i] if 0 <= i < len(self.mapa) else None
@@ -4074,13 +4157,13 @@ class Janela(wx.Frame):
             (lambda: prov.atualizar_enquete(obter()))
             if prov is not None else (lambda: None), self.fala)
 
-    def _copiar_texto(self, texto):
+    def _copiar_texto(self, texto, aviso="Texto copiado."):
         if wx.TheClipboard.Open():
             try:
                 wx.TheClipboard.SetData(wx.TextDataObject(texto))
             finally:
                 wx.TheClipboard.Close()
-        self.fala.falar("Texto copiado.")
+        self.fala.falar(aviso)
 
     def _detalhes(self):
         x = self._mensagem_selecionada()
@@ -4863,10 +4946,14 @@ class Janela(wx.Frame):
                             interromper=True)
             return
         def buscar(conta_id, texto):
-            return nm.candidatos(
+            achados = nm.candidatos(
                 texto, self.banco.contatos(conta_id),
                 [c for c in self.indice.values()
                  if c.conta_id == conta_id])
+            if self.cfg.get("ocultar_contatos_duplicados"):
+                achados = nm.sem_duplicados(
+                    achados, lambda t: (conta_id, t[0], t[1], t[2]))
+            return achados
         escolha = contatos.dialogo_nova_mensagem(self, contas, buscar)
         if escolha is None:
             return
@@ -4910,10 +4997,14 @@ class Janela(wx.Frame):
             return
 
         def buscar(conta_id, texto):
-            return nm.candidatos(
+            achados = nm.candidatos(
                 texto, self.banco.contatos(conta_id),
                 [c for c in self.indice.values()
                  if c.conta_id == conta_id])
+            if self.cfg.get("ocultar_contatos_duplicados"):
+                achados = nm.sem_duplicados(
+                    achados, lambda t: (conta_id, t[0], t[1], t[2]))
+            return achados
         escolha = contatos.dialogo_nova_chamada(self, contas, buscar)
         if escolha is None:
             return
@@ -5311,6 +5402,22 @@ class Janela(wx.Frame):
             return
         self._copiar_texto(x.texto or m.conteudo(x))
 
+    def _copiar_texto_ia(self, x=None):
+        """Copia direto a transcrição, descrição ou texto do PDF que a IA fez
+        da mensagem, sem abrir a caixa de leitura."""
+        if x is None:
+            x = self._mensagem_selecionada()
+        if x is None:
+            return
+        rotulo = m.rotulo_da_ia(x)
+        if not rotulo:
+            bipe("erro")
+            self.fala.falar("Esta mensagem não tem transcrição nem "
+                            "descrição.", interromper=True)
+            return
+        self._copiar_texto(m.extras_de(x)["ia"]["texto"],
+                           "%s copiada." % rotulo.capitalize())
+
     def _copiar_conteudo(self, x, tipo, valor):
         """Um item "Copiar ..." do menu da mensagem: o texto, o endereco ou o
         arquivo da midia (que precisa estar baixada)."""
@@ -5418,7 +5525,10 @@ class Janela(wx.Frame):
         dlg = contatos.GerenciadorContatos(
             self, self.banco, _ContasParaContatos(self),
             self._renomear_pelos_contatos,
-            lambda t: self.fala.falar(t, interromper=True))
+            lambda t: self.fala.falar(t, interromper=True),
+            ocultar_duplicados=bool(self.cfg.get("ocultar_contatos_duplicados")),
+            ao_ocultar=lambda v: self.cfg.set(
+                "ocultar_contatos_duplicados", bool(v)))
         try:
             dlg.ShowModal()
         finally:
@@ -5750,6 +5860,8 @@ class Janela(wx.Frame):
             if nome and nome != c.nome:
                 c.nome = nome
                 mudou.append(c)
+                self.banco.renomear_autor_da_conversa(c.conta_id, c.id, nome)
+                m.alinhar_autores(c, self.cache.get(c.chave, []))
         if mudou:
             self.banco.salvar_conversas(mudou)
         self._ordenar()
@@ -5801,6 +5913,9 @@ class Janela(wx.Frame):
         if x.resposta_a not in self.mapa:
             # fora da lista aberta: tenta trazer do banco de dados
             o = self.banco.mensagem(x.conta_id, x.conversa_id, x.resposta_a)
+            if o is None and self._original_de_grupo(x) is not None:
+                self._ir_para_mensagem_do_grupo(x)
+                return
             if o is None:
                 bipe("erro")
                 motivo = self._motivo_do_original_ausente(x)
@@ -5819,11 +5934,48 @@ class Janela(wx.Frame):
         self.lista_msgs.SetSelection(self.mapa.index(x.resposta_a))
         self.lista_msgs.SetFocus()
 
+    def _ir_para_mensagem_do_grupo(self, x):
+        """Resposta em particular a uma mensagem de grupo: abre a conversa do
+        grupo posicionada na mensagem respondida. Esc volta para a resposta."""
+        o = self._original_de_grupo(x)
+        grupo = self.indice.get((o.conta_id, o.conversa_id))
+        origem = (x.conta_id, x.conversa_id)
+        self._fechar_conversa()
+        self._abrir_conversa(grupo)
+        if self.atual != grupo.chave:
+            return
+        self._mostrar_mensagem(o)
+        self.volta_para = [(origem, x.id)]
+
+    def _mostrar_mensagem(self, o):
+        """Poe a selecao da conversa aberta na mensagem `o`, trazendo-a do
+        banco se estiver fora da lista, e deixa o foco nas mensagens."""
+        if o.id not in self.mapa:
+            self._mesclar(self.atual, [o])
+        self.alvo_inicial = o.id
+        self.marcador_id = None
+        self._preencher_mensagens(o.id)
+        self.selecao_automatica = False
+        if o.id in self.mapa:
+            self.lista_msgs.SetSelection(self.mapa.index(o.id))
+        self.lista_msgs.SetFocus()
+
     def _voltar_da_respondida(self):
         """Esc depois de ir para a mensagem respondida: volta para a resposta
         de onde a pessoa saiu. False se nao ha para onde voltar."""
         while self.volta_para:
             id_ = self.volta_para.pop()
+            if isinstance(id_, tuple):        # veio de outra conversa
+                chave, mid = id_
+                conv = self.indice.get(chave)
+                x = self.banco.mensagem(chave[0], chave[1], mid)                     if conv is not None else None
+                if x is None:
+                    continue
+                self._fechar_conversa()
+                self._abrir_conversa(conv)
+                if self.atual == conv.chave:
+                    self._mostrar_mensagem(x)
+                return True
             if id_ in self.mapa:
                 self.lista_msgs.SetSelection(self.mapa.index(id_))
                 return True
@@ -7048,6 +7200,10 @@ class Janela(wx.Frame):
                 m.definir_modo_previa(valor)
                 if self.atual is not None:
                     self._preencher_mensagens()
+            elif chave == "manter_apagadas":
+                m.definir_manter_apagadas(valor)
+            elif chave in ("chamada_eco", "chamada_ruido"):
+                self._carregar_eco()
             elif chave in ("ia_linha_descricao", "ia_linha_transcricao"):
                 self._carregar_limites_ia()
                 if self.atual is not None:
@@ -7086,8 +7242,14 @@ class Janela(wx.Frame):
         if self.atual == chave:
             self._preencher_mensagens()
 
+    def _carregar_eco(self):
+        midia_eco.definir(self.cfg.get("chamada_eco"),
+                          self.cfg.get("chamada_ruido"))
+
     def _carregar_limites_ia(self):
+        self._carregar_eco()
         """Quanto do texto da IA entra na linha de cada mensagem."""
+        m.definir_manter_apagadas(self.cfg.get("manter_apagadas"))
         m.definir_limites_ia(self.cfg.get("ia_linha_descricao"),
                              self.cfg.get("ia_linha_transcricao"))
 
@@ -7628,10 +7790,11 @@ class Janela(wx.Frame):
         self._saindo = True
         self._tirar_bandeja()
         if hasattr(self, "UnregisterHotKey"):
-            try:
-                self.UnregisterHotKey(self._id_global)
-            except Exception:
-                pass
+            for id_ in self._ids_globais.values():
+                try:
+                    self.UnregisterHotKey(id_)
+                except Exception:
+                    pass
         if self._gravacao_rapida is not None:
             self._terminar_gravacao_rapida(enviar=False)
         self.Hide()

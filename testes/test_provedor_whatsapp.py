@@ -1432,6 +1432,21 @@ def test_apagar_para_todos_esconde_o_conteudo(amb):
     assert "segredo" not in m.formatar(a.mensagem, m.ESTILO_AUTOR_PRIMEIRO)
 
 
+def test_manter_apagadas_guarda_o_conteudo_e_so_marca(amb, monkeypatch):
+    monkeypatch.setitem(m.MANTER, "apagadas", True)
+    _chegou(amb, texto="segredo")
+    apagar = E.Message(protocolMessage=E.ProtocolMessage(
+        key=_chave("M1"), type=E.ProtocolMessage.REVOKE))
+    amb.f["Message"](amb.c, evento("D1", apagar))
+    a = esperar(amb.fila, ev.MensagemAtualizada)
+    assert a.motivo == "apagada" and a.mensagem.texto == "segredo"
+    extras = m.extras_de(a.mensagem)
+    assert extras["apagada_pelo_autor"] and not extras["apagada"]
+    linha = m.formatar(a.mensagem, m.ESTILO_AUTOR_PRIMEIRO)
+    assert "segredo" in linha and "(apagada pelo autor)" in linha
+    assert amb.banco.mensagem("w1", a.conversa_id, "M1").texto == "segredo"
+
+
 def test_alteracao_de_mensagem_desconhecida_e_ignorada(amb):
     amb.f["Connected"](amb.c, N.Connected())
     esperar(amb.fila, ev.ContaPronta)

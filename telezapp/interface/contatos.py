@@ -127,14 +127,17 @@ def adicionar_contato(pai, banco, contas, falar):
 class GerenciadorContatos(wx.Dialog):
     """Lista de contatos com Adicionar, Editar, Remover e Trazer."""
 
-    def __init__(self, pai, banco, contas, ao_mudar, falar):
+    def __init__(self, pai, banco, contas, ao_mudar, falar,
+                 ocultar_duplicados=False, ao_ocultar=None):
         """contas: objeto com .lista() -> [(conta_id, servico, nome)] e
-        .provedor(conta_id); ao_mudar(): chamado depois de cada mudanca."""
+        .provedor(conta_id); ao_mudar(): chamado depois de cada mudanca;
+        ao_ocultar(bool): guarda a escolha de ocultar os repetidos."""
         super().__init__(pai, title="Contatos",
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.banco, self.contas = banco, contas
         self.ao_mudar, self.falar = ao_mudar, falar
         self._itens = []
+        self.ao_ocultar = ao_ocultar
         lay = wx.BoxSizer(wx.VERTICAL)
         lay.Add(wx.StaticText(
             self, label="Contatos do TeleZapp. O nome vale nas conversas, "
@@ -145,6 +148,9 @@ class GerenciadorContatos(wx.Dialog):
         self.busca = wx.TextCtrl(self, name="Buscar contato",
                                  size=(520, -1))
         lay.Add(self.busca, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+        self.ocultar = wx.CheckBox(self, label="Ocultar contatos &duplicados")
+        self.ocultar.SetValue(bool(ocultar_duplicados))
+        lay.Add(self.ocultar, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
         self.lista = wx.ListBox(self, name="Contatos", size=(520, 260))
         lay.Add(self.lista, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
         linha = wx.BoxSizer(wx.HORIZONTAL)
@@ -169,6 +175,7 @@ class GerenciadorContatos(wx.Dialog):
         self.lista.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self._editar())
         self.busca.Bind(wx.EVT_TEXT, lambda e: self._preencher(
             self._chave_selecionada()))
+        self.ocultar.Bind(wx.EVT_CHECKBOX, self._ao_ocultar)
         self.busca.Bind(wx.EVT_CHAR_HOOK, self._tecla_na_busca)
         self._preencher()
         self.busca.SetFocus()
@@ -188,6 +195,13 @@ class GerenciadorContatos(wx.Dialog):
             return
         evt.Skip()
 
+    def _ao_ocultar(self, _evt=None):
+        if self.ao_ocultar is not None:
+            self.ao_ocultar(self.ocultar.GetValue())
+        self._preencher(self._chave_selecionada())
+        self.falar("Contatos duplicados %s." % (
+            "ocultos" if self.ocultar.GetValue() else "à mostra"))
+
     def _casa_busca(self, c, busca):
         digitos = "".join(ch for ch in busca if ch.isdigit())
         return m.casa_busca(c[2], busca) or bool(
@@ -197,6 +211,11 @@ class GerenciadorContatos(wx.Dialog):
         por_id = self._contas_por_id()
         todos = [c for c in self.banco.contatos() if c[0] in por_id]
         busca = self.busca.GetValue().strip()
+        if self.ocultar.GetValue():
+            from telezapp.nucleo import nova_mensagem as nm
+            todos = nm.sem_duplicados(
+                todos, lambda c: (c[0], c[1], c[2], c[3]),
+                entre_contas=True)
         self._itens = [c for c in todos
                        if not busca or self._casa_busca(c, busca)]
         self.lista.Set([
@@ -353,7 +372,8 @@ class DialogoEscolherPessoa(wx.Dialog):
         self.SetSizerAndFit(lay)
         self.CentreOnParent()
         self._atualizar()
-        self.para.SetFocus()
+        # com mais de uma conta, o foco comeca na escolha do servico / conta
+        (self.conta or self.para).SetFocus()
 
     def _conta_id(self):
         i = max(self.conta.GetSelection(), 0) if self.conta else 0

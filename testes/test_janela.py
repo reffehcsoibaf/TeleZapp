@@ -1170,6 +1170,28 @@ def test_copiar_texto_da_caixa_fala_e_vai_para_a_area_de_transferencia(
     assert copiados == ["conteudo"] and ditas == ["Texto copiado."]
 
 
+def test_copiar_transcricao_ou_descricao_tem_slot_de_atalho(j, monkeypatch):
+    assert "copiar_ia" in j.atalhos.acoes
+    assert j.atalhos.efetivo("copiar_ia") == ""
+    j._aplicar_opcao("atalhos", {"copiar_ia": "Ctrl+Alt+T"})
+    assert j.itens["copiar_ia"].rotulo.endswith("	Ctrl+Alt+T")
+    copiados, ditas = [], []
+    monkeypatch.setattr(j, "_copiar_texto",
+                        lambda t, aviso="": copiados.append((t, aviso)))
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    voz = m.Mensagem("t1", "10", "v1", autor="Ana", tipo=m.VOZ)
+    j._copiar_texto_ia(voz)
+    assert copiados == [] and "não tem transcrição" in ditas[-1]
+    m.atualizar_extras(voz, ia={"texto": "olá, tudo bem?",
+                                "genero": "audio"})
+    j._copiar_texto_ia(voz)
+    assert copiados == [("olá, tudo bem?", "Transcrição copiada.")]
+    foto = m.Mensagem("t1", "10", "f1", autor="Ana", tipo=m.FOTO)
+    m.atualizar_extras(foto, ia={"texto": "um gato", "genero": "imagem"})
+    j._copiar_texto_ia(foto)
+    assert copiados[-1] == ("um gato", "Descrição copiada.")
+
+
 def test_detalhes_pedem_ao_provedor_o_nome_de_quem_recebeu(j, monkeypatch):
     j.lista_conv.SetSelection(0)
     j._char_hook(Tecla(wx_falso.WXK_RETURN))
@@ -1964,7 +1986,8 @@ def test_anuncio_de_quem_toca_e_opcional(jm_midia, monkeypatch):
                         lambda t, interromper=False: falas.append(t))
     j.cfg.set("falar_quem_toca", False)
     _preparar_sequencia(j, monkeypatch)
-    assert falas[-1] == "Tocando."
+    assert "Tocando." not in falas and not any(
+        "Tocando" in t for t in falas)         # Enter e o audio toca, sem fala
     # na sequencia valem as opcoes proprias dela, nao esta
     primeiro = MotorFalso.criados[0]
     primeiro.terminou = True
@@ -2890,6 +2913,26 @@ def test_responder_em_particular_abre_a_conversa_da_pessoa_citando_a_mensagem(j)
     j._enviar_texto()
     assert ("enviar", "5551999990000@s.whatsapp.net", "falo aqui", "5") \
         in j.contas.p.pedidos
+
+
+def test_resposta_em_particular_cita_a_mensagem_do_grupo_e_leva_ate_ela(j):
+    j.indice[("t1", "20")].tipo = "grupo"
+    j.indice[("t1", "20")].nome = "Turma"
+    j.banco.salvar_mensagens([m.Mensagem(
+        "t1", "20", "5", autor="Bia", texto="oi pessoal", data=AGORA,
+        remetente="5551999990000@s.whatsapp.net")])
+    r = m.Mensagem("t1", "10", "r1", minha=True, texto="falo aqui",
+                   data=AGORA + 5, resposta_a="5")
+    j.banco.salvar_mensagens([r])
+    j.contas.servico = lambda conta_id: "whatsapp"
+    j._abrir_conversa(j.indice[("t1", "10")])
+    linha = j._itens_msgs[j.mapa.index("r1")]
+    assert 'Bia, no grupo Turma: "oi pessoal"' in linha
+    selecionar(j, "r1")
+    j._ir_para_respondida()
+    assert j.atual == ("t1", "20") and j._chave_selecionada() == "5"
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))      # volta para a resposta
+    assert j.atual == ("t1", "10") and j._chave_selecionada() == "r1"
 
 
 def test_responder_em_particular_so_em_grupo_e_de_outra_pessoa(j):
@@ -4417,6 +4460,52 @@ def test_atalho_global_e_registrado_e_avisa_se_estiver_ocupado(j):
     j.RegisterHotKey = lambda *a: False          # outro programa usa
     j._aplicar_opcao("atalhos", {"mostrar_janela": "Ctrl+Alt+Y"})
     assert "outro programa" in ditas[-1]
+
+
+def test_atalhos_globais_de_atender_e_recusar_a_chamada(j, monkeypatch):
+    from telezapp.nucleo import chamadas as ch
+    registros = {}
+    j.RegisterHotKey = lambda id_, mods, tecla: registros.update(
+        {id_: (mods, tecla)}) or True
+    j.UnregisterHotKey = lambda id_: None
+    for chave in ("atender_global", "recusar_global"):
+        assert chave in j.atalhos.acoes
+        assert j.atalhos.efetivo(chave) == ""
+    j._aplicar_opcao("atalhos", {"atender_global": "Ctrl+Alt+A",
+                                 "recusar_global": "Ctrl+Alt+R"})
+    ids = j._ids_globais
+    assert registros == {
+        ids["atender_global"]: (wx_falso.MOD_CONTROL | wx_falso.MOD_ALT,
+                                ord("A")),
+        ids["recusar_global"]: (wx_falso.MOD_CONTROL | wx_falso.MOD_ALT,
+                                ord("R"))}
+    feito, ditas = [], []
+    monkeypatch.setattr(j, "_atender_chamada", lambda: feito.append("a"))
+    monkeypatch.setattr(j, "_desligar_chamada", lambda: feito.append("r"))
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+
+    class Evt:
+        def __init__(self, id_):
+            self.id = id_
+
+        def GetId(self):
+            return self.id
+    j.chamada = None
+    j._ao_atalho_global(Evt(ids["atender_global"]))
+    assert feito == [] and ditas[-1] == "Nenhuma chamada tocando."
+    j.chamada = ch.Chamada("t1", "10", "Ana", entrante=True,
+                           estado=ch.TOCANDO)
+    j._ao_atalho_global(Evt(ids["atender_global"]))
+    j._ao_atalho_global(Evt(ids["recusar_global"]))
+    assert feito == ["a", "r"]
+    j.chamada.aplicar(ch.EM_CHAMADA, "", "")      # em chamada: so desliga
+    j._ao_atalho_global(Evt(ids["atender_global"]))
+    j._ao_atalho_global(Evt(ids["recusar_global"]))
+    assert feito == ["a", "r", "r"]
+    j.chamada = None
+    j._ao_atalho_global(Evt(ids["recusar_global"]))
+    assert feito == ["a", "r", "r"]
+    assert ditas[-1] == "Nenhuma chamada em andamento."
 
 
 def test_menu_midias_agrupa_as_escolhas_e_o_atalho_fala_portugues(j):

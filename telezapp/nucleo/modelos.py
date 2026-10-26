@@ -209,6 +209,7 @@ def extras_de(msg):
             "original": dados.get("original") or "",
             "editada": bool(dados.get("editada")),
             "apagada": bool(dados.get("apagada")),
+            "apagada_pelo_autor": bool(dados.get("apagada_pelo_autor")),
             "ouvida": bool(dados.get("ouvida")),
             "favorita": bool(dados.get("favorita")),
             "reacoes": list(dados.get("reacoes") or []),
@@ -544,10 +545,9 @@ def anuncio_reproducao(msg, velocidade="", proximo=False,
     a tocar: quem enviou, o que e e quanto dura.
     'Tocando mensagem de voz de Ana, 12 segundos.' `velocidade` e o rotulo
     ('1,5x'), dito so quando nao e a normal; `proximo`: veio da sequencia.
-    `detalhado` falso: so 'Tocando.' (com a velocidade, se nao e a normal)."""
+    `detalhado` falso: nada (texto vazio); o proprio audio e o aviso."""
     if not detalhado:
-        texto = "Tocando" + (", a " + velocidade if velocidade else "") + "."
-        return ("Próximo áudio. " + texto) if proximo else texto
+        return "Próximo áudio." if proximo else ""
     coisa = {VOZ: "mensagem de voz", AUDIO: "áudio",
              VIDEO: "vídeo"}.get(msg.tipo, "áudio")
     if msg.minha:
@@ -609,6 +609,32 @@ def _telefone_do_endereco(remetente):
     if dominio == "s.whatsapp.net" and usuario.isdigit():
         return "+" + usuario
     return remetente or ""
+
+
+def nome_para_autor(conv):
+    """O nome com que a pessoa de uma conversa privada aparece como autor das
+    mensagens que ela envia: o nome da conversa (o do contato salvo vale mais
+    que o do perfil). "" quando a conversa so tem o telefone ou nao tem nome
+    ainda (nao serve para apagar um nome de perfil que a mensagem trouxe)."""
+    if conv is None or conv.tipo != "privada":
+        return ""
+    nome = (conv.nome or "").strip()
+    if not nome or nome.startswith("+") or nome == "Contato sem nome":
+        return ""
+    return nome
+
+
+def alinhar_autores(conv, msgs):
+    """Poe em todas as mensagens recebidas de uma conversa privada o mesmo
+    autor (nome_para_autor). Devolve as que mudaram."""
+    nome = nome_para_autor(conv)
+    mudaram = []
+    if nome:
+        for x in msgs:
+            if not x.minha and x.autor != nome:
+                x.autor = nome
+                mudaram.append(x)
+    return mudaram
 
 
 def quem_enviou(msg, conv=None, nome_do_remetente=None):
@@ -684,6 +710,14 @@ def _so_link(m):
 
 LIMITE_IA_NA_LINHA = {"descricao": 0, "transcricao": 1000}
 
+# Ligado pela janela a partir da opcao `manter_apagadas`: o que o remetente
+# apaga para todos continua guardado aqui, so marcado.
+MANTER = {"apagadas": False}
+
+
+def definir_manter_apagadas(ligado):
+    MANTER["apagadas"] = bool(ligado)
+
 
 def definir_limites_ia(descricao, transcricao):
     LIMITE_IA_NA_LINHA["descricao"] = max(0, int(descricao or 0))
@@ -731,6 +765,8 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None,
         cont = _juntar(trecho_da_previa(m), cont)
     if extras_de(m)["editada"]:
         cont = _juntar(cont, "(editada)")
+    if extras_de(m)["apagada_pelo_autor"]:
+        cont = _juntar(cont, "(apagada pelo autor)")
     if extras_de(m)["favorita"]:
         cont = _juntar(cont, "(favorita)")
     if getattr(m, "expira", 0):

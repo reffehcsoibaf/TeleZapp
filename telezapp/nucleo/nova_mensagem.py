@@ -45,6 +45,55 @@ def candidatos(busca, contatos, conversas):
     return achados
 
 
+def _nome_simples(nome):
+    import unicodedata
+    base = unicodedata.normalize("NFD", (nome or "").strip().lower())
+    return " ".join("".join(c for c in base
+                            if unicodedata.category(c) != "Mn").split())
+
+
+def _digitos(id_, telefone):
+    """Digitos do telefone do contato; sem telefone, os do endereco quando
+    ele e um telefone (@s.whatsapp.net). O endereco @lid nao conta."""
+    digitos = "".join(c for c in telefone or "" if c.isdigit())
+    if not digitos and (id_ or "").endswith("@s.whatsapp.net"):
+        digitos = "".join(c for c in id_.split("@")[0] if c.isdigit())
+    return digitos
+
+
+def sem_duplicados(itens, dados, entre_contas=False):
+    """Tira da lista a mesma pessoa repetida, mantendo a ordem e o primeiro.
+    `dados(item)` -> (grupo, id, nome, telefone); grupo e a conta (so se
+    comparam contatos do mesmo grupo). Sao a mesma pessoa: o mesmo telefone
+    e, quando um dos dois nao tem telefone (aparece so pelo endereco @lid,
+    por exemplo), o mesmo nome. Duas pessoas com o mesmo nome e telefones
+    diferentes continuam as duas. Com `entre_contas`, o grupo e ignorado: a
+    mesma pessoa em varias contas aparece uma vez so."""
+    fichas = []
+    for x in itens:
+        grupo, id_, nome, tel = dados(x)
+        if entre_contas:
+            grupo = None
+        fichas.append((x, grupo, _digitos(id_, tel), _nome_simples(nome)))
+    com_telefone = {(g, n) for _, g, d, n in fichas if d and n}
+    vistos, saida = set(), []
+    for x, grupo, digitos, nome in fichas:
+        if digitos:
+            chave = (grupo, "tel", digitos)
+        elif not nome:
+            chave = None
+        elif (grupo, nome) in com_telefone:
+            continue                # o mesmo nome ja aparece com telefone
+        else:
+            chave = (grupo, "nome", nome)
+        if chave is not None:
+            if chave in vistos:
+                continue
+            vistos.add(chave)
+        saida.append(x)
+    return saida
+
+
 def rotulo(nome, telefone=""):
     """'Ana Souza, +5551999998888'."""
     return "%s, %s" % (nome, telefone) if telefone else nome

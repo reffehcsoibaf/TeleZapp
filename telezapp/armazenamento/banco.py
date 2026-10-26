@@ -425,6 +425,15 @@ class Banco:
                 % ", ".join("?" * len(remetentes)),
                 (nome, conta_id, nome, *remetentes)).rowcount
 
+    def renomear_autor_da_conversa(self, conta_id, conversa_id, nome):
+        """Poe `nome` como autor de todas as mensagens recebidas numa
+        conversa com uma pessoa. Devolve quantas mudaram."""
+        with self._trava, self._con:
+            return self._con.execute(
+                "UPDATE mensagens SET autor=? WHERE conta_id=? AND "
+                "conversa_id=? AND minha=0 AND autor<>?",
+                (nome, conta_id, conversa_id, nome)).rowcount
+
     def nome_do_remetente(self, conta_id, remetentes):
         """Nome (autor) mais recente com que alguem dessa lista de enderecos
         aparece nas mensagens guardadas, sem contar telefones soltos."""
