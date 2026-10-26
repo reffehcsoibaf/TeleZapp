@@ -1170,6 +1170,28 @@ def test_copiar_texto_da_caixa_fala_e_vai_para_a_area_de_transferencia(
     assert copiados == ["conteudo"] and ditas == ["Texto copiado."]
 
 
+def test_copiar_transcricao_ou_descricao_tem_slot_de_atalho(j, monkeypatch):
+    assert "copiar_ia" in j.atalhos.acoes
+    assert j.atalhos.efetivo("copiar_ia") == ""
+    j._aplicar_opcao("atalhos", {"copiar_ia": "Ctrl+Alt+T"})
+    assert j.itens["copiar_ia"].rotulo.endswith("	Ctrl+Alt+T")
+    copiados, ditas = [], []
+    monkeypatch.setattr(j, "_copiar_texto",
+                        lambda t, aviso="": copiados.append((t, aviso)))
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    voz = m.Mensagem("t1", "10", "v1", autor="Ana", tipo=m.VOZ)
+    j._copiar_texto_ia(voz)
+    assert copiados == [] and "não tem transcrição" in ditas[-1]
+    m.atualizar_extras(voz, ia={"texto": "olá, tudo bem?",
+                                "genero": "audio"})
+    j._copiar_texto_ia(voz)
+    assert copiados == [("olá, tudo bem?", "Transcrição copiada.")]
+    foto = m.Mensagem("t1", "10", "f1", autor="Ana", tipo=m.FOTO)
+    m.atualizar_extras(foto, ia={"texto": "um gato", "genero": "imagem"})
+    j._copiar_texto_ia(foto)
+    assert copiados[-1] == ("um gato", "Descrição copiada.")
+
+
 def test_detalhes_pedem_ao_provedor_o_nome_de_quem_recebeu(j, monkeypatch):
     j.lista_conv.SetSelection(0)
     j._char_hook(Tecla(wx_falso.WXK_RETURN))

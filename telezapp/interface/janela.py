@@ -567,6 +567,7 @@ class Janela(wx.Frame):
         item(m_msg, "responder_particular", "Responder em &particular")
         item(m_msg, "responder", "&Responder\tCtrl+Shift+R")
         item(m_msg, "copiar", "&Copiar texto\tCtrl+Shift+C")
+        item(m_msg, "copiar_ia", "Copiar a transcrição ou descrição")
         item(m_msg, "detalhes", "&Detalhes\tAlt+Enter")
         item(m_msg, "editar_msg", "Edi&tar mensagem	F2")
         item(m_msg, "reagir", "Re&agir à mensagem...\tCtrl+Shift+G")
@@ -814,6 +815,7 @@ class Janela(wx.Frame):
             "responder": lambda e: self._responder(),
             "responder_particular": lambda e: self._responder_em_particular(),
             "copiar": lambda e: self._copiar(),
+            "copiar_ia": lambda e: self._copiar_texto_ia(),
             "encaminhar": lambda e: self._encaminhar(),
             "editar_msg": lambda e: self._editar_mensagem(),
             "reagir": lambda e: self._reagir(),
@@ -4121,13 +4123,13 @@ class Janela(wx.Frame):
             (lambda: prov.atualizar_enquete(obter()))
             if prov is not None else (lambda: None), self.fala)
 
-    def _copiar_texto(self, texto):
+    def _copiar_texto(self, texto, aviso="Texto copiado."):
         if wx.TheClipboard.Open():
             try:
                 wx.TheClipboard.SetData(wx.TextDataObject(texto))
             finally:
                 wx.TheClipboard.Close()
-        self.fala.falar("Texto copiado.")
+        self.fala.falar(aviso)
 
     def _detalhes(self):
         x = self._mensagem_selecionada()
@@ -5365,6 +5367,22 @@ class Janela(wx.Frame):
         if x is None:
             return
         self._copiar_texto(x.texto or m.conteudo(x))
+
+    def _copiar_texto_ia(self, x=None):
+        """Copia direto a transcrição, descrição ou texto do PDF que a IA fez
+        da mensagem, sem abrir a caixa de leitura."""
+        if x is None:
+            x = self._mensagem_selecionada()
+        if x is None:
+            return
+        rotulo = m.rotulo_da_ia(x)
+        if not rotulo:
+            bipe("erro")
+            self.fala.falar("Esta mensagem não tem transcrição nem "
+                            "descrição.", interromper=True)
+            return
+        self._copiar_texto(m.extras_de(x)["ia"]["texto"],
+                           "%s copiada." % rotulo.capitalize())
 
     def _copiar_conteudo(self, x, tipo, valor):
         """Um item "Copiar ..." do menu da mensagem: o texto, o endereco ou o
