@@ -423,6 +423,7 @@ class Janela(wx.Frame):
         self._escrita_liberada = True   # a conversa aberta aceita mensagens
         self._caiu = set()        # contas que cairam (som de reconectada)
         self._quem_cache = {}     # quem enviou, p/ mensagens sem autor
+        self._de_grupo = {}       # resposta em particular -> msg do grupo
         # modo de selecao (Control Espaco): marcas em varias conversas ou
         # mensagens para agir de uma vez pelo menu de contexto
         self.modo_conv, self.marc_conv = False, set()    # chaves de conversa
@@ -3707,6 +3708,7 @@ class Janela(wx.Frame):
         self.editando = None
         self.modo_msg, self.marc_msg = False, set()
         self._quem_cache.clear()
+        self._de_grupo.clear()
         self._descartar_anexos()
         self.marcador_n = conv.nao_lidas
         self.marcador_id = None
@@ -3902,6 +3904,7 @@ class Janela(wx.Frame):
                 m.formatar(x, self.estilo, anterior,
                            quem=self._quem_enviou(x),
                            respondida=self._original(x, porid)
+                           or self._resposta_de_grupo(x)
                            or self._motivo_do_original_ausente(x)
                            or None),
                 x.id in self.marc_msg))
@@ -4016,6 +4019,36 @@ class Janela(wx.Frame):
             if o is not None:
                 porid[o.id] = o
         return o
+
+    def _original_de_grupo(self, x):
+        """A mensagem de grupo que `x` (numa conversa com uma pessoa)
+        responde em particular: o WhatsApp guarda o id dela, e ela mora na
+        conversa do grupo. None se nao e esse caso ou nao esta guardada."""
+        if not x.resposta_a or self.banco is None or self.contas is None:
+            return None
+        chave = (x.conta_id, x.conversa_id, x.resposta_a)
+        if chave in self._de_grupo:
+            return self._de_grupo[chave]
+        achada = None
+        conv = self.indice.get((x.conta_id, x.conversa_id))
+        if conv is not None and conv.tipo == "privada" and                 self.contas.servico(x.conta_id) == "whatsapp":
+            for y in self.banco.mensagens_por_id(x.conta_id, [x.resposta_a]):
+                dono = self.indice.get((y.conta_id, y.conversa_id))
+                if y.conversa_id != x.conversa_id and dono is not None                         and dono.tipo == "grupo":
+                    achada = y
+                    break
+        self._de_grupo[chave] = achada
+        return achada
+
+    def _resposta_de_grupo(self, x):
+        """Como a linha cita a mensagem do grupo: 'Ana, no grupo Turma:
+        "texto"'. Vazio se `x` nao responde a mensagem de grupo."""
+        o = self._original_de_grupo(x)
+        if o is None:
+            return ""
+        grupo = self.indice[(o.conta_id, o.conversa_id)].nome
+        quem = "você" if o.minha else (o.autor or "mensagem")
+        return '%s, no grupo %s: "%s"' % (quem, grupo, m.citacao(o))
 
     def _chave_selecionada(self):
         i = self.lista_msgs.GetSelection()
@@ -5879,6 +5912,9 @@ class Janela(wx.Frame):
         if x.resposta_a not in self.mapa:
             # fora da lista aberta: tenta trazer do banco de dados
             o = self.banco.mensagem(x.conta_id, x.conversa_id, x.resposta_a)
+            if o is None and self._original_de_grupo(x) is not None:
+                self._ir_para_mensagem_do_grupo(x)
+                return
             if o is None:
                 bipe("erro")
                 motivo = self._motivo_do_original_ausente(x)
@@ -5897,11 +5933,48 @@ class Janela(wx.Frame):
         self.lista_msgs.SetSelection(self.mapa.index(x.resposta_a))
         self.lista_msgs.SetFocus()
 
+    def _ir_para_mensagem_do_grupo(self, x):
+        """Resposta em particular a uma mensagem de grupo: abre a conversa do
+        grupo posicionada na mensagem respondida. Esc volta para a resposta."""
+        o = self._original_de_grupo(x)
+        grupo = self.indice.get((o.conta_id, o.conversa_id))
+        origem = (x.conta_id, x.conversa_id)
+        self._fechar_conversa()
+        self._abrir_conversa(grupo)
+        if self.atual != grupo.chave:
+            return
+        self._mostrar_mensagem(o)
+        self.volta_para = [(origem, x.id)]
+
+    def _mostrar_mensagem(self, o):
+        """Poe a selecao da conversa aberta na mensagem `o`, trazendo-a do
+        banco se estiver fora da lista, e deixa o foco nas mensagens."""
+        if o.id not in self.mapa:
+            self._mesclar(self.atual, [o])
+        self.alvo_inicial = o.id
+        self.marcador_id = None
+        self._preencher_mensagens(o.id)
+        self.selecao_automatica = False
+        if o.id in self.mapa:
+            self.lista_msgs.SetSelection(self.mapa.index(o.id))
+        self.lista_msgs.SetFocus()
+
     def _voltar_da_respondida(self):
         """Esc depois de ir para a mensagem respondida: volta para a resposta
         de onde a pessoa saiu. False se nao ha para onde voltar."""
         while self.volta_para:
             id_ = self.volta_para.pop()
+            if isinstance(id_, tuple):        # veio de outra conversa
+                chave, mid = id_
+                conv = self.indice.get(chave)
+                x = self.banco.mensagem(chave[0], chave[1], mid)                     if conv is not None else None
+                if x is None:
+                    continue
+                self._fechar_conversa()
+                self._abrir_conversa(conv)
+                if self.atual == conv.chave:
+                    self._mostrar_mensagem(x)
+                return True
             if id_ in self.mapa:
                 self.lista_msgs.SetSelection(self.mapa.index(id_))
                 return True

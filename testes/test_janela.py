@@ -2915,6 +2915,26 @@ def test_responder_em_particular_abre_a_conversa_da_pessoa_citando_a_mensagem(j)
         in j.contas.p.pedidos
 
 
+def test_resposta_em_particular_cita_a_mensagem_do_grupo_e_leva_ate_ela(j):
+    j.indice[("t1", "20")].tipo = "grupo"
+    j.indice[("t1", "20")].nome = "Turma"
+    j.banco.salvar_mensagens([m.Mensagem(
+        "t1", "20", "5", autor="Bia", texto="oi pessoal", data=AGORA,
+        remetente="5551999990000@s.whatsapp.net")])
+    r = m.Mensagem("t1", "10", "r1", minha=True, texto="falo aqui",
+                   data=AGORA + 5, resposta_a="5")
+    j.banco.salvar_mensagens([r])
+    j.contas.servico = lambda conta_id: "whatsapp"
+    j._abrir_conversa(j.indice[("t1", "10")])
+    linha = j._itens_msgs[j.mapa.index("r1")]
+    assert 'Bia, no grupo Turma: "oi pessoal"' in linha
+    selecionar(j, "r1")
+    j._ir_para_respondida()
+    assert j.atual == ("t1", "20") and j._chave_selecionada() == "5"
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))      # volta para a resposta
+    assert j.atual == ("t1", "10") and j._chave_selecionada() == "r1"
+
+
 def test_responder_em_particular_so_em_grupo_e_de_outra_pessoa(j):
     _abrir_com_caixa(j)                        # conversa com pessoa
     x = j._mensagens_atuais()[-1]
