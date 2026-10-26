@@ -505,6 +505,9 @@ def test_sem_duplicados_junta_a_mesma_pessoa_e_mantem_quem_so_tem_o_nome():
          ("t2", "5551999998888@s.whatsapp.net", "Ana Souza", "")]
     r = nm.sem_duplicados(c, lambda x: x)
     assert r == [c[0], c[2], c[3], c[6]]
+    # na lista de todas as contas (janela Contatos) a pessoa vale uma vez so
+    todas = nm.sem_duplicados(c, lambda x: x, entre_contas=True)
+    assert todas == [c[0], c[2], c[3]]
 
 
 def test_mensagem_que_o_telezapp_entende_nao_diz_sem_suporte():

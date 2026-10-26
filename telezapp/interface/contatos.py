@@ -214,7 +214,8 @@ class GerenciadorContatos(wx.Dialog):
         if self.ocultar.GetValue():
             from telezapp.nucleo import nova_mensagem as nm
             todos = nm.sem_duplicados(
-                todos, lambda c: (c[0], c[1], c[2], c[3]))
+                todos, lambda c: (c[0], c[1], c[2], c[3]),
+                entre_contas=True)
         self._itens = [c for c in todos
                        if not busca or self._casa_busca(c, busca)]
         self.lista.Set([

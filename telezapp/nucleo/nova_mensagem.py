@@ -61,16 +61,19 @@ def _digitos(id_, telefone):
     return digitos
 
 
-def sem_duplicados(itens, dados):
+def sem_duplicados(itens, dados, entre_contas=False):
     """Tira da lista a mesma pessoa repetida, mantendo a ordem e o primeiro.
     `dados(item)` -> (grupo, id, nome, telefone); grupo e a conta (so se
     comparam contatos do mesmo grupo). Sao a mesma pessoa: o mesmo telefone
     e, quando um dos dois nao tem telefone (aparece so pelo endereco @lid,
     por exemplo), o mesmo nome. Duas pessoas com o mesmo nome e telefones
-    diferentes continuam as duas."""
+    diferentes continuam as duas. Com `entre_contas`, o grupo e ignorado: a
+    mesma pessoa em varias contas aparece uma vez so."""
     fichas = []
     for x in itens:
         grupo, id_, nome, tel = dados(x)
+        if entre_contas:
+            grupo = None
         fichas.append((x, grupo, _digitos(id_, tel), _nome_simples(nome)))
     com_telefone = {(g, n) for _, g, d, n in fichas if d and n}
     vistos, saida = set(), []
