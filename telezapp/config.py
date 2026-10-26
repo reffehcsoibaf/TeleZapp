@@ -507,6 +507,18 @@ OPCOES = (
           "tocar, fala Fim da sequência. Só vale se pelo menos dois áudios "
           "tocaram em sequência; um áudio sozinho não anuncia nada. "
           "Interromper o áudio com Esc também não anuncia."),
+    Opcao("chamada_eco", "Cancelar o eco nas chamadas de voz", "Mídias", True,
+          "Quando você ouve a chamada pelo alto-falante, o microfone capta "
+          "a voz da outra pessoa e ela se ouve de volta. Marcada, o TeleZapp "
+          "tira esse eco do que envia, também quando ele volta atrasado "
+          "por uma mesa de som com retorno. Use fone para o melhor "
+          "resultado. Vale a partir da próxima chamada. Desmarque se a "
+          "outra pessoa disser que sua voz sai cortada ou abafada."),
+    Opcao("chamada_ruido", "Reduzir o ruído do microfone nas chamadas de "
+          "voz", "Mídias", True,
+          "Diminui ruídos constantes captados pelo microfone, como "
+          "ventilador, ar-condicionado e chiado. Vale a partir da próxima "
+          "chamada."),
     Opcao("midias_baixar", "Quando baixar as mídias", "Mídias", "demanda",
           "Sob demanda baixa só quando você abre a mídia. Automático baixa "
           "ao receber, até o limite escolhido.",

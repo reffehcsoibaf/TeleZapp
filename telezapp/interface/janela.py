@@ -33,6 +33,7 @@ from telezapp.interface.chamada import DialogoChamada
 from telezapp.interface import dispositivos as ui_dispositivos
 from telezapp.midia import armazem
 from telezapp.midia import dispositivos
+from telezapp.midia import eco as midia_eco
 from telezapp.midia import envio
 from telezapp.midia import prioridade
 from telezapp.midia import velocidade as vel
@@ -7201,6 +7202,8 @@ class Janela(wx.Frame):
                     self._preencher_mensagens()
             elif chave == "manter_apagadas":
                 m.definir_manter_apagadas(valor)
+            elif chave in ("chamada_eco", "chamada_ruido"):
+                self._carregar_eco()
             elif chave in ("ia_linha_descricao", "ia_linha_transcricao"):
                 self._carregar_limites_ia()
                 if self.atual is not None:
@@ -7239,7 +7242,12 @@ class Janela(wx.Frame):
         if self.atual == chave:
             self._preencher_mensagens()
 
+    def _carregar_eco(self):
+        midia_eco.definir(self.cfg.get("chamada_eco"),
+                          self.cfg.get("chamada_ruido"))
+
     def _carregar_limites_ia(self):
+        self._carregar_eco()
         """Quanto do texto da IA entra na linha de cada mensagem."""
         m.definir_manter_apagadas(self.cfg.get("manter_apagadas"))
         m.definir_limites_ia(self.cfg.get("ia_linha_descricao"),

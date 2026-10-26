@@ -120,6 +120,14 @@ def esperar(cond, limite=3.0):
     return False
 
 
+@pytest.fixture(autouse=True)
+def sem_eco_por_padrao():
+    """Os testes de chamada nao dependem do processamento de eco."""
+    cw.midia_eco.definir(False, False)
+    yield
+    cw.midia_eco.definir(True, True)
+
+
 @pytest.fixture
 def mundo():
     ponte, barramento, audio = PonteFalsa(), Barramento(), AudioFalso()
@@ -153,6 +161,77 @@ def test_ligar_publica_chamando_e_em_chamada_com_audio(mundo):
     assert esperar(lambda: audio.saidas and audio.saidas[0].escrito)
     assert audio.microfones_abertos == ["Mic B"]
     assert audio.saidas_abertas == ["Saida A"]
+
+
+def test_eco_limpa_o_microfone_e_recebe_o_que_toca_como_referencia(
+        mundo, monkeypatch):
+    v, ponte, bus, audio = mundo
+    visto = {"ref": [], "mic": 0}
+
+    class EcoFalso:
+        def __init__(self, eco, ruido):
+            visto["args"] = (eco, ruido)
+
+        def referencia(self, pcm):
+            visto["ref"].append(pcm)
+
+        def processar(self, pcm):
+            visto["mic"] += 1
+            return b"" * len(pcm)
+
+        def diagnostico(self):
+            return {}
+
+        def reiniciar(self):
+            visto["reiniciou"] = True
+    monkeypatch.setattr(cw.midia_eco, "CancelaEco", EcoFalso)
+    cw.midia_eco.definir(True, False)
+    enviados = []
+    ponte.escrever_quadro = lambda c, d: enviados.append(d) or True
+    chamada_recebida(ponte, bus)
+    v.atender(CID, "Mic A", "Saida A")
+    ponte.fila.put({"ev": "ready", "call": "R1"})
+    assert esperar(lambda: len(enviados) > 2)
+    assert visto["args"] == (True, False)
+    assert enviados[-1] == b"" * cw.BYTES_POR_QUADRO
+    ponte.recebidos.put(QUADRO)
+    assert esperar(lambda: visto["ref"] == [QUADRO])
+    v.trocar_dispositivos(CID, saida="Saida A")
+    assert esperar(lambda: visto.get("reiniciou"))
+    # mudo: segue o silencio, sem passar pelo processamento
+    v.silenciar(CID, True)
+    antes = visto["mic"]
+    enviados.clear()
+    assert esperar(lambda: len(enviados) > 2)
+    assert all(d == bytes(cw.BYTES_POR_QUADRO) for d in enviados[-2:])
+    assert visto["mic"] - antes <= 2
+
+
+def test_falha_do_eco_manda_o_quadro_como_veio(mundo, monkeypatch):
+    v, ponte, bus, _ = mundo
+
+    class Quebrado:
+        def __init__(self, eco, ruido):
+            pass
+
+        def referencia(self, pcm):
+            pass
+
+        def processar(self, pcm):
+            raise RuntimeError("falhou")
+
+        def reiniciar(self):
+            pass
+    monkeypatch.setattr(cw.midia_eco, "CancelaEco", Quebrado)
+    cw.midia_eco.definir(True, True)
+    enviados = []
+    ponte.escrever_quadro = lambda c, d: enviados.append(d) or True
+    chamada_recebida(ponte, bus)
+    v.atender(CID)
+    ponte.fila.put({"ev": "ready", "call": "R1"})
+    assert esperar(lambda: len(enviados) > 2)
+    assert enviados[-1] == b"" * cw.BYTES_POR_QUADRO     # como captado
+    assert v.ligacoes[CID].eco is None
 
 
 def test_falha_ao_ligar_encerra_com_a_explicacao(mundo):
