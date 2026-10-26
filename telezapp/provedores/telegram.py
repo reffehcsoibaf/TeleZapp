@@ -2459,6 +2459,13 @@ class ProvedorTelegram(Provedor):
         conversa = str(chat) if chat else None
         for x in self.banco.mensagens_por_id(
                 self.conta.id, evento.deleted_ids, conversa):
+            if m.MANTER["apagadas"] and not x.minha:
+                # opcao "manter as apagadas": fica guardada, so marcada
+                m.atualizar_extras(x, apagada_pelo_autor=True)
+                self.banco.salvar_mensagens([x])
+                self.barramento.publicar(ev.MensagemAtualizada(
+                    self.conta.id, x.conversa_id, x, "apagada"))
+                continue
             self.barramento.publicar(ev.MensagemApagadaNoCelular(
                 self.conta.id, x.conversa_id, x.id))
 

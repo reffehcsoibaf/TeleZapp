@@ -3172,7 +3172,7 @@ class Janela(wx.Frame):
             quem = [p for p in self.quem_reagiu.get(chave, [])
                     if p[0] != e.quem]
             self.quem_reagiu[chave] = quem + [(e.quem, e.emoji)]
-        if e.motivo == "apagada":
+        if e.motivo == "apagada" and                 not m.extras_de(e.mensagem)["apagada_pelo_autor"]:
             self._descartar_midia_apagada(e.mensagem)
         if self._atualizar_previa_se_for_a_ultima(chave, e.mensagem) or (
                 nova_reacao and {"reacoes", "quem_reagiu"} & set(
@@ -7199,6 +7199,8 @@ class Janela(wx.Frame):
                 m.definir_modo_previa(valor)
                 if self.atual is not None:
                     self._preencher_mensagens()
+            elif chave == "manter_apagadas":
+                m.definir_manter_apagadas(valor)
             elif chave in ("ia_linha_descricao", "ia_linha_transcricao"):
                 self._carregar_limites_ia()
                 if self.atual is not None:
@@ -7239,6 +7241,7 @@ class Janela(wx.Frame):
 
     def _carregar_limites_ia(self):
         """Quanto do texto da IA entra na linha de cada mensagem."""
+        m.definir_manter_apagadas(self.cfg.get("manter_apagadas"))
         m.definir_limites_ia(self.cfg.get("ia_linha_descricao"),
                              self.cfg.get("ia_linha_transcricao"))
 

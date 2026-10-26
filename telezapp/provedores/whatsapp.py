@@ -3492,6 +3492,11 @@ class ProvedorWhatsApp(Provedor):
             alvo = p.key.ID
             if p.type == p.REVOKE:
                 def apagar(x):
+                    if m.MANTER["apagadas"] and not x.minha:
+                        # opcao "manter as apagadas": o conteudo fica, so
+                        # marcado como apagado pelo autor
+                        m.atualizar_extras(x, apagada_pelo_autor=True)
+                        return
                     x.texto = ""
                     m.atualizar_extras(x, apagada=True, links=[], botoes=[],
                                        acoes=[], original="")

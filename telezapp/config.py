@@ -255,6 +255,17 @@ OPCOES = (
           "(e confere ao abrir, para o que venceu com ele fechado). "
           "Desmarcada, as mensagens ficam guardadas aqui, marcadas como "
           "vencidas. O que o TeleZapp apaga não volta numa nova sincronia."),
+    Opcao("manter_apagadas",
+          "Manter as mensagens que quem enviou apagar para todos",
+          "Privacidade", False,
+          "Quando alguém apaga uma mensagem para todos depois de o TeleZapp "
+          "tê-la recebido, o WhatsApp e o Telegram tiram o conteúdo do "
+          "celular. Marcada, o TeleZapp guarda o que já tinha (texto, "
+          "áudio e outras mídias baixadas) e só acrescenta \"apagada pelo "
+          "autor\" na linha da mensagem. Desmarcada, ela vira Mensagem "
+          "apagada e a mídia baixada é descartada. Só vale para o que "
+          "chegar depois de marcar; o que já foi apagado não volta. As "
+          "mensagens que você mesmo apaga continuam sendo apagadas."),
     Opcao("verificar_atualizacoes",
           "Avisar quando houver versão nova do TeleZapp", "Atualizações",
           True,

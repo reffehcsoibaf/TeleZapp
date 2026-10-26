@@ -425,6 +425,35 @@ def test_voz_ouvida_aqui_avisa_o_telegram_e_ouvida_la_marca_aqui(ambiente):
         p.parar()
 
 
+def test_manter_apagadas_no_telegram_marca_em_vez_de_remover(
+        ambiente, monkeypatch):
+    import asyncio
+    monkeypatch.setitem(m.MANTER, "apagadas", True)
+    cliente = ClienteFalso()
+    p = ambiente.criar(cliente)
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ConversasAtualizadas)
+        ambiente.banco.salvar_mensagens([
+            m.Mensagem("t1", "10", "61", texto="oi", data=time.time()),
+            m.Mensagem("t1", "10", "62", texto="meu", minha=True,
+                       data=time.time())])
+        apagadas = cliente.handlers[3]
+        asyncio.run_coroutine_threadsafe(
+            apagadas(types.SimpleNamespace(deleted_ids=[61, 62],
+                                           chat_id=None)),
+            p._loop).result(5)
+        a = esperar(ambiente.fila, ev.MensagemAtualizada)
+        assert (a.mensagem.id, a.motivo) == ("61", "apagada")
+        assert a.mensagem.texto == "oi"
+        assert m.extras_de(a.mensagem)["apagada_pelo_autor"]
+        # a minha, apagada em outro aparelho, continua sendo removida
+        e = esperar(ambiente.fila, ev.MensagemApagadaNoCelular)
+        assert e.mensagem_id == "62"
+    finally:
+        p.parar()
+
+
 def test_mensagem_apagada_no_celular_e_apagada_daqui(ambiente):
     import asyncio
     cliente = ClienteFalso()

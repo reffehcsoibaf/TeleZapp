@@ -209,6 +209,7 @@ def extras_de(msg):
             "original": dados.get("original") or "",
             "editada": bool(dados.get("editada")),
             "apagada": bool(dados.get("apagada")),
+            "apagada_pelo_autor": bool(dados.get("apagada_pelo_autor")),
             "ouvida": bool(dados.get("ouvida")),
             "favorita": bool(dados.get("favorita")),
             "reacoes": list(dados.get("reacoes") or []),
@@ -709,6 +710,14 @@ def _so_link(m):
 
 LIMITE_IA_NA_LINHA = {"descricao": 0, "transcricao": 1000}
 
+# Ligado pela janela a partir da opcao `manter_apagadas`: o que o remetente
+# apaga para todos continua guardado aqui, so marcado.
+MANTER = {"apagadas": False}
+
+
+def definir_manter_apagadas(ligado):
+    MANTER["apagadas"] = bool(ligado)
+
 
 def definir_limites_ia(descricao, transcricao):
     LIMITE_IA_NA_LINHA["descricao"] = max(0, int(descricao or 0))
@@ -756,6 +765,8 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None,
         cont = _juntar(trecho_da_previa(m), cont)
     if extras_de(m)["editada"]:
         cont = _juntar(cont, "(editada)")
+    if extras_de(m)["apagada_pelo_autor"]:
+        cont = _juntar(cont, "(apagada pelo autor)")
     if extras_de(m)["favorita"]:
         cont = _juntar(cont, "(favorita)")
     if getattr(m, "expira", 0):
