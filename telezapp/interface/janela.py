@@ -4910,10 +4910,14 @@ class Janela(wx.Frame):
                             interromper=True)
             return
         def buscar(conta_id, texto):
-            return nm.candidatos(
+            achados = nm.candidatos(
                 texto, self.banco.contatos(conta_id),
                 [c for c in self.indice.values()
                  if c.conta_id == conta_id])
+            if self.cfg.get("ocultar_contatos_duplicados"):
+                achados = nm.sem_duplicados(
+                    achados, lambda t: (conta_id, t[0], t[1], t[2]))
+            return achados
         escolha = contatos.dialogo_nova_mensagem(self, contas, buscar)
         if escolha is None:
             return
@@ -4957,10 +4961,14 @@ class Janela(wx.Frame):
             return
 
         def buscar(conta_id, texto):
-            return nm.candidatos(
+            achados = nm.candidatos(
                 texto, self.banco.contatos(conta_id),
                 [c for c in self.indice.values()
                  if c.conta_id == conta_id])
+            if self.cfg.get("ocultar_contatos_duplicados"):
+                achados = nm.sem_duplicados(
+                    achados, lambda t: (conta_id, t[0], t[1], t[2]))
+            return achados
         escolha = contatos.dialogo_nova_chamada(self, contas, buscar)
         if escolha is None:
             return
@@ -5465,7 +5473,10 @@ class Janela(wx.Frame):
         dlg = contatos.GerenciadorContatos(
             self, self.banco, _ContasParaContatos(self),
             self._renomear_pelos_contatos,
-            lambda t: self.fala.falar(t, interromper=True))
+            lambda t: self.fala.falar(t, interromper=True),
+            ocultar_duplicados=bool(self.cfg.get("ocultar_contatos_duplicados")),
+            ao_ocultar=lambda v: self.cfg.set(
+                "ocultar_contatos_duplicados", bool(v)))
         try:
             dlg.ShowModal()
         finally:

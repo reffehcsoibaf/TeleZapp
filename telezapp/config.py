@@ -321,6 +321,15 @@ OPCOES = (
           "mensagem, Control E\". Desmarcada, os nomes ficam sem o atalho "
           "e os atalhos continuam funcionando. Os atalhos podem ser "
           "mudados em Configurações, Atalhos."),
+    Opcao("ocultar_contatos_duplicados", "Ocultar contatos duplicados",
+          "Interface", True,
+          "Nas listas de contatos (Contatos e a escolha de quem recebe em "
+          "Nova mensagem e Nova chamada), mostra uma vez só a pessoa que "
+          "aparece repetida: com o mesmo telefone, ou com o mesmo nome "
+          "quando uma das cópias não tem telefone. Duas pessoas com o mesmo "
+          "nome e telefones diferentes continuam as duas. Desmarcada, a "
+          "lista mostra tudo o que está guardado. O mesmo botão está na "
+          "janela Contatos."),
     Opcao("segundo_plano", "Continuar em segundo plano ao fechar a janela",
           "Sistema", False,
           "Fechar a janela (o botão de fechar ou Alt F4) só a minimiza: o "

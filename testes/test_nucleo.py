@@ -495,6 +495,18 @@ def test_conversa_privada_mostra_o_mesmo_autor_em_todas_as_mensagens():
     assert m.alinhar_autores(grupo, outro) == [] and outro[0].autor == "Bia"
 
 
+def test_sem_duplicados_junta_a_mesma_pessoa_e_mantem_quem_so_tem_o_nome():
+    from telezapp.nucleo import nova_mensagem as nm
+    c = [("t1", "5551999998888@s.whatsapp.net", "Ana Souza", ""),
+         ("t1", "123@lid", "Ana Souza", ""),         # mesmo nome, sem telefone
+         ("t1", "5551888887777@s.whatsapp.net", "Ana Souza", ""),   # outra
+         ("t1", "9@lid", "Zé", ""), ("t1", "10@lid", "ze", ""),
+         ("t1", "11@s.whatsapp.net", "Bia", "+55 51 99999-8888"),  # mesmo tel
+         ("t2", "5551999998888@s.whatsapp.net", "Ana Souza", "")]
+    r = nm.sem_duplicados(c, lambda x: x)
+    assert r == [c[0], c[2], c[3], c[6]]
+
+
 def test_mensagem_que_o_telezapp_entende_nao_diz_sem_suporte():
     assert m.conteudo(msg(tipo=m.OUTRO, texto="contato: Ana, +5551")) == \
         "contato: Ana, +5551"
