@@ -611,6 +611,32 @@ def _telefone_do_endereco(remetente):
     return remetente or ""
 
 
+def nome_para_autor(conv):
+    """O nome com que a pessoa de uma conversa privada aparece como autor das
+    mensagens que ela envia: o nome da conversa (o do contato salvo vale mais
+    que o do perfil). "" quando a conversa so tem o telefone ou nao tem nome
+    ainda (nao serve para apagar um nome de perfil que a mensagem trouxe)."""
+    if conv is None or conv.tipo != "privada":
+        return ""
+    nome = (conv.nome or "").strip()
+    if not nome or nome.startswith("+") or nome == "Contato sem nome":
+        return ""
+    return nome
+
+
+def alinhar_autores(conv, msgs):
+    """Poe em todas as mensagens recebidas de uma conversa privada o mesmo
+    autor (nome_para_autor). Devolve as que mudaram."""
+    nome = nome_para_autor(conv)
+    mudaram = []
+    if nome:
+        for x in msgs:
+            if not x.minha and x.autor != nome:
+                x.autor = nome
+                mudaram.append(x)
+    return mudaram
+
+
 def quem_enviou(msg, conv=None, nome_do_remetente=None):
     """Quem enviou, na lista e no arquivo salvo: o autor da mensagem; sem ele, o nome
     da conversa (se e com uma pessoa), o nome que a agenda ou as outras

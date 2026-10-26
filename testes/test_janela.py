@@ -4419,6 +4419,52 @@ def test_atalho_global_e_registrado_e_avisa_se_estiver_ocupado(j):
     assert "outro programa" in ditas[-1]
 
 
+def test_atalhos_globais_de_atender_e_recusar_a_chamada(j, monkeypatch):
+    from telezapp.nucleo import chamadas as ch
+    registros = {}
+    j.RegisterHotKey = lambda id_, mods, tecla: registros.update(
+        {id_: (mods, tecla)}) or True
+    j.UnregisterHotKey = lambda id_: None
+    for chave in ("atender_global", "recusar_global"):
+        assert chave in j.atalhos.acoes
+        assert j.atalhos.efetivo(chave) == ""
+    j._aplicar_opcao("atalhos", {"atender_global": "Ctrl+Alt+A",
+                                 "recusar_global": "Ctrl+Alt+R"})
+    ids = j._ids_globais
+    assert registros == {
+        ids["atender_global"]: (wx_falso.MOD_CONTROL | wx_falso.MOD_ALT,
+                                ord("A")),
+        ids["recusar_global"]: (wx_falso.MOD_CONTROL | wx_falso.MOD_ALT,
+                                ord("R"))}
+    feito, ditas = [], []
+    monkeypatch.setattr(j, "_atender_chamada", lambda: feito.append("a"))
+    monkeypatch.setattr(j, "_desligar_chamada", lambda: feito.append("r"))
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+
+    class Evt:
+        def __init__(self, id_):
+            self.id = id_
+
+        def GetId(self):
+            return self.id
+    j.chamada = None
+    j._ao_atalho_global(Evt(ids["atender_global"]))
+    assert feito == [] and ditas[-1] == "Nenhuma chamada tocando."
+    j.chamada = ch.Chamada("t1", "10", "Ana", entrante=True,
+                           estado=ch.TOCANDO)
+    j._ao_atalho_global(Evt(ids["atender_global"]))
+    j._ao_atalho_global(Evt(ids["recusar_global"]))
+    assert feito == ["a", "r"]
+    j.chamada.aplicar(ch.EM_CHAMADA, "", "")      # em chamada: so desliga
+    j._ao_atalho_global(Evt(ids["atender_global"]))
+    j._ao_atalho_global(Evt(ids["recusar_global"]))
+    assert feito == ["a", "r", "r"]
+    j.chamada = None
+    j._ao_atalho_global(Evt(ids["recusar_global"]))
+    assert feito == ["a", "r", "r"]
+    assert ditas[-1] == "Nenhuma chamada em andamento."
+
+
 def test_menu_midias_agrupa_as_escolhas_e_o_atalho_fala_portugues(j):
     # as escolhas soltas (Só quando eu abrir...) ficam sob um titulo claro
     assert j.atalhos.acoes["baixar_demanda"].rotulo == (

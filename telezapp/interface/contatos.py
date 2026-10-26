@@ -353,7 +353,8 @@ class DialogoEscolherPessoa(wx.Dialog):
         self.SetSizerAndFit(lay)
         self.CentreOnParent()
         self._atualizar()
-        self.para.SetFocus()
+        # com mais de uma conta, o foco comeca na escolha do servico / conta
+        (self.conta or self.para).SetFocus()
 
     def _conta_id(self):
         i = max(self.conta.GetSelection(), 0) if self.conta else 0

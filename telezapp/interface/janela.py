@@ -70,6 +70,10 @@ from telezapp.nucleo.midias import TEXTO_LIMPA
 log = logging.getLogger("telezapp.janela")
 
 MARCADOR = "marcador"
+ATALHOS_GLOBAIS = ("mostrar_janela", "atender_global", "recusar_global")
+ROTULO_GLOBAL = {"mostrar_janela": "chamar o TeleZapp",
+                 "atender_global": "atender a chamada",
+                 "recusar_global": "recusar ou desligar a chamada"}
 TEXTO_SEM_CONVERSA = "Nenhuma conversa aberta. Aperte Enter numa conversa."
 TEXTO_SEM_MENSAGENS = "Esta conversa ainda não tem mensagens."
 TEXTO_SOMENTE_LEITURA = ("Esta conversa é somente leitura: você não pode "
@@ -447,8 +451,12 @@ class Janela(wx.Frame):
         self._gravacao_rapida = None  # {"gravador", "origem"} gravando por atalho
         self._bandeja = None          # icone da area de notificacao
         self._saindo = False          # True: fechar e sair de verdade
-        self._id_global = (wx.NewIdRef().GetId() if hasattr(wx, "NewIdRef")
-                           else 9001)
+        # atalhos que valem em qualquer programa (RegisterHotKey), cada um
+        # com o seu id: funcao -> id
+        self._ids_globais = {
+            chave: (wx.NewIdRef().GetId() if hasattr(wx, "NewIdRef")
+                    else 9001 + n)
+            for n, chave in enumerate(ATALHOS_GLOBAIS)}
         # funcoes que aceitam atalho (os itens de menu e outras) e o que a
         # pessoa mudou; os rotulos sem atalho de cada item ficam em
         # _base_menu e o atalho entra na hora (ver _atualizar_atalhos)
@@ -461,8 +469,7 @@ class Janela(wx.Frame):
         self.CreateStatusBar()
         self.Bind(wx.EVT_CLOSE, self._ao_fechar)
         if hasattr(wx, "EVT_HOTKEY"):
-            self.Bind(wx.EVT_HOTKEY,
-                      lambda e: self._mostrar_da_bandeja())
+            self.Bind(wx.EVT_HOTKEY, self._ao_atalho_global)
         self._atualizar_bandeja()
         self._registrar_atalho_global()
         if hasattr(wx, "EVT_ICONIZE"):      # minimizar esconde as trancadas
@@ -738,6 +745,13 @@ class Janela(wx.Frame):
         self.atalhos.registrar(
             "mostrar_janela", "Chamar o TeleZapp quando ele está em segundo "
             "plano (atalho global)", "Geral", "")
+        self.atalhos.registrar(
+            "atender_global", "Atender a chamada que está tocando (atalho "
+            "global, vale em qualquer programa)", "Chamadas", "")
+        self.atalhos.registrar(
+            "recusar_global", "Recusar a chamada que está tocando ou desligar "
+            "a chamada em andamento (atalho global, vale em qualquer "
+            "programa)", "Chamadas", "")
         self._atualizar_atalhos()
 
         ligacoes = {
@@ -942,25 +956,47 @@ class Janela(wx.Frame):
         self._registrar_atalho_global()
 
     def _registrar_atalho_global(self):
-        """(Re)liga o atalho que chama o TeleZapp de qualquer lugar."""
+        """(Re)liga os atalhos que valem de qualquer lugar: chamar o
+        TeleZapp, atender e recusar a chamada que toca."""
         if not hasattr(self, "RegisterHotKey"):
             return
-        try:
-            self.UnregisterHotKey(self._id_global)
-        except Exception:
-            pass
-        canon = self.atalhos.efetivo("mostrar_janela")
-        if not canon:
+        for chave, id_ in self._ids_globais.items():
+            try:
+                self.UnregisterHotKey(id_)
+            except Exception:
+                pass
+            canon = self.atalhos.efetivo(chave)
+            if not canon:
+                continue
+            par = ui_teclas.para_atalho_global(canon)
+            if par is None or not self.RegisterHotKey(id_, *par):
+                log.warning("atalho global %s nao registrado", canon)
+                bipe("erro")
+                self.fala.falar(
+                    "Não consegui reservar o atalho %s para %s: outro "
+                    "programa já o usa. Escolha outro em Configurações, "
+                    "Atalhos." % (nucleo_atalhos.texto_falado(canon),
+                                  ROTULO_GLOBAL[chave]),
+                    interromper=True)
+
+    def _ao_atalho_global(self, evt):
+        """Um atalho global foi apertado, em qualquer programa."""
+        chave = next((c for c, i in self._ids_globais.items()
+                      if i == evt.GetId()), "mostrar_janela")
+        if chave == "mostrar_janela":
+            self._mostrar_da_bandeja()
             return
-        par = ui_teclas.para_atalho_global(canon)
-        if par is None or not self.RegisterHotKey(self._id_global, *par):
-            log.warning("atalho global %s nao registrado", canon)
-            bipe("erro")
-            self.fala.falar(
-                "Não consegui reservar o atalho %s para chamar o TeleZapp: "
-                "outro programa já o usa. Escolha outro em Configurações, "
-                "Atalhos." % nucleo_atalhos.texto_falado(canon),
-                interromper=True)
+        c = self.chamada
+        if chave == "atender_global":
+            if c is None or c.estado != ch.TOCANDO:
+                self.fala.falar("Nenhuma chamada tocando.", interromper=True)
+                return
+            self._atender_chamada()
+        elif c is None or not c.ativa:
+            self.fala.falar("Nenhuma chamada em andamento.",
+                            interromper=True)
+        else:
+            self._desligar_chamada()      # recusa se toca, desliga se nao
 
     def _atualizar_bandeja(self):
         """Cria ou tira o icone da area de notificacao conforme a opcao de
@@ -2975,6 +3011,7 @@ class Janela(wx.Frame):
         if aberta:
             conv.nao_lidas = 0
         self.indice[chave] = conv
+        m.alinhar_autores(conv, [msg])
         self._atualizar_previa(chave, msg)
         self._ordenar()
         self._preencher_conversas()
@@ -3647,6 +3684,15 @@ class Janela(wx.Frame):
             return
         self._abrir_conversa(conv)
 
+    def _alinhar_autores(self, conv, msgs):
+        """Numa conversa com uma pessoa, todas as mensagens dela mostram o
+        nome da conversa (o do contato salvo vale mais que o do perfil ou o
+        telefone com que cada mensagem chegou), tambem no banco."""
+        if m.alinhar_autores(conv, msgs):
+            self.banco.renomear_autor_da_conversa(
+                conv.conta_id, conv.id, m.nome_para_autor(conv))
+            self._quem_cache.clear()
+
     def _abrir_conversa(self, conv):
         conv = self._escolher_topico(conv)
         if conv is None:
@@ -3668,6 +3714,7 @@ class Janela(wx.Frame):
         guardadas = self.banco.mensagens(
             conv.conta_id, conv.id, min(LIMITE_CACHE, self._limite_memoria()))
         lista = self._mesclar(conv.chave, guardadas)
+        self._alinhar_autores(conv, lista)
         if self.marcador_n > 0 or not lista:
             # o banco pode nao ter as mensagens mais novas: o marcador so e
             # posto quando o servidor responder
@@ -5750,6 +5797,8 @@ class Janela(wx.Frame):
             if nome and nome != c.nome:
                 c.nome = nome
                 mudou.append(c)
+                self.banco.renomear_autor_da_conversa(c.conta_id, c.id, nome)
+                m.alinhar_autores(c, self.cache.get(c.chave, []))
         if mudou:
             self.banco.salvar_conversas(mudou)
         self._ordenar()
@@ -7628,10 +7677,11 @@ class Janela(wx.Frame):
         self._saindo = True
         self._tirar_bandeja()
         if hasattr(self, "UnregisterHotKey"):
-            try:
-                self.UnregisterHotKey(self._id_global)
-            except Exception:
-                pass
+            for id_ in self._ids_globais.values():
+                try:
+                    self.UnregisterHotKey(id_)
+                except Exception:
+                    pass
         if self._gravacao_rapida is not None:
             self._terminar_gravacao_rapida(enviar=False)
         self.Hide()

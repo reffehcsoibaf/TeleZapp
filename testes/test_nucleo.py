@@ -477,6 +477,24 @@ def test_salvar_conversa_identifica_quem_enviou():
     assert m.quem_enviou(msg(autor=""), grupo) == "Desconhecido"
 
 
+def test_conversa_privada_mostra_o_mesmo_autor_em_todas_as_mensagens():
+    priv = m.Conversa("t1", "10", "Ana Souza", "whatsapp", "privada")
+    msgs = [msg(autor="Aninha"), msg(autor="+5551999998888"),
+            msg(autor="Ana Souza"), msg(minha=True, autor="")]
+    mudaram = m.alinhar_autores(priv, msgs)
+    assert len(mudaram) == 2
+    assert [x.autor for x in msgs[:3]] == ["Ana Souza"] * 3
+    assert msgs[3].autor == ""                  # a minha continua sem autor
+    # so o telefone (ou sem nome): nao apaga o nome de perfil da mensagem
+    sem_nome = m.Conversa("t1", "10", "+5551999998888", "whatsapp", "privada")
+    perfil = [msg(autor="Aninha")]
+    assert m.alinhar_autores(sem_nome, perfil) == []
+    assert perfil[0].autor == "Aninha"
+    grupo = m.Conversa("t1", "g", "Turma", "whatsapp", "grupo")
+    outro = [msg(autor="Bia")]
+    assert m.alinhar_autores(grupo, outro) == [] and outro[0].autor == "Bia"
+
+
 def test_mensagem_que_o_telezapp_entende_nao_diz_sem_suporte():
     assert m.conteudo(msg(tipo=m.OUTRO, texto="contato: Ana, +5551")) == \
         "contato: Ana, +5551"
