@@ -462,7 +462,7 @@ OPCOES = (
           "Ao tocar o primeiro áudio, falar de quem é e a duração",
           "Mídias", False,
           "Quando um áudio ou mensagem de voz começa a tocar, fala o que é, "
-          "de quem e quanto dura. Desmarcada, só diz Tocando. Vale para o "
+          "de quem e quanto dura. Desmarcada, não fala nada: o próprio áudio começa a tocar. Vale para o "
           "primeiro áudio; os que tocam depois dele, na sequência, seguem as "
           "opções \"Na sequência de áudios\" logo abaixo."),
     Opcao("seq_falar_proximo", "Na sequência de áudios, falar Próximo áudio",

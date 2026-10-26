@@ -544,10 +544,9 @@ def anuncio_reproducao(msg, velocidade="", proximo=False,
     a tocar: quem enviou, o que e e quanto dura.
     'Tocando mensagem de voz de Ana, 12 segundos.' `velocidade` e o rotulo
     ('1,5x'), dito so quando nao e a normal; `proximo`: veio da sequencia.
-    `detalhado` falso: so 'Tocando.' (com a velocidade, se nao e a normal)."""
+    `detalhado` falso: nada (texto vazio); o proprio audio e o aviso."""
     if not detalhado:
-        texto = "Tocando" + (", a " + velocidade if velocidade else "") + "."
-        return ("Próximo áudio. " + texto) if proximo else texto
+        return "Próximo áudio." if proximo else ""
     coisa = {VOZ: "mensagem de voz", AUDIO: "áudio",
              VIDEO: "vídeo"}.get(msg.tipo, "áudio")
     if msg.minha:

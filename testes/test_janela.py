@@ -1964,7 +1964,8 @@ def test_anuncio_de_quem_toca_e_opcional(jm_midia, monkeypatch):
                         lambda t, interromper=False: falas.append(t))
     j.cfg.set("falar_quem_toca", False)
     _preparar_sequencia(j, monkeypatch)
-    assert falas[-1] == "Tocando."
+    assert "Tocando." not in falas and not any(
+        "Tocando" in t for t in falas)         # Enter e o audio toca, sem fala
     # na sequencia valem as opcoes proprias dela, nao esta
     primeiro = MotorFalso.criados[0]
     primeiro.terminou = True
