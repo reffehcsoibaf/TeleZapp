@@ -30,6 +30,7 @@ from telezapp.interface.progresso import JanelaDeProgresso
 from telezapp.interface.publicar_status import DialogoPublicarStatus
 from telezapp.interface.detalhes import ControleDetalhes, ControleRecibos
 from telezapp.interface.chamada import DialogoChamada
+from telezapp.interface.busca import DialogoBusca
 from telezapp.interface import dispositivos as ui_dispositivos
 from telezapp.midia import armazem
 from telezapp.midia import dispositivos
@@ -114,6 +115,9 @@ o texto)
 Control F: buscar conversa pelo nome (digitar o código secreto aqui libera as
 conversas trancadas no celular)
 Control Shift T: esconder de novo as conversas trancadas
+Conversas, Busca por critérios (ou o botão ao lado do Sair): achar mensagens
+guardadas combinando texto, serviço, conta, tipo, data, favoritas e mais
+(sem tecla de fábrica; dê uma em Configurações, Atalhos)
 Alt 4: filtro de serviço ou conta da lista de conversas
 Alt 5: filtro de tipo de conversa (todas, não lidas, pessoais, grupos,
 canais, arquivadas, trancadas)
@@ -424,6 +428,7 @@ class Janela(wx.Frame):
         self._ia_texto_ocupada = False     # redigir, resumir, corrigir
         self._ia_vagas = threading.Semaphore(2)    # pedidos automaticos
         self.avisos_de_chamada = {}   # (conta, chamada) -> janela de aviso
+        self._ultima_busca = None     # criterios da busca por criterios
         self._quadro_de_video_pendente = False
         self.presenca = None      # ev.Presenca (online / visto) da aberta
         self.digitando = None     # (ev.Presenca, expira) da conversa aberta
@@ -568,6 +573,7 @@ class Janela(wx.Frame):
         item(m_conv, "ler_ultima", "&Ouvir a última mensagem\tCtrl+R")
         item(m_conv, "atualizar", "A&tualizar a lista de conversas\tF5")
         item(m_conv, "buscar_conv", "Bus&car conversa\tCtrl+F")
+        item(m_conv, "busca_criterios", "Busca por crit&érios...")
         item(m_conv, "esconder_trancadas",
              "Esconder as conversas tr&ancadas\tCtrl+Shift+T")
 
@@ -776,6 +782,7 @@ class Janela(wx.Frame):
             "ir_filtro_conta": lambda e: self._ir_para(self.cx_conta, ""),
             "ir_filtro_tipo": lambda e: self._ir_para(self.cx_tipo, ""),
             "buscar_conv": lambda e: self._ir_para(self.campo_busca, ""),
+            "busca_criterios": lambda e: self._busca_por_criterios(),
             "esconder_trancadas": lambda e: self._esconder_trancadas(),
             "contatos": lambda e: self._gerenciar_contatos(),
             "salvar_pessoa": lambda e: self._salvar_pessoa(),
@@ -1116,6 +1123,9 @@ class Janela(wx.Frame):
         # Sair logo depois da busca (e antes da lista, na ordem de Tab), como
         # na maioria dos programas; sem tecla de acesso, porque Alt abre o
         # Menu. O item Sair de Ferramentas e Control Q continuam valendo.
+        self.botao_busca = wx.Button(painel, label="Busca por critérios")
+        self.botao_busca.Bind(wx.EVT_BUTTON,
+                              seguro(lambda e: self._busca_por_criterios()))
         self.botao_sair = wx.Button(painel, label="Sair")
         self.botao_sair.Bind(wx.EVT_BUTTON, seguro(lambda e: self._sair()))
         self.cx_conta.Bind(wx.EVT_CHOICE, seguro(self._ao_filtro_conta))
@@ -1171,6 +1181,7 @@ class Janela(wx.Frame):
             (rot_cx_conta, "Serviço ou conta", "ir_filtro_conta", ""),
             (rot_cx_tipo, "Tipo de conversa", "ir_filtro_tipo", ""),
             (rot_busca, "Buscar conversa", "buscar_conv", ""),
+            (self.botao_busca, "Busca por critérios", "busca_criterios", ""),
             (self.botao_sair, "Sair", "sair", ""),
             (rot_conv, "Conversas", "ir_conv", ""),
             (self.botao_enviar, "Enviar", "enviar_msg", ""),
@@ -1186,6 +1197,7 @@ class Janela(wx.Frame):
         esq.Add(self.cx_tipo, 0, wx.EXPAND | wx.BOTTOM, 6)
         esq.Add(rot_busca, 0, wx.BOTTOM, 2)
         esq.Add(self.campo_busca, 0, wx.EXPAND | wx.BOTTOM, 6)
+        esq.Add(self.botao_busca, 0, wx.BOTTOM, 6)
         esq.Add(self.botao_sair, 0, wx.BOTTOM, 6)
         esq.Add(rot_conv, 0, wx.BOTTOM, 4)
         esq.Add(self.lista_conv, 1, wx.EXPAND)
@@ -6332,6 +6344,28 @@ class Janela(wx.Frame):
             self._fechar_conversa()
         self._abrir_conversa(conv)
         self.fala.falar("Conversa com %s." % conv.nome, interromper=True)
+
+    @seguro
+    def _busca_por_criterios(self):
+        """Abre a busca por criterios nas mensagens guardadas; o resultado
+        escolhido abre a conversa na mensagem."""
+        contas = [(d["id"], self._nome_da_conta(d))
+                  for d in self.cfg.contas()]
+        dlg = DialogoBusca(
+            self, self.banco, contas, self.trancadas_liberadas,
+            self._ultima_busca,
+            falar=lambda t: self.fala.falar(t, interromper=True))
+        achado = None
+        try:
+            r = dlg.ShowModal()
+            if getattr(dlg, "criterios", None) is not None:
+                self._ultima_busca = dlg.criterios
+            if r == wx.ID_OK:
+                achado = dlg.escolhido
+        finally:
+            dlg.Destroy()
+        if achado is not None:
+            self._ver_na_conversa(achado.mensagem)
 
     def _ver_na_conversa(self, x):
         """Abre a conversa da mensagem e leva a selecao ate ela."""

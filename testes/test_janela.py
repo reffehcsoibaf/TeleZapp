@@ -5877,3 +5877,58 @@ def test_quadro_de_video_vai_para_a_janela_da_chamada(chamadas, monkeypatch):
     j._ao_quadro_de_video("10", 2, 1, b"\0" * 6)
     j._ao_quadro_de_video("10", 2, 1, b"\1" * 6)
     assert vistos == [(2, 1, b"\0" * 6), (2, 1, b"\1" * 6)]
+
+
+# ---------------------------------------------------- busca por criterios
+class DialogoBuscaFalso:
+    vistos = []
+
+    def __init__(self, pai, banco, contas, liberadas, anteriores, falar=None):
+        self.contas, self.liberadas, self.anteriores = (
+            contas, liberadas, anteriores)
+        self.criterios = None
+        self.escolhido = None
+        self.resultado = None
+        DialogoBuscaFalso.vistos.append(self)
+
+    def ShowModal(self):
+        return jm.wx.ID_OK if self.escolhido is not None else jm.wx.ID_CANCEL
+
+    def Destroy(self):
+        pass
+
+
+def test_botao_de_busca_por_criterios_fica_entre_a_busca_e_o_sair(j):
+    assert j.botao_busca.GetLabel().startswith("Busca por critérios")
+    nomes = [n for _, n, _, _ in j._controles_atalho]
+    assert nomes.index("Busca por critérios") == nomes.index("Sair") - 1
+    assert "busca_criterios" in j.itens
+
+
+def test_busca_por_criterios_abre_a_janela_com_as_contas(j, monkeypatch):
+    DialogoBuscaFalso.vistos = []
+    monkeypatch.setattr(jm, "DialogoBusca", DialogoBuscaFalso)
+    j._busca_por_criterios()
+    d = DialogoBuscaFalso.vistos[0]
+    assert d.liberadas is False and d.anteriores is None
+    assert [c[0] for c in d.contas] == [x["id"] for x in j.cfg.contas()]
+
+
+def test_resultado_escolhido_abre_a_conversa_na_mensagem(j, monkeypatch):
+    from telezapp.nucleo import busca as nb
+    vistos = []
+    monkeypatch.setattr(j, "_ver_na_conversa", lambda x: vistos.append(x))
+
+    class Escolhe(DialogoBuscaFalso):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.escolhido = nb.Achado(m.Mensagem("t1", "10", "5"), None, "")
+            self.criterios = nb.Criterios(termo="oi")
+    monkeypatch.setattr(jm, "DialogoBusca", Escolhe)
+    j._busca_por_criterios()
+    assert [x.id for x in vistos] == ["5"]
+    assert j._ultima_busca.termo == "oi"            # a proxima abre com ele
+    DialogoBuscaFalso.vistos = []
+    monkeypatch.setattr(jm, "DialogoBusca", DialogoBuscaFalso)
+    j._busca_por_criterios()
+    assert DialogoBuscaFalso.vistos[0].anteriores.termo == "oi"
