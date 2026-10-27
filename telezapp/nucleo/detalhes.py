@@ -52,6 +52,13 @@ def midias(mensagens, filtro=TODAS):
     return sorted(itens, key=lambda x: (x.data, x.id), reverse=True)
 
 
+def favoritas(mensagens):
+    """As mensagens marcadas como favoritas, da mais nova para a mais
+    antiga."""
+    return sorted((x for x in mensagens if m.extras_de(x)["favorita"]),
+                  key=lambda x: (x.data, x.id), reverse=True)
+
+
 def _tamanho(caminho):
     """Tamanho do arquivo no disco, ou None se ele nao esta mais la."""
     try:

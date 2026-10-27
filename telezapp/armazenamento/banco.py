@@ -636,6 +636,14 @@ class Banco:
                 "SELECT conta_id, conversa_id, id FROM mensagens WHERE "
                 "extras LIKE '%\"favorita\": true%'").fetchall())
 
+    def conversas_com_favoritas(self):
+        """{(conta_id, conversa_id)} das conversas que tem mensagem
+        favorita."""
+        with self._trava:
+            return set(self._con.execute(
+                "SELECT DISTINCT conta_id, conversa_id FROM mensagens WHERE "
+                "extras LIKE '%\"favorita\": true%'").fetchall())
+
     def mensagens_para_limpar(self, conta_id="", conversa_id="", tipos=(),
                               antes=None, minimo=0):
         """[(conta_id, conversa_id, id, tipo, tamanho, data)] que passam

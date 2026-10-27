@@ -13,6 +13,7 @@ sys.modules["wx"] = wx_falso
 from telezapp import config  # noqa: E402
 from telezapp.armazenamento.banco import Banco  # noqa: E402
 from telezapp.interface import janela as jm  # noqa: E402
+from telezapp.nucleo import detalhes as det_nucleo  # noqa: E402
 from telezapp.nucleo import eventos as ev  # noqa: E402
 from telezapp.nucleo import modelos as m  # noqa: E402
 
@@ -2250,6 +2251,79 @@ def _tipo(j, valor):
     j._ao_filtro_tipo()
 
 
+def test_link_de_convite_so_na_previa_ainda_vira_botao_de_entrar(j):
+    x = msg("1", "", minha=True)
+    m.guardar_extras(x, previa=m.previa_de_link(
+        "https://chat.whatsapp.com/JULThiZpj4iFiJGHLGwVVd", "TeleZapp",
+        "Convite para grupo do WhatsApp"))
+    j.contas.servico = lambda conta_id: "whatsapp"
+    acoes = j._acoes_da_mensagem(x)
+    assert [a["codigo"] for a in acoes] == ["JULThiZpj4iFiJGHLGwVVd"]
+    assert acoes[0]["tipo"] == "entrar"
+    # o botao que ja veio guardado nao dobra
+    m.guardar_extras(x, acoes=acoes)
+    assert len(j._acoes_da_mensagem(x)) == 1
+    j.contas.servico = lambda conta_id: "telegram"
+    m.guardar_extras(x, acoes=[])
+    assert j._acoes_da_mensagem(x) == []
+
+
+def test_link_de_convite_com_botao_de_entrar_sai_dos_links(j):
+    acoes = [{"tipo": "entrar", "codigo": "JULThiZpj4iFiJGHLGwVVd"}]
+    links = [("Convite", "https://chat.whatsapp.com/JULThiZpj4iFiJGHLGwVVd"),
+             ("Site", "https://exemplo.com/a")]
+    assert j._sem_links_de_convite(links, acoes) == links[1:]
+    assert j._sem_links_de_convite(links, []) == links
+
+
+def test_segundo_plano_tira_do_alttab_e_volta_ao_mostrar(j, monkeypatch):
+    chamadas = []
+    j.GetHandle = lambda: 77
+    monkeypatch.setattr(jm.segundo_plano, "tirar_do_alttab",
+                        lambda h: chamadas.append(("tirar", h)) or True)
+    monkeypatch.setattr(jm.segundo_plano, "voltar_ao_alttab",
+                        lambda h: chamadas.append(("voltar", h)))
+    j._tirar_do_alttab()
+    assert j._fora_do_alttab and chamadas == [("tirar", 77)]
+    j._voltar_ao_alttab()
+    j._voltar_ao_alttab()                      # a segunda nao faz nada
+    assert not j._fora_do_alttab and chamadas[1:] == [("voltar", 77)]
+    # o shell recusou: a janela segue normal
+    monkeypatch.setattr(jm.segundo_plano, "tirar_do_alttab", lambda h: False)
+    j._tirar_do_alttab()
+    assert not j._fora_do_alttab
+
+
+def test_filtro_de_conversas_com_mensagens_favoritas(j):
+    _tres(j)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    _tipo(j, "favoritas")
+    assert _nomes(j) == ["Nenhuma conversa neste filtro."]
+    x = msg("1", "guarde", conversa="20")
+    m.atualizar_extras(x, favorita=True)
+    j.banco.salvar_mensagens([x])
+    _tipo(j, "favoritas")
+    assert _nomes(j) == ["Bruno"]
+    assert ditas[-1] == "Com mensagens favoritas, Todas as contas. 1 conversa"
+    _tipo(j, "todas")
+    assert _nomes(j) == ["Ana", "Bruno", "Família"]
+
+
+def test_detalhes_lista_e_desfavorita_as_mensagens_favoritas(j):
+    c = _controle(j)
+    assert det_nucleo.favoritas(c.mensagens) == []
+    m.atualizar_extras(c.mensagens[0], favorita=True)
+    m.atualizar_extras(c.mensagens[1], favorita=True)
+    assert [x.id for x in det_nucleo.favoritas(c.mensagens)] == ["2", "1"]
+    assert "Mensagens fa&voritas" in [r for r, _ in c._botoes()]
+    opcoes = [r for r, _ in c._menu_favorita(c.mensagens[0])]
+    assert opcoes[:2] == ["Ver na conversa", "Desfavoritar"]
+    c._desfavoritar(c.mensagens[0])
+    assert [x.id for x in det_nucleo.favoritas(c.mensagens)] == ["2"]
+    assert m.extras_de(c.mensagens[0])["favorita"] is False
+
+
 def test_filtro_por_tipo_e_arquivadas(j):
     _tres(j)
     assert _nomes(j) == ["Ana", "Bruno", "Família"]    # arquivada fica fora
@@ -2519,6 +2593,22 @@ def test_adicionar_conta_pelo_menu_escolhe_o_servico_e_segue(j, monkeypatch):
         wx_falso.escolha_lista[0] = 0
         wx_falso.resposta_lista[0] = wx_falso.ID_OK
     assert chamadas == ["whatsapp", "telegram"]
+
+
+def test_cursor_acompanha_o_audio_da_sequencia_se_pedido(jm_midia,
+                                                        monkeypatch):
+    j = jm_midia
+    primeiro = _preparar_sequencia(j, monkeypatch)
+    segundo_id = [x.id for x in j.cache[j.atual] if x.tipo in (
+        m.VOZ, m.AUDIO)][1]
+    antes = j.lista_msgs.GetSelection()
+    primeiro.terminou = True
+    j._vigiar_audio(primeiro)                  # opcao desligada (padrao)
+    assert j.lista_msgs.GetSelection() == antes
+    j.cfg.set("seq_acompanhar", True)
+    j._acompanhar_audio(next(x for x in j.cache[j.atual]
+                             if x.id == segundo_id))
+    assert j.lista_msgs.GetSelection() == j.mapa.index(segundo_id)
 
 
 def test_fim_da_sequencia_so_se_pedido_e_com_mais_de_um_audio(jm_midia,
@@ -3077,7 +3167,7 @@ def test_detalhes_de_pessoa_mostra_dados_do_contato_e_botoes(j):
     assert "Mensagens guardadas: 2." in texto and "Fotos: 1" in texto
     assert [r for r, _ in c._botoes()] == [
         "&Editar contato", "&Mídias", "&Grupos em comum",
-        "&Limpar a conversa..."]
+        "Mensagens fa&voritas", "&Limpar a conversa..."]
 
 
 def test_detalhes_de_grupo_mostram_membros_e_so_admin_ve_administrar(j):
@@ -3096,7 +3186,7 @@ def test_detalhes_de_grupo_mostram_membros_e_so_admin_ve_administrar(j):
     assert "Criador: Ana" in texto
     rotulos = [r for r, _ in c._botoes()]
     assert rotulos == ["Ver &membros (2)", "&Mídias",
-                       "&Limpar a conversa..."]
+                       "Mensagens fa&voritas", "&Limpar a conversa..."]
     dados["sou_admin"] = True
     assert "&Administrar grupo" in [r for r, _ in c._botoes()]
     dados["comunidade"] = True
@@ -4348,6 +4438,22 @@ def test_atalho_de_gravar_inicia_e_o_segundo_aperto_envia(j, monkeypatch,
     pedido = [p for p in j.contas.p.pedidos if p[0] == "arquivo"][-1]
     assert pedido[2] == m.VOZ and pedido[4] == ""
     assert j.caixa.GetValue() == "rascunho que fica"
+
+
+def test_comecar_a_gravar_pelo_atalho_nao_fala_nada(j, monkeypatch, tmp_path):
+    from telezapp.midia.gravador import MICROFONE, SOM_E_MICROFONE
+    _preparar_gravacao_rapida(j, monkeypatch, tmp_path)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._gravar_rapido(MICROFONE)
+    assert j._gravacao_rapida and ditas == []
+    j._terminar_gravacao_rapida(enviar=False)
+    ditas.clear()
+    # so o aviso de que nao ha microfone ainda e falado
+    monkeypatch.setattr(GravadorFalso, "microfone_disponivel", False)
+    j._gravar_rapido(SOM_E_MICROFONE)
+    assert ditas == ["Não achei um microfone: gravando só o som do "
+                     "computador."]
 
 
 def test_esc_descarta_a_gravacao_do_atalho(j, monkeypatch, tmp_path):

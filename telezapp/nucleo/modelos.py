@@ -818,6 +818,7 @@ FILTROS_TIPO = (("todas", "Todas as conversas"),
                 ("grupos", "Grupos"),
                 ("canais", "Canais"),
                 ("fixadas", "Fixadas"),
+                ("favoritas", "Com mensagens favoritas"),
                 ("silenciadas", "Silenciadas"),
                 ("arquivadas", "Arquivadas"),
                 ("status", "Status e histórias"),
@@ -843,9 +844,11 @@ def casa_busca(nome, busca):
 ROTULO_TODAS_AS_CONTAS = "Todas as contas"
 
 
-def passa_filtro(c, tipo="todas", conta=CONTA_TODAS, busca=""):
+def passa_filtro(c, tipo="todas", conta=CONTA_TODAS, busca="",
+                 com_favoritas=()):
     """A conversa aparece na lista? `conta`: "todas", um servico
-    ("telegram", "whatsapp") ou "conta:<id>". `tipo`: ver FILTROS_TIPO. As
+    ("telegram", "whatsapp") ou "conta:<id>". `tipo`: ver FILTROS_TIPO;
+    `com_favoritas`: chaves das conversas que tem mensagem favorita. As
     arquivadas so aparecem no tipo Arquivadas. Valor desconhecido nao
     filtra."""
     if busca and not casa_busca(c.nome, busca):
@@ -878,6 +881,8 @@ def passa_filtro(c, tipo="todas", conta=CONTA_TODAS, busca=""):
         return c.tipo == "canal"
     if tipo == "fixadas":
         return bool(c.fixada)
+    if tipo == "favoritas":
+        return c.chave in com_favoritas
     if tipo == "silenciadas":
         return c.silenciada()
     return True
@@ -966,6 +971,9 @@ def conteudos_copiaveis(msg, maximo_links=12):
     if ia:
         itens.append(("texto", "Copiar " + rotulo_da_ia(msg), ia))
     links = itens_de_link(msg)[:maximo_links]
+    url_previa = (extras_de(msg)["previa"] or {}).get("url", "")
+    if url_previa.lower().startswith(("http://", "https://")) and             url_previa not in [u for _, u in links]:
+        links.append(("Link: " + url_previa, url_previa))   # so na previa
     for rotulo, url in links:
         itens.append(("link", "Copiar link" if len(links) == 1
                       else "Copiar " + rotulo, url))
