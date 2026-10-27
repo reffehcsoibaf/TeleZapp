@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Janela de Novo grupo, Novo canal e Nova comunidade: conta, nome,
 descricao e, nos grupos, participantes (e topicos, onde o servico tem)."""
 import wx

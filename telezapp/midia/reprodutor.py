@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Motor de audio do app: decodifica com soundfile (Ogg/Opus, MP3, WAV,
 FLAC...) e toca com sounddevice, lendo o arquivo aos poucos (sem carregar
 tudo na memoria). Pausa, retoma e anda para qualquer ponto.

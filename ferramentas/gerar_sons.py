@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Gera os sons de exemplo dos eventos do TeleZapp, todos sintetizados aqui
 (nenhuma amostra de terceiros), em Ogg Vorbis estereo.
 

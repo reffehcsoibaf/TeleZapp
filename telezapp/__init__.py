@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """TeleZapp: cliente de WhatsApp e Telegram para Windows, feito para leitores
 de tela."""
 

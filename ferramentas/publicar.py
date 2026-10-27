@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Prepara a Release do TeleZapp para o GitHub.
 
 Reaproveita o que ferramentas/empacotar.py gerou em lancamento/ (se o zip

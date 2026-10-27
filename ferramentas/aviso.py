@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Caixas de mensagem para o iniciar-telezapp.bat (o .bat so usa ASCII, por
 isso os textos com acento ficam aqui). Uso: aviso.py <chave> [caminho]"""
 import ctypes

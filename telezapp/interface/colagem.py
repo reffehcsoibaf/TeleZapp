@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Control V com midia: arquivos copiados no Explorer e imagens (print, imagem
 copiada de um site) viram anexos preparados, que esperam o Enter. Usado pela
 caixa de digitar da janela e pelo dialogo de nova mensagem."""

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """O que cada linha da lista de conversas mostra, e em que ordem.
 
 Sem wx, para testar em qualquer sistema. A escolha vive em `lista_conversas`

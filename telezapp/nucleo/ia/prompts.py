@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """O que se diz ao provedor. O texto das instrucoes e em ingles de proposito:
 o idioma da resposta e uma instrucao explicita, entao um texto serve a todos."""
 

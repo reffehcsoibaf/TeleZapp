@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Codigo secreto das conversas trancadas no celular.
 
 O WhatsApp tranca uma conversa atras de um codigo que so o celular conhece.

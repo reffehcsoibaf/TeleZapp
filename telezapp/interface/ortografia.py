@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Janela do corretor ortografico: mostra a palavra com erro, as sugestoes e
 os botoes para trocar, ignorar ou guardar no dicionario. A palavra e a frase
 em volta ficam num campo de texto, que o leitor de tela le inteiro."""

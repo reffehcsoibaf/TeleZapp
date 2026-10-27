@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Contribuidores do TeleZapp
+// Copyright (C) 2026 Fábio Scheffer Moraes
 
 // Fase 0 das chamadas do WhatsApp: um programa separado do TeleZapp que testa
 // o meowcaller (https://github.com/purpshell/meowcaller). A versao atual do

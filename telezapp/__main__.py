@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Ponto de entrada: python -m telezapp (ou pythonw, sem terminal).
 
 Qualquer erro grave vai para o log e aparece numa caixa de mensagem do

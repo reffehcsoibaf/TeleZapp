@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Criar grupo, canal ou comunidade: o que cada servico aceita e a conferencia
 do que a pessoa digitou, antes de enviar. Sem wx, para testar."""
 import re

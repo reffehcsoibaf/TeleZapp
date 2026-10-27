@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Prepara um arquivo para enviar: tipo, tipo MIME, duracao e tamanho.
 
 Sem FFmpeg (os experimentos mostraram que nao e preciso): o video MP4 tem a

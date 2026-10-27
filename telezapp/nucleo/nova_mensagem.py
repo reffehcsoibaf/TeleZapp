@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Nova mensagem: para quem enviar e por qual conta. Sem wx.
 
 O destino digitado pode ser o nome de um contato ou de uma conversa, um

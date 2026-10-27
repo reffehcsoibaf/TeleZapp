@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Duracao, largura, altura e codec de videos da familia MP4.
 
 Substitui o hachoir (GPL-2.0). Le so as caixas (boxes) necessarias, sem

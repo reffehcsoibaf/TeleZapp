@@ -176,4 +176,4 @@ versão 3 ou posterior** (GPL-3.0-or-later). O texto completo está em
 [`LICENSE`](LICENSE). As bibliotecas de terceiros e as licenças delas estão em
 [`docs/licencas-de-terceiros.md`](docs/licencas-de-terceiros.md).
 
-Copyright (C) 2026 Contribuidores do TeleZapp.
+Copyright (C) 2026 Fábio Scheffer Moraes.

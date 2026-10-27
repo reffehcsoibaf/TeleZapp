@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """O contrato comum dos servicos.
 
 A interface so conhece estes metodos. Todos voltam na hora: o trabalho roda

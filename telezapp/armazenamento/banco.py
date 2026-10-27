@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Banco local (SQLite): conversas e mensagens de todas as contas.
 
 Serve para abrir o app ja com as conversas na tela, antes da rede responder,

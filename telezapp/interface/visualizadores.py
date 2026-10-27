@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Leitores de midia dentro do app: imagem, audio, video e texto.
 
 Tudo abre numa janela do proprio TeleZapp, a partir do arquivo guardado na

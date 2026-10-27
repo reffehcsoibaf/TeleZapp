@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Formato comum aos dois servicos (conta, conversa, mensagem) e o texto que
 o leitor de tela fala para cada item. Sem dependencia de wxPython."""
 import json

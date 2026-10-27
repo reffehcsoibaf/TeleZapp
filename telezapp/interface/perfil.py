@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Janela para editar o proprio perfil: nome, recado e foto.
 
 So desenha e prepara a foto; ler o perfil e gravar nos servicos e com quem

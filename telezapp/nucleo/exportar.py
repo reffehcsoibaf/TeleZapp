@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Salvar o conteudo de uma conversa num .zip: o texto de todas as mensagens
 guardadas neste computador (conversa.txt) e as midias ja baixadas (pasta
 midias). Sem wx."""

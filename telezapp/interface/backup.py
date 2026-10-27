@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Janelas de backup e de restauracao: o que incluir (ou restaurar) e a
 senha. Quem grava e restaura e `nucleo.backup`."""
 import wx

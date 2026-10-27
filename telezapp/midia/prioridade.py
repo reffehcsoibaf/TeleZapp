@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Mantem o som da chamada correndo com o TeleZapp em segundo plano.
 
 Com a janela minimizada, escondida ou em outro programa em primeiro plano, o

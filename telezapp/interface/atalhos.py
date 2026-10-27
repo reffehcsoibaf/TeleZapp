@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Janela para escolher a combinacao de teclas de uma funcao: a pessoa aperta
 a combinacao e o programa a escreve e a fala. Os controles tem rotulos para
 o leitor de tela e nada depende da tela."""

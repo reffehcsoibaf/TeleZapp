@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Guia de uso e novidades: paginas HTML com a versao atual.
 
 Os modelos ficam em telezapp/ajuda com marcas {{versao}} e {{site}}; ao abrir,

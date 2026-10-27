@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Janela para instalar o TeleZapp ou criar uma copia portatil. Quem faz o
 trabalho e `nucleo.instalacao`."""
 import contextlib

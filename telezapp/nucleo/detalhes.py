@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Detalhes de uma conversa: contagens por tipo de conteudo, espaco usado e a
 lista de midias com filtro. Sem wx."""
 import os

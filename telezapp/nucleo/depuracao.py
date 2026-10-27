@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Textos do menu Depurar: tudo que o TeleZapp sabe sobre uma mensagem ou
 uma conversa, em texto simples para ler, copiar e colar num relato."""
 import json

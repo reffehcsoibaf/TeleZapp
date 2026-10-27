@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Adaptadores das APIs oficiais, sem rede nem disco: `montar_pedido` diz o
 que enviar e `ler_resposta` o que veio de volta. Assim o formato de cada
 provedor se testa direto."""

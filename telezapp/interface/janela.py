@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Janela principal: conversas, mensagens e caixa de digitacao.
 
 So conversa com o resto do app pelo gerenciador de contas (pedidos) e pelos

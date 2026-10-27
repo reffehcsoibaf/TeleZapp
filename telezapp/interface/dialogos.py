@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Janelas de login e de texto, com controles nativos lidos pelo NVDA.
 
 Cada campo tem um rotulo (StaticText antes do controle, que o NVDA le ao

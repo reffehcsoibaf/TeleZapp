@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Janela de detalhes da conversa: dados da pessoa, do grupo ou do canal, as
 midias com filtro, os membros, os grupos em comum e as ferramentas de
 administrador. `ControleDetalhes` junta a janela principal, os provedores e

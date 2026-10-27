@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Janela da enquete: a pergunta, as opcoes com a contagem de cada uma (marca
 com Espaco; numa enquete de uma resposta so, marcar uma desmarca a outra),
 Votar, Tirar meu voto, Atualizar e Ver quem votou."""

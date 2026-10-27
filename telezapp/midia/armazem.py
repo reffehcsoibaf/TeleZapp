@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Onde as midias baixadas ficam: so dentro da pasta de dados do TeleZapp
 (%APPDATA%\\TeleZapp\\midias\\<conta>\\<conversa>), nunca espalhadas pelo
 sistema."""

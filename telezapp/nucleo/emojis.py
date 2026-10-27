@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Emojis para reagir e para escrever: a lista completa, com nomes em
 portugues, e a busca por palavras. Os dados vem do pacote `emoji`; o resto
 do programa so enxerga `Emoji`."""

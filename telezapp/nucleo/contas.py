@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Liga, desliga e registra as contas. Cada conta tem o seu provedor.
 
 Uma conta nova so e gravada na configuracao depois que o login termina

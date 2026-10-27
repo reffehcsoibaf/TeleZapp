@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Chamadas de voz: estados, textos falados e o que a janela deve mostrar.
 
 Sem wx e sem rede, para ser testado fora do Windows. O provedor publica

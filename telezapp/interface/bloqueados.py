@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Bloquear e desbloquear pessoas, e a lista de quem esta bloqueado.
 
 Quem guarda os bloqueios e o servico (WhatsApp ou Telegram): aqui so se pede
