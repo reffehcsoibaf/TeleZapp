@@ -1446,3 +1446,46 @@ def test_deixar_de_seguir_e_silenciar_canal_do_telegram():
     assert rodar("silenciar", False)[0]
     assert pedidos[-1].settings.mute_until == 0
     assert rodar("xyz") == (False, "Ação desconhecida.")
+
+
+def test_video_do_telegram_sem_chamadas_nao_declara_suporte(ambiente):
+    p = ambiente.criar(object())
+    assert p.suporta_video is False and p.cameras() == []
+    vistos = []
+    p.definir_destino_video(lambda *a: vistos.append(a))
+    assert p._destino_video is not None            # guardado para quando abrir
+
+
+def test_video_do_telegram_repassa_camera_e_destino_as_chamadas(ambiente):
+    p = ambiente.criar(object())
+    chamadas = []
+
+    class Falsa:
+        pronta = True
+        suporta_video = True
+        destino_video = None
+
+        def cameras(self):
+            return ["Câmera A"]
+
+        async def ligar(self, chat, *args):
+            chamadas.append(("ligar", chat) + args)
+
+        async def atender(self, chat, *args):
+            chamadas.append(("atender", chat) + args)
+
+        async def ligar_camera(self, chat, nome=""):
+            chamadas.append(("ligar_camera", chat, nome))
+    p._chamadas = Falsa()
+    p._agendar = lambda coro: __import__("asyncio").run(coro)
+    assert p.suporta_video and p.cameras() == ["Câmera A"]
+    p.ligar("10", "Mic", "Saída")                       # voz: igual a antes
+    p.ligar("10", "Mic", "Saída", video=True, camera="")
+    p.atender_chamada("10", "Mic", "Saída", camera="Câmera A")
+    p.ligar_camera("10", "Câmera A")
+    assert chamadas == [("ligar", 10, "Mic", "Saída"),
+                        ("ligar", 10, "Mic", "Saída", True, ""),
+                        ("atender", 10, "Mic", "Saída", "Câmera A"),
+                        ("ligar_camera", 10, "Câmera A")]
+    p.definir_destino_video(print)
+    assert p._chamadas.destino_video is print

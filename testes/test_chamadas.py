@@ -376,3 +376,181 @@ def test_dispositivos_nao_tocam_na_ntgcalls_fora_da_thread_do_provedor():
     assert s.chamadas.dispositivos() == (["Padrão", "Headset"],
                                          ["Alto-falantes", "Fones"])
     assert len(chamadas_de_listagem) == feitas      # nada novo
+
+
+# ------------------------------------------------------------------ video
+class MotorFalsoComVideo(MotorFalso):
+    def __init__(self):
+        super().__init__()
+        self.com_camera = True
+        self.filters.stream_frame = lambda *a: ("quadros",)
+        MotorFalsoComVideo.pedidos = None
+
+    def cameras(self):
+        return [Dispositivo("Câmera A"), Dispositivo("Câmera B")] \
+            if self.com_camera else []
+
+    def fluxo_com_camera(self, camera, microfone):
+        return ("camera+mic", camera.title, microfone.title)
+
+    def filtro_quadros(self):
+        return ("quadros",)
+
+    def ouvir_pedidos(self, cliente, ao_pedido):
+        MotorFalsoComVideo.pedidos = ao_pedido
+
+    def fluxo_saida(self, d, camera=False):
+        return ("saida", d.title) + (("camera",) if camera else ())
+
+
+def sala_com_video(com_camera=True):
+    s = Sala()
+    s.chamadas._motor_fabrica = MotorFalsoComVideo
+    s.quadros = []
+    s.chamadas.destino_video = lambda *a: s.quadros.append(a)
+    return s
+
+
+def quadro_bgra(largura=4, altura=2, rotacao=0):
+    return types.SimpleNamespace(
+        chat_id=10, frames=[types.SimpleNamespace(
+            frame=bytes([10, 20, 30, 255]) * (largura * altura),
+            info=types.SimpleNamespace(
+                width=largura, height=altura,
+                rotation=types.SimpleNamespace(value=rotacao)))])
+
+
+def ultimo(s):
+    return [e for e in s.eventos if isinstance(e, ev.EstadoChamada)][-1]
+
+
+def test_ligar_com_video_manda_camera_e_microfone_e_recebe_a_camera():
+    s = sala_com_video()
+
+    async def cena():
+        await s.chamadas.iniciar()
+        await s.chamadas.ligar(10, "Headset", "Fones", video=True,
+                               camera="Câmera B")
+    rodar(cena())
+    acoes = MotorFalso.app.chamadas
+    assert ("play", 10, ("camera+mic", "Câmera B", "Headset")) in acoes
+    assert ("record", 10, ("saida", "Fones", "camera")) in acoes
+    e = ultimo(s)
+    assert e.video and e.camera and e.suporta_video
+    assert s.chamadas.cameras() == ["Câmera A", "Câmera B"]
+
+
+def test_ligar_com_video_sem_camera_liga_so_a_voz_e_avisa():
+    s = sala_com_video()
+
+    async def cena():
+        await s.chamadas.iniciar()
+        s.chamadas.motor.com_camera = False
+        s.chamadas._cameras = []
+        await s.chamadas.ligar(10, "", "", video=True, camera="")
+    rodar(cena())
+    assert ("play", 10, ("mic", "Padrão")) in MotorFalso.app.chamadas
+    assert not ultimo(s).video
+    assert any(isinstance(e, ev.Aviso) and "câmera" in e.texto
+               for e in s.eventos)
+
+
+def test_chamada_recebida_de_video_vem_marcada_e_atende_sem_camera():
+    s = sala_com_video()
+
+    async def cena():
+        await s.chamadas.iniciar()
+        await MotorFalsoComVideo.pedidos(10, True)       # evento bruto
+        await MotorFalso.app.handlers[("chat_update", "entrada")](
+            None, types.SimpleNamespace(chat_id=10))
+        assert ultimo(s).video and ultimo(s).entrante
+        await s.chamadas.atender(10, "", "", camera=None)
+    rodar(cena())
+    acoes = MotorFalso.app.chamadas
+    assert ("play", 10, ("mic", "Padrão")) in acoes           # sem camera
+    assert ("record", 10, ("saida", "Alto-falantes", "camera")) in acoes
+    assert not ultimo(s).camera and ultimo(s).video
+
+
+def test_atender_chamada_de_video_com_camera():
+    s = sala_com_video()
+
+    async def cena():
+        await s.chamadas.iniciar()
+        await MotorFalso.app.handlers[("chat_update", "entrada")](
+            None, types.SimpleNamespace(chat_id=10))
+        await MotorFalsoComVideo.pedidos(10, True)       # chega depois
+        await s.chamadas.atender(10, "", "", camera="")
+    rodar(cena())
+    assert ("play", 10, ("camera+mic", "Câmera A", "Padrão")) in \
+        MotorFalso.app.chamadas
+    assert ultimo(s).camera
+
+
+def test_quadro_do_outro_lado_vai_para_a_janela_e_marca_video_remoto():
+    s = sala_com_video()
+
+    async def cena():
+        await s.chamadas.iniciar()
+        await s.chamadas.ligar(10, video=True, camera="")
+        await s.chamadas._ao_quadro(None, quadro_bgra())
+    rodar(cena())
+    cid, largura, altura, rgb = s.quadros[0]
+    assert (cid, largura, altura) == ("10", 4, 2)
+    assert rgb[:3] == bytes([30, 20, 10])               # BGRA -> RGB
+    assert ultimo(s).video_remoto
+
+
+def test_quadro_girado_troca_largura_e_altura():
+    s = sala_com_video()
+
+    async def cena():
+        await s.chamadas.iniciar()
+        await s.chamadas.ligar(10, video=True, camera="")
+        await s.chamadas._ao_quadro(None, quadro_bgra(4, 2, rotacao=90))
+    rodar(cena())
+    assert s.quadros[0][1:3] == (2, 4)
+
+
+def test_sem_quadros_o_outro_lado_desligou_a_camera(monkeypatch):
+    s = sala_com_video()
+    monkeypatch.setattr(ct, "SEM_QUADROS_S", 0.05)
+
+    async def cena():
+        await s.chamadas.iniciar()
+        await s.chamadas.ligar(10, video=True, camera="")
+        await s.chamadas._ao_quadro(None, quadro_bgra())
+        assert ultimo(s).video_remoto
+        await asyncio.sleep(1.2)
+    rodar(cena())
+    assert not ultimo(s).video_remoto and ultimo(s).video
+
+
+def test_ligar_e_desligar_a_camera_no_meio_de_uma_chamada_de_voz():
+    s = sala_com_video()
+
+    async def cena():
+        await s.chamadas.iniciar()
+        await s.chamadas.ligar(10, "", "")
+        assert not ultimo(s).video
+        await s.chamadas.ligar_camera(10, "Câmera B")
+        assert ultimo(s).video and ultimo(s).camera
+        await s.chamadas.desligar_camera(10)
+    rodar(cena())
+    plays = [x for x in MotorFalso.app.chamadas if x[0] == "play"]
+    assert plays[-2] == ("play", 10, ("camera+mic", "Câmera B", "Padrão"))
+    assert plays[-1] == ("play", 10, ("mic", "Padrão"))
+    assert ultimo(s).video and not ultimo(s).camera
+
+
+def test_formato_desconhecido_de_quadro_nao_quebra():
+    s = sala_com_video()
+
+    async def cena():
+        await s.chamadas.iniciar()
+        await s.chamadas.ligar(10, video=True, camera="")
+        ruim = quadro_bgra()
+        ruim.frames[0].frame = b"abc"
+        await s.chamadas._ao_quadro(None, ruim)
+    rodar(cena())
+    assert s.quadros == []

@@ -233,3 +233,48 @@ class Decodificador:
         except Exception as e:
             log.debug("quadro de vídeo ignorado (%s)", e)
         return achados
+
+
+# ---------------------------------------------------- quadros brutos (Telegram)
+def formato_do_quadro(dados, largura, altura):
+    """"bgra", "i420" ou None, pelo tamanho dos dados. O motor do Telegram
+    entrega quadros brutos sem dizer o formato."""
+    if largura <= 0 or altura <= 0:
+        return None
+    n = len(dados)
+    if n == largura * altura * 4:
+        return "bgra"
+    if n == largura * altura * 3 // 2 and largura % 2 == 0 and altura % 2 == 0:
+        return "i420"
+    if n == largura * altura * 3:
+        return "rgb"
+    return None
+
+
+def quadro_para_rgb(dados, largura, altura):
+    """Os bytes RGB (largura x altura x 3) de um quadro bruto, ou None se o
+    formato nao for reconhecido."""
+    formato = formato_do_quadro(dados, largura, altura)
+    if formato is None:
+        return None
+    import numpy as np
+    bruto = np.frombuffer(dados, dtype=np.uint8)
+    if formato == "rgb":
+        return bytes(dados)
+    if formato == "bgra":
+        return bruto.reshape(altura, largura, 4)[:, :, [2, 1, 0]].tobytes()
+    import cv2
+    yuv = bruto.reshape(altura * 3 // 2, largura)
+    return cv2.cvtColor(yuv, cv2.COLOR_YUV2RGB_I420).tobytes()
+
+
+def girar_rgb(rgb, largura, altura, graus):
+    """(rgb, largura, altura) girado em sentido horario por `graus` (0, 90,
+    180 ou 270); qualquer outro valor deixa como esta."""
+    if graus not in (90, 180, 270):
+        return rgb, largura, altura
+    import numpy as np
+    imagem = np.frombuffer(rgb, dtype=np.uint8).reshape(altura, largura, 3)
+    girada = np.rot90(imagem, k=-(graus // 90))
+    nova_altura, nova_largura = girada.shape[0], girada.shape[1]
+    return np.ascontiguousarray(girada).tobytes(), nova_largura, nova_altura
