@@ -45,6 +45,30 @@ def candidatos(busca, contatos, conversas):
     return achados
 
 
+# O que a janela Nova mensagem deixa escolher mostrar: valor e texto.
+MODOS = (("tudo", "Contatos, conversas e grupos"),
+         ("contatos", "Só contatos"),
+         ("conversas", "Só conversas"),
+         ("grupos", "Só grupos"))
+
+
+def grupos_candidatos(busca, conversas, grupos=(), so_com_conversa=False):
+    """[(id, nome, "grupo")] dos grupos cujo nome casa com a busca: os das
+    conversas (tipo grupo) e, se nao `so_com_conversa`, os `grupos`
+    [(id, nome)] de que a conta participa mesmo sem conversa guardada."""
+    achados, vistos = [], set()
+    for c in conversas:
+        if c.tipo == "grupo" and c.id not in vistos and                 m.casa_busca(c.nome, busca):
+            vistos.add(c.id)
+            achados.append((c.id, c.nome, "grupo"))
+    if not so_com_conversa:
+        for id_, nome in grupos:
+            if id_ not in vistos and m.casa_busca(nome, busca):
+                vistos.add(id_)
+                achados.append((id_, nome, "grupo"))
+    return achados
+
+
 def _nome_simples(nome):
     import unicodedata
     base = unicodedata.normalize("NFD", (nome or "").strip().lower())

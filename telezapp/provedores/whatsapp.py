@@ -2013,6 +2013,19 @@ class ProvedorWhatsApp(Provedor):
                                 or "Grupo"))
         return sorted(achados, key=lambda x: x[1].lower())
 
+    def grupos_da_conta(self):
+        """[(conversa_id, nome)] dos grupos de que esta conta participa (nao
+        inclui o grupo-pai das comunidades). Bloqueia ate o WhatsApp
+        responder."""
+        if self.cliente is None or not self._conectada:
+            return []
+        achados = []
+        for g in self.cliente.get_joined_groups():
+            if g.GroupParent.IsParent:
+                continue
+            achados.append((jid_texto(g.JID), g.GroupName.Name or "Grupo"))
+        return sorted(achados, key=lambda x: x[1].lower())
+
     def _jid_do_convite(self, msg, acao):
         grupo = acao.get("grupo") or ""
         convidou = (msg.remetente or msg.conversa_id) if msg is not None             else ""

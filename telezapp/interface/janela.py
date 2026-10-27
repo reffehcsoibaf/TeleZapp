@@ -56,6 +56,7 @@ from telezapp.nucleo import backup
 from telezapp.nucleo import codigo_secreto
 from telezapp.nucleo import lista_conversas as lista_conv_nucleo
 from telezapp.nucleo import depuracao
+from telezapp.nucleo import trazer_contatos
 from telezapp.nucleo import grupo as ng
 from telezapp.interface import segundo_plano
 from telezapp.nucleo import encaminhar as enc
@@ -976,7 +977,9 @@ class Janela(wx.Frame):
             if not canon:
                 continue
             par = ui_teclas.para_atalho_global(canon)
-            if par is None or not self.RegisterHotKey(id_, *par):
+            if par is not None and self.RegisterHotKey(id_, *par):
+                log.info("atalho global %s registrado (%s)", canon, chave)
+            else:
                 log.warning("atalho global %s nao registrado", canon)
                 bipe("erro")
                 self.fala.falar(
@@ -990,6 +993,12 @@ class Janela(wx.Frame):
         """Um atalho global foi apertado, em qualquer programa."""
         chave = next((c for c, i in self._ids_globais.items()
                       if i == evt.GetId()), "mostrar_janela")
+        try:
+            log.info("atalho global apertado (%s): janela visivel=%s "
+                     "minimizada=%s", chave, self.IsShown(),
+                     self.IsIconized())
+        except Exception:
+            log.info("atalho global apertado (%s)", chave)
         if chave == "mostrar_janela":
             self._mostrar_da_bandeja()
             return
@@ -1762,12 +1771,58 @@ class Janela(wx.Frame):
                 self._caiu.discard(e.conta_id)
                 bipe("reconectada")
             self.fala.falar("%s conectado." % servico)
+            self._trazer_contatos_da_conta(e.conta_id)
             if self.interrompidas.pop(e.conta_id, None) is not None:
                 self._atualizar_titulo()
         elif e.estado == ev.PRECISA_LOGIN:
             self.fala.falar("%s: %s." % (servico, e.detalhe or e.estado))
             if e.detalhe == "desconectada pelo celular":
                 wx.CallAfter(self._oferecer_parear_de_novo, e.conta_id)
+
+    def _grupos_das_contas(self):
+        """[(conta_id, id, nome)] dos grupos de que as contas conectadas
+        participam, tenham ou nao conversa guardada (um grupo sem mensagem
+        recebida ainda nao esta na lista). Guarda o resultado por 2 minutos,
+        porque pergunta ao servico."""
+        achados = []
+        cache = self.__dict__.setdefault("_cache_grupos", {})
+        for d in self.cfg.contas():
+            cid = d["id"]
+            prov = self.contas.provedor(cid) if self.contas else None
+            if prov is None or self.estados.get(cid) != ev.CONECTADA:
+                continue
+            quando, lista = cache.get(cid, (0, None))
+            if lista is None or time.time() - quando > 120:
+                try:
+                    lista = list(prov.grupos_da_conta())
+                except Exception:
+                    log.exception("lista de grupos da conta")
+                    lista = []
+                cache[cid] = (time.time(), lista)
+            achados.extend((cid, gid, nome) for gid, nome in lista)
+        return achados
+
+    def _trazer_contatos_da_conta(self, conta_id):
+        """Com a opcao ligada, copia para a agenda os contatos da conta que
+        acabou de conectar. A agenda do WhatsApp chega logo depois de
+        conectar, por isso espera um pouco; a leitura e feita fora da tela e
+        a gravacao volta para ela."""
+        if not self.cfg.get("trazer_contatos_ao_abrir") or not self.contas:
+            return
+
+        def ler():
+            prov = self.contas.provedores.get(conta_id)
+            achados = trazer_contatos.ler(prov)
+            if achados:
+                wx.CallAfter(gravar, achados)
+
+        @seguro
+        def gravar(achados):
+            if trazer_contatos.salvar(self.banco, conta_id, achados):
+                self._renomear_pelos_contatos()
+
+        wx.CallLater(8000, lambda: threading.Thread(
+            target=ler, name="trazer-contatos", daemon=True).start())
 
     @seguro
     def _oferecer_parear_de_novo(self, conta_id):
@@ -2699,11 +2754,13 @@ class Janela(wx.Frame):
         nomes_contas = {d["id"]: d.get("nome") or d.get("telefone") or d["id"]
                         for d in self.cfg.contas()}
         varias = len(nomes_contas) > 1
-        destinos = enc.destinos(
-            list(self.indice.values()), self.banco.contatos(),
-            lambda cid: self.estados.get(cid) == ev.CONECTADA and
-            self.contas.provedor(cid) is not None,
-            trancadas=self.trancadas_liberadas)
+        conectada = (lambda cid: self.estados.get(cid) == ev.CONECTADA and
+                     self.contas.provedor(cid) is not None)
+        conversas, contatos = list(self.indice.values()), self.banco.contatos()
+        grupos = self._grupos_das_contas()
+        destinos = enc.destinos(conversas, contatos, conectada,
+                                trancadas=self.trancadas_liberadas,
+                                grupos=grupos)
         if not destinos:
             self.fala.falar("Nenhuma conversa de conta conectada para "
                             "receber.", interromper=True)
@@ -2722,7 +2779,9 @@ class Janela(wx.Frame):
         if pulados:
             resumo += " (%d não pode ser encaminhada: %s)" % (
                 len(pulados), "; ".join(sorted(set(pulados))))
-        dlg = je.DialogoEncaminhar(self, destinos, rotulo, resumo)
+        dlg = je.DialogoEncaminhar(
+            self, destinos, rotulo, resumo,
+            enc.categorias(conversas, contatos, grupos))
         try:
             if dlg.ShowModal() != wx.ID_OK:
                 return
@@ -2737,7 +2796,8 @@ class Janela(wx.Frame):
                 continue
             if (conta_id, conversa_id) not in self.indice:
                 conv = m.Conversa(conta_id, conversa_id, nome,
-                                  self.contas.servico(conta_id), "privada",
+                                  self.contas.servico(conta_id),
+                                  "grupo" if tipo == "grupo" else "privada",
                                   data=time.time())
                 self.indice[(conta_id, conversa_id)] = conv
                 self._ordenar()
@@ -3430,6 +3490,12 @@ class Janela(wx.Frame):
         if c is None or p is None:
             return
         mic, saida = self._dispositivos_da_chamada()
+        try:
+            log.info("atendendo a chamada: janela visivel=%s minimizada=%s "
+                     "ativa=%s", self.IsShown(), self.IsIconized(),
+                     self.IsActive())
+        except Exception:
+            pass
         p.atender_chamada(c.conversa_id, mic, saida)
 
     @seguro
@@ -4998,19 +5064,45 @@ class Janela(wx.Frame):
             self.fala.falar("Nenhuma conta conectada para enviar.",
                             interromper=True)
             return
-        def buscar(conta_id, texto):
-            achados = nm.candidatos(
-                texto, self.banco.contatos(conta_id),
-                [c for c in self.indice.values()
-                 if c.conta_id == conta_id])
-            if self.cfg.get("ocultar_contatos_duplicados"):
-                achados = nm.sem_duplicados(
-                    achados, lambda t: (conta_id, t[0], t[1], t[2]))
-            return achados
-        escolha = contatos.dialogo_nova_mensagem(self, contas, buscar)
+        grupos_ids = set()
+
+        def buscar(conta_id, texto, modo="tudo"):
+            conversas = [c for c in self.indice.values()
+                         if c.conta_id == conta_id]
+            contatos_ = self.banco.contatos(conta_id)
+            if modo == "grupos" or modo == "tudo":
+                sem_conversa = [(g, n) for c_, g, n in
+                                self._grupos_das_contas() if c_ == conta_id]
+            else:
+                sem_conversa = []
+            pessoas = []
+            if modo in ("tudo", "contatos", "conversas"):
+                pessoas = nm.candidatos(
+                    texto, contatos_ if modo != "conversas" else [],
+                    conversas if modo != "contatos" else [])
+                if self.cfg.get("ocultar_contatos_duplicados"):
+                    pessoas = nm.sem_duplicados(
+                        pessoas, lambda t: (conta_id, t[0], t[1], t[2]))
+            grupos = []
+            if modo in ("tudo", "conversas", "grupos"):
+                grupos = nm.grupos_candidatos(
+                    texto, conversas, sem_conversa,
+                    so_com_conversa=modo == "conversas")
+            grupos_ids.update(g[0] for g in grupos)
+            return pessoas + grupos
+        escolha = contatos.dialogo_nova_mensagem(self, contas, buscar,
+                                                 com_modo=True)
         if escolha is None:
             return
         conta_id, destino, pessoa = escolha
+        if pessoa and pessoa[0] in grupos_ids:
+            conv = self._garantir_conversa(conta_id, pessoa[0], pessoa[1],
+                                           "grupo")
+            if self.atual is not None and self.atual != conv.chave:
+                self._fechar_conversa()
+            self._abrir_conversa(conv)
+            self._mostrar_caixa()
+            return
         achado = pessoa or self._resolver_destino(conta_id, destino, nm)
         if achado is None:
             bipe("erro")
@@ -5581,7 +5673,10 @@ class Janela(wx.Frame):
             lambda t: self.fala.falar(t, interromper=True),
             ocultar_duplicados=bool(self.cfg.get("ocultar_contatos_duplicados")),
             ao_ocultar=lambda v: self.cfg.set(
-                "ocultar_contatos_duplicados", bool(v)))
+                "ocultar_contatos_duplicados", bool(v)),
+            trazer_ao_abrir=bool(self.cfg.get("trazer_contatos_ao_abrir")),
+            ao_trazer_ao_abrir=lambda v: self.cfg.set(
+                "trazer_contatos_ao_abrir", bool(v)))
         try:
             dlg.ShowModal()
         finally:

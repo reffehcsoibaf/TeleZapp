@@ -910,3 +910,63 @@ def test_estilos_da_janela_em_segundo_plano():
     assert fora & sp.WS_EX_TOOLWINDOW and not fora & sp.WS_EX_APPWINDOW
     assert fora & 0x100                               # o resto fica
     assert not sp.estilo_normal(fora) & sp.WS_EX_TOOLWINDOW
+
+
+def test_encaminhar_destinos_inclui_grupos_da_conta_e_filtra_por_modo():
+    from telezapp.nucleo import encaminhar as enc
+    conversas = [m.Conversa("a", "1", "Bia"),
+                 m.Conversa("a", "g1", "Time", tipo="grupo")]
+    contatos = [("a", "1", "Bia", ""), ("a", "7", "Dora", "+55")]
+    grupos = [("a", "g1", "Time"), ("a", "g2", "Família"),
+              ("b", "g3", "De outra conta")]
+    d = enc.destinos(conversas, contatos, lambda c: c == "a", grupos=grupos)
+    assert [x[2] for x in d] == ["Bia", "Dora", "Família", "Time"]
+    assert [x[3] for x in d if x[2] == "Família"] == ["grupo"]
+    cat = enc.categorias(conversas, contatos, grupos)
+    nomes = lambda modo: [x[2] for x in enc.do_modo(d, modo, cat)]
+    assert nomes("tudo") == ["Bia", "Dora", "Família", "Time"]
+    assert nomes("conversas") == ["Bia", "Time"]
+    assert nomes("contatos") == ["Bia", "Dora"]
+    assert nomes("grupos") == ["Família", "Time"]
+
+
+def test_nova_mensagem_grupos_candidatos_com_e_sem_conversa():
+    from telezapp.nucleo import nova_mensagem as nm
+    conversas = [m.Conversa("a", "g1", "Time", tipo="grupo"),
+                 m.Conversa("a", "1", "Bia")]
+    grupos = [("g1", "Time"), ("g2", "Família")]
+    assert nm.grupos_candidatos("", conversas, grupos) == [
+        ("g1", "Time", "grupo"), ("g2", "Família", "grupo")]
+    assert nm.grupos_candidatos("fam", conversas, grupos) == [
+        ("g2", "Família", "grupo")]
+    assert nm.grupos_candidatos("", conversas, grupos,
+                                so_com_conversa=True) == [
+        ("g1", "Time", "grupo")]
+
+
+def test_trazer_contatos_so_entram_os_que_faltam():
+    from telezapp.nucleo import trazer_contatos as tc
+
+    class Banco:
+        def __init__(self):
+            self.salvos = [("a", "1", "Bia", "")]
+
+        def contatos(self, conta_id):
+            return list(self.salvos)
+
+        def salvar_contato(self, conta_id, id_, nome, tel):
+            self.salvos.append((conta_id, id_, nome, tel))
+
+    class Prov:
+        def contatos_da_conta(self):
+            return [("1", "Outra Bia", ""), ("2", "Caio", "+55")]
+
+    class Quebrado:
+        def contatos_da_conta(self):
+            raise RuntimeError
+
+    b = Banco()
+    assert tc.salvar(b, "a", tc.ler(Prov())) == 1
+    assert ("a", "2", "Caio", "+55") in b.salvos
+    assert ("a", "1", "Outra Bia", "") not in b.salvos
+    assert tc.ler(Quebrado()) == [] and tc.ler(None) == []

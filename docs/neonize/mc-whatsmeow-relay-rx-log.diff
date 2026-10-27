@@ -1,0 +1,17 @@
+--- engine_media.go (antes)
++++ engine_media.go (depois)
+@@ antes do "Keepalive: re-send the Allocate AND a WhatsApp ping" @@
++	// TeleZapp: a cada 5 s nos primeiros 40 s, quantos pacotes o relay mandou (qualquer
++	// tipo), para separar "relay mudo" de "relay vivo mas sem a midia do outro lado".
++	go func() {
++		t := time.NewTicker(5 * time.Second)
++		defer t.Stop()
++		for i := 1; i <= 8; i++ {
++			select {
++			case <-ctx.Done():
++				return
++			case <-t.C:
++			}
++			log.Info().Int("segundos", i*5).Uint64("pacotes_do_relay", relayRx.Load()).Msg("relay rx count")
++		}
++	}()

@@ -254,7 +254,8 @@ class DialogoConfiguracoes(wx.Dialog):
             return
         acao = self.modelo.registro.acoes[chave]
         escolha = ui_atalhos.escolher_atalho(
-            self, acao.rotulo, self.modelo.atalho_de(chave), self.fala)
+            self, acao.rotulo, self.modelo.atalho_de(chave),
+            lambda texto, interromper=True: self._atalhos_dizer(texto))
         if escolha is None:
             return
         canon = "" if escolha == ui_atalhos.REMOVER else escolha

@@ -23,6 +23,10 @@ AGORA = time.time()
 class ProvedorFalso:
     def __init__(self):
         self.pedidos = []
+        self.grupos = []
+
+    def grupos_da_conta(self):
+        return list(self.grupos)
 
     def carregar_mensagens(self, cid, limite=50):
         self.pedidos.append(("carregar", cid, limite))
@@ -2681,7 +2685,7 @@ def test_nova_mensagem_escolhe_a_pessoa_e_abre_a_conversa_sem_enviar(
     from telezapp.interface import contatos
     vistas = []
     monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
-                        lambda pai, contas, buscar: vistas.append(contas) or
+                        lambda pai, contas, buscar, **k: vistas.append(contas) or
                         (("t1", "bruno", None)))
     enviados = []
     j._enviar_texto = lambda: enviados.append(j.atual)
@@ -2714,7 +2718,7 @@ def test_nova_mensagem_para_telefone_cria_conversa_no_whatsapp(j, monkeypatch):
     j.b.publicar(ev.EstadoConta("w1", ev.CONECTADA))
     vistas = []
     monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
-                        lambda pai, contas, buscar: vistas.append(contas) or
+                        lambda pai, contas, buscar, **k: vistas.append(contas) or
                         ("w1", "(51) 99999-8888", None))
     j._nova_mensagem()
     assert len(vistas[0]) == 2                  # duas contas: aparece a escolha
@@ -2732,7 +2736,7 @@ def test_nova_mensagem_sem_conta_conectada_ou_destino_desconhecido(j,
     assert ditas[-1] == "Nenhuma conta conectada para enviar."
     j.estados["t1"] = ev.CONECTADA
     monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
-                        lambda pai, contas, buscar: ("t1", "ninguem assim", None))
+                        lambda pai, contas, buscar, **k: ("t1", "ninguem assim", None))
     j._nova_mensagem()
     assert ditas[-1].startswith("Não encontrei ninguem assim.")
 
@@ -2741,7 +2745,7 @@ def test_nova_mensagem_com_pessoa_escolhida_na_lista_nao_resolve_o_texto(
         j, monkeypatch):
     from telezapp.interface import contatos
     monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
-                        lambda pai, contas, buscar: (
+                        lambda pai, contas, buscar, **k: (
                             "t1", "br", ("20", "Bruno")))
     j._resolver_destino = lambda *a: (_ for _ in ()).throw(AssertionError)
     j._nova_mensagem()
@@ -2951,7 +2955,7 @@ def test_encaminhar_envia_para_as_conversas_escolhidas(j, monkeypatch):
     _abrir_com_caixa(j)
 
     class Dialogo:
-        def __init__(self, pai, destinos, rotulo_de, resumo):
+        def __init__(self, pai, destinos, rotulo_de, resumo, categorias=None):
             assert any(d[1] == "10" for d in destinos)
             assert rotulo_de(destinos[0])
             self.resumo = resumo
@@ -4935,7 +4939,7 @@ def test_nova_chamada_escolhe_a_pessoa_e_liga(j, monkeypatch):
     j._provedor_de_chamada = lambda conta_id: j.contas.p
     j.estados["t1"] = ev.CONECTADA
     monkeypatch.setattr(contatos, "dialogo_nova_chamada",
-                        lambda pai, contas, buscar: vistas.append(contas) or
+                        lambda pai, contas, buscar, **k: vistas.append(contas) or
                         ("t1", "bruno", None))
     j._ligar_para = lambda conv: ligou.append(conv.id)
     j._nova_chamada()
@@ -5680,3 +5684,49 @@ def test_botao_limpar_a_conversa_abre_a_limpeza_so_dela(j, monkeypatch):
     c.limpar()
     assert abertas == [(c.conv.conta_id, c.conv.id, c.conv.nome)]
     assert atualizou == [True]            # algo saiu: refaz os detalhes
+
+
+def test_encaminhar_mostra_grupo_sem_conversa_e_cria_a_conversa_de_grupo(
+        j, monkeypatch):
+    from telezapp.interface import encaminhar as je
+    _abrir_com_caixa(j)
+    j.contas.p.grupos = [("g9@g.us", "Grupo novo")]
+    vistos = {}
+
+    class Dialogo:
+        def __init__(self, pai, destinos, rotulo_de, resumo, categorias=None):
+            vistos["destinos"] = destinos
+            vistos["categorias"] = categorias
+
+        def ShowModal(self):
+            return jm.wx.ID_OK
+
+        def escolhidos(self):
+            return [("t1", "g9@g.us", "Grupo novo", "grupo")]
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(je, "DialogoEncaminhar", Dialogo)
+    j._encaminhar()
+    assert ("t1", "g9@g.us", "Grupo novo", "grupo") in vistos["destinos"]
+    assert "grupos" in vistos["categorias"][("t1", "g9@g.us")]
+    assert j.indice[("t1", "g9@g.us")].tipo == "grupo"
+    assert ("enviar", "g9@g.us", "oi", "") in j.contas.p.pedidos
+
+
+def test_nova_mensagem_escolhe_grupo_sem_conversa_e_abre_como_grupo(
+        j, monkeypatch):
+    from telezapp.interface import contatos
+    j.contas.p.grupos = [("g9@g.us", "Grupo novo")]
+    achados = {}
+
+    def dialogo(pai, contas, buscar, **k):
+        achados["lista"] = buscar("t1", "novo", "grupos")
+        achados["tudo"] = buscar("t1", "", "tudo")
+        return "t1", "", ("g9@g.us", "Grupo novo")
+    monkeypatch.setattr(contatos, "dialogo_nova_mensagem", dialogo)
+    j._nova_mensagem()
+    assert achados["lista"] == [("g9@g.us", "Grupo novo", "grupo")]
+    assert ("g9@g.us", "Grupo novo", "grupo") in achados["tudo"]
+    assert j.atual == ("t1", "g9@g.us")
+    assert j.indice[("t1", "g9@g.us")].tipo == "grupo"

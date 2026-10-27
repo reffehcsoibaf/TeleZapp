@@ -332,6 +332,15 @@ OPCOES = (
           "mensagem, Control E\". Desmarcada, os nomes ficam sem o atalho "
           "e os atalhos continuam funcionando. Os atalhos podem ser "
           "mudados em Configurações, Atalhos."),
+    Opcao("trazer_contatos_ao_abrir",
+          "Obter os contatos das contas ao abrir o TeleZapp", "Interface",
+          True,
+          "Ao conectar cada conta, copia para a agenda do TeleZapp os "
+          "contatos que ela já tem (os salvos no celular ou só no "
+          "WhatsApp), para as conversas e os autores aparecerem com o nome "
+          "e não com o número. Não troca o nome de quem você já nomeou "
+          "aqui. Desmarcada, só entram os contatos que você adicionar. A "
+          "mesma caixa está na janela Contatos."),
     Opcao("ocultar_contatos_duplicados", "Ocultar contatos duplicados",
           "Interface", True,
           "Nas listas de contatos (Contatos e a escolha de quem recebe em "

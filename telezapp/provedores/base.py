@@ -240,6 +240,11 @@ class Provedor(ABC):
         """[(conversa_id, nome)] dos grupos em que a conta e administradora."""
         return []
 
+    def grupos_da_conta(self):
+        """[(conversa_id, nome)] de todos os grupos de que a conta participa,
+        tenham ou nao conversa guardada aqui. Pode esperar a rede."""
+        return []
+
     def administrar_canal(self, conversa_id, acao, valor=None):
         """Ferramentas do canal (silenciar, deixar_de_seguir). (ok, texto)."""
         return False, "Esta conta não gerencia canais por aqui."

@@ -10,19 +10,29 @@ class DialogoEncaminhar(wx.Dialog):
     """Busca por nome e lista de conversas com caixa de marcar. As marcas
     sobrevivem a uma nova busca."""
 
-    def __init__(self, pai, destinos, rotulo_de, resumo):
+    def __init__(self, pai, destinos, rotulo_de, resumo, categorias=None):
         """destinos: ver nucleo.encaminhar.destinos; rotulo_de(destino) ->
-        texto da linha; resumo: o que esta sendo encaminhado."""
+        texto da linha; resumo: o que esta sendo encaminhado; categorias:
+        ver nucleo.encaminhar.categorias (sem ela nao ha o filtro Mostrar)."""
         super().__init__(pai, title="Encaminhar",
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.todos, self.rotulo_de = destinos, rotulo_de
         self.marcados = set()               # (conta_id, conversa_id)
         self._mostrados = []
+        self.categorias = categorias
+        self.modo = None
         lay = wx.BoxSizer(wx.VERTICAL)
         lay.Add(wx.StaticText(self, label="Encaminhar %s. Digite para buscar "
                                           "e marque com Espaço as conversas "
                                           "que vão receber." % resumo),
                 0, wx.ALL, 10)
+        if categorias is not None:
+            lay.Add(wx.StaticText(self, label="Mostrar"), 0,
+                    wx.LEFT | wx.RIGHT, 10)
+            self.modo = wx.Choice(self, choices=[r for _, r in enc.MODOS],
+                                  name="Mostrar")
+            self.modo.SetSelection(0)
+            lay.Add(self.modo, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
         lay.Add(wx.StaticText(self, label="Buscar conversa ou contato"), 0,
                 wx.LEFT | wx.RIGHT, 10)
         self.busca = wx.TextCtrl(self, name="Buscar conversa ou contato")
@@ -40,6 +50,8 @@ class DialogoEncaminhar(wx.Dialog):
         lay.Add(botoes, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
         self.SetSizerAndFit(lay)
         self.busca.Bind(wx.EVT_TEXT, lambda e: self._preencher())
+        if self.modo is not None:
+            self.modo.Bind(wx.EVT_CHOICE, lambda e: self._preencher())
         self.lista.Bind(wx.EVT_CHECKLISTBOX, self._ao_marcar)
         self.Bind(wx.EVT_BUTTON, self._ok, id=wx.ID_OK)
         self._preencher()
@@ -47,7 +59,11 @@ class DialogoEncaminhar(wx.Dialog):
         self.busca.SetFocus()
 
     def _preencher(self):
-        self._mostrados = enc.filtrar(self.todos, self.busca.GetValue())
+        base = self.todos
+        if self.modo is not None:
+            base = enc.do_modo(base, enc.MODOS[max(
+                self.modo.GetSelection(), 0)][0], self.categorias)
+        self._mostrados = enc.filtrar(base, self.busca.GetValue())
         self.lista.Set([self.rotulo_de(d) for d in self._mostrados])
         for i, d in enumerate(self._mostrados):
             self.lista.Check(i, (d[0], d[1]) in self.marcados)
