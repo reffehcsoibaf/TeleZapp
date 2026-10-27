@@ -23,6 +23,10 @@ AGORA = time.time()
 class ProvedorFalso:
     def __init__(self):
         self.pedidos = []
+        self.grupos = []
+
+    def grupos_da_conta(self):
+        return list(self.grupos)
 
     def carregar_mensagens(self, cid, limite=50):
         self.pedidos.append(("carregar", cid, limite))
@@ -1625,7 +1629,7 @@ class DialogoFalso:
     abertos = []
 
     def __init__(self, pai, chamada, acoes, falar, microfones=(),
-                 saidas=(), microfone="", saida="", ao_fechar=None):
+                 saidas=(), microfone="", saida="", ao_fechar=None, **mais):
         self.chamada, self.acoes, self.falar = chamada, acoes, falar
         self.microfones, self.saidas = list(microfones), list(saidas)
         self.ao_fechar = ao_fechar
@@ -2681,7 +2685,7 @@ def test_nova_mensagem_escolhe_a_pessoa_e_abre_a_conversa_sem_enviar(
     from telezapp.interface import contatos
     vistas = []
     monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
-                        lambda pai, contas, buscar: vistas.append(contas) or
+                        lambda pai, contas, buscar, **k: vistas.append(contas) or
                         (("t1", "bruno", None)))
     enviados = []
     j._enviar_texto = lambda: enviados.append(j.atual)
@@ -2714,7 +2718,7 @@ def test_nova_mensagem_para_telefone_cria_conversa_no_whatsapp(j, monkeypatch):
     j.b.publicar(ev.EstadoConta("w1", ev.CONECTADA))
     vistas = []
     monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
-                        lambda pai, contas, buscar: vistas.append(contas) or
+                        lambda pai, contas, buscar, **k: vistas.append(contas) or
                         ("w1", "(51) 99999-8888", None))
     j._nova_mensagem()
     assert len(vistas[0]) == 2                  # duas contas: aparece a escolha
@@ -2732,7 +2736,7 @@ def test_nova_mensagem_sem_conta_conectada_ou_destino_desconhecido(j,
     assert ditas[-1] == "Nenhuma conta conectada para enviar."
     j.estados["t1"] = ev.CONECTADA
     monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
-                        lambda pai, contas, buscar: ("t1", "ninguem assim", None))
+                        lambda pai, contas, buscar, **k: ("t1", "ninguem assim", None))
     j._nova_mensagem()
     assert ditas[-1].startswith("Não encontrei ninguem assim.")
 
@@ -2741,7 +2745,7 @@ def test_nova_mensagem_com_pessoa_escolhida_na_lista_nao_resolve_o_texto(
         j, monkeypatch):
     from telezapp.interface import contatos
     monkeypatch.setattr(contatos, "dialogo_nova_mensagem",
-                        lambda pai, contas, buscar: (
+                        lambda pai, contas, buscar, **k: (
                             "t1", "br", ("20", "Bruno")))
     j._resolver_destino = lambda *a: (_ for _ in ()).throw(AssertionError)
     j._nova_mensagem()
@@ -2898,6 +2902,55 @@ def test_modo_de_selecao_nas_mensagens_favorita_em_massa(j):
     assert not j.modo_msg and not j.marc_msg
 
 
+def test_atalhos_de_conversa_valem_para_todas_as_marcadas(j):
+    j.lista_conv.SetFocus()
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_SPACE, ctrl=True))
+    j.lista_conv.SetSelection(1)
+    j._char_hook(Tecla(wx_falso.WXK_SPACE))
+    assert len(j.marc_conv) == 2
+    j._fixar_conversa()                      # o atalho, sem conversa dada
+    assert all(c.fixada for c in j.indice.values())
+    assert not j.modo_conv and not j.marc_conv
+
+
+def test_apagar_e_arquivar_pelo_atalho_usam_as_marcadas(j):
+    chamadas = []
+    j._massa_conversas = lambda acao: chamadas.append(("c", acao))
+    j._massa_mensagens = lambda acao: chamadas.append(("m", acao))
+    j.lista_conv.SetFocus()
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_SPACE, ctrl=True))
+    j._apagar_conversa()
+    j._arquivar_conversa()
+    j._silenciar_conversa()
+    j._marcar_conversa_lida()
+    assert chamadas == [("c", "apagar"), ("c", "arquivar"),
+                        ("c", "silenciar"), ("c", "lidas")]
+
+
+def test_atalhos_de_mensagem_valem_para_todas_as_marcadas(j):
+    chamadas = []
+    j._massa_mensagens = lambda acao: chamadas.append(acao)
+    _abrir_com_caixa(j)
+    j.lista_msgs.SetFocus()
+    j.lista_msgs.SetSelection(len(j.lista_msgs.itens) - 1)
+    j._char_hook(Tecla(wx_falso.WXK_SPACE, ctrl=True))
+    j._favoritar_mensagem()
+    j._apagar_mensagem()
+    j._copiar()
+    assert chamadas == ["favoritar", "apagar", "copiar"]
+
+
+def test_sem_marcas_o_atalho_age_so_no_item_em_foco(j):
+    chamadas = []
+    j._massa_conversas = lambda acao: chamadas.append(acao)
+    j.lista_conv.SetFocus()
+    j.lista_conv.SetSelection(0)
+    j._fixar_conversa()
+    assert chamadas == [] and j._conversa_selecionada().fixada
+
+
 def test_grupo_limpar_conversa_apaga_mensagens_e_mantem_na_lista(j):
     _abrir_com_caixa(j)
     chave = ("t1", "20")
@@ -2951,7 +3004,7 @@ def test_encaminhar_envia_para_as_conversas_escolhidas(j, monkeypatch):
     _abrir_com_caixa(j)
 
     class Dialogo:
-        def __init__(self, pai, destinos, rotulo_de, resumo):
+        def __init__(self, pai, destinos, rotulo_de, resumo, categorias=None):
             assert any(d[1] == "10" for d in destinos)
             assert rotulo_de(destinos[0])
             self.resumo = resumo
@@ -4354,11 +4407,11 @@ def test_enviar_sem_a_opcao_nao_consulta_o_corretor(j, monkeypatch):
 def test_menus_mostram_o_atalho_e_a_opcao_esconde(j):
     assert j.itens["ir_caixa"].rotulo.endswith("\tCtrl+E")
     assert j.atalhos.efetivo("ir_caixa") == "Ctrl+E"
-    assert j.botao_enviar.GetLabel() == "&Enviar (Enter)"
+    assert j.botao_enviar.GetLabel() == "Enviar (Enter)"
     assert j.botao_anexar.GetLabel() == "Anexar e enviar arquivo (Ctrl+Shift+A)"
     j._aplicar_opcao("mostrar_atalhos", False)
     assert "\t" not in j.itens["ir_caixa"].rotulo
-    assert j.botao_enviar.GetLabel() == "&Enviar"
+    assert j.botao_enviar.GetLabel() == "Enviar"
     # os atalhos seguem valendo, pela tabela de aceleracao
     assert len(j.tabela_de_aceleracao.entradas) > 10
     j._aplicar_opcao("mostrar_atalhos", True)
@@ -4643,16 +4696,16 @@ def test_por_padrao_enter_quebra_a_linha_e_control_enter_envia(j):
     j._enviar_texto()
     assert ("enviar", "20", "linha um", "") in j.contas.p.pedidos
     j._rotular_controles()
-    assert j.botao_enviar.GetLabel() == "&Enviar (Ctrl+Enter)"
+    assert j.botao_enviar.GetLabel() == "Enviar (Ctrl+Enter)"
 
 
 def test_com_a_opcao_enter_envia_e_o_botao_diz_enter(j):
     j.cfg.set("enter_envia", False)
     j._rotular_controles()
-    assert j.botao_enviar.GetLabel() == "&Enviar (Ctrl+Enter)"
+    assert j.botao_enviar.GetLabel() == "Enviar (Ctrl+Enter)"
     j._aplicar_opcao("enter_envia", True)
     j._rotular_controles()
-    assert j.botao_enviar.GetLabel() == "&Enviar (Enter)"
+    assert j.botao_enviar.GetLabel() == "Enviar (Enter)"
     assert j._tecla_de_enviar() == "Enter"
     j.cfg.set("enter_envia", False)
     assert j._tecla_de_enviar() == "Control Enter"
@@ -4935,7 +4988,7 @@ def test_nova_chamada_escolhe_a_pessoa_e_liga(j, monkeypatch):
     j._provedor_de_chamada = lambda conta_id: j.contas.p
     j.estados["t1"] = ev.CONECTADA
     monkeypatch.setattr(contatos, "dialogo_nova_chamada",
-                        lambda pai, contas, buscar: vistas.append(contas) or
+                        lambda pai, contas, buscar, **k: vistas.append(contas) or
                         ("t1", "bruno", None))
     j._ligar_para = lambda conv: ligou.append(conv.id)
     j._nova_chamada()
@@ -5168,7 +5221,8 @@ def test_escolher_dispositivos_guarda_e_vale_para_tocar_e_gravar(
     from telezapp.midia import dispositivos
     monkeypatch.setattr(
         jm.ui_dispositivos, "escolher",
-        lambda pai, mic, saida: ("Fone (USB)", "Alto-falantes"))
+        lambda pai, mic, saida, aviso: ("Fone (USB)", "Alto-falantes",
+                                        "Caixa (Bluetooth)"))
     ditas = []
     j.fala.falar = lambda t, interromper=False: ditas.append(t)
     try:
@@ -5177,15 +5231,18 @@ def test_escolher_dispositivos_guarda_e_vale_para_tocar_e_gravar(
         assert j.cfg.get("chamada_saida") == "Alto-falantes"
         assert dispositivos.microfone() == "Fone (USB)"
         assert dispositivos.saida() == "Alto-falantes"
-        assert any("Alto-falantes" in t for t in ditas)
+        assert j.cfg.get("notificacao_saida") == "Caixa (Bluetooth)"
+        assert dispositivos.notificacao() == "Caixa (Bluetooth)"
+        assert any("Alto-falantes" in t and "Caixa (Bluetooth)" in t
+                   for t in ditas)
     finally:
-        dispositivos.definir("", "")
+        dispositivos.definir("", "", "")
 
 
 def test_escolher_dispositivos_cancelado_nao_muda_nada(j, monkeypatch):
     from telezapp.midia import dispositivos
     monkeypatch.setattr(jm.ui_dispositivos, "escolher",
-                        lambda pai, mic, saida: None)
+                        lambda pai, mic, saida, aviso: None)
     j._escolher_dispositivos()
     assert j.cfg.get("chamada_microfone") == ""
     assert dispositivos.microfone() == ""
@@ -5680,3 +5737,198 @@ def test_botao_limpar_a_conversa_abre_a_limpeza_so_dela(j, monkeypatch):
     c.limpar()
     assert abertas == [(c.conv.conta_id, c.conv.id, c.conv.nome)]
     assert atualizou == [True]            # algo saiu: refaz os detalhes
+
+
+def test_encaminhar_mostra_grupo_sem_conversa_e_cria_a_conversa_de_grupo(
+        j, monkeypatch):
+    from telezapp.interface import encaminhar as je
+    _abrir_com_caixa(j)
+    j.contas.p.grupos = [("g9@g.us", "Grupo novo")]
+    vistos = {}
+
+    class Dialogo:
+        def __init__(self, pai, destinos, rotulo_de, resumo, categorias=None):
+            vistos["destinos"] = destinos
+            vistos["categorias"] = categorias
+
+        def ShowModal(self):
+            return jm.wx.ID_OK
+
+        def escolhidos(self):
+            return [("t1", "g9@g.us", "Grupo novo", "grupo")]
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(je, "DialogoEncaminhar", Dialogo)
+    j._encaminhar()
+    assert ("t1", "g9@g.us", "Grupo novo", "grupo") in vistos["destinos"]
+    assert "grupos" in vistos["categorias"][("t1", "g9@g.us")]
+    assert j.indice[("t1", "g9@g.us")].tipo == "grupo"
+    assert ("enviar", "g9@g.us", "oi", "") in j.contas.p.pedidos
+
+
+def test_nova_mensagem_escolhe_grupo_sem_conversa_e_abre_como_grupo(
+        j, monkeypatch):
+    from telezapp.interface import contatos
+    j.contas.p.grupos = [("g9@g.us", "Grupo novo")]
+    achados = {}
+
+    def dialogo(pai, contas, buscar, **k):
+        achados["lista"] = buscar("t1", "novo", "grupos")
+        achados["tudo"] = buscar("t1", "", "tudo")
+        return "t1", "", ("g9@g.us", "Grupo novo")
+    monkeypatch.setattr(contatos, "dialogo_nova_mensagem", dialogo)
+    j._nova_mensagem()
+    assert achados["lista"] == [("g9@g.us", "Grupo novo", "grupo")]
+    assert ("g9@g.us", "Grupo novo", "grupo") in achados["tudo"]
+    assert j.atual == ("t1", "g9@g.us")
+    assert j.indice[("t1", "g9@g.us")].tipo == "grupo"
+
+
+# ---------------------------------------------------------------- video
+def com_video(chamadas):
+    p = chamadas.p
+    p.suporta_video = True
+    p.cameras = lambda: ["Câmera A", "Câmera B"]
+    p.destino = []
+    p.definir_destino_video = lambda f: p.destino.append(f)
+    for nome in ("ligar_camera", "desligar_camera"):
+        setattr(p, nome, lambda *a, _n=nome: p.comandos.append((_n,) + a))
+    p.ligar = lambda *a, **k: p.comandos.append(("ligar", a, k))
+    p.atender_chamada = lambda *a, **k: p.comandos.append(("atender", a, k))
+    return p
+
+
+def test_ligar_com_video_pede_video_com_a_camera_escolhida(chamadas):
+    j = chamadas.j
+    p = com_video(chamadas)
+    j.cfg.set("chamada_camera", "Câmera B")
+    j.atual = ("t1", "10")
+    j._ligar(video=True)
+    assert p.comandos == [("ligar", ("10", "", ""),
+                           {"video": True, "camera": "Câmera B"})]
+    assert p.destino                           # recebe os quadros do outro
+
+
+def test_ligar_com_video_sem_suporte_avisa(chamadas):
+    j = chamadas.j
+    j.atual = ("t1", "10")
+    j._ligar(video=True)
+    assert any("não faz chamadas de vídeo" in f for f in chamadas.falas)
+    assert chamadas.p.comandos == []
+
+
+def test_atender_chamada_de_video_comeca_sem_camera(chamadas):
+    j = chamadas.j
+    p = com_video(chamadas)
+    j.b.publicar(ev.EstadoChamada("t1", "10", "tocando", "Ana", True,
+                                  video=True, suporta_video=True))
+    j._atender_chamada()
+    assert p.comandos == [("atender", ("10", "", ""), {"camera": None})]
+
+
+def test_atender_chamada_de_video_com_a_opcao_liga_a_camera(chamadas):
+    j = chamadas.j
+    p = com_video(chamadas)
+    j.cfg.set("video_camera_ao_atender", True)
+    j.cfg.set("chamada_camera", "Câmera A")
+    j.b.publicar(ev.EstadoChamada("t1", "10", "tocando", "Ana", True,
+                                  video=True, suporta_video=True))
+    j._atender_chamada()
+    assert p.comandos == [("atender", ("10", "", ""),
+                           {"camera": "Câmera A"})]
+
+
+def test_botao_da_camera_liga_e_desliga(chamadas):
+    j = chamadas.j
+    p = com_video(chamadas)
+    j.b.publicar(ev.EstadoChamada("t1", "10", "em chamada", "Ana", False,
+                                  video=True, suporta_video=True))
+    j._alternar_camera()
+    j.b.publicar(ev.EstadoChamada("t1", "10", "em chamada", "Ana", False,
+                                  video=True, camera=True,
+                                  suporta_video=True))
+    j._alternar_camera()
+    assert p.comandos == [("ligar_camera", "10", ""),
+                          ("desligar_camera", "10")]
+
+
+def test_video_que_muda_e_falado_sem_repetir_o_estado(chamadas):
+    j = chamadas.j
+    com_video(chamadas)
+    j.b.publicar(ev.EstadoChamada("t1", "10", "em chamada", "Ana", False,
+                                  suporta_video=True))
+    chamadas.falas.clear()
+    j.b.publicar(ev.EstadoChamada("t1", "10", "em chamada", "Ana", False,
+                                  video=True, video_remoto=True,
+                                  suporta_video=True))
+    assert chamadas.falas == [
+        "A chamada passou para vídeo. Ana ligou a câmera."]
+
+
+def test_quadro_de_video_vai_para_a_janela_da_chamada(chamadas, monkeypatch):
+    j = chamadas.j
+    com_video(chamadas)
+    vistos = []
+    j.b.publicar(ev.EstadoChamada("t1", "10", "em chamada", "Ana", False,
+                                  video=True, suporta_video=True))
+    j.dlg_chamada.mostrar_quadro = lambda *a: vistos.append(a)
+    monkeypatch.setattr(jm.wx, "CallAfter", lambda f, *a: f(*a))
+    j._ao_quadro_de_video("10", 2, 1, b"\0" * 6)
+    j._ao_quadro_de_video("10", 2, 1, b"\1" * 6)
+    assert vistos == [(2, 1, b"\0" * 6), (2, 1, b"\1" * 6)]
+
+
+# ---------------------------------------------------- busca por criterios
+class DialogoBuscaFalso:
+    vistos = []
+
+    def __init__(self, pai, banco, contas, liberadas, anteriores, falar=None):
+        self.contas, self.liberadas, self.anteriores = (
+            contas, liberadas, anteriores)
+        self.criterios = None
+        self.escolhido = None
+        self.resultado = None
+        DialogoBuscaFalso.vistos.append(self)
+
+    def ShowModal(self):
+        return jm.wx.ID_OK if self.escolhido is not None else jm.wx.ID_CANCEL
+
+    def Destroy(self):
+        pass
+
+
+def test_botao_de_busca_por_criterios_fica_entre_a_busca_e_o_sair(j):
+    assert j.botao_busca.GetLabel().startswith("Busca por critérios")
+    nomes = [n for _, n, _, _ in j._controles_atalho]
+    assert nomes.index("Busca por critérios") == nomes.index("Sair") - 1
+    assert "busca_criterios" in j.itens
+
+
+def test_busca_por_criterios_abre_a_janela_com_as_contas(j, monkeypatch):
+    DialogoBuscaFalso.vistos = []
+    monkeypatch.setattr(jm, "DialogoBusca", DialogoBuscaFalso)
+    j._busca_por_criterios()
+    d = DialogoBuscaFalso.vistos[0]
+    assert d.liberadas is False and d.anteriores is None
+    assert [c[0] for c in d.contas] == [x["id"] for x in j.cfg.contas()]
+
+
+def test_resultado_escolhido_abre_a_conversa_na_mensagem(j, monkeypatch):
+    from telezapp.nucleo import busca as nb
+    vistos = []
+    monkeypatch.setattr(j, "_ver_na_conversa", lambda x: vistos.append(x))
+
+    class Escolhe(DialogoBuscaFalso):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.escolhido = nb.Achado(m.Mensagem("t1", "10", "5"), None, "")
+            self.criterios = nb.Criterios(termo="oi")
+    monkeypatch.setattr(jm, "DialogoBusca", Escolhe)
+    j._busca_por_criterios()
+    assert [x.id for x in vistos] == ["5"]
+    assert j._ultima_busca.termo == "oi"            # a proxima abre com ele
+    DialogoBuscaFalso.vistos = []
+    monkeypatch.setattr(jm, "DialogoBusca", DialogoBuscaFalso)
+    j._busca_por_criterios()
+    assert DialogoBuscaFalso.vistos[0].anteriores.termo == "oi"

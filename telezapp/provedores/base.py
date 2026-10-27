@@ -138,6 +138,25 @@ class Provedor(ABC):
         """Silencia ou reativa o microfone durante a chamada."""
         raise NotImplementedError
 
+    # Video nas chamadas: so o WhatsApp faz por enquanto.
+    suporta_video = False
+
+    def cameras(self):
+        """Nomes das cameras que o provedor pode usar nas chamadas."""
+        return []
+
+    def ligar_camera(self, conversa_id, nome=""):
+        """Liga a camera na chamada (numa chamada de voz, pede video)."""
+        raise NotImplementedError
+
+    def desligar_camera(self, conversa_id):
+        raise NotImplementedError
+
+    def definir_destino_video(self, destino):
+        """`destino(conversa_id, largura, altura, rgb)` recebe os quadros do
+        video do outro lado."""
+        raise NotImplementedError
+
     def trocar_dispositivos(self, conversa_id, microfone="", saida=""):
         """Troca o microfone e/ou a saida de som no meio da chamada. Nome
         vazio mantem o atual."""
@@ -238,6 +257,11 @@ class Provedor(ABC):
 
     def grupos_que_administro(self):
         """[(conversa_id, nome)] dos grupos em que a conta e administradora."""
+        return []
+
+    def grupos_da_conta(self):
+        """[(conversa_id, nome)] de todos os grupos de que a conta participa,
+        tenham ou nao conversa guardada aqui. Pode esperar a rede."""
         return []
 
     def administrar_canal(self, conversa_id, acao, valor=None):

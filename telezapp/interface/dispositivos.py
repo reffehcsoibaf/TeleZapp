@@ -9,17 +9,22 @@ from telezapp.midia import dispositivos
 
 
 class DialogoDispositivos(wx.Dialog):
-    def __init__(self, pai, microfones, saidas, microfone="", saida=""):
+    def __init__(self, pai, microfones, saidas, microfone="", saida="",
+                 notificacao=""):
         super().__init__(pai, title="Dispositivos de som",
                          style=wx.DEFAULT_DIALOG_STYLE)
         self.itens_mic, pos_mic = dispositivos.opcoes(microfones, microfone)
         self.itens_saida, pos_saida = dispositivos.opcoes(saidas, saida)
+        self.itens_aviso, pos_aviso = dispositivos.opcoes(saidas, notificacao)
         self.escolha_saida = wx.Choice(self, choices=self.itens_saida,
                                        name="Saída de som")
         self.escolha_mic = wx.Choice(self, choices=self.itens_mic,
                                      name="Microfone")
+        self.escolha_aviso = wx.Choice(self, choices=self.itens_aviso,
+                                       name="Saída dos sons de aviso")
         self.escolha_saida.SetSelection(pos_saida)
         self.escolha_mic.SetSelection(pos_mic)
+        self.escolha_aviso.SetSelection(pos_aviso)
 
         lay = wx.BoxSizer(wx.VERTICAL)
         lay.Add(wx.StaticText(
@@ -28,7 +33,11 @@ class DialogoDispositivos(wx.Dialog):
         for rotulo, escolha in (
                 (wx.StaticText(self, label="Saída de &som (alto-falantes ou "
                                            "fone):"), self.escolha_saida),
-                (wx.StaticText(self, label="&Microfone:"), self.escolha_mic)):
+                (wx.StaticText(self, label="&Microfone:"), self.escolha_mic),
+                (wx.StaticText(self, label="Saída dos sons de a&viso do "
+                                           "TeleZapp (mensagens novas, "
+                                           "toques, bipes):"),
+                 self.escolha_aviso)):
             lay.Add(rotulo, 0, wx.LEFT | wx.RIGHT, 12)
             lay.Add(escolha, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
         botoes = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
@@ -38,18 +47,22 @@ class DialogoDispositivos(wx.Dialog):
         self.escolha_saida.SetFocus()
 
     def escolhidos(self):
-        """(microfone, saida): o nome, ou vazio para o padrão do Windows."""
+        """(microfone, saida, aviso): o nome, ou vazio para o padrão do
+        Windows."""
         return (dispositivos.nome_escolhido(
                     self.itens_mic, self.escolha_mic.GetSelection()),
                 dispositivos.nome_escolhido(
-                    self.itens_saida, self.escolha_saida.GetSelection()))
+                    self.itens_saida, self.escolha_saida.GetSelection()),
+                dispositivos.nome_escolhido(
+                    self.itens_aviso, self.escolha_aviso.GetSelection()))
 
 
-def escolher(pai, microfone="", saida=""):
+def escolher(pai, microfone="", saida="", notificacao=""):
     """Abre a janela com os dispositivos do Windows. Devolve (microfone,
-    saida) ou None se a pessoa cancelar."""
+    saida, aviso) ou None se a pessoa cancelar."""
     microfones, saidas = dispositivos.listar()
-    dlg = DialogoDispositivos(pai, microfones, saidas, microfone, saida)
+    dlg = DialogoDispositivos(pai, microfones, saidas, microfone, saida,
+                              notificacao)
     try:
         if dlg.ShowModal() != wx.ID_OK:
             return None

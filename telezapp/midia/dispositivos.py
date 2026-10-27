@@ -17,14 +17,24 @@ PADRAO = ""                  # "o padrao do Windows"
 _IGNORADOS = ("Mapeador de som",)     # o mapeador e o proprio padrao
 
 _trava = threading.Lock()
-_escolha = {"microfone": PADRAO, "saida": PADRAO}
+_escolha = {"microfone": PADRAO, "saida": PADRAO, "notificacao": PADRAO}
 
 
-def definir(microfone=PADRAO, saida=PADRAO):
-    """Guarda a escolha para quem abre o som depois (reprodutor, gravador)."""
+def definir(microfone=PADRAO, saida=PADRAO, notificacao=None):
+    """Guarda a escolha para quem abre o som depois (reprodutor, gravador).
+    `notificacao` e a saida dos sons de aviso do TeleZapp; None deixa como
+    esta."""
     with _trava:
         _escolha["microfone"] = microfone or PADRAO
         _escolha["saida"] = saida or PADRAO
+        if notificacao is not None:
+            _escolha["notificacao"] = notificacao or PADRAO
+
+
+def notificacao():
+    """A saida dos sons de aviso (vazio = o padrao do Windows)."""
+    with _trava:
+        return _escolha["notificacao"]
 
 
 def microfone():
@@ -91,6 +101,10 @@ def indice_do_microfone():
 
 def indice_da_saida():
     return indice(saida(), False)
+
+
+def indice_da_notificacao():
+    return indice(notificacao(), False)
 
 
 def opcoes(nomes, atual):

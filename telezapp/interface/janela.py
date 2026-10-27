@@ -30,6 +30,7 @@ from telezapp.interface.progresso import JanelaDeProgresso
 from telezapp.interface.publicar_status import DialogoPublicarStatus
 from telezapp.interface.detalhes import ControleDetalhes, ControleRecibos
 from telezapp.interface.chamada import DialogoChamada
+from telezapp.interface.busca import DialogoBusca
 from telezapp.interface import dispositivos as ui_dispositivos
 from telezapp.midia import armazem
 from telezapp.midia import dispositivos
@@ -56,6 +57,7 @@ from telezapp.nucleo import backup
 from telezapp.nucleo import codigo_secreto
 from telezapp.nucleo import lista_conversas as lista_conv_nucleo
 from telezapp.nucleo import depuracao
+from telezapp.nucleo import trazer_contatos
 from telezapp.nucleo import grupo as ng
 from telezapp.interface import segundo_plano
 from telezapp.nucleo import encaminhar as enc
@@ -113,13 +115,18 @@ o texto)
 Control F: buscar conversa pelo nome (digitar o código secreto aqui libera as
 conversas trancadas no celular)
 Control Shift T: esconder de novo as conversas trancadas
+Conversas, Busca por critérios (ou o botão ao lado do Sair): achar mensagens
+guardadas combinando texto, serviço, conta, tipo, data, favoritas e mais
+(sem tecla de fábrica; dê uma em Configurações, Atalhos)
 Alt 4: filtro de serviço ou conta da lista de conversas
 Alt 5: filtro de tipo de conversa (todas, não lidas, pessoais, grupos,
 canais, arquivadas, trancadas)
 Control Shift R: responder à mensagem selecionada
 Control Espaço (nas listas de conversas e de mensagens): ligar o modo de
 seleção e marcar o item em foco; depois, Espaço marca ou desmarca os outros,
-a tecla Menu mostra as ações para todos os marcados e Esc desfaz tudo
+a tecla Menu mostra as ações para todos os marcados e Esc desfaz tudo; os
+atalhos (Delete, Control Shift F, Control Shift C, Control Shift E...) também
+valem para todos os marcados
 Delete: apagar a conversa (na lista de conversas) ou a mensagem (na lista de
 mensagens) selecionada, com confirmação
 Control I: detalhes da conversa selecionada (dados, mídias, membros, grupos em
@@ -152,6 +159,8 @@ segundos no áudio que toca (Control Shift Page Up e Page Down: 30
 segundos)
 Control vírgula: abrir as configurações (busca, categorias e opções)
 Control Shift L: ligar para a conversa (Telegram, conversa com uma pessoa)
+Chamadas, Ligar com vídeo e Ligar ou desligar a câmera (WhatsApp): sem tecla de
+fábrica; dê uma em Configurações, Atalhos
 Control Shift J: voltar à janela da chamada
 Control Shift K: silenciar ou ativar o microfone na chamada
 Control Shift H: desligar a chamada
@@ -419,6 +428,8 @@ class Janela(wx.Frame):
         self._ia_texto_ocupada = False     # redigir, resumir, corrigir
         self._ia_vagas = threading.Semaphore(2)    # pedidos automaticos
         self.avisos_de_chamada = {}   # (conta, chamada) -> janela de aviso
+        self._ultima_busca = None     # criterios da busca por criterios
+        self._quadro_de_video_pendente = False
         self.presenca = None      # ev.Presenca (online / visto) da aberta
         self.digitando = None     # (ev.Presenca, expira) da conversa aberta
         self.editando = None      # mensagem minha que esta sendo editada
@@ -562,6 +573,7 @@ class Janela(wx.Frame):
         item(m_conv, "ler_ultima", "&Ouvir a última mensagem\tCtrl+R")
         item(m_conv, "atualizar", "A&tualizar a lista de conversas\tF5")
         item(m_conv, "buscar_conv", "Bus&car conversa\tCtrl+F")
+        item(m_conv, "busca_criterios", "Busca por crit&érios...")
         item(m_conv, "esconder_trancadas",
              "Esconder as conversas tr&ancadas\tCtrl+Shift+T")
 
@@ -601,6 +613,8 @@ class Janela(wx.Frame):
 
         m_cham = wx.Menu()
         item(m_cham, "ligar", "&Ligar para esta conversa\tCtrl+Shift+L")
+        item(m_cham, "ligar_video", "Ligar com &vídeo")
+        item(m_cham, "chamada_camera", "Ligar ou desligar a &câmera")
         item(m_cham, "chamada_janela",
              "Mostrar a &janela da chamada\tCtrl+Shift+J")
         item(m_cham, "chamada_mudo",
@@ -768,6 +782,7 @@ class Janela(wx.Frame):
             "ir_filtro_conta": lambda e: self._ir_para(self.cx_conta, ""),
             "ir_filtro_tipo": lambda e: self._ir_para(self.cx_tipo, ""),
             "buscar_conv": lambda e: self._ir_para(self.campo_busca, ""),
+            "busca_criterios": lambda e: self._busca_por_criterios(),
             "esconder_trancadas": lambda e: self._esconder_trancadas(),
             "contatos": lambda e: self._gerenciar_contatos(),
             "salvar_pessoa": lambda e: self._salvar_pessoa(),
@@ -854,6 +869,8 @@ class Janela(wx.Frame):
             "gravar_mic_janela": lambda e: self._gravar(MICROFONE),
             "gravar_som_janela": lambda e: self._gravar(SOM_INTERNO),
             "ligar": lambda e: self._ligar(),
+            "ligar_video": lambda e: self._ligar(video=True),
+            "chamada_camera": lambda e: self._alternar_camera(),
             "chamada_janela": lambda e: self._mostrar_chamada(),
             "chamada_mudo": lambda e: self._alternar_mudo(),
             "chamada_tempo": lambda e: self._falar_tempo_da_chamada(),
@@ -892,7 +909,9 @@ class Janela(wx.Frame):
         }
         for chave, tratador in ligacoes.items():
             self.Bind(wx.EVT_MENU, seguro(tratador), self.itens[chave])
-        dispositivos.definir(*self._dispositivos_da_chamada()[:2])
+        dispositivos.definir(*self._dispositivos_da_chamada()[:2],
+                             notificacao=self.cfg.get("notificacao_saida")
+                             or "")
         self.banco.depuracao = bool(self.cfg.get("depuracao"))
         self.itens["depuracao"].Check(self.banco.depuracao)
         self.Bind(wx.EVT_MENU,
@@ -976,7 +995,9 @@ class Janela(wx.Frame):
             if not canon:
                 continue
             par = ui_teclas.para_atalho_global(canon)
-            if par is None or not self.RegisterHotKey(id_, *par):
+            if par is not None and self.RegisterHotKey(id_, *par):
+                log.info("atalho global %s registrado (%s)", canon, chave)
+            else:
                 log.warning("atalho global %s nao registrado", canon)
                 bipe("erro")
                 self.fala.falar(
@@ -990,6 +1011,12 @@ class Janela(wx.Frame):
         """Um atalho global foi apertado, em qualquer programa."""
         chave = next((c for c, i in self._ids_globais.items()
                       if i == evt.GetId()), "mostrar_janela")
+        try:
+            log.info("atalho global apertado (%s): janela visivel=%s "
+                     "minimizada=%s", chave, self.IsShown(),
+                     self.IsIconized())
+        except Exception:
+            log.info("atalho global apertado (%s)", chave)
         if chave == "mostrar_janela":
             self._mostrar_da_bandeja()
             return
@@ -1096,6 +1123,9 @@ class Janela(wx.Frame):
         # Sair logo depois da busca (e antes da lista, na ordem de Tab), como
         # na maioria dos programas; sem tecla de acesso, porque Alt abre o
         # Menu. O item Sair de Ferramentas e Control Q continuam valendo.
+        self.botao_busca = wx.Button(painel, label="Busca por critérios")
+        self.botao_busca.Bind(wx.EVT_BUTTON,
+                              seguro(lambda e: self._busca_por_criterios()))
         self.botao_sair = wx.Button(painel, label="Sair")
         self.botao_sair.Bind(wx.EVT_BUTTON, seguro(lambda e: self._sair()))
         self.cx_conta.Bind(wx.EVT_CHOICE, seguro(self._ao_filtro_conta))
@@ -1139,7 +1169,7 @@ class Janela(wx.Frame):
         self.caixa = wx.TextCtrl(painel,
                                  style=wx.TE_MULTILINE | wx.TE_PROCESS_ENTER,
                                  name="Digite sua mensagem")
-        self.botao_enviar = wx.Button(painel, label="&Enviar")
+        self.botao_enviar = wx.Button(painel, label="Enviar")
         # sem tecla de acesso: Alt abre o Menu e as letras ja estao em uso
         self.botao_anexar = wx.Button(painel, label="Anexar e enviar arquivo")
         self.botao_mic = wx.Button(painel, label="Gravar do microfone")
@@ -1151,9 +1181,10 @@ class Janela(wx.Frame):
             (rot_cx_conta, "Serviço ou conta", "ir_filtro_conta", ""),
             (rot_cx_tipo, "Tipo de conversa", "ir_filtro_tipo", ""),
             (rot_busca, "Buscar conversa", "buscar_conv", ""),
+            (self.botao_busca, "Busca por critérios", "busca_criterios", ""),
             (self.botao_sair, "Sair", "sair", ""),
             (rot_conv, "Conversas", "ir_conv", ""),
-            (self.botao_enviar, "&Enviar", "enviar_msg", ""),
+            (self.botao_enviar, "Enviar", "enviar_msg", ""),
             (self.botao_anexar, "Anexar e enviar arquivo", "anexar", ""),
             (self.botao_mic, "Gravar do microfone", "gravar_mic", ""),
             (self.botao_som, "Gravar som do computador", "gravar_som", ""),
@@ -1166,6 +1197,7 @@ class Janela(wx.Frame):
         esq.Add(self.cx_tipo, 0, wx.EXPAND | wx.BOTTOM, 6)
         esq.Add(rot_busca, 0, wx.BOTTOM, 2)
         esq.Add(self.campo_busca, 0, wx.EXPAND | wx.BOTTOM, 6)
+        esq.Add(self.botao_busca, 0, wx.BOTTOM, 6)
         esq.Add(self.botao_sair, 0, wx.BOTTOM, 6)
         esq.Add(rot_conv, 0, wx.BOTTOM, 4)
         esq.Add(self.lista_conv, 1, wx.EXPAND)
@@ -1762,12 +1794,58 @@ class Janela(wx.Frame):
                 self._caiu.discard(e.conta_id)
                 bipe("reconectada")
             self.fala.falar("%s conectado." % servico)
+            self._trazer_contatos_da_conta(e.conta_id)
             if self.interrompidas.pop(e.conta_id, None) is not None:
                 self._atualizar_titulo()
         elif e.estado == ev.PRECISA_LOGIN:
             self.fala.falar("%s: %s." % (servico, e.detalhe or e.estado))
             if e.detalhe == "desconectada pelo celular":
                 wx.CallAfter(self._oferecer_parear_de_novo, e.conta_id)
+
+    def _grupos_das_contas(self):
+        """[(conta_id, id, nome)] dos grupos de que as contas conectadas
+        participam, tenham ou nao conversa guardada (um grupo sem mensagem
+        recebida ainda nao esta na lista). Guarda o resultado por 2 minutos,
+        porque pergunta ao servico."""
+        achados = []
+        cache = self.__dict__.setdefault("_cache_grupos", {})
+        for d in self.cfg.contas():
+            cid = d["id"]
+            prov = self.contas.provedor(cid) if self.contas else None
+            if prov is None or self.estados.get(cid) != ev.CONECTADA:
+                continue
+            quando, lista = cache.get(cid, (0, None))
+            if lista is None or time.time() - quando > 120:
+                try:
+                    lista = list(prov.grupos_da_conta())
+                except Exception:
+                    log.exception("lista de grupos da conta")
+                    lista = []
+                cache[cid] = (time.time(), lista)
+            achados.extend((cid, gid, nome) for gid, nome in lista)
+        return achados
+
+    def _trazer_contatos_da_conta(self, conta_id):
+        """Com a opcao ligada, copia para a agenda os contatos da conta que
+        acabou de conectar. A agenda do WhatsApp chega logo depois de
+        conectar, por isso espera um pouco; a leitura e feita fora da tela e
+        a gravacao volta para ela."""
+        if not self.cfg.get("trazer_contatos_ao_abrir") or not self.contas:
+            return
+
+        def ler():
+            prov = self.contas.provedores.get(conta_id)
+            achados = trazer_contatos.ler(prov)
+            if achados:
+                wx.CallAfter(gravar, achados)
+
+        @seguro
+        def gravar(achados):
+            if trazer_contatos.salvar(self.banco, conta_id, achados):
+                self._renomear_pelos_contatos()
+
+        wx.CallLater(8000, lambda: threading.Thread(
+            target=ler, name="trazer-contatos", daemon=True).start())
 
     @seguro
     def _oferecer_parear_de_novo(self, conta_id):
@@ -2406,9 +2484,30 @@ class Janela(wx.Frame):
             log.exception("erro ao marcar como lida na conta")
         conv.nao_lidas = 0
 
+    def _em_massa_conv(self, acao, conv):
+        """Atalho ou menu de uma conversa, com a lista de conversas em foco e
+        conversas marcadas no modo de selecao: vale para todas as marcadas."""
+        if conv is not None or not self.modo_conv or \
+                self.FindFocus() is not self.lista_conv or \
+                not self._marcadas_conv():
+            return False
+        self._massa_conversas(acao)
+        return True
+
+    def _em_massa_msg(self, acao, x=None):
+        """O mesmo para as mensagens marcadas na lista de mensagens."""
+        if x is not None or not self.modo_msg or \
+                self.FindFocus() is not self.lista_msgs or \
+                not self._marcadas_msg():
+            return False
+        self._massa_mensagens(acao)
+        return True
+
     def _marcar_conversa_lida(self, conv=None):
         """Marca como lida a conversa em foco (ou a do menu de contexto) sem
         abri-la."""
+        if self._em_massa_conv("lidas", conv):
+            return
         conv = conv or self._conversa_em_foco()
         if conv is None:
             self.fala.falar("Nenhuma conversa selecionada.")
@@ -2424,6 +2523,8 @@ class Janela(wx.Frame):
     def _arquivar_conversa(self, conv=None):
         """Arquiva a conversa em foco, ou a tira dos arquivados. A conta
         tambem e avisada (no WhatsApp, pelo aviso de estado `archive`)."""
+        if self._em_massa_conv("arquivar", conv):
+            return
         conv = conv or self._conversa_em_foco()
         if conv is None:
             self.fala.falar("Nenhuma conversa selecionada.")
@@ -2471,6 +2572,8 @@ class Janela(wx.Frame):
     def _fixar_conversa(self, conv=None):
         """Fixa a conversa no topo da lista, ou a desafixa; o servico e
         avisado."""
+        if self._em_massa_conv("fixar", conv):
+            return
         conv = conv or self._conversa_em_foco()
         if conv is None:
             self.fala.falar("Nenhuma conversa selecionada.")
@@ -2490,6 +2593,8 @@ class Janela(wx.Frame):
     def _silenciar_conversa(self, conv=None):
         """Silencia a conversa (8 horas, 1 semana ou sempre) ou reativa o
         som. Conversa silenciada nao avisa mensagens novas."""
+        if self._em_massa_conv("silenciar", conv):
+            return
         conv = conv or self._conversa_em_foco()
         if conv is None:
             self.fala.falar("Nenhuma conversa selecionada.")
@@ -2519,6 +2624,8 @@ class Janela(wx.Frame):
     def _apagar_conversa(self, conv=None):
         """Apaga a conversa e tudo dela neste computador. Fica registrada
         como apagada: so volta com mensagem nova, ou com novo pareamento."""
+        if self._em_massa_conv("apagar", conv):
+            return
         conv = conv or self._conversa_em_foco()
         if conv is None:
             self.fala.falar("Nenhuma conversa selecionada.")
@@ -2648,6 +2755,8 @@ class Janela(wx.Frame):
     def _favoritar_mensagem(self, x=None):
         """Marca a mensagem como favorita, ou tira a marca. Favoritas nao
         entram na limpeza; no WhatsApp a conta tambem e avisada."""
+        if self._em_massa_msg("favoritar", x):
+            return
         if x is None:
             x = self._mensagem_selecionada()
         if x is None:
@@ -2675,6 +2784,10 @@ class Janela(wx.Frame):
         que a pessoa escolher, de qualquer conta conectada. Midia so sai se
         ja foi baixada."""
         from telezapp.interface import encaminhar as je
+        if msgs is None and self.modo_msg and \
+                self.FindFocus() is self.lista_msgs and self._marcadas_msg():
+            msgs = self._marcadas_msg()
+            self._sair_selecao(self.lista_msgs, falar=False)
         if msgs is None:
             x = self._mensagem_selecionada()
             msgs = [x] if x is not None else []
@@ -2699,11 +2812,13 @@ class Janela(wx.Frame):
         nomes_contas = {d["id"]: d.get("nome") or d.get("telefone") or d["id"]
                         for d in self.cfg.contas()}
         varias = len(nomes_contas) > 1
-        destinos = enc.destinos(
-            list(self.indice.values()), self.banco.contatos(),
-            lambda cid: self.estados.get(cid) == ev.CONECTADA and
-            self.contas.provedor(cid) is not None,
-            trancadas=self.trancadas_liberadas)
+        conectada = (lambda cid: self.estados.get(cid) == ev.CONECTADA and
+                     self.contas.provedor(cid) is not None)
+        conversas, contatos = list(self.indice.values()), self.banco.contatos()
+        grupos = self._grupos_das_contas()
+        destinos = enc.destinos(conversas, contatos, conectada,
+                                trancadas=self.trancadas_liberadas,
+                                grupos=grupos)
         if not destinos:
             self.fala.falar("Nenhuma conversa de conta conectada para "
                             "receber.", interromper=True)
@@ -2722,7 +2837,9 @@ class Janela(wx.Frame):
         if pulados:
             resumo += " (%d não pode ser encaminhada: %s)" % (
                 len(pulados), "; ".join(sorted(set(pulados))))
-        dlg = je.DialogoEncaminhar(self, destinos, rotulo, resumo)
+        dlg = je.DialogoEncaminhar(
+            self, destinos, rotulo, resumo,
+            enc.categorias(conversas, contatos, grupos))
         try:
             if dlg.ShowModal() != wx.ID_OK:
                 return
@@ -2737,7 +2854,8 @@ class Janela(wx.Frame):
                 continue
             if (conta_id, conversa_id) not in self.indice:
                 conv = m.Conversa(conta_id, conversa_id, nome,
-                                  self.contas.servico(conta_id), "privada",
+                                  self.contas.servico(conta_id),
+                                  "grupo" if tipo == "grupo" else "privada",
                                   data=time.time())
                 self.indice[(conta_id, conversa_id)] = conv
                 self._ordenar()
@@ -2782,6 +2900,8 @@ class Janela(wx.Frame):
         """Apaga a mensagem selecionada aqui e na conta (para todos, quando
         e minha e a pessoa escolhe, ou so para mim). Nao volta por historico
         nem por nova leitura."""
+        if self._em_massa_msg("apagar", x):
+            return
         if x is None:
             x = self._mensagem_selecionada()
         if x is None:
@@ -3269,7 +3389,7 @@ class Janela(wx.Frame):
                 self.cfg.get("chamada_saida") or "")
 
     @seguro
-    def _ligar(self):
+    def _ligar(self, video=False):
         if self.chamada is not None and self.chamada.ativa:
             self.fala.falar("Já há uma chamada em andamento.",
                             interromper=True)
@@ -3282,9 +3402,9 @@ class Janela(wx.Frame):
             self.fala.falar("Abra ou selecione uma conversa para ligar.",
                             interromper=True)
             return
-        self._ligar_para(conv)
+        self._ligar_para(conv, video)
 
-    def _ligar_para(self, conv):
+    def _ligar_para(self, conv, video=False):
         """Liga para a conversa com uma pessoa, se a conta puder."""
         if conv.tipo != "privada":
             bipe("erro")
@@ -3304,6 +3424,17 @@ class Janela(wx.Frame):
                             interromper=True)
             return
         mic, saida = self._dispositivos_da_chamada()
+        if video:
+            if not getattr(p, "suporta_video", False):
+                bipe("erro")
+                self.fala.falar("Esta conta ainda não faz chamadas de "
+                                "vídeo.", interromper=True)
+                return
+            self._registrar_destino_de_video(p)
+            log.info("ligando com vídeo (%s)", conv.conta_id)
+            p.ligar(conv.id, mic, saida, video=True,
+                    camera=self.cfg.get("chamada_camera") or "")
+            return
         log.info("ligando (%s)", conv.conta_id)
         p.ligar(conv.id, mic, saida)
 
@@ -3353,12 +3484,23 @@ class Janela(wx.Frame):
             if self.dlg_chamada is not None:
                 self.dlg_chamada.fechar()
             c = self.chamada = ch.Chamada(
-                e.conta_id, e.conversa_id, e.nome, e.entrante, e.estado)
+                e.conta_id, e.conversa_id, e.nome, e.entrante, e.estado,
+                video=e.video, camera=e.camera,
+                video_remoto=e.video_remoto, suporta_video=e.suporta_video)
             mudou = True
         else:
             if e.nome and not c.nome:
                 c.nome = e.nome
             mudou = c.aplicar(e.estado, e.motivo, e.erro)
+            antes = (c.video, c.camera, c.video_remoto)
+            if c.aplicar_video(e.video, e.camera, e.video_remoto,
+                               e.suporta_video) and not mudou:
+                # so o video mudou: diz o que foi, sem repetir o estado
+                self.fala.falar(ch.fala_do_video(
+                    antes, (c.video, c.camera, c.video_remoto), c.nome),
+                    interromper=True)
+                self._atualizar_dialogo_chamada(c)
+                return
         if not mudou:
             return
         log.info("chamada: %s %s", c.estado, c.motivo)
@@ -3392,7 +3534,12 @@ class Janela(wx.Frame):
         mics, saidas = p.dispositivos_de_audio() if p is not None \
             else ([], [])
         mic, saida = self._dispositivos_da_chamada()
+        com_video = bool(p is not None and getattr(p, "suporta_video", False))
+        if com_video:
+            self._registrar_destino_de_video(p)
         acoes = {
+            "camera": self._alternar_camera,
+            "trocar_camera": self._trocar_camera,
             "atender": self._atender_chamada,
             "recusar": self._desligar_chamada,
             "desligar": self._desligar_chamada,
@@ -3402,13 +3549,60 @@ class Janela(wx.Frame):
         }
         self.dlg_chamada = DialogoChamada(
             self, c, acoes, lambda t: self.fala.falar(t, interromper=True),
-            mics, saidas, mic, saida, ao_fechar=self._chamada_fechada)
+            mics, saidas, mic, saida, ao_fechar=self._chamada_fechada,
+            cameras=p.cameras() if com_video else (),
+            camera=self.cfg.get("chamada_camera") or "")
         self.dlg_chamada.Show()
         if hasattr(self.dlg_chamada, "Raise"):
             self.dlg_chamada.Raise()
 
     def _chamada_fechada(self):
         self.dlg_chamada = None
+
+    # ------------------------------------------------------------- video
+    def _registrar_destino_de_video(self, p):
+        p.definir_destino_video(self._ao_quadro_de_video)
+
+    def _ao_quadro_de_video(self, cid, largura, altura, rgb):
+        """De outra thread: leva o quadro para a janela, descartando o que
+        chegar enquanto o anterior ainda nao foi desenhado."""
+        if self._quadro_de_video_pendente:
+            return
+        self._quadro_de_video_pendente = True
+        wx.CallAfter(self._mostrar_quadro_de_video, largura, altura, rgb)
+
+    def _mostrar_quadro_de_video(self, largura, altura, rgb):
+        self._quadro_de_video_pendente = False
+        if self.dlg_chamada is not None:
+            self.dlg_chamada.mostrar_quadro(largura, altura, rgb)
+
+    @seguro
+    def _alternar_camera(self):
+        c = self._chamada_em_curso()
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if c is None or p is None or not getattr(p, "suporta_video", False):
+            if c is not None:
+                self.fala.falar("Esta conta ainda não faz chamadas de "
+                                "vídeo.", interromper=True)
+            return
+        if c.estado != ch.EM_CHAMADA:
+            self.fala.falar("A câmera só pode ser mudada durante a "
+                            "conversa.", interromper=True)
+            return
+        if c.camera:
+            p.desligar_camera(c.conversa_id)
+        else:
+            p.ligar_camera(c.conversa_id,
+                           self.cfg.get("chamada_camera") or "")
+
+    @seguro
+    def _trocar_camera(self, nome):
+        self.cfg.set("chamada_camera", nome)
+        c = self.chamada
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if c is not None and p is not None and c.camera:
+            p.desligar_camera(c.conversa_id)
+            p.ligar_camera(c.conversa_id, nome)
 
     def _chamada_em_curso(self):
         if self.chamada is None or not self.chamada.ativa:
@@ -3430,6 +3624,20 @@ class Janela(wx.Frame):
         if c is None or p is None:
             return
         mic, saida = self._dispositivos_da_chamada()
+        com_video = c.video and getattr(p, "suporta_video", False)
+        if com_video:
+            self._registrar_destino_de_video(p)
+        try:
+            log.info("atendendo a chamada: janela visivel=%s minimizada=%s "
+                     "ativa=%s", self.IsShown(), self.IsIconized(),
+                     self.IsActive())
+        except Exception:
+            pass
+        if com_video:
+            camera = (self.cfg.get("chamada_camera") or "") \
+                if self.cfg.get("video_camera_ao_atender") else None
+            p.atender_chamada(c.conversa_id, mic, saida, camera=camera)
+            return
         p.atender_chamada(c.conversa_id, mic, saida)
 
     @seguro
@@ -3477,24 +3685,30 @@ class Janela(wx.Frame):
     def _escolher_dispositivos(self):
         """Janela de dispositivos de som: vale para tocar, gravar e ligar."""
         mic, saida = self._dispositivos_da_chamada()
-        escolha = ui_dispositivos.escolher(self, mic, saida)
+        escolha = ui_dispositivos.escolher(
+            self, mic, saida, self.cfg.get("notificacao_saida") or "")
         if escolha is None:
             return
-        mic, saida = escolha
-        self._guardar_dispositivos(mic, saida)
+        mic, saida, aviso = escolha
+        self._guardar_dispositivos(mic, saida, aviso)
         c = self.chamada
         p = self._provedor_de_chamada(c.conta_id) if c else None
         if p is not None and c.estado == ch.EM_CHAMADA:
             p.trocar_dispositivos(c.conversa_id, mic, saida)
         self.fala.falar("Dispositivos de som guardados. Saída: %s. "
-                        "Microfone: %s." % (saida or "padrão do Windows",
-                                            mic or "padrão do Windows"),
+                        "Microfone: %s. Sons de aviso: %s." % (
+                            saida or "padrão do Windows",
+                            mic or "padrão do Windows",
+                            aviso or "padrão do Windows"),
                         interromper=True)
 
-    def _guardar_dispositivos(self, microfone, saida):
+    def _guardar_dispositivos(self, microfone, saida, aviso=None):
         self.cfg.set("chamada_microfone", microfone)
         self.cfg.set("chamada_saida", saida)
-        dispositivos.definir(microfone, saida)
+        if aviso is not None:
+            self.cfg.set("notificacao_saida", aviso)
+        dispositivos.definir(microfone, saida,
+                             self.cfg.get("notificacao_saida") or "")
 
     @seguro
     def _trocar_dispositivos(self, microfone, saida):
@@ -4998,19 +5212,45 @@ class Janela(wx.Frame):
             self.fala.falar("Nenhuma conta conectada para enviar.",
                             interromper=True)
             return
-        def buscar(conta_id, texto):
-            achados = nm.candidatos(
-                texto, self.banco.contatos(conta_id),
-                [c for c in self.indice.values()
-                 if c.conta_id == conta_id])
-            if self.cfg.get("ocultar_contatos_duplicados"):
-                achados = nm.sem_duplicados(
-                    achados, lambda t: (conta_id, t[0], t[1], t[2]))
-            return achados
-        escolha = contatos.dialogo_nova_mensagem(self, contas, buscar)
+        grupos_ids = set()
+
+        def buscar(conta_id, texto, modo="tudo"):
+            conversas = [c for c in self.indice.values()
+                         if c.conta_id == conta_id]
+            contatos_ = self.banco.contatos(conta_id)
+            if modo == "grupos" or modo == "tudo":
+                sem_conversa = [(g, n) for c_, g, n in
+                                self._grupos_das_contas() if c_ == conta_id]
+            else:
+                sem_conversa = []
+            pessoas = []
+            if modo in ("tudo", "contatos", "conversas"):
+                pessoas = nm.candidatos(
+                    texto, contatos_ if modo != "conversas" else [],
+                    conversas if modo != "contatos" else [])
+                if self.cfg.get("ocultar_contatos_duplicados"):
+                    pessoas = nm.sem_duplicados(
+                        pessoas, lambda t: (conta_id, t[0], t[1], t[2]))
+            grupos = []
+            if modo in ("tudo", "conversas", "grupos"):
+                grupos = nm.grupos_candidatos(
+                    texto, conversas, sem_conversa,
+                    so_com_conversa=modo == "conversas")
+            grupos_ids.update(g[0] for g in grupos)
+            return pessoas + grupos
+        escolha = contatos.dialogo_nova_mensagem(self, contas, buscar,
+                                                 com_modo=True)
         if escolha is None:
             return
         conta_id, destino, pessoa = escolha
+        if pessoa and pessoa[0] in grupos_ids:
+            conv = self._garantir_conversa(conta_id, pessoa[0], pessoa[1],
+                                           "grupo")
+            if self.atual is not None and self.atual != conv.chave:
+                self._fechar_conversa()
+            self._abrir_conversa(conv)
+            self._mostrar_caixa()
+            return
         achado = pessoa or self._resolver_destino(conta_id, destino, nm)
         if achado is None:
             bipe("erro")
@@ -5450,6 +5690,8 @@ class Janela(wx.Frame):
         self.fala.falar("Resposta cancelada.")
 
     def _copiar(self):
+        if self._em_massa_msg("copiar"):
+            return
         x = self._mensagem_selecionada()
         if x is None:
             return
@@ -5581,7 +5823,10 @@ class Janela(wx.Frame):
             lambda t: self.fala.falar(t, interromper=True),
             ocultar_duplicados=bool(self.cfg.get("ocultar_contatos_duplicados")),
             ao_ocultar=lambda v: self.cfg.set(
-                "ocultar_contatos_duplicados", bool(v)))
+                "ocultar_contatos_duplicados", bool(v)),
+            trazer_ao_abrir=bool(self.cfg.get("trazer_contatos_ao_abrir")),
+            ao_trazer_ao_abrir=lambda v: self.cfg.set(
+                "trazer_contatos_ao_abrir", bool(v)))
         try:
             dlg.ShowModal()
         finally:
@@ -6099,6 +6344,28 @@ class Janela(wx.Frame):
             self._fechar_conversa()
         self._abrir_conversa(conv)
         self.fala.falar("Conversa com %s." % conv.nome, interromper=True)
+
+    @seguro
+    def _busca_por_criterios(self):
+        """Abre a busca por criterios nas mensagens guardadas; o resultado
+        escolhido abre a conversa na mensagem."""
+        contas = [(d["id"], self._nome_da_conta(d))
+                  for d in self.cfg.contas()]
+        dlg = DialogoBusca(
+            self, self.banco, contas, self.trancadas_liberadas,
+            self._ultima_busca,
+            falar=lambda t: self.fala.falar(t, interromper=True))
+        achado = None
+        try:
+            r = dlg.ShowModal()
+            if getattr(dlg, "criterios", None) is not None:
+                self._ultima_busca = dlg.criterios
+            if r == wx.ID_OK:
+                achado = dlg.escolhido
+        finally:
+            dlg.Destroy()
+        if achado is not None:
+            self._ver_na_conversa(achado.mensagem)
 
     def _ver_na_conversa(self, x):
         """Abre a conversa da mensagem e leva a selecao ate ela."""
@@ -7259,7 +7526,8 @@ class Janela(wx.Frame):
                     self._preencher_mensagens()
             elif chave == "manter_apagadas":
                 m.definir_manter_apagadas(valor)
-            elif chave in ("chamada_eco", "chamada_ruido"):
+            elif chave in ("chamada_eco", "chamada_ruido",
+                           "chamada_retorno"):
                 self._carregar_eco()
             elif chave in ("ia_linha_descricao", "ia_linha_transcricao"):
                 self._carregar_limites_ia()
@@ -7301,7 +7569,8 @@ class Janela(wx.Frame):
 
     def _carregar_eco(self):
         midia_eco.definir(self.cfg.get("chamada_eco"),
-                          self.cfg.get("chamada_ruido"))
+                          self.cfg.get("chamada_ruido"),
+                          self.cfg.get("chamada_retorno"))
 
     def _carregar_limites_ia(self):
         self._carregar_eco()
@@ -7843,7 +8112,9 @@ class Janela(wx.Frame):
                 if hasattr(evt, "Veto"):
                     evt.Veto()
                 return
-        log.info("fechando a janela")
+        log.info("fechando a janela (%s)",
+                 "pedido do Windows" if hasattr(evt, "CanVeto") and
+                 not evt.CanVeto() else "pedido da pessoa ou do programa")
         self._saindo = True
         self._tirar_bandeja()
         if hasattr(self, "UnregisterHotKey"):

@@ -514,6 +514,7 @@ class ProvedorTelegram(Provedor):
         self._usuarios = {}                     # @usuario -> dados ou None
         self._pronto = threading.Event()
         self._chamadas = None                   # ChamadasTelegram, se houver
+        self._destino_video = None              # f(cid, largura, altura, rgb)
 
     # ----------------------------------------------------------- execucao
     def iniciar(self):
@@ -2244,6 +2245,7 @@ class ProvedorTelegram(Provedor):
             return
         chamadas = ChamadasTelegram(self.cliente, self.conta.id,
                                     self.barramento, self._nome_da_conversa)
+        chamadas.destino_video = self._destino_video
         if await chamadas.iniciar():
             self._chamadas = chamadas
 
@@ -2270,11 +2272,40 @@ class ProvedorTelegram(Provedor):
             return
         self._agendar(getattr(self._chamadas, nome_metodo)(chat, *args))
 
-    def ligar(self, conversa_id, microfone="", saida=""):
-        self._comando_de_chamada("ligar", conversa_id, microfone, saida)
+    def ligar(self, conversa_id, microfone="", saida="", video=False,
+              camera=None):
+        if video or camera is not None:
+            self._comando_de_chamada("ligar", conversa_id, microfone, saida,
+                                     video, camera)
+        else:
+            self._comando_de_chamada("ligar", conversa_id, microfone, saida)
 
-    def atender_chamada(self, conversa_id, microfone="", saida=""):
-        self._comando_de_chamada("atender", conversa_id, microfone, saida)
+    def atender_chamada(self, conversa_id, microfone="", saida="",
+                        camera=None):
+        if camera is not None:
+            self._comando_de_chamada("atender", conversa_id, microfone,
+                                     saida, camera)
+        else:
+            self._comando_de_chamada("atender", conversa_id, microfone,
+                                     saida)
+
+    @property
+    def suporta_video(self):
+        return self._chamadas is not None and self._chamadas.suporta_video
+
+    def cameras(self):
+        return self._chamadas.cameras() if self._chamadas is not None else []
+
+    def ligar_camera(self, conversa_id, nome=""):
+        self._comando_de_chamada("ligar_camera", conversa_id, nome)
+
+    def desligar_camera(self, conversa_id):
+        self._comando_de_chamada("desligar_camera", conversa_id)
+
+    def definir_destino_video(self, destino):
+        self._destino_video = destino
+        if self._chamadas is not None:
+            self._chamadas.destino_video = destino
 
     def encerrar_chamada(self, conversa_id):
         self._comando_de_chamada("encerrar", conversa_id)

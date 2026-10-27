@@ -32,7 +32,7 @@ def test_o_que_nao_serve_de_atalho():
     assert at.problema("Alt+F4")
     assert at.problema("E")                 # letra solta atrapalha a digitacao
     assert at.problema("Shift+E")
-    assert at.problema("Alt+E")             # aperta o botao Enviar
+    assert at.problema("Alt+E") == ""       # livre: o Enviar nao tem mais tecla de acesso
     assert at.problema("Alt+M") == ""       # Alt sozinho ja abre o menu
     assert at.problema("Ctrl+Enter") == ""  # o atalho de fabrica de enviar
     assert at.problema("Shift+Enter")       # quebra a linha

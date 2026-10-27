@@ -43,13 +43,14 @@ def preparar(msg, caminho_da_midia):
     return Item("texto", texto), ""
 
 
-def destinos(conversas, contatos, conectada, trancadas=False):
+def destinos(conversas, contatos, conectada, trancadas=False, grupos=()):
     """[(conta_id, conversa_id, nome, tipo)] para onde encaminhar, por nome:
     as conversas de contas conectadas (sem as trancadas, a menos que
     `trancadas`) e os contatos que ainda nao tem conversa.
 
     conversas: [Conversa]; contatos: [(conta_id, id, nome, telefone)];
-    conectada(conta_id) -> bool."""
+    conectada(conta_id) -> bool; grupos: [(conta_id, id, nome)] de que a
+    conta participa e que ainda nao tem conversa guardada."""
     achados, vistos = [], set()
     for c in conversas:
         if not conectada(c.conta_id) or c.somente_leitura or (
@@ -62,8 +63,43 @@ def destinos(conversas, contatos, conectada, trancadas=False):
             continue
         vistos.add((conta_id, id_))
         achados.append((conta_id, id_, nome or telefone or id_, "privada"))
+    for conta_id, id_, nome in grupos:
+        if (conta_id, id_) in vistos or not conectada(conta_id):
+            continue
+        vistos.add((conta_id, id_))
+        achados.append((conta_id, id_, nome or id_, "grupo"))
     return sorted(achados, key=lambda d: d[2].lower())
 
 
 def filtrar(lista, busca):
     return [d for d in lista if m.casa_busca(d[2], busca)]
+
+
+# O que a janela deixa escolher mostrar: valor e texto da caixa.
+MODOS = (("tudo", "Conversas, contatos e grupos"),
+         ("conversas", "Só conversas"),
+         ("contatos", "Só contatos"),
+         ("grupos", "Só grupos"))
+
+
+def categorias(conversas, contatos, grupos=()):
+    """{(conta_id, id): {"conversas", "contatos", "grupos"}} de cada destino:
+    tem conversa, esta na agenda, e um grupo."""
+    cat = {}
+    for c in conversas:
+        s = cat.setdefault((c.conta_id, c.id), set())
+        s.add("conversas")
+        if c.tipo == "grupo":
+            s.add("grupos")
+    for conta_id, id_, _nome, _tel in contatos:
+        cat.setdefault((conta_id, id_), set()).add("contatos")
+    for conta_id, id_, _nome in grupos:
+        cat.setdefault((conta_id, id_), set()).add("grupos")
+    return cat
+
+
+def do_modo(lista, modo, cat):
+    """Os destinos que cabem no modo ("tudo" deixa todos)."""
+    if modo == "tudo":
+        return list(lista)
+    return [d for d in lista if modo in cat.get((d[0], d[1]), ())]

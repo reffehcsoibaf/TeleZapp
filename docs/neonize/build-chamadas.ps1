@@ -27,8 +27,19 @@ git -C $trab clean -q -fdx
 # go.mod/go.sum fixos da variante (replace do whatsmeow local e, nas chamadas, do meowcaller)
 Copy-Item "$raiz\fontes\$Variante\go.mod","$raiz\fontes\$Variante\go.sum" "$trab\goneonize\" -Force
 
+# o neonize poe <bot biz_bot="1"/> em toda mensagem de conversa privada, e o destinatario ve o selo
+# "IA" com botoes de avaliacao, ate de conta que nao e Business. O padrao do neonize e LIGADO (so
+# NEONIZE_BOT_TAG=off desliga); aqui o padrao passa a ser DESLIGADO (so NEONIZE_BOT_TAG=on liga),
+# para o selo nao depender de o Python ter definido a variavel antes
+$pm = "$trab\goneonize\main.go"
+$sm = [IO.File]::ReadAllText($pm)
+if (($sm -split [regex]::Escape('return isPrivate')).Count -ne 2) { throw 'shouldAddBotNode nao encontrada (ou repetida)' }
+$sm = $sm.Replace('return isPrivate', 'return isPrivate && strings.EqualFold(strings.TrimSpace(os.Getenv("NEONIZE_BOT_TAG")), "on")')
+[IO.File]::WriteAllText($pm, $sm)
+
 if ($Variante -eq 'chamadas') {
     Copy-Item "$raiz\fontes\chamadas\calls.go" "$trab\goneonize\calls.go" -Force
+    Copy-Item "$raiz\fontes\chamadas\calls_video.go" "$trab\goneonize\calls_video.go" -Force
     $p = "$trab\goneonize\main.go"
     $s = [IO.File]::ReadAllText($p)
     $s = [regex]::Replace($s, '(\t\tdelete\(clients, C\.GoString\(id\)\)\r?\n)', '$1' + "`t`tremoverChamadas(C.GoString(id))`n", 1)
@@ -40,6 +51,14 @@ if ($Variante -eq 'chamadas') {
     $dsnNovo = 'file:%s?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=30000&_synchronous=NORMAL&_txlock=immediate'
     if (-not $s.Contains($dsn)) { throw 'DSN do sqlite nao encontrado' }
     $s = $s.Replace($dsn, $dsnNovo)
+    # escritas nos mapas globais (clients, StopSignal, eventChannel) entre mapasMu: com varias
+    # contas abrindo juntas, duas escritas simultaneas derrubam o processo ("concurrent map writes")
+    Copy-Item "$raiz\fontes\chamadas\mapas.go" "$trab\goneonize\mapas.go" -Force
+    foreach ($e in 'StopSignal[C.GoString(id)] = cancel', 'eventChannel[uuid] = eventChan', 'clients[uuid] = client',
+                   'delete(clients, C.GoString(id))', 'delete(StopSignal, C.GoString(id))', 'delete(eventChannel, C.GoString(id))') {
+        if (($s -split [regex]::Escape($e)).Count -ne 2) { throw "escrita de mapa nao encontrada (ou repetida): $e" }
+        $s = $s.Replace($e, "mapasMu.Lock(); $e; mapasMu.Unlock()")
+    }
     [IO.File]::WriteAllText($p, $s)
 }
 

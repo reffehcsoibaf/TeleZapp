@@ -332,6 +332,15 @@ OPCOES = (
           "mensagem, Control E\". Desmarcada, os nomes ficam sem o atalho "
           "e os atalhos continuam funcionando. Os atalhos podem ser "
           "mudados em Configurações, Atalhos."),
+    Opcao("trazer_contatos_ao_abrir",
+          "Obter os contatos das contas ao abrir o TeleZapp", "Interface",
+          True,
+          "Ao conectar cada conta, copia para a agenda do TeleZapp os "
+          "contatos que ela já tem (os salvos no celular ou só no "
+          "WhatsApp), para as conversas e os autores aparecerem com o nome "
+          "e não com o número. Não troca o nome de quem você já nomeou "
+          "aqui. Desmarcada, só entram os contatos que você adicionar. A "
+          "mesma caixa está na janela Contatos."),
     Opcao("ocultar_contatos_duplicados", "Ocultar contatos duplicados",
           "Interface", True,
           "Nas listas de contatos (Contatos e a escolha de quem recebe em "
@@ -526,6 +535,22 @@ OPCOES = (
           "Diminui ruídos constantes captados pelo microfone, como "
           "ventilador, ar-condicionado e chiado. Vale a partir da próxima "
           "chamada."),
+    Opcao("video_camera_ao_atender", "Ligar a câmera ao atender uma chamada "
+          "de vídeo", "Mídias", False,
+          "Desmarcada, ao atender uma chamada de vídeo a sua câmera fica "
+          "desligada: você ouve e vê a outra pessoa, mas ela não vê você, e "
+          "a câmera pode ser ligada na janela da chamada. Marcada, a câmera "
+          "liga junto com a chamada. Quem liga uma chamada de vídeo sempre "
+          "começa com a câmera ligada."),
+    Opcao("chamada_retorno", "Tirar das chamadas de voz o retorno da minha "
+          "voz", "Mídias", True,
+          "Quando a outra pessoa usa uma mesa de som com retorno (monitor) "
+          "ou ouve a chamada pelo alto-falante, a sua voz volta para você, "
+          "atrasada, misturada com a dela, e você se ouve. Marcada, o "
+          "TeleZapp mede se isso está acontecendo e, só então, tira esse "
+          "retorno do que você ouve. Sem retorno, a voz dela passa "
+          "intacta. Vale a partir da próxima chamada. A solução de verdade "
+          "é do lado dela: um retorno sem a sua voz (mix-minus)."),
     Opcao("midias_baixar", "Quando baixar as mídias", "Mídias", "demanda",
           "Sob demanda baixa só quando você abre a mídia. Automático baixa "
           "ao receber, até o limite escolhido.",
@@ -709,6 +734,8 @@ PADROES.update({
     "contas": [],            # [{"id", "servico", "telefone", "nome"}]
     "chamada_microfone": "",     # nome do microfone usado nas chamadas
     "chamada_saida": "",         # nome da saida de som das chamadas
+    "chamada_camera": "",        # nome da camera das chamadas de video
+    "notificacao_saida": "",     # nome da saida dos sons de aviso do app
     "telegram_api_id": 0,
     "telegram_api_hash": "",
     "filtro_conversas": "todas",   # tipo escolhido na janela principal

@@ -36,6 +36,13 @@ from telezapp.provedores.base import (DownloadCancelado, ErroBloqueio,
 
 log = logging.getLogger("telezapp.whatsapp")
 
+# O neonize poe <bot biz_bot="1"/> em toda mensagem de conversa privada, e o
+# destinatario ve o selo "IA" com botoes de avaliacao. Desligado ja ao carregar
+# o modulo (e de novo a cada conexao), antes de qualquer envio, para nunca
+# depender da ordem em que as coisas abrem. A DLL do TeleZapp tambem nasce com
+# o selo desligado; so "on" o liga.
+os.environ["NEONIZE_BOT_TAG"] = "off"
+
 EMBRULHOS = ("deviceSentMessage", "ephemeralMessage", "viewOnceMessage",
              "viewOnceMessageV2", "viewOnceMessageV2Extension",
              "documentWithCaptionMessage", "editedMessage",
@@ -960,6 +967,7 @@ class ProvedorWhatsApp(Provedor):
         self._pareando = False      # QR ou codigo em andamento
         self._chamadas = {}         # id da chamada -> dados (so aviso)
         self._voz = None            # ChamadasWhatsApp, se as chamadas estao ligadas
+        self._destino_video = None  # f(cid, largura, altura, rgb), da janela
         self._disponivel = False    # presenca "disponivel" enviada
         self._observadas = {}       # JID da conversa observada -> conversa_id
         self._presenca_cid = None   # a conversa aberta com presenca
@@ -999,7 +1007,10 @@ class ProvedorWhatsApp(Provedor):
 
     # ----------------------------------------------------------- execucao
     def _criar_cliente(self):
+        inicio = time.monotonic()
         from neonize.client import NewClient
+        log.info("biblioteca do WhatsApp carregada em %.1f s",
+                 time.monotonic() - inicio)
         self._ligar_log_detalhado()
         caminho = caminho_sessao(self.pasta_sessoes, self.conta.id)
         return NewClient(caminho, props=props_do_aparelho(self.historico))
@@ -1081,6 +1092,8 @@ class ProvedorWhatsApp(Provedor):
             # O neonize poe <bot biz_bot="1"/> em toda mensagem de conversa
             # privada, e o destinatario ve o selo "IA" com botoes de avaliacao
             os.environ["NEONIZE_BOT_TAG"] = "off"
+            log.info("selo de IA nas mensagens enviadas: desligado "
+                     "(NEONIZE_BOT_TAG=%s)", os.environ["NEONIZE_BOT_TAG"])
             self.cliente = self.fabrica_cliente()
             self._preparar_chamadas()
             registros = {
@@ -2011,6 +2024,19 @@ class ProvedorWhatsApp(Provedor):
             if eu is not None and (eu.IsAdmin or eu.IsSuperAdmin):
                 achados.append((jid_texto(g.JID), g.GroupName.Name
                                 or "Grupo"))
+        return sorted(achados, key=lambda x: x[1].lower())
+
+    def grupos_da_conta(self):
+        """[(conversa_id, nome)] dos grupos de que esta conta participa (nao
+        inclui o grupo-pai das comunidades). Bloqueia ate o WhatsApp
+        responder."""
+        if self.cliente is None or not self._conectada:
+            return []
+        achados = []
+        for g in self.cliente.get_joined_groups():
+            if g.GroupParent.IsParent:
+                continue
+            achados.append((jid_texto(g.JID), g.GroupName.Name or "Grupo"))
         return sorted(achados, key=lambda x: x[1].lower())
 
     def _jid_do_convite(self, msg, acao):
@@ -4501,8 +4527,10 @@ class ProvedorWhatsApp(Provedor):
                 Ponte(self.cliente.uuid), self.conta.id, self.barramento,
                 self._conversa_do_peer, self._nome_da_conversa,
                 self._destino_da_chamada)
+            self._voz.destino_video = self._destino_video
             self._voz.iniciar()
-            log.info("chamadas de voz do WhatsApp ligadas")
+            log.info("chamadas de voz do WhatsApp ligadas (video: %s)",
+                     "sim" if self._voz.suporta_video else "não")
         except Exception:
             log.exception("erro ao preparar as chamadas do WhatsApp")
             self._voz = None
@@ -4529,11 +4557,33 @@ class ProvedorWhatsApp(Provedor):
                          args=(conversa_id,) + args, daemon=True,
                          name="chamada-" + metodo).start()
 
-    def ligar(self, conversa_id, microfone="", saida=""):
-        self._comando_de_chamada("ligar", conversa_id, microfone, saida)
+    def ligar(self, conversa_id, microfone="", saida="", video=False,
+              camera=None):
+        self._comando_de_chamada("ligar", conversa_id, microfone, saida,
+                                 video, camera)
 
-    def atender_chamada(self, conversa_id, microfone="", saida=""):
-        self._comando_de_chamada("atender", conversa_id, microfone, saida)
+    def atender_chamada(self, conversa_id, microfone="", saida="",
+                        camera=None):
+        self._comando_de_chamada("atender", conversa_id, microfone, saida,
+                                 camera)
+
+    @property
+    def suporta_video(self):
+        return self._voz is not None and self._voz.suporta_video
+
+    def cameras(self):
+        return self._voz.cameras() if self._voz is not None else []
+
+    def ligar_camera(self, conversa_id, nome=""):
+        self._comando_de_chamada("ligar_camera", conversa_id, nome)
+
+    def desligar_camera(self, conversa_id):
+        self._comando_de_chamada("desligar_camera", conversa_id)
+
+    def definir_destino_video(self, destino):
+        self._destino_video = destino
+        if self._voz is not None:
+            self._voz.destino_video = destino
 
     def encerrar_chamada(self, conversa_id):
         self._comando_de_chamada("encerrar", conversa_id)

@@ -636,6 +636,71 @@ class Banco:
                 "SELECT conta_id, conversa_id, id FROM mensagens WHERE "
                 "extras LIKE '%\"favorita\": true%'").fetchall())
 
+    def buscar_mensagens(self, contas=(), servicos=(), tipos_de_conversa=(),
+                         situacoes=(), minha=None,
+                         data_de=None, data_ate=None, segundos_min=None,
+                         segundos_max=None, tamanho_min=None,
+                         tamanho_max=None, estados=(),
+                         mais_antigas_primeiro=False, agora=None,
+                         incluir_trancadas=False, limite_de_linhas=200000):
+        """[(Mensagem, Conversa)] das mensagens guardadas que passam nos
+        filtros de estrutura (o texto e as marcas de `extras` a busca confere
+        depois: ver nucleo.busca). Conversas trancadas so entram se
+        `incluir_trancadas`."""
+        cond, par = [], []
+
+        def em(coluna, valores):
+            if valores:
+                valores = sorted(valores)
+                cond.append("%s IN (%s)" % (coluna, ",".join("?" * len(
+                    valores))))
+                par.extend(valores)
+        em("c.conta_id", contas)
+        em("c.servico", servicos)
+        em("c.tipo", tipos_de_conversa)
+        em("m.estado", estados)
+        if not incluir_trancadas:
+            cond.append("c.trancada=0")
+        agora = time.time() if agora is None else agora
+        colunas = {"arquivada": "c.arquivada=1", "fixada": "c.fixada=1",
+                   "nao_lida": "c.nao_lidas>0", "trancada": "c.trancada=1",
+                   "temporaria": "c.temporaria_s>0",
+                   "somente_leitura": "c.somente_leitura=1"}
+        for s in sorted(situacoes):
+            if s == "silenciada":
+                cond.append("(c.silenciada_ate<0 OR c.silenciada_ate>?)")
+                par.append(agora)
+            elif s in colunas:
+                cond.append(colunas[s])
+        if minha is not None:
+            cond.append("m.minha=?")
+            par.append(1 if minha else 0)
+        for coluna, op, valor in (
+                ("m.data", ">=", data_de), ("m.data", "<=", data_ate),
+                ("m.segundos", ">=", segundos_min),
+                ("m.segundos", "<=", segundos_max),
+                ("m.tamanho", ">=", tamanho_min),
+                ("m.tamanho", "<=", tamanho_max)):
+            if valor is not None:
+                cond.append("%s %s ?" % (coluna, op))
+                par.append(valor)
+        ordem = "ASC" if mais_antigas_primeiro else "DESC"
+        sql = ("SELECT %s, %s FROM mensagens m JOIN conversas c ON "
+               "m.conta_id=c.conta_id AND m.conversa_id=c.id%s "
+               "ORDER BY m.data %s, CAST(m.id AS INTEGER) %s LIMIT %d" % (
+                   ", ".join("m." + f for f in _CAMPOS_MSG),
+                   ", ".join("c." + f for f in _CAMPOS_CONV),
+                   (" WHERE " + " AND ".join(cond)) if cond else "",
+                   ordem, ordem, int(limite_de_linhas)))
+        with self._trava:
+            linhas = self._con.execute(sql, par).fetchall()
+        n = len(_CAMPOS_MSG)
+        saida = []
+        for l in linhas:
+            x = _msg(l[:n])
+            saida.append((x, Conversa(*l[n:])))
+        return saida
+
     def conversas_com_favoritas(self):
         """{(conta_id, conversa_id)} das conversas que tem mensagem
         favorita."""

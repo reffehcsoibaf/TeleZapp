@@ -36,6 +36,10 @@ class PonteFalsa:
         self.escritos = 0
         self.recebidos = queue.Queue()
         self.fim = False
+        self.acoes_de_video = []
+        self.unidades_enviadas = []
+        self.video_recebido = queue.Queue()
+        self.ligadas_com_video = []
 
     def ligada(self):
         return True
@@ -46,7 +50,27 @@ class PonteFalsa:
         except queue.Empty:
             return None
 
-    def ligar(self, destino):
+    def suporta_video(self):
+        return True
+
+    def video(self, chamada, acao):
+        self.acoes_de_video.append((chamada, acao))
+        return True
+
+    def escrever_video(self, chamada, unidade, duracao_ms=100):
+        self.unidades_enviadas.append(unidade)
+        return True
+
+    def ler_video(self, chamada, espera_ms=500):
+        if self.fim:
+            return False
+        try:
+            return self.video_recebido.get(timeout=0.02)
+        except queue.Empty:
+            return None
+
+    def ligar(self, destino, video=False):
+        self.ligadas_com_video.append(video)
         self.ligadas.append(destino)
         if self.erro_ao_ligar:
             return "", "", self.erro_ao_ligar
@@ -123,9 +147,9 @@ def esperar(cond, limite=3.0):
 @pytest.fixture(autouse=True)
 def sem_eco_por_padrao():
     """Os testes de chamada nao dependem do processamento de eco."""
-    cw.midia_eco.definir(False, False)
+    cw.midia_eco.definir(False, False, False)
     yield
-    cw.midia_eco.definir(True, True)
+    cw.midia_eco.definir(True, True, True)
 
 
 @pytest.fixture
@@ -223,7 +247,7 @@ def test_falha_do_eco_manda_o_quadro_como_veio(mundo, monkeypatch):
         def reiniciar(self):
             pass
     monkeypatch.setattr(cw.midia_eco, "CancelaEco", Quebrado)
-    cw.midia_eco.definir(True, True)
+    cw.midia_eco.definir(True, True, False)
     enviados = []
     ponte.escrever_quadro = lambda c, d: enviados.append(d) or True
     chamada_recebida(ponte, bus)
@@ -433,3 +457,151 @@ def test_entrada_atendida_sem_som_encerra_explicando(mundo):
     assert esperar(lambda: ponte.desligadas == ["R1"], 3.0)
     ponte.fila.put({"ev": "end", "call": "R1", "reason": "hangup"})
     assert esperar(lambda: (ch.ENCERRADA, ch.FALHA) in bus.estados())
+
+
+# ------------------------------------------------------------------ video
+class VideoFalso:
+    """No lugar de midia.video: sem camera nem codec de verdade."""
+    QUADRO_MS = 100
+
+    def __init__(self):
+        self.cameras_abertas = []
+        self.decodificados = []
+        self.quadros_decodificados = [(4, 2, b"\x01" * 24)]
+
+    def disponivel(self):
+        return True
+
+    def listar_cameras(self):
+        return ["Câmera A", "Câmera B"]
+
+    class Codificador:
+        def __init__(self):
+            self.chaves = 0
+
+        def codificar(self, quadro):
+            return [b"\x00\x00\x01au" + quadro]
+
+        def pedir_quadro_chave(self):
+            self.chaves += 1
+
+        def fechar(self):
+            pass
+
+    def Decodificador(self):
+        video = self
+
+        class D:
+            def decodificar(self, unidade):
+                video.decodificados.append(unidade)
+                return video.quadros_decodificados
+        return D()
+
+    def Camera(self, nome, ao_quadro):
+        video = self
+
+        class C:
+            def iniciar(self):
+                video.cameras_abertas.append(nome)
+                ao_quadro(b"quadro")
+
+            def parar(self):
+                video.camera_parada = True
+        return C()
+
+
+@pytest.fixture
+def mundo_video(mundo):
+    v, ponte, bus, audio = mundo
+    v.video = VideoFalso()
+    quadros = []
+    v.destino_video = lambda cid, l, a, rgb: quadros.append((cid, l, a, rgb))
+    return v, ponte, bus, quadros
+
+
+def ultimo_estado(bus):
+    return [e for e in bus.eventos if isinstance(e, ev.EstadoChamada)][-1]
+
+
+def test_ligar_com_video_liga_a_camera_e_manda_o_video(mundo_video):
+    v, ponte, bus, _ = mundo_video
+    v.ligar(CID, "", "", video=True, camera="Câmera B")
+    assert esperar(lambda: ponte.ligadas)
+    assert ponte.ligadas_com_video == [True]
+    ponte.fila.put({"ev": "ready", "call": "C1"})
+    assert esperar(lambda: v.video.cameras_abertas == ["Câmera B"])
+    assert esperar(lambda: ponte.unidades_enviadas)
+    e = ultimo_estado(bus)
+    assert e.video and e.camera and e.suporta_video
+
+
+def test_video_do_outro_lado_chega_decodificado_a_janela(mundo_video):
+    v, ponte, bus, quadros = mundo_video
+    v.ligar(CID, video=True)
+    assert esperar(lambda: ponte.ligadas)
+    ponte.fila.put({"ev": "ready", "call": "C1"})
+    assert esperar(lambda: v.ligacoes[CID].recebendo_video)
+    ponte.video_recebido.put(b"\x00\x00\x00\x01unidade")
+    assert esperar(lambda: quadros)
+    assert quadros[0] == (CID, 4, 2, b"\x01" * 24)
+    assert esperar(lambda: ultimo_estado(bus).video_remoto)
+
+
+def test_chamada_recebida_de_video_vem_marcada(mundo_video):
+    v, ponte, bus, _ = mundo_video
+    ponte.fila.put({"ev": "incoming", "call": "R1", "peer": "1@lid",
+                    "video": True})
+    assert esperar(lambda: bus.eventos)
+    assert ultimo_estado(bus).video
+    v.atender(CID, "", "", camera=None)          # atende sem camera
+    ponte.fila.put({"ev": "ready", "call": "R1"})
+    assert esperar(lambda: (ch.EM_CHAMADA, "") in bus.estados())
+    assert esperar(lambda: v.ligacoes[CID].recebendo_video)
+    assert v.video.cameras_abertas == []
+    assert not ultimo_estado(bus).camera
+
+
+def test_pedido_de_video_do_outro_lado_e_aceito(mundo_video):
+    v, ponte, bus, _ = mundo_video
+    chamada_recebida(ponte, bus, "R1")
+    v.atender(CID)
+    ponte.fila.put({"ev": "ready", "call": "R1"})
+    assert esperar(lambda: (ch.EM_CHAMADA, "") in bus.estados())
+    ponte.fila.put({"ev": "video", "call": "R1", "active": False,
+                    "upgrade": True})
+    assert esperar(lambda: ("R1", cw.VIDEO_ACEITAR) in ponte.acoes_de_video)
+    assert esperar(lambda: ultimo_estado(bus).video)
+
+
+def test_ligar_a_camera_numa_chamada_de_voz_pede_video(mundo_video):
+    v, ponte, bus, _ = mundo_video
+    v.ligar(CID)
+    assert esperar(lambda: ponte.ligadas)
+    ponte.fila.put({"ev": "ready", "call": "C1"})
+    assert esperar(lambda: (ch.EM_CHAMADA, "") in bus.estados())
+    v.ligar_camera(CID, "Câmera A")
+    assert ("C1", cw.VIDEO_PEDIR) in ponte.acoes_de_video
+    assert v.video.cameras_abertas == ["Câmera A"]
+    v.desligar_camera(CID)
+    assert ("C1", cw.VIDEO_DESLIGAR) in ponte.acoes_de_video
+    assert not ultimo_estado(bus).camera and ultimo_estado(bus).video
+
+
+def test_pedido_de_quadro_chave_chega_ao_codificador(mundo_video):
+    v, ponte, bus, _ = mundo_video
+    v.ligar(CID, video=True, camera="")
+    assert esperar(lambda: ponte.ligadas)
+    ponte.fila.put({"ev": "ready", "call": "C1"})
+    assert esperar(lambda: v.ligacoes[CID].codificador is not None)
+    ponte.fila.put({"ev": "keyframe", "call": "C1"})
+    assert esperar(lambda: v.ligacoes[CID].codificador.chaves == 1)
+
+
+def test_camera_para_quando_a_chamada_acaba(mundo_video):
+    v, ponte, bus, _ = mundo_video
+    v.ligar(CID, video=True, camera="")
+    assert esperar(lambda: ponte.ligadas)
+    ponte.fila.put({"ev": "ready", "call": "C1"})
+    assert esperar(lambda: v.video.cameras_abertas)
+    ponte.fila.put({"ev": "end", "call": "C1", "reason": ""})
+    assert esperar(lambda: getattr(v.video, "camera_parada", False))

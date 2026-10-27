@@ -43,12 +43,15 @@ PASSO_MIN_MS = 30
 HISTERESE_MS = 50
 REFERENCIA_MAX = TAXA * 2       # amostras da referencia que esperam
 
-# Ligado pela janela a partir das opcoes `chamada_eco` e `chamada_ruido`
-LIGADOS = {"eco": True, "ruido": True}
+# Ligado pela janela a partir das opcoes `chamada_eco`, `chamada_ruido` e
+# `chamada_retorno`
+LIGADOS = {"eco": True, "ruido": True, "retorno": True}
 
 
-def definir(eco, ruido):
+def definir(eco, ruido, retorno=None):
     LIGADOS["eco"], LIGADOS["ruido"] = bool(eco), bool(ruido)
+    if retorno is not None:
+        LIGADOS["retorno"] = bool(retorno)
 
 
 def _criar_modulo(eco, ruido):
@@ -121,6 +124,11 @@ class CancelaEco:
     @property
     def disponivel(self):
         return self._apm is not None
+
+    @property
+    def ecoando(self):
+        """True se a ultima medida achou eco claro (correlacao alta)."""
+        return self._ultimo_atraso is not None
 
     def reiniciar(self):
         """Esquece o caminho do eco aprendido (outra chamada, ou troca de
@@ -201,8 +209,8 @@ class CancelaEco:
                 if self._eco:
                     self._hist_mic = self._lembrar(self._hist_mic, parte,
                                                    JANELA_S)
-                    self._hist_saida = self._lembrar(self._hist_saida, limpo,
-                                                     JANELA_S)
+                    self._hist_saida = self._lembrar(
+                        self._hist_saida, limpo, JANELA_S + ATRASO_MAX_S)
                     if self._quadros % MEDIR_A_CADA == 0 and \
                             self._hist_mic.size >= JANELA_S * TAXA_MEDIDA:
                         self._ajustar_atraso()
@@ -254,8 +262,58 @@ class CancelaEco:
                      "erros": self._erros,
                      "referencia_segurada_ms": self._seguro * 1000 // TAXA}
             if self._eco and self._hist_mic.size >= TAXA_MEDIDA:
+                janela = int(JANELA_S * TAXA_MEDIDA)
                 entrada, atraso = acoplamento(self._hist_ref, self._hist_mic)
-                saida, _ = acoplamento(self._hist_ref, self._hist_saida)
+                saida, _ = acoplamento(self._hist_ref,
+                                       self._hist_saida[-janela:])
                 dados.update(eco_na_entrada=entrada, eco_atraso_ms=atraso,
                              eco_na_saida=saida)
+                # o eco do OUTRO lado: o que chega de la contem a nossa voz,
+                # de volta, com o atraso do caminho dele? (a nossa referencia
+                # aqui e o que enviamos, e o sinal e o que recebemos)
+                if self._hist_ref.size >= TAXA_MEDIDA:
+                    volta, atraso_v = acoplamento(self._hist_saida,
+                                                  self._hist_ref[-janela:])
+                    dados.update(eco_do_outro_lado=volta,
+                                 eco_do_outro_lado_atraso_ms=atraso_v)
         return dados
+
+
+class CancelaRetorno:
+    """Tira do que CHEGA o retorno da nossa propria voz. Quem fala conosco
+    pode ter uma mesa de som com retorno (monitor), ou um alto-falante que o
+    microfone dele capta: a nossa voz volta, atrasada, misturada com a dele.
+    E o mesmo problema do `CancelaEco` com os papeis trocados: a referencia e
+    o que enviamos, e o "microfone" e o que recebemos. So troca o som quando
+    a medida acha o retorno (correlacao alta); sem retorno, o que chega passa
+    como veio, para nao mexer na voz dele a toa."""
+
+    def __init__(self, fabrica=None):
+        self._c = CancelaEco(eco=True, ruido=False, fabrica=fabrica)
+
+    @property
+    def disponivel(self):
+        return self._c.disponivel
+
+    @property
+    def ativo(self):
+        return self._c.ecoando
+
+    def enviado(self, pcm):
+        """O que mandamos ao outro lado (PCM s16le, 16 kHz, mono)."""
+        self._c.referencia(pcm)
+
+    def recebido(self, pcm):
+        """O que veio do outro lado, sem o retorno da nossa voz (quando ha)."""
+        limpo = self._c.processar(pcm)
+        if self._c.ecoando and len(limpo) == len(pcm):
+            return limpo
+        return bytes(pcm)
+
+    def reiniciar(self):
+        self._c.reiniciar()
+
+    def diagnostico(self):
+        d = self._c.diagnostico()
+        d["ativo"] = self.ativo
+        return d
