@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Janela para criar uma enquete: a pergunta, as opcoes (digite e aperte
 Enter para acrescentar; Remover tira a selecionada), se aceita varias
 respostas e, no Telegram, se os votos sao anonimos."""

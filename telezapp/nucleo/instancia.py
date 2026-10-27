@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Uma segunda abertura do programa avisa a primeira, que pode estar
 escondida na bandeja, para mostrar a janela. O aviso e um evento nomeado do
 Windows (por usuario); sem Windows, nada acontece."""

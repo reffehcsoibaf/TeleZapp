@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Detalhes de uma conversa: contagens por tipo de conteudo, espaco usado e a
 lista de midias com filtro. Sem wx."""
 import os
@@ -50,6 +50,13 @@ def midias(mensagens, filtro=TODAS):
     itens = [x for x in mensagens if (
         classes(x) if filtro == TODAS else filtro in classes(x))]
     return sorted(itens, key=lambda x: (x.data, x.id), reverse=True)
+
+
+def favoritas(mensagens):
+    """As mensagens marcadas como favoritas, da mais nova para a mais
+    antiga."""
+    return sorted((x for x in mensagens if m.extras_de(x)["favorita"]),
+                  key=lambda x: (x.data, x.id), reverse=True)
 
 
 def _tamanho(caminho):

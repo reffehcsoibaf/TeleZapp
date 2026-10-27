@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Banco local (SQLite): conversas e mensagens de todas as contas.
 
 Serve para abrir o app ja com as conversas na tela, antes da rede responder,
@@ -634,6 +634,14 @@ class Banco:
         with self._trava:
             return set(self._con.execute(
                 "SELECT conta_id, conversa_id, id FROM mensagens WHERE "
+                "extras LIKE '%\"favorita\": true%'").fetchall())
+
+    def conversas_com_favoritas(self):
+        """{(conta_id, conversa_id)} das conversas que tem mensagem
+        favorita."""
+        with self._trava:
+            return set(self._con.execute(
+                "SELECT DISTINCT conta_id, conversa_id FROM mensagens WHERE "
                 "extras LIKE '%\"favorita\": true%'").fetchall())
 
     def mensagens_para_limpar(self, conta_id="", conversa_id="", tipos=(),

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Pacotes de sons: o Padrao (bips do sistema), o TeleZapp (os arquivos que
 vem com o programa) e os pacotes personalizados da pessoa, cada um numa pasta
 com um arquivo por evento (`nova.ogg`, `erro.mp3`...). Sem wx, para testar.

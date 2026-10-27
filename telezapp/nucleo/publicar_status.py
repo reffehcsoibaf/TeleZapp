@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Conferencia do que a pessoa quer publicar como status (WhatsApp) ou
 historia (Telegram), antes de enviar. Sem wx, para testar."""
 from telezapp.midia import envio

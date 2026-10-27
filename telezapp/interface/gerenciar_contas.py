@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Janela de Gerenciar contas: uma lista em que cada conta tem uma caixa de
 marcar (marcada = ativada, desmarcada = desativada), e, com a conta em foco,
 os botões Excluir e Renomear (Tab). Quem muda as contas é a Janela; aqui só

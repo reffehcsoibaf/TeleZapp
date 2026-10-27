@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Janela principal: conversas, mensagens e caixa de digitacao.
 
 So conversa com o resto do app pelo gerenciador de contas (pedidos) e pelos
@@ -56,6 +56,8 @@ from telezapp.nucleo import backup
 from telezapp.nucleo import codigo_secreto
 from telezapp.nucleo import lista_conversas as lista_conv_nucleo
 from telezapp.nucleo import depuracao
+from telezapp.nucleo import grupo as ng
+from telezapp.interface import segundo_plano
 from telezapp.nucleo import encaminhar as enc
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import exportar
@@ -453,6 +455,7 @@ class Janela(wx.Frame):
         self._gravacao_rapida = None  # {"gravador", "origem"} gravando por atalho
         self._bandeja = None          # icone da area de notificacao
         self._saindo = False          # True: fechar e sair de verdade
+        self._fora_do_alttab = False  # em segundo plano: so na barra de tarefas
         # atalhos que valem em qualquer programa (RegisterHotKey), cada um
         # com o seu id: funcao -> id
         self._ids_globais = {
@@ -1035,6 +1038,7 @@ class Janela(wx.Frame):
         atalho = self.atalhos.efetivo("mostrar_janela")
         bipe("escondido")
         self.Iconize(True)
+        self._tirar_do_alttab()
         self.fala.falar(
             "O TeleZapp continua em segundo plano. Para voltar, %s." % (
                 "aperte %s" % nucleo_atalhos.texto_falado(atalho) if atalho
@@ -1042,9 +1046,23 @@ class Janela(wx.Frame):
                      "notificação"),
             interromper=True)
 
+    def _tirar_do_alttab(self):
+        """Em segundo plano a janela fica na barra de tarefas, mas nao no
+        Alt+Tab: so volta pela barra de tarefas, pelo icone da area de
+        notificacao ou pelo atalho global."""
+        pegar = getattr(self, "GetHandle", None)
+        if pegar is not None:
+            self._fora_do_alttab = segundo_plano.tirar_do_alttab(pegar())
+
+    def _voltar_ao_alttab(self):
+        if self._fora_do_alttab:
+            self._fora_do_alttab = False
+            segundo_plano.voltar_ao_alttab(self.GetHandle())
+
     def _mostrar_da_bandeja(self):
         """Traz a janela de volta, de onde ela estiver (escondida,
         minimizada ou atras de outras)."""
+        self._voltar_ao_alttab()
         if not self.IsShown():
             self.Show()
         if self.IsIconized():
@@ -1215,13 +1233,36 @@ class Janela(wx.Frame):
                 b.Show(False)
         self.painel.Layout()
 
+    def _acoes_da_mensagem(self, x):
+        """Botoes da mensagem: os guardados e, no WhatsApp, o de entrar nos
+        links de convite do texto ou da previa (vale tambem para mensagens
+        que chegaram antes de o botao existir)."""
+        acoes = list(m.extras_de(x)["acoes"])
+        if self.contas.servico(x.conta_id) != "whatsapp":
+            return acoes
+        extras = m.extras_de(x)
+        vistos = {a.get("codigo") for a in acoes if a.get("tipo") == "entrar"}
+        textos = [x.texto or "", (extras["previa"] or {}).get("url", "")]
+        textos += [u for u, _ in extras["links"]]
+        return acoes + ng.entradas_de_links(" ".join(textos), vistos)
+
+    @staticmethod
+    def _sem_links_de_convite(links, acoes):
+        """Tira da lista os links de convite que ja tem botao de entrar:
+        abrir o link so levaria ao navegador, e o botao entra pelo TeleZapp."""
+        codigos = [a["codigo"] for a in acoes
+                   if a.get("tipo") == "entrar" and a.get("codigo")]
+        return [l for l in links
+                if not any(c in " ".join(map(str, l)) for c in codigos)]
+
     def _atualizar_botoes(self):
         """Mostra, logo depois da lista, um botao para cada botao/opcao da
         mensagem selecionada (Tab vai de um ao outro). Nao mexe no foco, a
         nao ser que o botao focado deixe de existir."""
         x = self._mensagem_selecionada() if self.atual else None
-        acoes = m.extras_de(x)["acoes"][:MAX_BOTOES_ACAO] if x else []
-        links = m.itens_de_link(x)[:MAX_BOTOES_LINK] if x else []
+        acoes = self._acoes_da_mensagem(x)[:MAX_BOTOES_ACAO] if x else []
+        links = self._sem_links_de_convite(m.itens_de_link(x), acoes)[
+            :MAX_BOTOES_LINK] if x else []
         mencoes = [dict(p) for p in m.extras_de(x)["mencoes"]
                    ][:MAX_BOTOES_LINK] if x else []
         rotulos_mencao = [dialogos.rotulo_mencao(p) for p in mencoes]
@@ -1830,10 +1871,13 @@ class Janela(wx.Frame):
                 filhos = self._topicos_de(c)
                 if filhos:       # o grupo mostra os nao lidas de todos
                     c.nao_lidas = sum(f.nao_lidas for f in filhos)
+        favoritas = self.banco.conversas_com_favoritas() \
+            if self.filtro_tipo == "favoritas" and self.banco else ()
         self.conversas = sorted(
             (c for c in self.indice.values()
              if "#" not in c.id and (c.chave == self.atual or m.passa_filtro(
-                 c, self.filtro_tipo, self.filtro_conta, self.busca))),
+                 c, self.filtro_tipo, self.filtro_conta, self.busca,
+                 favoritas))),
             key=lambda c: (not c.fixada, -c.data))
 
     # ------------------------------------------- lista de conversas
@@ -2615,6 +2659,8 @@ class Janela(wx.Frame):
         m.atualizar_extras(x, favorita=favorita)
         self.banco.salvar_mensagens([x])
         self._preencher_mensagens()
+        if self.filtro_tipo == "favoritas":
+            self._aplicar_filtros(falar=False)
         prov = self.contas.provedor(x.conta_id) if self.contas else None
         if prov is not None and getattr(prov, "FAVORITA_NA_CONTA", False):
             self._avisar_conta(
@@ -2923,6 +2969,8 @@ class Janela(wx.Frame):
         evento.Skip()
         if evento.IsIconized():
             self._esconder_trancadas(falar=False)
+        else:               # voltou pela barra de tarefas: volta ao Alt+Tab
+            self._voltar_ao_alttab()
 
     def _busca_pronta(self):
         """Enter no campo de busca: fala o resultado e vai para a lista."""
@@ -4189,9 +4237,11 @@ class Janela(wx.Frame):
         if x.tipo in armazem.BAIXAVEIS and self.midias is not None:
             midia = "baixada" if self.midias.caminho(x) else "não baixada"
         extras = m.extras_de(x)
+        acoes = self._acoes_da_mensagem(x)
         links = [tuple(l) for l in extras["links"]]
         vistos = {u for u, _ in links}
         links += [l for l in m.extrair_links(x.texto) if l[0] not in vistos]
+        links = self._sem_links_de_convite(links, acoes)
         controle = None
         if em_grupo and contagens and recibos:
             controle = ControleRecibos(self, conv, recibos, nomes)
@@ -4205,11 +4255,11 @@ class Janela(wx.Frame):
             botoes=[tuple(b) for b in extras["botoes"]],
             mencoes=extras["mencoes"],
             acoes=[(a.get("rotulo", ""), a.get("tipo") == "lista")
-                   for a in extras["acoes"]])
+                   for a in acoes])
         if controle is not None and controle.abrir_conversa is not None:
             wx.CallAfter(self._abrir_conversa_de, controle.abrir_conversa)
         elif pessoa is not None and "_acao" in pessoa:
-            wx.CallAfter(self._tocar_acao, x, extras["acoes"][pessoa["_acao"]])
+            wx.CallAfter(self._tocar_acao, x, acoes[pessoa["_acao"]])
         elif pessoa is not None:
             wx.CallAfter(self._abrir_conversa_da_mencao, x, pessoa)
 
@@ -4811,7 +4861,7 @@ class Janela(wx.Frame):
             finally:
                 dlg.Destroy()
         dlg = wx.TextEntryDialog(
-            self, "Cole o link de convite (chat.whatsapp.com/...):",
+            self, "Cole o link de convite do grupo, da comunidade ou do canal:",
             "Entrar em um grupo por link")
         try:
             if dlg.ShowModal() != wx.ID_OK:
@@ -4819,16 +4869,15 @@ class Janela(wx.Frame):
             texto = dlg.GetValue()
         finally:
             dlg.Destroy()
-        codigo = ng.codigo_do_convite(texto)
-        if not codigo:
+        acao = ng.acao_do_link(texto)
+        if not acao:
             bipe("erro")
-            self.fala.falar("Isso não parece um link de convite de grupo.",
-                            interromper=True)
-            wx.MessageBox("Isso não parece um link de convite de grupo.",
-                          NOME, wx.OK | wx.ICON_WARNING, self)
+            self.fala.falar("Isso não parece um link de convite de grupo "
+                            "ou canal.", interromper=True)
+            wx.MessageBox("Isso não parece um link de convite de grupo ou "
+                          "canal.", NOME, wx.OK | wx.ICON_WARNING, self)
             return
-        self._entrar_no_grupo(None, {"codigo": codigo},
-                              self.contas.provedor(conta_id))
+        self._entrar_no_grupo(None, acao, self.contas.provedor(conta_id))
 
     def _entrar_no_grupo(self, x, acao, prov):
         """Botao "Entrar no grupo": mostra o que o convite diz e, se a pessoa
@@ -4857,9 +4906,13 @@ class Janela(wx.Frame):
             self.fala.falar(texto, interromper=True)
             wx.MessageBox(texto, NOME, wx.OK | wx.ICON_INFORMATION, self)
             return
-        partes = ["Entrar em %s?" % previa["nome"]]
+        partes = ["Entrar %s %s?" % (
+            {"canal": "no canal", "comunidade": "na comunidade"}.get(
+                previa.get("tipo"), "em"), previa["nome"])]
         if previa.get("membros"):
-            partes.append("%d membros." % previa["membros"])
+            partes.append("%d %s." % (previa["membros"], "seguidores"
+                                      if previa.get("tipo") == "canal"
+                                      else "membros"))
         if previa.get("descricao"):
             partes.append("Descrição: %s" % previa["descricao"])
         pergunta = " ".join(partes)
@@ -6371,18 +6424,12 @@ class Janela(wx.Frame):
             self.fala.falar(str(e), interromper=True)
             return
         self._gravacao_rapida = {"gravador": g, "origem": origem}
-        chave = {MICROFONE: "gravar_mic", SOM_INTERNO: "gravar_som",
-                 SOM_E_MICROFONE: "gravar_som_mic"}[origem]
-        atalho = self.atalhos.efetivo(chave)
         self.SetStatusText("Gravando...")
-        sem_mic = (" Não achei um microfone: gravando só o som do "
-                   "computador." if origem == SOM_E_MICROFONE and
-                   not g.microfone_disponivel else "")
-        self.fala.falar(
-            "Gravando.%s %s Esc descarta." % (sem_mic, (
-                "Aperte %s de novo para parar e enviar." %
-                nucleo_atalhos.texto_falado(atalho) if atalho else
-                "Pare pelo menu Mídias.")), interromper=True)
+        # sem anuncio falado: o bipe de "gravando" ja avisa, e a fala poderia
+        # entrar na gravacao do som do computador
+        if origem == SOM_E_MICROFONE and not g.microfone_disponivel:
+            self.fala.falar("Não achei um microfone: gravando só o som do "
+                            "computador.", interromper=True)
 
     def _pausar_gravacao_rapida(self):
         """Pausa ou continua a gravacao feita por atalho. O trecho da pausa
@@ -6724,11 +6771,21 @@ class Janela(wx.Frame):
                 # _tocar_sem_janela: falar os dois separados cortava o
                 # primeiro (cada fala interrompe a anterior)
                 self._proximo_chave = x.chave
+                self._acompanhar_audio(x)
                 self._abrir_midia(x=x)
                 return True
             if x.chave == chave:
                 achou = True
         return False
+
+    def _acompanhar_audio(self, x):
+        """Opcao "o cursor acompanha": passa a selecao da lista de mensagens
+        para o audio que vai tocar, sem mexer no foco."""
+        if not self.cfg.get("seq_acompanhar") or self.atual != (
+                x.conta_id, x.conversa_id) or x.id not in self.mapa:
+            return
+        self.selecao_automatica = False
+        self.lista_msgs.SetSelection(self.mapa.index(x.id))
 
     def _fim_da_sequencia(self):
         """O ultimo audio acabou e nao ha outro: avisa, se a pessoa quer e

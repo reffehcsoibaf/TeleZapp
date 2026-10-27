@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Consulta as Releases do GitHub para saber se ha versao nova. So le: nao
 baixa nem instala nada. Sem dependencia de wxPython."""
 import json

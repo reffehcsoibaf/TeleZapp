@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Janela que oferece a versao nova: o texto, somente leitura e com o foco,
 diz a versao oferecida e as novidades desde a versao em uso; depois do texto
 vem o Tab para os botoes Sim e Nao."""

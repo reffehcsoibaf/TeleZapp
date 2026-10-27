@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Faz o trabalho: le a midia, escolhe o provedor da tarefa, envia o pedido
 e devolve o texto. A rede entra como parametro (`enviar`), para testar."""
 import json

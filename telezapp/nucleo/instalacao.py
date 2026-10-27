@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Instalar o TeleZapp a partir de uma copia portatil e criar copias portateis
 a partir de uma instalacao (como o NVDA). Sem wxPython.
 
@@ -238,7 +238,7 @@ def _registrar(destino):
         for nome, valor in (
                 ("DisplayName", NOME),
                 ("DisplayVersion", VERSAO),
-                ("Publisher", "Contribuidores do TeleZapp"),
+                ("Publisher", "Fábio Scheffer Moraes"),
                 ("InstallLocation", destino),
                 ("DisplayIcon", exe),
                 ("UninstallString", '"%s" --desinstalar' % exe)):

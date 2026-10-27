@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Ponte entre o wx e o texto das combinacoes de teclas (nucleo/atalhos):
 le uma combinacao de um evento de teclado e a transforma em tecla de
 aceleracao do menu ou de atalho global do Windows."""

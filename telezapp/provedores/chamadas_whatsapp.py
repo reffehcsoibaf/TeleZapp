@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Chamadas de voz 1 a 1 do WhatsApp, pelo mesmo cliente das mensagens.
 
 A DLL do neonize de teste leva dentro o meowcaller (MIT,

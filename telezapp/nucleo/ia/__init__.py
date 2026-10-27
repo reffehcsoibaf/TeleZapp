@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Provedores de IA para transcrever voz e audio, descrever imagens, videos
 e figurinhas e transformar PDF em texto acessivel. Sem wxPython.
 

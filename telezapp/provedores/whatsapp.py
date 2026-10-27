@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Provedor do WhatsApp (neonize, ligacao Python da whatsmeow).
 
 - O neonize bloqueia ao conectar: connect() roda numa thread so dele, e os
@@ -27,6 +27,7 @@ from telezapp import config
 from telezapp.midia import armazem, envio
 from telezapp.nucleo import chamadas as ch
 from telezapp.nucleo import eventos as ev
+from telezapp.nucleo import grupo as ng
 from telezapp.nucleo import mencoes as nucleo_mencoes
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import previa_links
@@ -229,13 +230,10 @@ def contatos_da_mensagem(interna, presentes=None):
     return pessoas
 
 
-RE_CONVITE_WHATSAPP = re.compile(
-    r"chat\.whatsapp\.com/(?:invite/)?([A-Za-z0-9]{20,24})")
-
-
 def entradas_de_grupo(interna, texto=""):
     """Botoes "Entrar no grupo": o convite que um administrador manda (para
-    quem so aceita grupos de contatos) e os links chat.whatsapp.com do texto.
+    quem so aceita grupos de contatos) e os links chat.whatsapp.com do texto
+    (grupos e comunidades), mais os whatsapp.com/channel/ (canais).
     Entram junto das acoes da mensagem, com tipo "entrar"."""
     entradas, vistos = [], set()
     try:
@@ -248,13 +246,12 @@ def entradas_de_grupo(interna, texto=""):
                     "tipo": "entrar", "rotulo": "Entrar no grupo " + nome,
                     "codigo": x.inviteCode, "grupo": x.groupJID,
                     "expira": int(x.inviteExpiration or 0), "nome": nome})
+        if interna.HasField("extendedTextMessage"):   # link so na previa
+            texto = "%s %s" % (texto or "",
+                               interna.extendedTextMessage.matchedText)
     except (ValueError, AttributeError):
         pass
-    for codigo in RE_CONVITE_WHATSAPP.findall(texto or ""):
-        if codigo not in vistos:
-            vistos.add(codigo)
-            entradas.append({"tipo": "entrar", "rotulo": "Entrar no grupo "
-                             "(link de convite)", "codigo": codigo})
+    entradas += ng.entradas_de_links(texto, vistos)
     return entradas
 
 
@@ -2025,6 +2022,8 @@ class ProvedorWhatsApp(Provedor):
     def previa_do_convite(self, msg, acao):
         if self.cliente is None or not self._conectada:
             return {"erro": "Sem conexão com o WhatsApp."}
+        if acao.get("modo") == "canal":
+            return self._previa_do_canal(acao)
         try:
             grupo, convidou = self._jid_do_convite(msg, acao)
             if grupo is not None and convidou is not None:
@@ -2037,13 +2036,39 @@ class ProvedorWhatsApp(Provedor):
             log.info("prévia do convite falhou: %s", type(e).__name__)
             return {"erro": "O convite não vale mais ou foi cancelado."}
         return {"nome": info.GroupName.Name or acao.get("nome") or "grupo",
+                "tipo": "comunidade" if info.GroupParent.IsParent else "grupo",
                 "membros": len(info.Participants),
                 "descricao": info.GroupTopic.Topic, "ja_participa": bool(
                     info.Participants and self._eu(info) is not None)}
 
+    def _previa_do_canal(self, acao):
+        try:
+            info = self.cliente.get_newsletter_info_with_invite(acao["codigo"])
+        except Exception as e:
+            log.info("prévia do canal falhou: %s", type(e).__name__)
+            return {"erro": "O link do canal não vale mais ou foi "
+                            "cancelado."}
+        meta = info.ThreadMeta
+        return {"nome": meta.Name.Text or "canal", "tipo": "canal",
+                "membros": int(meta.SubscriberCount),
+                "descricao": meta.Description.Text,
+                "ja_participa": int(info.ViewerMeta.Role) in (1, 3, 4)}
+
+    def _seguir_canal(self, acao):
+        try:
+            info = self.cliente.get_newsletter_info_with_invite(acao["codigo"])
+            self.cliente.follow_newsletter(info.ID)
+        except Exception as e:
+            log.warning("seguir o canal falhou: %s", type(e).__name__)
+            return False, ("O WhatsApp não deixou seguir o canal (o link "
+                           "pode ter sido cancelado).")
+        return True, "Você agora segue o canal."
+
     def entrar_no_grupo(self, msg, acao):
         if self.cliente is None or not self._conectada:
             return False, "Sem conexão com o WhatsApp."
+        if acao.get("modo") == "canal":
+            return self._seguir_canal(acao)
         try:
             grupo, convidou = self._jid_do_convite(msg, acao)
             if grupo is not None and convidou is not None:

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Janela "Dispositivos de som": a saida (onde tocam os audios e a chamada) e o
 microfone (onde se grava a voz e se fala na chamada). A primeira opcao de cada
 lista e "Padrão do Windows"."""

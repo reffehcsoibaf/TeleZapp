@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Eventos que os provedores (cada um em sua thread) mandam para a interface.
 
 O barramento recebe uma funcao `entregar` que leva a chamada para a thread da

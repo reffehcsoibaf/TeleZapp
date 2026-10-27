@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Quadros de um video numa imagem so (uma grade com a hora de cada quadro),
 para descrever o video com qualquer provedor que veja imagens."""
 from telezapp.nucleo.ia.provedores import ErroIA

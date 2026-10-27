@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Janela de detalhes da conversa: dados da pessoa, do grupo ou do canal, as
 midias com filtro, os membros, os grupos em comum e as ferramentas de
 administrador. `ControleDetalhes` junta a janela principal, os provedores e
@@ -467,6 +467,7 @@ class ControleDetalhes:
                                if d.get("silenciado") else "&Silenciar o canal",
                                self.silenciar_canal))
                 botoes.append(("&Deixar de seguir", self.deixar_de_seguir))
+        botoes.append(("Mensagens fa&voritas", self.favoritas))
         botoes.append(("&Limpar a conversa...", self.limpar))
         return botoes
 
@@ -534,6 +535,52 @@ class ControleDetalhes:
         opcoes.append(("Apagar...", lambda: self._apagar(x)))
         opcoes.append(("Ver na conversa", lambda: self._ver(x)))
         return opcoes
+
+    # ---- favoritas
+    def favoritas(self):
+        """Lista as mensagens favoritas da conversa, da mais nova para a
+        mais antiga."""
+        if not det.favoritas(self.mensagens):
+            self.jan.fala.falar("Nenhuma mensagem favorita nesta conversa.",
+                                interromper=True)
+            wx.MessageBox("Nenhuma mensagem favorita nesta conversa.",
+                          "Mensagens favoritas",
+                          wx.OK | wx.ICON_INFORMATION, self.dlg)
+            return
+
+        def filtrar(_):
+            return [(det.rotulo_do_item(x), x)
+                    for x in det.favoritas(self.mensagens)]
+        dlg = DialogoLista(
+            self.dlg, "Mensagens favoritas de %s" % self.conv.nome,
+            "Mensagens favoritas (Menu abre as ações)", (), filtrar,
+            self._menu_favorita)
+        self._lista_favoritas = dlg
+        self._sub(dlg)
+
+    def _menu_favorita(self, x):
+        opcoes = [("Ver na conversa", lambda: self._ver(x)),
+                  ("Desfavoritar", lambda: self._desfavoritar(x))]
+        for tipo, rotulo, valor in m.conteudos_copiaveis(x):
+            opcoes.append((rotulo, lambda t=tipo, v=valor:
+                           self.jan._copiar_conteudo(x, t, v)))
+        return opcoes
+
+    def _desfavoritar(self, x):
+        """Tira a marca (no TeleZapp e, no WhatsApp, na conta) e a mensagem
+        sai da lista. Vale a copia que a janela principal ja tem aberta."""
+        aberta = next((y for y in self.jan.cache.get(self.conv.chave, [])
+                       if y.id == x.id), None)
+        if aberta is not None:
+            x = aberta
+        self.jan._favoritar_mensagem(x)
+        self.mensagens = [y if y.id != x.id else x for y in self.mensagens]
+        lista = getattr(self, "_lista_favoritas", None)
+        if lista is not None:
+            try:
+                lista.recarregar()
+            except RuntimeError:
+                pass
 
     def _apagar(self, x):
         self.jan._apagar_mensagem(x)

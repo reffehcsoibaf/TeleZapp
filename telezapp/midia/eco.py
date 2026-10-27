@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Cancelamento de eco e reducao de ruido do microfone nas chamadas de voz.
 
 Quem escuta a chamada pelo alto-falante faz o microfone captar a voz da outra

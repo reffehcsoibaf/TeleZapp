@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Quais provedores existem, o que cada um aceita e os limites. Uma tabela
 so: a configuracao, o servico e o menu das mensagens leem dela."""
 from dataclasses import dataclass

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Contribuidores do TeleZapp
+// Copyright (C) 2026 Fábio Scheffer Moraes
 //
 // Recebe os relatos do formulario da pagina do TeleZapp (site/relatar.html),
 // guarda cada um no KV por 90 dias e deixa o responsavel le-los em /admin.

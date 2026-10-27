@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Janela de configuracoes no estilo do NVDA: busca no alto, categorias numa
 lista vertical e, ao lado, as opcoes da categoria como controles nativos.
 

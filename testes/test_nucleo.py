@@ -875,3 +875,38 @@ def test_citacoes_da_conversa_voltam_do_banco(tmp_path):
                                        "grupo", nao_lidas=3, citacoes=2)])
     assert banco.conversas("c")[0].citacoes == 2
     banco.fechar()
+
+
+def test_acao_do_link_de_grupo_comunidade_ou_canal():
+    from telezapp.nucleo import grupo as ng
+    assert ng.acao_do_link("https://chat.whatsapp.com/AbCdEfGhIjKl") == {
+        "codigo": "AbCdEfGhIjKl"}
+    assert ng.acao_do_link("whatsapp.com/channel/0029VaAbCd_Ef-Gh") == {
+        "codigo": "0029VaAbCd_Ef-Gh", "modo": "canal"}
+    assert ng.acao_do_link("nada a ver") is None
+
+
+def test_filtro_de_conversas_com_favoritas_so_olha_a_lista_dada():
+    c = m.Conversa("c", "p1", "Ana", "whatsapp", "privada")
+    assert not m.passa_filtro(c, "favoritas")
+    assert m.passa_filtro(c, "favoritas", com_favoritas={("c", "p1")})
+    c.arquivada = True
+    assert not m.passa_filtro(c, "favoritas", com_favoritas={("c", "p1")})
+
+
+def test_link_so_na_previa_pode_ser_copiado():
+    x = m.Mensagem("c", "v", "1", minha=True, texto="")
+    m.guardar_extras(x, previa=m.previa_de_link(
+        "https://chat.whatsapp.com/JULThiZpj4iFiJGHLGwVVd", "TeleZapp", "x"))
+    assert m.conteudos_copiaveis(x) == [
+        ("link", "Copiar link",
+         "https://chat.whatsapp.com/JULThiZpj4iFiJGHLGwVVd")]
+
+
+def test_estilos_da_janela_em_segundo_plano():
+    from telezapp.interface import segundo_plano as sp
+    base = 0x00040100
+    fora = sp.estilo_fora_do_alttab(base)
+    assert fora & sp.WS_EX_TOOLWINDOW and not fora & sp.WS_EX_APPWINDOW
+    assert fora & 0x100                               # o resto fica
+    assert not sp.estilo_normal(fora) & sp.WS_EX_TOOLWINDOW

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """TeleZapp: cliente de WhatsApp e Telegram para Windows, feito para leitores
 de tela."""
 
@@ -8,7 +8,7 @@ import re
 NOME = "TeleZapp"
 # ano.mes.dia.digito: o ultimo numero sobe quando sai mais de uma versao no
 # mesmo dia (2026.10.13.0, 2026.10.13.1...)
-VERSAO = "2026.10.26.0"
+VERSAO = "2026.10.26.1"
 SITE = "https://github.com/reffehcsoibaf/TeleZapp"
 # a pagina do projeto e o formulario de relatos (pasta site/, no GitHub Pages)
 PAGINA_DO_PROJETO = "https://reffehcsoibaf.github.io/TeleZapp/"

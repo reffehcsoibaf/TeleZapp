@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Pasta de dados, configuracoes e registro (log).
 
 Tudo o que da acesso as contas (sessoes) e o banco local ficam em
@@ -507,6 +507,13 @@ OPCOES = (
           "tocar, fala Fim da sequência. Só vale se pelo menos dois áudios "
           "tocaram em sequência; um áudio sozinho não anuncia nada. "
           "Interromper o áudio com Esc também não anuncia."),
+    Opcao("seq_acompanhar", "Na sequência de áudios, o cursor acompanha o "
+          "áudio que toca", "Mídias", False,
+          "Quando um áudio da sequência começa a tocar, a seleção da lista de "
+          "mensagens passa para ele, sem tirar o foco de onde você está. "
+          "Assim, ao voltar para a lista, você já está no áudio que tocou por "
+          "último. Desmarcada, a seleção fica onde você deixou. Só vale se a "
+          "conversa dos áudios estiver aberta."),
     Opcao("chamada_eco", "Cancelar o eco nas chamadas de voz", "Mídias", True,
           "Quando você ouve a chamada pelo alto-falante, o microfone capta "
           "a voz da outra pessoa e ela se ouve de volta. Marcada, o TeleZapp "

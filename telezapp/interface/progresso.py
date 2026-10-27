@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Janela com uma barra de progresso de verdade (wx.Gauge).
 
 Para quem usa leitor de tela a barra diz mais do que a fala: o NVDA toca bipes

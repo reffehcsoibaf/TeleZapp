@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Textos e arquivos das ferramentas de grupo (pedidos de entrada, foto e
 convite com QR). Sem wx, para testar em qualquer sistema; quem fala com o
 servico sao os provedores."""
 import io
+import re
 import time
 
 
@@ -46,10 +47,47 @@ def extensao_da_imagem(dados):
 def codigo_do_convite(texto):
     """O codigo de um link chat.whatsapp.com/CODIGO (ou o proprio codigo);
     "" se nao parece um convite."""
-    import re
     texto = (texto or "").strip()
     achado = re.search(r"chat\.whatsapp\.com/(?:invite/)?([A-Za-z0-9]{10,64})",
                        texto)
     if achado:
         return achado.group(1)
     return texto if re.fullmatch(r"[A-Za-z0-9]{10,64}", texto) else ""
+
+
+RE_CONVITE_WHATSAPP = re.compile(
+    r"chat\.whatsapp\.com/(?:invite/)?([A-Za-z0-9]{20,24})")
+RE_CANAL_WHATSAPP = re.compile(
+    r"whatsapp\.com/channel/([A-Za-z0-9_-]{10,64})")
+
+
+def entradas_de_links(texto, vistos=None):
+    """Acoes "entrar" dos links de convite no texto: grupo ou comunidade
+    (chat.whatsapp.com/CODIGO) e canal (whatsapp.com/channel/CODIGO).
+    `vistos`: conjunto de codigos que ja tem botao (e recebe os novos)."""
+    vistos = set() if vistos is None else vistos
+    entradas = []
+    for codigo in RE_CONVITE_WHATSAPP.findall(texto or ""):
+        if codigo not in vistos:
+            vistos.add(codigo)
+            entradas.append({"tipo": "entrar", "rotulo": "Entrar no grupo "
+                             "(link de convite)", "codigo": codigo})
+    for codigo in RE_CANAL_WHATSAPP.findall(texto or ""):
+        if codigo not in vistos:
+            vistos.add(codigo)
+            entradas.append({"tipo": "entrar", "modo": "canal",
+                             "rotulo": "Seguir o canal (link)",
+                             "codigo": codigo})
+    return entradas
+
+
+def acao_do_link(texto):
+    """A acao "entrar" de um link colado: grupo ou comunidade
+    (chat.whatsapp.com/CODIGO) ou canal (whatsapp.com/channel/CODIGO); None
+    se nao parece um convite."""
+    achado = re.search(r"whatsapp\.com/channel/([A-Za-z0-9_-]{10,64})",
+                       texto or "")
+    if achado:
+        return {"codigo": achado.group(1), "modo": "canal"}
+    codigo = codigo_do_convite(texto)
+    return {"codigo": codigo} if codigo else None

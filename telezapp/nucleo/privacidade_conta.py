@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Privacidade da conta (WhatsApp e Telegram): visto por ultimo, online,
 recado, confirmacao de leitura, quem me adiciona a grupos.
 

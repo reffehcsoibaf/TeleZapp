@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Provedor do Telegram (Telethon), numa thread com o seu proprio asyncio.
 
 Nada aqui toca na janela: os resultados saem como eventos. O registro nunca

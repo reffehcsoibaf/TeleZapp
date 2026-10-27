@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Agenda de contatos do TeleZapp: ver, adicionar, editar e remover.
 
 Os contatos ficam so no TeleZapp (nao vao para o celular nem para a conta).

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Onde ficam as chaves dos provedores de IA.
 
 No Windows as chaves sao cifradas com o DPAPI do usuario: so o mesmo usuario

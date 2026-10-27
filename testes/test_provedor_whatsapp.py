@@ -2127,6 +2127,35 @@ def test_entrar_no_grupo_pelo_convite_ou_pelo_link(tmp_path):
     banco.fechar()
 
 
+def test_link_de_canal_vira_botao_e_segue_o_canal(tmp_path):
+    link = E.Message(conversation="veja https://whatsapp.com/channel/"
+                     "0029VaAbCdEfGhIj e https://chat.whatsapp.com/"
+                     "KLMNOPQRSTABCDEFGHIJ")
+    msg, _ = wa.converter(evento("C1", link), "w1", "c")
+    acoes = m.extras_de(msg)["acoes"]
+    assert [a.get("modo") for a in acoes] == [None, "canal"]
+    assert acoes[1]["codigo"] == "0029VaAbCdEfGhIj"
+    seguidos = []
+    meta = N.NewsletterThreadMetadata(
+        Name=N.NewsletterText(Text="Notícias"), SubscriberCount=50,
+        Description=N.NewsletterText(Text="Sobre"))
+    info = N.NewsletterMetadata(
+        ID=jid("999", "newsletter"), ThreadMeta=meta,
+        ViewerMeta=N.NewsletterViewerMetadata(Role=2))
+    p, banco = _provedor_com_cliente(tmp_path, types.SimpleNamespace(
+        get_newsletter_info_with_invite=lambda c: info,
+        follow_newsletter=lambda j_: seguidos.append(j_.User)))
+    previa = p.previa_do_convite(None, acoes[1])
+    assert (previa["nome"], previa["tipo"], previa["membros"],
+            previa["ja_participa"]) == ("Notícias", "canal", 50, False)
+    assert p.entrar_no_grupo(None, acoes[1]) == (
+        True, "Você agora segue o canal.")
+    assert seguidos == ["999"]
+    info.ViewerMeta.Role = 1
+    assert p.previa_do_convite(None, acoes[1])["ja_participa"]
+    banco.fechar()
+
+
 def test_falha_de_pareamento_no_registro_do_whatsmeow_vira_evento(amb):
     registro = logging.getLogger("whatsmeow.Client")
     # outros testes podem deixar lixo na lista de ouvintes

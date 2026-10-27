@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Editar o proprio perfil (nome, recado e foto) no WhatsApp e no Telegram.
 
 Sem wx, para testar em qualquer sistema. Quem fala com o servico sao os

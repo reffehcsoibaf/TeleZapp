@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Abrir o TeleZapp ao entrar no Windows: um valor na chave Run do usuario
 (HKCU), sem precisar de administrador. O programa aberto assim recebe
 --segundo-plano e, se a opcao de continuar em segundo plano estiver ligada,

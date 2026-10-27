@@ -13,6 +13,18 @@
 </header>
 <main>
 <section>
+<h2>Versão 2026.10.26.1</h2>
+<ul>
+<li>Nova opção em Configurações, Mídias: "Na sequência de áudios, o cursor acompanha o áudio que toca". Marcada, a seleção da lista de mensagens passa para cada áudio que começa a tocar na sequência, sem tirar o foco de onde você está. Vem desmarcada.</li>
+<li>Ao começar a gravar pelo atalho, o TeleZapp não fala mais nada: só toca o bipe de gravando. Quem grava o som do computador não corre mais o risco de a voz do leitor de tela entrar na gravação. O aviso de que não há microfone continua sendo falado, e pausar, parar e descartar também.</li>
+<li>Com "Continuar em segundo plano", ao fechar a janela o TeleZapp fica na barra de tarefas, mas não aparece mais no Alt+Tab. Para voltar, use a barra de tarefas, o ícone da área de notificação, o atalho da área de trabalho ou o atalho global.</li>
+<li>Corrigido: o botão de entrar no grupo não aparecia quando o link de convite vinha só na prévia da mensagem, sem texto (por exemplo, link enviado pelo celular). Agora aparece, inclusive nas mensagens que você já recebeu.</li>
+<li>Link de convite agora vira botão também para canais do WhatsApp: numa mensagem com um link de canal (whatsapp.com/channel/...) aparece "Seguir o canal (link)" nos detalhes da mensagem, que mostra o nome e os seguidores e pergunta antes de seguir. Grupos e comunidades já tinham o botão pelos links chat.whatsapp.com, e a pergunta agora diz se é uma comunidade. No Telegram os links de convite e de grupos e canais públicos já funcionavam. "Entrar em um grupo por link", no menu Novo, também aceita link de canal.</li>
+<li>Nos detalhes da conversa (pessoa, grupo ou canal) há o botão "Mensagens favoritas": lista as favoritas daquela conversa, da mais nova para a mais antiga. Enter vai para a mensagem na conversa; o menu de contexto também desfavorita e copia o conteúdo.</li>
+<li>Novo tipo de conversa na lista: "Com mensagens favoritas" mostra só as conversas que têm alguma mensagem favorita. Como nos outros tipos, as arquivadas ficam de fora (estão em Arquivadas).</li>
+</ul>
+</section>
+<section>
 <h2>Versão 2026.10.26.0</h2>
 <ul>
 <li>Cancelamento de eco nas chamadas de voz: quem ouve a chamada pelo alto-falante não faz mais a outra pessoa ouvir a própria voz, mesmo quando o eco volta atrasado, como no retorno de uma mesa de som. Usa o mesmo motor de áudio do Chrome e do Google Meet. Há também a redução do ruído do microfone (ventilador, chiado). As duas opções ficam em Configurações, Mídias, vêm marcadas e valem a partir da próxima chamada. O registro (log) mostra de 5 em 5 segundos quanto eco chega ao microfone e quanto sobra, para ajudar a achar problemas.</li>
@@ -463,7 +475,7 @@
 </section>
 </main>
 <footer>
-<p>TeleZapp versão {{versao}}. Software livre, licença GNU GPL versão 3 ou posterior. Desenvolvido pelos contribuidores do TeleZapp. Site e downloads: <a href="{{site}}">{{site}}</a></p>
+<p>TeleZapp versão {{versao}}. Software livre, licença GNU GPL versão 3 ou posterior. Desenvolvido por Fábio Scheffer Moraes. Site e downloads: <a href="{{site}}">{{site}}</a></p>
 </footer>
 </body>
 </html>

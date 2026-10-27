@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Gera o que vai para a Release, em lancamento/:
 
     TeleZapp.zip        a pasta do programa (o atualizador usa este)
@@ -38,11 +38,11 @@ def arquivo_de_versao(pasta, descricao, original):
                     OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
   kids=[
     StringFileInfo([StringTable('041604b0', [
-      StringStruct('CompanyName', 'Contribuidores do TeleZapp'),
+      StringStruct('CompanyName', 'Fábio Scheffer Moraes'),
       StringStruct('FileDescription', %(d)r),
       StringStruct('FileVersion', %(v)r),
       StringStruct('InternalName', %(n)r),
-      StringStruct('LegalCopyright', 'Copyright (C) 2026 Contribuidores do TeleZapp. Licença GPL-3.0-or-later.'),
+      StringStruct('LegalCopyright', 'Copyright (C) 2026 Fábio Scheffer Moraes. Licença GPL-3.0-or-later.'),
       StringStruct('OriginalFilename', %(o)r),
       StringStruct('ProductName', %(n)r),
       StringStruct('ProductVersion', %(v)r),

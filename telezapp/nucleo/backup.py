@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Backup e restauracao: um arquivo .zip, com senha opcional (AES-256, que o
 7-Zip tambem abre), com as partes que a pessoa escolher.
 

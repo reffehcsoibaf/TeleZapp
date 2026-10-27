@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Previa de links buscada pelo proprio TeleZapp (titulo, descricao e nome do
 site de uma pagina), para as mensagens recebidas e as que ele envia.
 

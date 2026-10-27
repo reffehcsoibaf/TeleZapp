@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Contribuidores do TeleZapp
+# Copyright (C) 2026 Fábio Scheffer Moraes
 """Janelas das ferramentas de grupo: pedidos de entrada (aprovar e recusar) e
 link de convite com QR Code. Controles nativos do wx, para o leitor de tela;
 as chamadas ao servico rodam fora da thread da interface."""
