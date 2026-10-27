@@ -194,7 +194,7 @@ def bipe(tipo="nova", valor=None):
         threading.Thread(target=_tocar_arquivo, args=(tipo, caminho),
                          daemon=True).start()
         return
-    if winsound is None:
+    if winsound is None and _indice_dos_avisos() is None:
         return
     threading.Thread(target=_tocar, args=(tom_padrao(tipo),),
                      daemon=True).start()
@@ -212,8 +212,12 @@ def _tocar_arquivo(tipo, caminho):
             dados, taxa = _ler_som(caminho, LIMITE_SEGUNDOS_ARQUIVO)
         # sd.play para o som anterior e abre o novo: duas threads juntas
         # mexem no mesmo fluxo do PortAudio e derrubam o programa
+        dispositivo = _indice_dos_avisos()
         with _trava_som:
-            sd.play(dados, taxa)
+            if dispositivo is None:
+                sd.play(dados, taxa)
+            else:
+                sd.play(dados, taxa, device=dispositivo)
     except Exception as e:
         log.warning("não consegui tocar o som escolhido (%r); usando o "
                     "padrão", e)
@@ -221,59 +225,78 @@ def _tocar_arquivo(tipo, caminho):
             _tocar(tom_padrao(tipo))
 
 
-def _tocar(tipo):
+# Os sons padrao, nota a nota: (frequencia em Hz, duracao em ms)
+NOTAS = {
+    "nova": ((880, 90), (1175, 120)),
+    "enviada": ((660, 80),),
+    "pronto": ((660, 90), (880, 90), (1100, 90)),
+    "atualizado": ((990, 70), (990, 70)),
+    "conectado": ((523, 110), (659, 110), (784, 110), (1047, 110)),
+    # chamada recebida: dois pares de notas, repetido pela janela
+    "toque": ((784, 120), (988, 120), (784, 120), (988, 120)),
+    # chamada que eu fiz: um tom grave e longo, como o de espera de um
+    # telefone (a janela repete a cada 3 s)
+    "chamando": ((425, DURACAO_TOM_DE_CHAMADA_MS),),
+    # conta que caiu: dois tons descendo, mais graves que o de chamada
+    "desconectada": ((440, 150), (330, 150)),
+    "download_pronto": ((740, 70), (988, 70)),
+    "mencao_ou_resposta": ((1047, 70), (1319, 70), (1047, 70)),
+    "reacao_recebida": ((1319, 55), (1568, 55)),
+    "desligada": ((494, 120), (392, 120), (330, 120)),
+    # curto: nao pode entrar na gravacao
+    "gravando": ((784, 60), (1047, 60)),
+    "voto_enquete": ((1047, 60), (1319, 60)),
+    "escondido": ((784, 90), (523, 90)),
+    "voltou": ((523, 90), (784, 90)),
+}
+NOTAS_PADRAO = ((300, 200),)
+TAXA_SINTETICA = 44100
+
+
+def _indice_dos_avisos():
+    """O dispositivo de saida escolhido para os sons de aviso, ou None (o
+    padrao do Windows)."""
     try:
-        if tipo == "nova":
-            winsound.Beep(880, 90)
-            winsound.Beep(1175, 120)
-        elif tipo == "enviada":
-            winsound.Beep(660, 80)
-        elif tipo == "pronto":
-            for f in (660, 880, 1100):
-                winsound.Beep(f, 90)
-        elif tipo == "atualizado":
-            winsound.Beep(990, 70)
-            winsound.Beep(990, 70)
-        elif tipo == "conectado":
-            for f in (523, 659, 784, 1047):
-                winsound.Beep(f, 110)
-        elif tipo == "toque":
-            # chamada recebida: dois pares de notas, repetido pela janela
-            for f in (784, 988, 784, 988):
-                winsound.Beep(f, 120)
-        elif tipo == "chamando":
-            # chamada que eu fiz: um tom grave e longo, como o de espera de
-            # um telefone (1,5 s; a janela repete a cada 3 s)
-            winsound.Beep(425, DURACAO_TOM_DE_CHAMADA_MS)
-        elif tipo == "desconectada":
-            # conta que caiu: dois tons descendo, mais graves que o de chamada
-            for f in (440, 330):
-                winsound.Beep(f, 150)
-        elif tipo == "download_pronto":
-            for f in (740, 988):
-                winsound.Beep(f, 70)
-        elif tipo == "mencao_ou_resposta":
-            for f in (1047, 1319, 1047):       # tres toques: chamou voce
-                winsound.Beep(f, 70)
-        elif tipo == "reacao_recebida":
-            for f in (1319, 1568):          # dois toques curtos e agudos
-                winsound.Beep(f, 55)
-        elif tipo == "desligada":
-            for f in (494, 392, 330):
-                winsound.Beep(f, 120)
-        elif tipo == "gravando":
-            for f in (784, 1047):       # curto: nao pode entrar na gravacao
-                winsound.Beep(f, 60)
-        elif tipo == "voto_enquete":
-            for f in (1047, 1319):
-                winsound.Beep(f, 60)
-        elif tipo == "escondido":
-            for f in (784, 523):
-                winsound.Beep(f, 90)
-        elif tipo == "voltou":
-            for f in (523, 784):
-                winsound.Beep(f, 90)
-        else:
-            winsound.Beep(300, 200)
+        from telezapp.midia import dispositivos
+        return dispositivos.indice_da_notificacao()
+    except Exception:
+        return None
+
+
+def _onda(notas):
+    """O som padrao como amostras, para tocar em um dispositivo escolhido
+    (o winsound.Beep so toca no padrao do Windows)."""
+    import numpy as np
+    partes = []
+    for freq, ms in notas:
+        n = int(TAXA_SINTETICA * ms / 1000)
+        t = np.arange(n) / TAXA_SINTETICA
+        onda = 0.3 * np.sin(2 * np.pi * freq * t)
+        rampa = min(n // 2, int(TAXA_SINTETICA * 0.004))
+        if rampa:
+            subida = np.linspace(0.0, 1.0, rampa)
+            onda[:rampa] *= subida
+            onda[n - rampa:] *= subida[::-1]
+        partes.append(onda)
+    return np.concatenate(partes).astype("float32")
+
+
+def _tocar(tipo):
+    notas = NOTAS.get(tipo, NOTAS_PADRAO)
+    try:
+        dispositivo = _indice_dos_avisos()
+        if dispositivo is not None:
+            import sounddevice as sd
+            with _trava_som:
+                sd.play(_onda(notas), TAXA_SINTETICA, device=dispositivo)
+            return
+    except Exception as e:
+        log.warning("não consegui tocar o aviso no dispositivo escolhido "
+                    "(%r); usando o padrão do Windows", e)
+    if winsound is None:
+        return
+    try:
+        for freq, ms in notas:
+            winsound.Beep(freq, ms)
     except Exception:
         pass

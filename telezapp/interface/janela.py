@@ -155,6 +155,8 @@ segundos no áudio que toca (Control Shift Page Up e Page Down: 30
 segundos)
 Control vírgula: abrir as configurações (busca, categorias e opções)
 Control Shift L: ligar para a conversa (Telegram, conversa com uma pessoa)
+Chamadas, Ligar com vídeo e Ligar ou desligar a câmera (WhatsApp): sem tecla de
+fábrica; dê uma em Configurações, Atalhos
 Control Shift J: voltar à janela da chamada
 Control Shift K: silenciar ou ativar o microfone na chamada
 Control Shift H: desligar a chamada
@@ -422,6 +424,7 @@ class Janela(wx.Frame):
         self._ia_texto_ocupada = False     # redigir, resumir, corrigir
         self._ia_vagas = threading.Semaphore(2)    # pedidos automaticos
         self.avisos_de_chamada = {}   # (conta, chamada) -> janela de aviso
+        self._quadro_de_video_pendente = False
         self.presenca = None      # ev.Presenca (online / visto) da aberta
         self.digitando = None     # (ev.Presenca, expira) da conversa aberta
         self.editando = None      # mensagem minha que esta sendo editada
@@ -604,6 +607,8 @@ class Janela(wx.Frame):
 
         m_cham = wx.Menu()
         item(m_cham, "ligar", "&Ligar para esta conversa\tCtrl+Shift+L")
+        item(m_cham, "ligar_video", "Ligar com &vídeo")
+        item(m_cham, "chamada_camera", "Ligar ou desligar a &câmera")
         item(m_cham, "chamada_janela",
              "Mostrar a &janela da chamada\tCtrl+Shift+J")
         item(m_cham, "chamada_mudo",
@@ -857,6 +862,8 @@ class Janela(wx.Frame):
             "gravar_mic_janela": lambda e: self._gravar(MICROFONE),
             "gravar_som_janela": lambda e: self._gravar(SOM_INTERNO),
             "ligar": lambda e: self._ligar(),
+            "ligar_video": lambda e: self._ligar(video=True),
+            "chamada_camera": lambda e: self._alternar_camera(),
             "chamada_janela": lambda e: self._mostrar_chamada(),
             "chamada_mudo": lambda e: self._alternar_mudo(),
             "chamada_tempo": lambda e: self._falar_tempo_da_chamada(),
@@ -895,7 +902,9 @@ class Janela(wx.Frame):
         }
         for chave, tratador in ligacoes.items():
             self.Bind(wx.EVT_MENU, seguro(tratador), self.itens[chave])
-        dispositivos.definir(*self._dispositivos_da_chamada()[:2])
+        dispositivos.definir(*self._dispositivos_da_chamada()[:2],
+                             notificacao=self.cfg.get("notificacao_saida")
+                             or "")
         self.banco.depuracao = bool(self.cfg.get("depuracao"))
         self.itens["depuracao"].Check(self.banco.depuracao)
         self.Bind(wx.EVT_MENU,
@@ -3368,7 +3377,7 @@ class Janela(wx.Frame):
                 self.cfg.get("chamada_saida") or "")
 
     @seguro
-    def _ligar(self):
+    def _ligar(self, video=False):
         if self.chamada is not None and self.chamada.ativa:
             self.fala.falar("Já há uma chamada em andamento.",
                             interromper=True)
@@ -3381,9 +3390,9 @@ class Janela(wx.Frame):
             self.fala.falar("Abra ou selecione uma conversa para ligar.",
                             interromper=True)
             return
-        self._ligar_para(conv)
+        self._ligar_para(conv, video)
 
-    def _ligar_para(self, conv):
+    def _ligar_para(self, conv, video=False):
         """Liga para a conversa com uma pessoa, se a conta puder."""
         if conv.tipo != "privada":
             bipe("erro")
@@ -3403,6 +3412,17 @@ class Janela(wx.Frame):
                             interromper=True)
             return
         mic, saida = self._dispositivos_da_chamada()
+        if video:
+            if not getattr(p, "suporta_video", False):
+                bipe("erro")
+                self.fala.falar("Esta conta ainda não faz chamadas de "
+                                "vídeo.", interromper=True)
+                return
+            self._registrar_destino_de_video(p)
+            log.info("ligando com vídeo (%s)", conv.conta_id)
+            p.ligar(conv.id, mic, saida, video=True,
+                    camera=self.cfg.get("chamada_camera") or "")
+            return
         log.info("ligando (%s)", conv.conta_id)
         p.ligar(conv.id, mic, saida)
 
@@ -3452,12 +3472,23 @@ class Janela(wx.Frame):
             if self.dlg_chamada is not None:
                 self.dlg_chamada.fechar()
             c = self.chamada = ch.Chamada(
-                e.conta_id, e.conversa_id, e.nome, e.entrante, e.estado)
+                e.conta_id, e.conversa_id, e.nome, e.entrante, e.estado,
+                video=e.video, camera=e.camera,
+                video_remoto=e.video_remoto, suporta_video=e.suporta_video)
             mudou = True
         else:
             if e.nome and not c.nome:
                 c.nome = e.nome
             mudou = c.aplicar(e.estado, e.motivo, e.erro)
+            antes = (c.video, c.camera, c.video_remoto)
+            if c.aplicar_video(e.video, e.camera, e.video_remoto,
+                               e.suporta_video) and not mudou:
+                # so o video mudou: diz o que foi, sem repetir o estado
+                self.fala.falar(ch.fala_do_video(
+                    antes, (c.video, c.camera, c.video_remoto), c.nome),
+                    interromper=True)
+                self._atualizar_dialogo_chamada(c)
+                return
         if not mudou:
             return
         log.info("chamada: %s %s", c.estado, c.motivo)
@@ -3491,7 +3522,12 @@ class Janela(wx.Frame):
         mics, saidas = p.dispositivos_de_audio() if p is not None \
             else ([], [])
         mic, saida = self._dispositivos_da_chamada()
+        com_video = bool(p is not None and getattr(p, "suporta_video", False))
+        if com_video:
+            self._registrar_destino_de_video(p)
         acoes = {
+            "camera": self._alternar_camera,
+            "trocar_camera": self._trocar_camera,
             "atender": self._atender_chamada,
             "recusar": self._desligar_chamada,
             "desligar": self._desligar_chamada,
@@ -3501,13 +3537,60 @@ class Janela(wx.Frame):
         }
         self.dlg_chamada = DialogoChamada(
             self, c, acoes, lambda t: self.fala.falar(t, interromper=True),
-            mics, saidas, mic, saida, ao_fechar=self._chamada_fechada)
+            mics, saidas, mic, saida, ao_fechar=self._chamada_fechada,
+            cameras=p.cameras() if com_video else (),
+            camera=self.cfg.get("chamada_camera") or "")
         self.dlg_chamada.Show()
         if hasattr(self.dlg_chamada, "Raise"):
             self.dlg_chamada.Raise()
 
     def _chamada_fechada(self):
         self.dlg_chamada = None
+
+    # ------------------------------------------------------------- video
+    def _registrar_destino_de_video(self, p):
+        p.definir_destino_video(self._ao_quadro_de_video)
+
+    def _ao_quadro_de_video(self, cid, largura, altura, rgb):
+        """De outra thread: leva o quadro para a janela, descartando o que
+        chegar enquanto o anterior ainda nao foi desenhado."""
+        if self._quadro_de_video_pendente:
+            return
+        self._quadro_de_video_pendente = True
+        wx.CallAfter(self._mostrar_quadro_de_video, largura, altura, rgb)
+
+    def _mostrar_quadro_de_video(self, largura, altura, rgb):
+        self._quadro_de_video_pendente = False
+        if self.dlg_chamada is not None:
+            self.dlg_chamada.mostrar_quadro(largura, altura, rgb)
+
+    @seguro
+    def _alternar_camera(self):
+        c = self._chamada_em_curso()
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if c is None or p is None or not getattr(p, "suporta_video", False):
+            if c is not None:
+                self.fala.falar("Esta conta ainda não faz chamadas de "
+                                "vídeo.", interromper=True)
+            return
+        if c.estado != ch.EM_CHAMADA:
+            self.fala.falar("A câmera só pode ser mudada durante a "
+                            "conversa.", interromper=True)
+            return
+        if c.camera:
+            p.desligar_camera(c.conversa_id)
+        else:
+            p.ligar_camera(c.conversa_id,
+                           self.cfg.get("chamada_camera") or "")
+
+    @seguro
+    def _trocar_camera(self, nome):
+        self.cfg.set("chamada_camera", nome)
+        c = self.chamada
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if c is not None and p is not None and c.camera:
+            p.desligar_camera(c.conversa_id)
+            p.ligar_camera(c.conversa_id, nome)
 
     def _chamada_em_curso(self):
         if self.chamada is None or not self.chamada.ativa:
@@ -3529,12 +3612,20 @@ class Janela(wx.Frame):
         if c is None or p is None:
             return
         mic, saida = self._dispositivos_da_chamada()
+        com_video = c.video and getattr(p, "suporta_video", False)
+        if com_video:
+            self._registrar_destino_de_video(p)
         try:
             log.info("atendendo a chamada: janela visivel=%s minimizada=%s "
                      "ativa=%s", self.IsShown(), self.IsIconized(),
                      self.IsActive())
         except Exception:
             pass
+        if com_video:
+            camera = (self.cfg.get("chamada_camera") or "") \
+                if self.cfg.get("video_camera_ao_atender") else None
+            p.atender_chamada(c.conversa_id, mic, saida, camera=camera)
+            return
         p.atender_chamada(c.conversa_id, mic, saida)
 
     @seguro
@@ -3582,24 +3673,30 @@ class Janela(wx.Frame):
     def _escolher_dispositivos(self):
         """Janela de dispositivos de som: vale para tocar, gravar e ligar."""
         mic, saida = self._dispositivos_da_chamada()
-        escolha = ui_dispositivos.escolher(self, mic, saida)
+        escolha = ui_dispositivos.escolher(
+            self, mic, saida, self.cfg.get("notificacao_saida") or "")
         if escolha is None:
             return
-        mic, saida = escolha
-        self._guardar_dispositivos(mic, saida)
+        mic, saida, aviso = escolha
+        self._guardar_dispositivos(mic, saida, aviso)
         c = self.chamada
         p = self._provedor_de_chamada(c.conta_id) if c else None
         if p is not None and c.estado == ch.EM_CHAMADA:
             p.trocar_dispositivos(c.conversa_id, mic, saida)
         self.fala.falar("Dispositivos de som guardados. Saída: %s. "
-                        "Microfone: %s." % (saida or "padrão do Windows",
-                                            mic or "padrão do Windows"),
+                        "Microfone: %s. Sons de aviso: %s." % (
+                            saida or "padrão do Windows",
+                            mic or "padrão do Windows",
+                            aviso or "padrão do Windows"),
                         interromper=True)
 
-    def _guardar_dispositivos(self, microfone, saida):
+    def _guardar_dispositivos(self, microfone, saida, aviso=None):
         self.cfg.set("chamada_microfone", microfone)
         self.cfg.set("chamada_saida", saida)
-        dispositivos.definir(microfone, saida)
+        if aviso is not None:
+            self.cfg.set("notificacao_saida", aviso)
+        dispositivos.definir(microfone, saida,
+                             self.cfg.get("notificacao_saida") or "")
 
     @seguro
     def _trocar_dispositivos(self, microfone, saida):

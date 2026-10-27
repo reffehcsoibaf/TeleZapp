@@ -53,7 +53,7 @@ var (
 	chamadasMu      sync.Mutex
 	chamadasCliente = map[string]*meowcaller.Client{}
 	chamadasEventos = map[string]chan string{}
-	chamadasLogs    = map[string]waLog.Logger{} // log do cliente, para registrar()
+	chamadasLogs    = map[string]waLog.Logger{}  // log do cliente, para registrar()
 	chamadasAtivas  = map[string]*chamadaAtiva{} // chave: id do cliente + "|" + id da chamada
 )
 
@@ -130,6 +130,10 @@ type chamadaAtiva struct {
 	// quadros que passaram, para o log dizer se o som chegou ou saiu
 	recebidos atomic.Int64 // do outro lado (WriteFrame)
 	enviados  atomic.Int64 // do nosso microfone (ReadFrame)
+	// video: unidades de acesso H.264 (Annex-B) que chegam do outro lado
+	// (calls_video.go)
+	video          chan []byte
+	videoRecebidos atomic.Int64
 }
 
 func (c *chamadaAtiva) encerrar() { c.uma.Do(func() { close(c.fim) }) }
@@ -213,6 +217,7 @@ func ligarChamada(cliente string, c *meowcaller.Call, entrante bool) *chamadaAti
 		entrada:  make(chan []byte, quadrosNaFila),
 		saida:    make(chan []byte, quadrosNaFila),
 		fim:      make(chan struct{}),
+		video:    make(chan []byte, videoNaFila),
 	}
 	id := c.ID()
 	chamadasMu.Lock()
@@ -220,6 +225,7 @@ func ligarChamada(cliente string, c *meowcaller.Call, entrante bool) *chamadaAti
 	chamadasMu.Unlock()
 	c.Receive(a)
 	c.Play(a)
+	ligarVideo(cliente, c, a)
 	inicio := time.Now()
 	go func() { // a cada 5 s: quantos quadros ja passaram
 		t := time.NewTicker(5 * time.Second)
@@ -303,7 +309,9 @@ func instalarChamadas(id string) {
 	chamadasMu.Unlock()
 	mc.OnIncomingCall(func(c *meowcaller.Call) {
 		ligarChamada(id, c, true)
-		emitirEvento(id, map[string]any{"ev": "incoming", "call": c.ID(), "peer": c.Peer()})
+		_, grupo := c.GroupState()
+		emitirEvento(id, map[string]any{"ev": "incoming", "call": c.ID(), "peer": c.Peer(),
+			"video": c.IsVideo(), "group": grupo})
 	})
 }
 
@@ -392,7 +400,11 @@ func CallsNextEvent(id *C.char, buf *C.char, cap C.int, timeoutMs C.int) C.int {
 //
 //export CallDial
 func CallDial(id *C.char, target *C.char, buf *C.char, cap C.int) C.int {
-	cliente := C.GoString(id)
+	return discar(C.GoString(id), C.GoString(target), false, buf, cap)
+}
+
+// discar liga para um numero (ou endereco), de voz ou de video.
+func discar(cliente, numero string, video bool, buf *C.char, cap C.int) C.int {
 	chamadasMu.Lock()
 	mc := chamadasCliente[cliente]
 	chamadasMu.Unlock()
@@ -409,7 +421,6 @@ func CallDial(id *C.char, target *C.char, buf *C.char, cap C.int) C.int {
 	}
 	ctx, cancelar := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelar()
-	numero := C.GoString(target)
 	destino := numero
 	if strings.Contains(numero, "@") {
 		// ja e um endereco (ex.: 123@lid): nao ha o que resolver
@@ -426,8 +437,8 @@ func CallDial(id *C.char, target *C.char, buf *C.char, cap C.int) C.int {
 			break
 		}
 	}
-	registrar(cliente, "ligando para %s (pedido: %s)", mascararNumero(destino), mascararNumero(numero))
-	c, err := mc.Call(ctx, destino)
+	registrar(cliente, "ligando para %s (pedido: %s, video=%v)", mascararNumero(destino), mascararNumero(numero), video)
+	c, err := mc.CallWithOptions(ctx, destino, meowcaller.CallOptions{Video: video})
 	if err != nil {
 		registrar(cliente, "a ligacao para %s falhou: %v", mascararNumero(destino), err)
 		return erro(err)

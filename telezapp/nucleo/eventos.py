@@ -220,6 +220,12 @@ class EstadoChamada:
     entrante: bool = False
     motivo: str = ""
     erro: str = ""
+    # video (WhatsApp): a chamada e de video, a nossa camera esta ligada, o
+    # outro lado manda video, e se este provedor sabe fazer video
+    video: bool = False
+    camera: bool = False
+    video_remoto: bool = False
+    suporta_video: bool = False
 
 
 @dataclass

@@ -29,8 +29,9 @@ SEM_RESPOSTA = "sem resposta"
 FALHA = "falha"
 
 # Botoes que a janela da chamada pode mostrar
-ATENDER, RECUSAR, DESLIGAR, SILENCIAR, TEMPO, FECHAR = (
-    "atender", "recusar", "desligar", "silenciar", "tempo", "fechar")
+ATENDER, RECUSAR, DESLIGAR, SILENCIAR, TEMPO, FECHAR, CAMERA = (
+    "atender", "recusar", "desligar", "silenciar", "tempo", "fechar",
+    "camera")
 
 
 def formatar_duracao(segundos):
@@ -68,6 +69,10 @@ class Chamada:
     mudo: bool = False
     inicio_conexao: float = 0.0     # quando entrou em EM_CHAMADA (monotonic)
     erro: str = ""                  # explicacao da falha, ja em portugues
+    video: bool = False             # a chamada e (ou virou) de video
+    camera: bool = False            # a nossa camera esta ligada
+    video_remoto: bool = False      # o outro lado esta mandando video
+    suporta_video: bool = False     # a conta sabe fazer video
     _agora: object = field(default=time.monotonic, repr=False)
 
     @property
@@ -82,6 +87,15 @@ class Chamada:
         if self.estado == EM_CHAMADA and self.inicio_conexao:
             return self._agora() - self.inicio_conexao
         return 0.0
+
+    def aplicar_video(self, video, camera, video_remoto, suporta=None):
+        """Atualiza o que e do video; devolve True se algo mudou."""
+        novo = (bool(video), bool(camera), bool(video_remoto))
+        if suporta is not None:
+            self.suporta_video = bool(suporta)
+        antigo = (self.video, self.camera, self.video_remoto)
+        self.video, self.camera, self.video_remoto = novo
+        return novo != antigo
 
     def aplicar(self, estado, motivo="", erro=""):
         """Muda o estado; devolve True se algo mudou."""
@@ -109,6 +123,51 @@ def _quem(nome):
     return nome or "contato"
 
 
+def rotulo_camera(c):
+    """O botao da camera: liga/desliga a nossa; numa chamada so de voz,
+    ligar pede ao outro lado para passar a video."""
+    if c.camera:
+        return "Desligar a &câmera"
+    return "Ligar a &câmera" if c.video else         "Passar para &vídeo (ligar a câmera)"
+
+
+def fala_camera(camera, video):
+    if camera:
+        return "Câmera ligada."
+    return "Câmera desligada." if video else "Câmera desligada."
+
+
+def fala_do_video(antes, depois, nome):
+    """O que falar quando so o video mudou. `antes` e `depois` sao
+    (video, camera, video_remoto); "" se nada a dizer."""
+    quem = _quem(nome)
+    video0, camera0, remoto0 = antes
+    video1, camera1, remoto1 = depois
+    partes = []
+    if video1 and not video0:
+        partes.append("A chamada passou para vídeo.")
+    if camera1 != camera0:
+        partes.append("Sua câmera foi ligada." if camera1
+                      else "Sua câmera foi desligada.")
+    if remoto1 != remoto0:
+        partes.append("%s ligou a câmera." % quem if remoto1
+                      else "%s desligou a câmera." % quem)
+    return " ".join(partes)
+
+
+def texto_do_video(c):
+    """O que o video da chamada esta fazendo, para a janela e o leitor."""
+    if not c.video:
+        return ""
+    partes = ["Chamada de vídeo."]
+    partes.append("Sua câmera está %s." % ("ligada" if c.camera
+                                          else "desligada"))
+    partes.append("%s %s vídeo." % (
+        _quem(c.nome), "está mandando" if c.video_remoto
+        else "não está mandando"))
+    return " ".join(partes)
+
+
 def texto_encerramento(c):
     """O que aconteceu, em uma frase, para falar e mostrar."""
     quem = _quem(c.nome)
@@ -132,16 +191,19 @@ def apresentar(c):
     """O que mostrar e falar para o estado atual da chamada `c`."""
     quem = _quem(c.nome)
     if c.estado == TOCANDO:
+        de = "Chamada de vídeo de %s" if c.video else "Chamada de %s"
         return Apresentacao(
-            "Chamada de %s" % quem,
-            "%s está ligando para você." % quem,
-            "Chamada de %s. Enter atende, Escape recusa." % quem,
+            de % quem,
+            ("%s está ligando para você por vídeo." if c.video
+             else "%s está ligando para você.") % quem,
+            de % quem + ". Enter atende, Escape recusa.",
             (ATENDER, RECUSAR), ATENDER, "toque")
     if c.estado == CHAMANDO:
+        por_video = " por vídeo" if c.video else ""
         return Apresentacao(
-            "Chamando %s" % quem,
-            "Chamando %s. Esperando atender." % quem,
-            "Chamando %s." % quem,
+            "Chamando %s%s" % (quem, por_video),
+            "Chamando %s%s. Esperando atender." % (quem, por_video),
+            "Chamando %s%s." % (quem, por_video),
             (DESLIGAR,), DESLIGAR, "chamando")
     if c.estado == CONECTANDO:
         return Apresentacao(
@@ -151,11 +213,13 @@ def apresentar(c):
             (DESLIGAR,), DESLIGAR)
     if c.estado == EM_CHAMADA:
         mudo = " Seu microfone está silenciado." if c.mudo else ""
+        video = (" " + texto_do_video(c)) if c.video else ""
+        botoes = (SILENCIAR, CAMERA, TEMPO, DESLIGAR) if c.suporta_video             else (SILENCIAR, TEMPO, DESLIGAR)
         return Apresentacao(
             "Em chamada com %s" % quem,
-            "Em chamada com %s.%s" % (quem, mudo),
-            "Conectado com %s.%s" % (quem, mudo),
-            (SILENCIAR, TEMPO, DESLIGAR), DESLIGAR, "conectado")
+            "Em chamada com %s.%s%s" % (quem, mudo, video),
+            "Conectado com %s.%s%s" % (quem, mudo, video),
+            botoes, DESLIGAR, "conectado")
     texto = texto_encerramento(c)
     return Apresentacao(
         "Chamada encerrada", texto, texto, (FECHAR,), FECHAR, "desligada")

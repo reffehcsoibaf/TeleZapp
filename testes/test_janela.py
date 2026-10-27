@@ -1629,7 +1629,7 @@ class DialogoFalso:
     abertos = []
 
     def __init__(self, pai, chamada, acoes, falar, microfones=(),
-                 saidas=(), microfone="", saida="", ao_fechar=None):
+                 saidas=(), microfone="", saida="", ao_fechar=None, **mais):
         self.chamada, self.acoes, self.falar = chamada, acoes, falar
         self.microfones, self.saidas = list(microfones), list(saidas)
         self.ao_fechar = ao_fechar
@@ -5221,7 +5221,8 @@ def test_escolher_dispositivos_guarda_e_vale_para_tocar_e_gravar(
     from telezapp.midia import dispositivos
     monkeypatch.setattr(
         jm.ui_dispositivos, "escolher",
-        lambda pai, mic, saida: ("Fone (USB)", "Alto-falantes"))
+        lambda pai, mic, saida, aviso: ("Fone (USB)", "Alto-falantes",
+                                        "Caixa (Bluetooth)"))
     ditas = []
     j.fala.falar = lambda t, interromper=False: ditas.append(t)
     try:
@@ -5230,15 +5231,18 @@ def test_escolher_dispositivos_guarda_e_vale_para_tocar_e_gravar(
         assert j.cfg.get("chamada_saida") == "Alto-falantes"
         assert dispositivos.microfone() == "Fone (USB)"
         assert dispositivos.saida() == "Alto-falantes"
-        assert any("Alto-falantes" in t for t in ditas)
+        assert j.cfg.get("notificacao_saida") == "Caixa (Bluetooth)"
+        assert dispositivos.notificacao() == "Caixa (Bluetooth)"
+        assert any("Alto-falantes" in t and "Caixa (Bluetooth)" in t
+                   for t in ditas)
     finally:
-        dispositivos.definir("", "")
+        dispositivos.definir("", "", "")
 
 
 def test_escolher_dispositivos_cancelado_nao_muda_nada(j, monkeypatch):
     from telezapp.midia import dispositivos
     monkeypatch.setattr(jm.ui_dispositivos, "escolher",
-                        lambda pai, mic, saida: None)
+                        lambda pai, mic, saida, aviso: None)
     j._escolher_dispositivos()
     assert j.cfg.get("chamada_microfone") == ""
     assert dispositivos.microfone() == ""
@@ -5779,3 +5783,97 @@ def test_nova_mensagem_escolhe_grupo_sem_conversa_e_abre_como_grupo(
     assert ("g9@g.us", "Grupo novo", "grupo") in achados["tudo"]
     assert j.atual == ("t1", "g9@g.us")
     assert j.indice[("t1", "g9@g.us")].tipo == "grupo"
+
+
+# ---------------------------------------------------------------- video
+def com_video(chamadas):
+    p = chamadas.p
+    p.suporta_video = True
+    p.cameras = lambda: ["Câmera A", "Câmera B"]
+    p.destino = []
+    p.definir_destino_video = lambda f: p.destino.append(f)
+    for nome in ("ligar_camera", "desligar_camera"):
+        setattr(p, nome, lambda *a, _n=nome: p.comandos.append((_n,) + a))
+    p.ligar = lambda *a, **k: p.comandos.append(("ligar", a, k))
+    p.atender_chamada = lambda *a, **k: p.comandos.append(("atender", a, k))
+    return p
+
+
+def test_ligar_com_video_pede_video_com_a_camera_escolhida(chamadas):
+    j = chamadas.j
+    p = com_video(chamadas)
+    j.cfg.set("chamada_camera", "Câmera B")
+    j.atual = ("t1", "10")
+    j._ligar(video=True)
+    assert p.comandos == [("ligar", ("10", "", ""),
+                           {"video": True, "camera": "Câmera B"})]
+    assert p.destino                           # recebe os quadros do outro
+
+
+def test_ligar_com_video_sem_suporte_avisa(chamadas):
+    j = chamadas.j
+    j.atual = ("t1", "10")
+    j._ligar(video=True)
+    assert any("não faz chamadas de vídeo" in f for f in chamadas.falas)
+    assert chamadas.p.comandos == []
+
+
+def test_atender_chamada_de_video_comeca_sem_camera(chamadas):
+    j = chamadas.j
+    p = com_video(chamadas)
+    j.b.publicar(ev.EstadoChamada("t1", "10", "tocando", "Ana", True,
+                                  video=True, suporta_video=True))
+    j._atender_chamada()
+    assert p.comandos == [("atender", ("10", "", ""), {"camera": None})]
+
+
+def test_atender_chamada_de_video_com_a_opcao_liga_a_camera(chamadas):
+    j = chamadas.j
+    p = com_video(chamadas)
+    j.cfg.set("video_camera_ao_atender", True)
+    j.cfg.set("chamada_camera", "Câmera A")
+    j.b.publicar(ev.EstadoChamada("t1", "10", "tocando", "Ana", True,
+                                  video=True, suporta_video=True))
+    j._atender_chamada()
+    assert p.comandos == [("atender", ("10", "", ""),
+                           {"camera": "Câmera A"})]
+
+
+def test_botao_da_camera_liga_e_desliga(chamadas):
+    j = chamadas.j
+    p = com_video(chamadas)
+    j.b.publicar(ev.EstadoChamada("t1", "10", "em chamada", "Ana", False,
+                                  video=True, suporta_video=True))
+    j._alternar_camera()
+    j.b.publicar(ev.EstadoChamada("t1", "10", "em chamada", "Ana", False,
+                                  video=True, camera=True,
+                                  suporta_video=True))
+    j._alternar_camera()
+    assert p.comandos == [("ligar_camera", "10", ""),
+                          ("desligar_camera", "10")]
+
+
+def test_video_que_muda_e_falado_sem_repetir_o_estado(chamadas):
+    j = chamadas.j
+    com_video(chamadas)
+    j.b.publicar(ev.EstadoChamada("t1", "10", "em chamada", "Ana", False,
+                                  suporta_video=True))
+    chamadas.falas.clear()
+    j.b.publicar(ev.EstadoChamada("t1", "10", "em chamada", "Ana", False,
+                                  video=True, video_remoto=True,
+                                  suporta_video=True))
+    assert chamadas.falas == [
+        "A chamada passou para vídeo. Ana ligou a câmera."]
+
+
+def test_quadro_de_video_vai_para_a_janela_da_chamada(chamadas, monkeypatch):
+    j = chamadas.j
+    com_video(chamadas)
+    vistos = []
+    j.b.publicar(ev.EstadoChamada("t1", "10", "em chamada", "Ana", False,
+                                  video=True, suporta_video=True))
+    j.dlg_chamada.mostrar_quadro = lambda *a: vistos.append(a)
+    monkeypatch.setattr(jm.wx, "CallAfter", lambda f, *a: f(*a))
+    j._ao_quadro_de_video("10", 2, 1, b"\0" * 6)
+    j._ao_quadro_de_video("10", 2, 1, b"\1" * 6)
+    assert vistos == [(2, 1, b"\0" * 6), (2, 1, b"\1" * 6)]

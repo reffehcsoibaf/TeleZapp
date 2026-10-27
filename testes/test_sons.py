@@ -217,3 +217,51 @@ def test_eventos_novos_herdam_o_som_certo_e_tem_bip_proprio():
     assert fala.tom_padrao("voto_enviado") == "enviada"
     for evento in ("gravando", "voto_enquete", "escondido", "voltou"):
         assert fala.tom_padrao(evento) == evento
+
+
+def test_aviso_no_dispositivo_escolhido_toca_pelo_sounddevice(monkeypatch):
+    tocados, beeps = [], []
+    monkeypatch.setitem(sys.modules, "sounddevice", types.SimpleNamespace(
+        play=lambda dados, taxa, device=None: tocados.append(
+            (len(dados), taxa, device))))
+    monkeypatch.setattr(fala, "winsound", types.SimpleNamespace(
+        Beep=lambda f, ms: beeps.append(f)))
+    monkeypatch.setattr(fala, "_indice_dos_avisos", lambda: 7)
+    fala._tocar("nova")
+    assert beeps == []                         # nao foi pelo winsound
+    quadros, taxa, dispositivo = tocados[0]
+    assert dispositivo == 7 and taxa == fala.TAXA_SINTETICA
+    assert quadros == int(taxa * 0.09) + int(taxa * 0.12)
+
+
+def test_aviso_sem_dispositivo_escolhido_segue_no_winsound(monkeypatch):
+    beeps = []
+    monkeypatch.setattr(fala, "winsound", types.SimpleNamespace(
+        Beep=lambda f, ms: beeps.append((f, ms))))
+    monkeypatch.setattr(fala, "_indice_dos_avisos", lambda: None)
+    fala._tocar("nova")
+    assert beeps == [(880, 90), (1175, 120)]
+
+
+def test_arquivo_de_aviso_vai_para_o_dispositivo_escolhido(tmp_path,
+                                                           monkeypatch):
+    tocados = []
+    monkeypatch.setitem(sys.modules, "sounddevice", types.SimpleNamespace(
+        play=lambda dados, taxa, device=None: tocados.append(device)))
+    monkeypatch.setattr(fala, "_indice_dos_avisos", lambda: 3)
+    fala._tocar_arquivo("nova", wav(tmp_path / "a.wav"))
+    assert tocados == [3]
+
+
+def test_dispositivo_dos_avisos_guarda_e_nao_mexe_nos_outros():
+    from telezapp.midia import dispositivos
+    try:
+        dispositivos.definir("Mic", "Saida", "Caixa")
+        assert dispositivos.notificacao() == "Caixa"
+        dispositivos.definir("Mic2", "Saida2")           # sem mexer no aviso
+        assert dispositivos.notificacao() == "Caixa"
+        assert dispositivos.microfone() == "Mic2"
+        dispositivos.definir("", "", "")
+        assert dispositivos.notificacao() == ""
+    finally:
+        dispositivos.definir("", "", "")

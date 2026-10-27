@@ -24,6 +24,26 @@ def etapa(log, nome):
              time.monotonic() - _INICIO)
 
 
+STD_ERROR_HANDLE = -12
+
+
+def redirecionar_erro_nativo(arquivo):
+    """Faz a saida de erro do Windows (a que o Go e o C usam, sem terminal)
+    escrever no arquivo. Devolve a saida anterior, para quem quiser voltar."""
+    if sys.platform != "win32":
+        return None
+    import ctypes
+    import msvcrt
+    k = ctypes.windll.kernel32
+    k.GetStdHandle.restype = ctypes.c_void_p
+    k.GetStdHandle.argtypes = [ctypes.c_uint32]
+    k.SetStdHandle.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
+    anterior = k.GetStdHandle(STD_ERROR_HANDLE & 0xFFFFFFFF)
+    k.SetStdHandle(STD_ERROR_HANDLE & 0xFFFFFFFF,
+                   msvcrt.get_osfhandle(arquivo.fileno()))
+    return anterior
+
+
 def tempo_ligado():
     """Segundos desde que o Windows foi ligado (None fora do Windows)."""
     try:
@@ -137,6 +157,10 @@ def main():
         # sem janela de terminal o stderr do processo vai para o nada: o que
         # as DLLs (a do WhatsApp, em Go) escrevem ao cair fica neste arquivo
         os.dup2(_ARQUIVO_FALHA.fileno(), 2)
+        # o Go escreve a falha fatal na saida de erro do Windows, nao no
+        # descritor 2 do Python: sem isto o motivo da queda se perde
+        os.environ.setdefault("GOTRACEBACK", "all")
+        redirecionar_erro_nativo(_ARQUIVO_FALHA)
     except Exception:
         log.exception("não foi possível ativar o registro de falhas nativas")
     # a marca some no fim normal; se ainda existir, a vez anterior caiu
@@ -258,8 +282,6 @@ def main():
         from telezapp.nucleo import inicializacao
         inicializacao.definir(True)      # mantem o caminho em dia
     if sinal:
-        import threading
-
         threading.Thread(target=_vigiar_aviso,
                          args=(sinal, janela, instancia),
                          daemon=True, name="aviso-de-abertura").start()

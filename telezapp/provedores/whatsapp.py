@@ -960,6 +960,7 @@ class ProvedorWhatsApp(Provedor):
         self._pareando = False      # QR ou codigo em andamento
         self._chamadas = {}         # id da chamada -> dados (so aviso)
         self._voz = None            # ChamadasWhatsApp, se as chamadas estao ligadas
+        self._destino_video = None  # f(cid, largura, altura, rgb), da janela
         self._disponivel = False    # presenca "disponivel" enviada
         self._observadas = {}       # JID da conversa observada -> conversa_id
         self._presenca_cid = None   # a conversa aberta com presenca
@@ -4517,8 +4518,10 @@ class ProvedorWhatsApp(Provedor):
                 Ponte(self.cliente.uuid), self.conta.id, self.barramento,
                 self._conversa_do_peer, self._nome_da_conversa,
                 self._destino_da_chamada)
+            self._voz.destino_video = self._destino_video
             self._voz.iniciar()
-            log.info("chamadas de voz do WhatsApp ligadas")
+            log.info("chamadas de voz do WhatsApp ligadas (video: %s)",
+                     "sim" if self._voz.suporta_video else "não")
         except Exception:
             log.exception("erro ao preparar as chamadas do WhatsApp")
             self._voz = None
@@ -4545,11 +4548,33 @@ class ProvedorWhatsApp(Provedor):
                          args=(conversa_id,) + args, daemon=True,
                          name="chamada-" + metodo).start()
 
-    def ligar(self, conversa_id, microfone="", saida=""):
-        self._comando_de_chamada("ligar", conversa_id, microfone, saida)
+    def ligar(self, conversa_id, microfone="", saida="", video=False,
+              camera=None):
+        self._comando_de_chamada("ligar", conversa_id, microfone, saida,
+                                 video, camera)
 
-    def atender_chamada(self, conversa_id, microfone="", saida=""):
-        self._comando_de_chamada("atender", conversa_id, microfone, saida)
+    def atender_chamada(self, conversa_id, microfone="", saida="",
+                        camera=None):
+        self._comando_de_chamada("atender", conversa_id, microfone, saida,
+                                 camera)
+
+    @property
+    def suporta_video(self):
+        return self._voz is not None and self._voz.suporta_video
+
+    def cameras(self):
+        return self._voz.cameras() if self._voz is not None else []
+
+    def ligar_camera(self, conversa_id, nome=""):
+        self._comando_de_chamada("ligar_camera", conversa_id, nome)
+
+    def desligar_camera(self, conversa_id):
+        self._comando_de_chamada("desligar_camera", conversa_id)
+
+    def definir_destino_video(self, destino):
+        self._destino_video = destino
+        if self._voz is not None:
+            self._voz.destino_video = destino
 
     def encerrar_chamada(self, conversa_id):
         self._comando_de_chamada("encerrar", conversa_id)

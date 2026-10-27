@@ -535,6 +535,13 @@ OPCOES = (
           "Diminui ruídos constantes captados pelo microfone, como "
           "ventilador, ar-condicionado e chiado. Vale a partir da próxima "
           "chamada."),
+    Opcao("video_camera_ao_atender", "Ligar a câmera ao atender uma chamada "
+          "de vídeo", "Mídias", False,
+          "Desmarcada, ao atender uma chamada de vídeo a sua câmera fica "
+          "desligada: você ouve e vê a outra pessoa, mas ela não vê você, e "
+          "a câmera pode ser ligada na janela da chamada. Marcada, a câmera "
+          "liga junto com a chamada. Quem liga uma chamada de vídeo sempre "
+          "começa com a câmera ligada."),
     Opcao("midias_baixar", "Quando baixar as mídias", "Mídias", "demanda",
           "Sob demanda baixa só quando você abre a mídia. Automático baixa "
           "ao receber, até o limite escolhido.",
@@ -718,6 +725,8 @@ PADROES.update({
     "contas": [],            # [{"id", "servico", "telefone", "nome"}]
     "chamada_microfone": "",     # nome do microfone usado nas chamadas
     "chamada_saida": "",         # nome da saida de som das chamadas
+    "chamada_camera": "",        # nome da camera das chamadas de video
+    "notificacao_saida": "",     # nome da saida dos sons de aviso do app
     "telegram_api_id": 0,
     "telegram_api_hash": "",
     "filtro_conversas": "todas",   # tipo escolhido na janela principal

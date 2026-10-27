@@ -25,6 +25,7 @@ import time
 
 from telezapp.nucleo import chamadas as ch
 from telezapp.midia import eco as midia_eco
+from telezapp.midia import video as midia_video
 from telezapp.midia import prioridade
 from telezapp.nucleo import eventos as ev
 
@@ -39,6 +40,11 @@ LIMITE_DE_FALHAS = 20            # erros seguidos do som ate desistir
 ESPERA_AUDIO_S = 20              # atendida, mas sem som do outro lado
 QUADROS_POR_REGISTRO = 83        # um registro do eco a cada 5 s (quadros de 60 ms)
 FASE_CONECTANDO = 3              # CallPhase do meowcaller: Connecting
+BYTES_DO_VIDEO = 512 * 1024      # uma unidade de acesso H.264 cabe com folga
+FIM_DO_VIDEO = -2                # retorno da DLL: a chamada acabou
+# CallVideo: o que fazer com o video da chamada
+VIDEO_PEDIR, VIDEO_ACEITAR, VIDEO_PARAR, VIDEO_LIGAR, VIDEO_DESLIGAR = (
+    1, 2, 3, 4, 5)
 SEM_AUDIO = ("A chamada foi atendida, mas o som do outro lado não chegou. "
              "Pode ser a rede ou o firewall do Windows bloqueando o áudio "
              "da chamada. Veja se o TeleZapp está liberado no firewall e "
@@ -97,6 +103,19 @@ class Ponte:
         g.CallWriteAudio.restype = c.c_int
         self._buf_ev = ctypes.create_string_buffer(4096)
         self._buf_audio = ctypes.create_string_buffer(BYTES_POR_QUADRO)
+        if self.suporta_video():
+            g.CallDialWith.argtypes = [c.c_char_p, c.c_char_p, c.c_int,
+                                       c.c_char_p, c.c_int]
+            g.CallDialWith.restype = c.c_int
+            g.CallVideo.argtypes = [c.c_char_p, c.c_char_p, c.c_int]
+            g.CallVideo.restype = c.c_int
+            g.CallWriteVideo.argtypes = [c.c_char_p, c.c_char_p, c.c_char_p,
+                                         c.c_int, c.c_int]
+            g.CallWriteVideo.restype = c.c_int
+            g.CallReadVideo.argtypes = [c.c_char_p, c.c_char_p, c.c_char_p,
+                                        c.c_int, c.c_int]
+            g.CallReadVideo.restype = c.c_int
+            self._buf_video = ctypes.create_string_buffer(BYTES_DO_VIDEO)
 
     def ligada(self):
         return self.go.CallsEnabled(self.uuid) == 1
@@ -109,16 +128,43 @@ class Ponte:
             return json.loads(self._buf_ev.value.decode("utf-8"))
         return False if n < 0 else None
 
-    def ligar(self, destino):
+    def suporta_video(self):
+        """True se a DLL tem as funcoes de video das chamadas."""
+        return all(hasattr(self.go, n) for n in (
+            "CallDialWith", "CallVideo", "CallWriteVideo", "CallReadVideo"))
+
+    def ligar(self, destino, video=False):
         """(id_da_chamada, peer, erro)."""
         buf = ctypes.create_string_buffer(1024)
-        n = self.go.CallDial(self.uuid, destino.encode(), buf, 1024)
+        if video:
+            n = self.go.CallDialWith(self.uuid, destino.encode(), 1, buf,
+                                     1024)
+        else:
+            n = self.go.CallDial(self.uuid, destino.encode(), buf, 1024)
         if n <= 0:
             return "", "", "A DLL não respondeu."
         r = json.loads(buf.value.decode("utf-8"))
         if "call" not in r:
             return "", "", r.get("error", "erro desconhecido")
         return r["call"], r.get("peer", ""), ""
+
+    def video(self, chamada, acao):
+        """Pedir, aceitar ou parar o video; ligar ou desligar a camera."""
+        return self.go.CallVideo(self.uuid, chamada.encode(), acao) == 0
+
+    def escrever_video(self, chamada, unidade, duracao_ms=100):
+        """False ate o outro lado confirmar o nosso video."""
+        return self.go.CallWriteVideo(self.uuid, chamada.encode(), unidade,
+                                      len(unidade), duracao_ms) == 0
+
+    def ler_video(self, chamada, espera_ms=500):
+        """Bytes de uma unidade de acesso, None (nada a tempo) ou False
+        (a chamada acabou)."""
+        n = self.go.CallReadVideo(self.uuid, chamada.encode(),
+                                  self._buf_video, BYTES_DO_VIDEO, espera_ms)
+        if n > 0:
+            return self._buf_video.raw[:n]
+        return False if n == FIM_DO_VIDEO else None
 
     def atender(self, chamada):
         return self.go.CallAnswer(self.uuid, chamada.encode()) == 0
@@ -212,6 +258,10 @@ class _Ligacao:
         self.trocar_mic = threading.Event()
         self.trocar_saida = threading.Event()
         self.threads = []
+        self.camera_nome = None         # None = camera desligada; "" = a 1a
+        self.camera = None              # midia.video.Camera
+        self.codificador = None         # midia.video.Codificador
+        self.recebendo_video = False
 
 
 class ChamadasWhatsApp:
@@ -229,6 +279,8 @@ class ChamadasWhatsApp:
         self.audio = audio or Audio()
         self.espera_s = espera_s
         self.espera_audio_s = espera_audio_s
+        self.destino_video = None       # f(cid, largura, altura, rgb), da janela
+        self.video = midia_video        # trocavel nos testes
         self.ligacoes = {}              # id da conversa -> _Ligacao
         self._trava = threading.RLock()
         self._parar = threading.Event()
@@ -255,6 +307,19 @@ class ChamadasWhatsApp:
         except Exception:
             return False
 
+    @property
+    def suporta_video(self):
+        try:
+            return self.ponte.suporta_video() and self.video.disponivel()
+        except Exception:
+            return False
+
+    def cameras(self):
+        try:
+            return self.video.listar_cameras()
+        except Exception:
+            return []
+
     def atualizar_dispositivos(self):
         try:
             self._nomes = self.audio.listar()
@@ -267,9 +332,11 @@ class ChamadasWhatsApp:
 
     # --------------------------------------------------------- estados
     def _publicar(self, c):
+        c.suporta_video = self.suporta_video
         self.barramento.publicar(ev.EstadoChamada(
             self.conta_id, str(c.conversa_id), c.estado, c.nome, c.entrante,
-            c.motivo, c.erro))
+            c.motivo, c.erro, c.video, c.camera, c.video_remoto,
+            c.suporta_video))
 
     def _mudar(self, cid, estado, motivo="", erro=""):
         with self._trava:
@@ -279,6 +346,7 @@ class ChamadasWhatsApp:
             c = lig.chamada
             if estado == ch.ENCERRADA:
                 lig.parar.set()
+                self._parar_camera(lig)
                 self.ligacoes.pop(cid, None)
         self._publicar(c)
 
@@ -311,7 +379,16 @@ class ChamadasWhatsApp:
     def _tratar(self, e):
         tipo, call_id = e.get("ev"), e.get("call", "")
         if tipo == "incoming":
-            self._ao_receber(call_id, e.get("peer", ""))
+            self._ao_receber(call_id, e.get("peer", ""),
+                             bool(e.get("video")))
+        elif tipo == "video":
+            cid, lig = self._achar(call_id)
+            if lig is not None:
+                self._ao_video_do_outro(cid, lig, e)
+        elif tipo == "keyframe":
+            cid, lig = self._achar(call_id)
+            if lig is not None and lig.codificador is not None:
+                lig.codificador.pedir_quadro_chave()
         elif tipo == "state":
             fase = e.get("phase")
             log.info("chamada %s: fase %s", call_id, fase)
@@ -331,6 +408,7 @@ class ChamadasWhatsApp:
                 log.info("chamada %s: som do outro lado chegando", call_id)
                 self._mudar(cid, ch.EM_CHAMADA)
                 self._iniciar_audio(cid, lig)
+                self._iniciar_video(cid, lig)
         elif tipo == "end":
             cid, lig = self._achar(call_id)
             if lig is not None:
@@ -368,7 +446,7 @@ class ChamadasWhatsApp:
         threading.Thread(target=vigia, name="chamada-vigia-audio",
                          daemon=True).start()
 
-    def _ao_receber(self, call_id, peer):
+    def _ao_receber(self, call_id, peer, video=False):
         cid = self.conversa_do_peer(peer)
         with self._trava:
             ocupado = bool(self.ligacoes)
@@ -381,7 +459,8 @@ class ChamadasWhatsApp:
         except Exception:
             nome = ""
         self.atualizar_dispositivos()
-        c = ch.Chamada(self.conta_id, cid, nome, True, ch.TOCANDO)
+        c = ch.Chamada(self.conta_id, cid, nome, True, ch.TOCANDO,
+                       video=bool(video))
         with self._trava:
             self.ligacoes[cid] = _Ligacao(c, call_id)
         self._publicar(c)
@@ -405,7 +484,9 @@ class ChamadasWhatsApp:
         self._mudar(cid, ch.ENCERRADA, motivo, erro)
 
     # ------------------------------------------------------- saida
-    def ligar(self, cid, microfone="", saida=""):
+    def ligar(self, cid, microfone="", saida="", video=False, camera=None):
+        """`video`: chamada de video; `camera`: o nome da camera (vazio = a
+        primeira) ou None para comecar com ela desligada."""
         with self._trava:
             if self.ligacoes:
                 log.info("já existe uma chamada; ligar ignorado")
@@ -414,9 +495,12 @@ class ChamadasWhatsApp:
                 nome = self.nome_de(cid)
             except Exception:
                 nome = ""
-            c = ch.Chamada(self.conta_id, cid, nome, False, ch.CHAMANDO)
+            video = bool(video) and self.suporta_video
+            c = ch.Chamada(self.conta_id, cid, nome, False, ch.CHAMANDO,
+                           video=video)
             lig = _Ligacao(c)
             lig.mic, lig.saida = microfone, saida
+            lig.camera_nome = camera if video else None
             self.ligacoes[cid] = lig
         self.atualizar_dispositivos()
         self._publicar(c)
@@ -424,7 +508,8 @@ class ChamadasWhatsApp:
                          name="chamada-discar", daemon=True).start()
 
     def _discar(self, cid, lig):
-        call_id, _peer, erro = self.ponte.ligar(self.destino_de(cid))
+        call_id, _peer, erro = self.ponte.ligar(self.destino_de(cid),
+                                                lig.chamada.video)
         if erro:
             log.warning("não foi possível ligar: %s", erro)
             self._mudar(cid, ch.ENCERRADA, ch.FALHA,
@@ -452,12 +537,13 @@ class ChamadasWhatsApp:
                          daemon=True).start()
 
     # ----------------------------------------------------- controles
-    def atender(self, cid, microfone="", saida=""):
+    def atender(self, cid, microfone="", saida="", camera=None):
         with self._trava:
             lig = self.ligacoes.get(cid)
             if lig is None or lig.chamada.estado != ch.TOCANDO:
                 return
             lig.mic, lig.saida = microfone, saida
+            lig.camera_nome = camera if lig.chamada.video else None
         self._mudar(cid, ch.CONECTANDO)
         self._vigiar_audio(cid, lig)
         if not self.ponte.atender(lig.call_id):
@@ -502,6 +588,143 @@ class ChamadasWhatsApp:
             lig.trocar_mic.set()
         if saida:
             lig.trocar_saida.set()
+
+    # ----------------------------------------------------------- video
+    def _iniciar_video(self, cid, lig):
+        """Chamada de video que conectou: comeca a ler o video do outro lado
+        e, se a camera foi pedida, a ligar."""
+        if not lig.chamada.video or not self.suporta_video:
+            return
+        self._receber_video_em_segundo_plano(cid, lig)
+        if lig.camera_nome is not None:
+            self._iniciar_camera(cid, lig, lig.camera_nome)
+
+    def _marcar_video(self, cid, lig, video=None, camera=None, remoto=None):
+        """Muda o que e do video na chamada e avisa a janela se mudou."""
+        with self._trava:
+            c = lig.chamada
+            mudou = c.aplicar_video(
+                c.video if video is None else video,
+                c.camera if camera is None else camera,
+                c.video_remoto if remoto is None else remoto)
+        if mudou:
+            self._publicar(c)
+        return mudou
+
+    def _ao_video_do_outro(self, cid, lig, e):
+        """O outro lado ligou ou desligou a camera, ou pediu para passar a
+        chamada para video (aceito na hora; a nossa camera continua como
+        estava)."""
+        if e.get("upgrade"):
+            if self.suporta_video and self.ponte.video(lig.call_id,
+                                                       VIDEO_ACEITAR):
+                log.info("chamada %s: o outro lado pediu video; aceito",
+                         lig.call_id)
+            else:
+                log.warning("chamada %s: não consegui aceitar o video do "
+                            "outro lado", lig.call_id)
+        if e.get("upgrade") or e.get("active"):
+            self._marcar_video(cid, lig, video=True,
+                               remoto=bool(e.get("active")))
+            if lig.chamada.estado in (ch.CONECTANDO, ch.EM_CHAMADA):
+                self._receber_video_em_segundo_plano(cid, lig)
+        else:
+            self._marcar_video(cid, lig, remoto=False)
+
+    def _receber_video_em_segundo_plano(self, cid, lig):
+        with self._trava:
+            if lig.recebendo_video:
+                return
+            lig.recebendo_video = True
+        t = threading.Thread(target=self._receber_video, args=(cid, lig),
+                             name="chamada-video", daemon=True)
+        lig.threads.append(t)
+        t.start()
+
+    def _receber_video(self, cid, lig):
+        """DLL -> decodificador -> a janela."""
+        try:
+            dec = self.video.Decodificador()
+            while not lig.parar.is_set():
+                unidade = self.ponte.ler_video(lig.call_id, 500)
+                if unidade is False:
+                    break
+                if not unidade:
+                    continue
+                for largura, altura, rgb in dec.decodificar(unidade):
+                    if not lig.chamada.video_remoto:
+                        self._marcar_video(cid, lig, video=True, remoto=True)
+                    if self.destino_video is not None:
+                        self.destino_video(cid, largura, altura, rgb)
+        except Exception:
+            log.exception("erro ao receber o vídeo da chamada")
+        finally:
+            lig.recebendo_video = False
+            log.info("vídeo do outro lado encerrado")
+
+    def _iniciar_camera(self, cid, lig, nome):
+        """Abre a camera `nome` (vazio = a primeira) e manda o video."""
+        if lig.camera is not None:
+            return True
+        escolhida = nome or next(iter(self.cameras()), "")
+        if not escolhida:
+            log.warning("nenhuma câmera encontrada")
+            self.barramento.publicar(ev.Aviso(
+                self.conta_id, "Não encontrei nenhuma câmera neste "
+                "computador.", False))
+            return False
+        lig.codificador = self.video.Codificador()
+
+        def ao_quadro(quadro):
+            for unidade in lig.codificador.codificar(quadro):
+                self.ponte.escrever_video(lig.call_id, unidade,
+                                          self.video.QUADRO_MS)
+        lig.camera = self.video.Camera(escolhida, ao_quadro)
+        lig.camera.iniciar()
+        log.info("câmera ligada (%s)", escolhida)
+        self._marcar_video(cid, lig, camera=True)
+        return True
+
+    def _parar_camera(self, lig):
+        camera, lig.camera = lig.camera, None
+        if camera is not None:
+            camera.parar()
+        if lig.codificador is not None:
+            lig.codificador.fechar()
+            lig.codificador = None
+
+    def ligar_camera(self, cid, nome=""):
+        """Liga a nossa camera. Numa chamada so de voz, pede ao outro lado
+        para passar a video."""
+        with self._trava:
+            lig = self.ligacoes.get(cid)
+        if lig is None or lig.chamada.estado != ch.EM_CHAMADA or \
+                not self.suporta_video:
+            return
+        lig.camera_nome = nome
+        if not lig.chamada.video:
+            if not self.ponte.video(lig.call_id, VIDEO_PEDIR):
+                self.barramento.publicar(ev.Aviso(
+                    self.conta_id, "Não consegui passar a chamada para "
+                    "vídeo.", False))
+                return
+            self._marcar_video(cid, lig, video=True)
+            self._receber_video_em_segundo_plano(cid, lig)
+        else:
+            self.ponte.video(lig.call_id, VIDEO_LIGAR)
+        self._iniciar_camera(cid, lig, nome)
+
+    def desligar_camera(self, cid):
+        """Desliga a nossa camera; a chamada segue (de video, sem a nossa
+        imagem)."""
+        with self._trava:
+            lig = self.ligacoes.get(cid)
+        if lig is None or lig.camera is None:
+            return
+        self._parar_camera(lig)
+        lig.camera_nome = None
+        self.ponte.video(lig.call_id, VIDEO_DESLIGAR)
+        self._marcar_video(cid, lig, camera=False)
 
     # ----------------------------------------------------------- audio
     def _iniciar_audio(self, cid, lig):
