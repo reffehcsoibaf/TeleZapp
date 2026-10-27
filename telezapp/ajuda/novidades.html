@@ -15,6 +15,8 @@
 <section>
 <h2>Versão 2026.10.27.0</h2>
 <ul>
+<li>Corrigido: o TeleZapp podia fechar sozinho logo depois de abrir quando havia mais de uma conta do WhatsApp (duas contas conectando ao mesmo tempo derrubavam o programa). Se acontecer, o arquivo falha-nativa.log, na pasta de registros, agora guarda o motivo.</li>
+<li>Corrigido: as mensagens enviadas no WhatsApp podiam chegar à outra pessoa com o selo "IA" e botões de avaliação. O selo agora fica desligado por padrão, mesmo que a variável de controle falte.</li>
 <li>Contatos: o botão "Trazer das contas" virou a caixa "Obter os contatos das contas ao abrir o TeleZapp", marcada por padrão (também em Configurações, Interface). Ao conectar cada conta, os contatos dela entram na agenda do TeleZapp, e as conversas aparecem com o nome e não com o número. Quem não quiser sincronizar desmarca a caixa. Marcá-la na janela Contatos traz os contatos na hora.</li>
 <li>Encaminhar e Nova mensagem agora mostram os grupos de que a conta participa, mesmo os que ainda não têm conversa na lista. As duas janelas ganharam a caixa Mostrar: contatos, conversas e grupos, só contatos, só conversas ou só grupos.</li>
 <li>Busca por critérios: um botão novo, entre o campo de busca e o Sair, abre uma janela para achar mensagens guardadas combinando critérios que você marca: texto (com frase exata), serviço, conta, tipo e situação da conversa, nome da conversa, tipo de mensagem, características (favorita, com link, resposta, editada, ouvida...), quem enviou, período, duração, tamanho do arquivo e estado do envio. Enter no resultado abre a conversa na mensagem.</li>
