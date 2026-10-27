@@ -1159,7 +1159,7 @@ class Janela(wx.Frame):
         self.caixa = wx.TextCtrl(painel,
                                  style=wx.TE_MULTILINE | wx.TE_PROCESS_ENTER,
                                  name="Digite sua mensagem")
-        self.botao_enviar = wx.Button(painel, label="&Enviar")
+        self.botao_enviar = wx.Button(painel, label="Enviar")
         # sem tecla de acesso: Alt abre o Menu e as letras ja estao em uso
         self.botao_anexar = wx.Button(painel, label="Anexar e enviar arquivo")
         self.botao_mic = wx.Button(painel, label="Gravar do microfone")
@@ -1173,7 +1173,7 @@ class Janela(wx.Frame):
             (rot_busca, "Buscar conversa", "buscar_conv", ""),
             (self.botao_sair, "Sair", "sair", ""),
             (rot_conv, "Conversas", "ir_conv", ""),
-            (self.botao_enviar, "&Enviar", "enviar_msg", ""),
+            (self.botao_enviar, "Enviar", "enviar_msg", ""),
             (self.botao_anexar, "Anexar e enviar arquivo", "anexar", ""),
             (self.botao_mic, "Gravar do microfone", "gravar_mic", ""),
             (self.botao_som, "Gravar som do computador", "gravar_som", ""),

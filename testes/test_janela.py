@@ -4407,11 +4407,11 @@ def test_enviar_sem_a_opcao_nao_consulta_o_corretor(j, monkeypatch):
 def test_menus_mostram_o_atalho_e_a_opcao_esconde(j):
     assert j.itens["ir_caixa"].rotulo.endswith("\tCtrl+E")
     assert j.atalhos.efetivo("ir_caixa") == "Ctrl+E"
-    assert j.botao_enviar.GetLabel() == "&Enviar (Enter)"
+    assert j.botao_enviar.GetLabel() == "Enviar (Enter)"
     assert j.botao_anexar.GetLabel() == "Anexar e enviar arquivo (Ctrl+Shift+A)"
     j._aplicar_opcao("mostrar_atalhos", False)
     assert "\t" not in j.itens["ir_caixa"].rotulo
-    assert j.botao_enviar.GetLabel() == "&Enviar"
+    assert j.botao_enviar.GetLabel() == "Enviar"
     # os atalhos seguem valendo, pela tabela de aceleracao
     assert len(j.tabela_de_aceleracao.entradas) > 10
     j._aplicar_opcao("mostrar_atalhos", True)
@@ -4696,16 +4696,16 @@ def test_por_padrao_enter_quebra_a_linha_e_control_enter_envia(j):
     j._enviar_texto()
     assert ("enviar", "20", "linha um", "") in j.contas.p.pedidos
     j._rotular_controles()
-    assert j.botao_enviar.GetLabel() == "&Enviar (Ctrl+Enter)"
+    assert j.botao_enviar.GetLabel() == "Enviar (Ctrl+Enter)"
 
 
 def test_com_a_opcao_enter_envia_e_o_botao_diz_enter(j):
     j.cfg.set("enter_envia", False)
     j._rotular_controles()
-    assert j.botao_enviar.GetLabel() == "&Enviar (Ctrl+Enter)"
+    assert j.botao_enviar.GetLabel() == "Enviar (Ctrl+Enter)"
     j._aplicar_opcao("enter_envia", True)
     j._rotular_controles()
-    assert j.botao_enviar.GetLabel() == "&Enviar (Enter)"
+    assert j.botao_enviar.GetLabel() == "Enviar (Enter)"
     assert j._tecla_de_enviar() == "Enter"
     j.cfg.set("enter_envia", False)
     assert j._tecla_de_enviar() == "Control Enter"

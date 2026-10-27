@@ -45,7 +45,6 @@ _RESERVADAS = {
     "Ctrl+Alt+Delete": "Control Alt Delete é do Windows",
     "Ctrl+Esc": "Control Esc abre o menu Iniciar",
     "Alt+Esc": "Alt Esc troca de programa no Windows",
-    "Alt+E": "Alt E aperta o botão Enviar",
     "Alt+Space": "Alt Espaço abre o menu da janela",
     "Delete": "Delete apaga",
     "Backspace": "Backspace apaga",

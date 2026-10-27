@@ -29,6 +29,7 @@ Copy-Item "$raiz\fontes\$Variante\go.mod","$raiz\fontes\$Variante\go.sum" "$trab
 
 if ($Variante -eq 'chamadas') {
     Copy-Item "$raiz\fontes\chamadas\calls.go" "$trab\goneonize\calls.go" -Force
+    Copy-Item "$raiz\fontes\chamadas\calls_video.go" "$trab\goneonize\calls_video.go" -Force
     $p = "$trab\goneonize\main.go"
     $s = [IO.File]::ReadAllText($p)
     $s = [regex]::Replace($s, '(\t\tdelete\(clients, C\.GoString\(id\)\)\r?\n)', '$1' + "`t`tremoverChamadas(C.GoString(id))`n", 1)
@@ -40,6 +41,14 @@ if ($Variante -eq 'chamadas') {
     $dsnNovo = 'file:%s?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=30000&_synchronous=NORMAL&_txlock=immediate'
     if (-not $s.Contains($dsn)) { throw 'DSN do sqlite nao encontrado' }
     $s = $s.Replace($dsn, $dsnNovo)
+    # escritas nos mapas globais (clients, StopSignal, eventChannel) entre mapasMu: com varias
+    # contas abrindo juntas, duas escritas simultaneas derrubam o processo ("concurrent map writes")
+    Copy-Item "$raiz\fontes\chamadas\mapas.go" "$trab\goneonize\mapas.go" -Force
+    foreach ($e in 'StopSignal[C.GoString(id)] = cancel', 'eventChannel[uuid] = eventChan', 'clients[uuid] = client',
+                   'delete(clients, C.GoString(id))', 'delete(StopSignal, C.GoString(id))', 'delete(eventChannel, C.GoString(id))') {
+        if (($s -split [regex]::Escape($e)).Count -ne 2) { throw "escrita de mapa nao encontrada (ou repetida): $e" }
+        $s = $s.Replace($e, "mapasMu.Lock(); $e; mapasMu.Unlock()")
+    }
     [IO.File]::WriteAllText($p, $s)
 }
 
