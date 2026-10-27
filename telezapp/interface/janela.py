@@ -7492,7 +7492,8 @@ class Janela(wx.Frame):
                     self._preencher_mensagens()
             elif chave == "manter_apagadas":
                 m.definir_manter_apagadas(valor)
-            elif chave in ("chamada_eco", "chamada_ruido"):
+            elif chave in ("chamada_eco", "chamada_ruido",
+                           "chamada_retorno"):
                 self._carregar_eco()
             elif chave in ("ia_linha_descricao", "ia_linha_transcricao"):
                 self._carregar_limites_ia()
@@ -7534,7 +7535,8 @@ class Janela(wx.Frame):
 
     def _carregar_eco(self):
         midia_eco.definir(self.cfg.get("chamada_eco"),
-                          self.cfg.get("chamada_ruido"))
+                          self.cfg.get("chamada_ruido"),
+                          self.cfg.get("chamada_retorno"))
 
     def _carregar_limites_ia(self):
         self._carregar_eco()

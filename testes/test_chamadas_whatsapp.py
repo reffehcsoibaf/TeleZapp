@@ -147,9 +147,9 @@ def esperar(cond, limite=3.0):
 @pytest.fixture(autouse=True)
 def sem_eco_por_padrao():
     """Os testes de chamada nao dependem do processamento de eco."""
-    cw.midia_eco.definir(False, False)
+    cw.midia_eco.definir(False, False, False)
     yield
-    cw.midia_eco.definir(True, True)
+    cw.midia_eco.definir(True, True, True)
 
 
 @pytest.fixture
@@ -247,7 +247,7 @@ def test_falha_do_eco_manda_o_quadro_como_veio(mundo, monkeypatch):
         def reiniciar(self):
             pass
     monkeypatch.setattr(cw.midia_eco, "CancelaEco", Quebrado)
-    cw.midia_eco.definir(True, True)
+    cw.midia_eco.definir(True, True, False)
     enviados = []
     ponte.escrever_quadro = lambda c, d: enviados.append(d) or True
     chamada_recebida(ponte, bus)

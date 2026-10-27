@@ -252,6 +252,8 @@ class _Ligacao:
         self.erro = ""                  # explicacao se a intencao for FALHA
         self.audio_iniciado = False
         self.eco = None                 # midia.eco.CancelaEco da chamada
+        self.retorno = None             # midia.eco.CancelaRetorno da chamada
+        self.quadros_retorno = 0
         self.quadros_mic = 0
         self.vigia_audio = False
         self.parar = threading.Event()
@@ -735,6 +737,8 @@ class ChamadasWhatsApp:
         if midia_eco.LIGADOS["eco"] or midia_eco.LIGADOS["ruido"]:
             lig.eco = midia_eco.CancelaEco(midia_eco.LIGADOS["eco"],
                                            midia_eco.LIGADOS["ruido"])
+        if midia_eco.LIGADOS["retorno"]:
+            lig.retorno = midia_eco.CancelaRetorno()
         for alvo, nome in ((self._enviar, "chamada-mic"),
                            (self._receber, "chamada-voz")):
             t = threading.Thread(target=alvo, args=(lig,), name=nome,
@@ -791,6 +795,7 @@ class ChamadasWhatsApp:
                         dados = silencio
                     elif lig.eco is not None:
                         dados = self._sem_eco(lig, bytes(dados))
+                    self._avisar_retorno(lig, bytes(dados))
                     if not self.ponte.escrever_quadro(lig.call_id,
                                                       bytes(dados)):
                         falhas += 1
@@ -812,6 +817,31 @@ class ChamadasWhatsApp:
             prioridade.soltar_thread(ident)
             log.info("microfone da chamada encerrado (%d quadros enviados)",
                      enviados)
+
+    def _avisar_retorno(self, lig, dados):
+        """Diz ao tira-retorno o que estamos mandando (a referencia dele)."""
+        if lig.retorno is None:
+            return
+        try:
+            lig.retorno.enviado(dados)
+        except Exception:
+            log.exception("erro no cancelamento do retorno; desligado")
+            lig.retorno = None
+
+    def _sem_retorno(self, lig, quadro):
+        """O quadro recebido sem o retorno da nossa voz, se ele existir."""
+        if lig.retorno is None:
+            return quadro
+        try:
+            limpo = lig.retorno.recebido(quadro)
+        except Exception:
+            log.exception("erro no cancelamento do retorno; desligado")
+            lig.retorno = None
+            return quadro
+        if lig.quadros_retorno % QUADROS_POR_REGISTRO == 0:
+            log.info("retorno da chamada: %s", lig.retorno.diagnostico())
+        lig.quadros_retorno += 1
+        return limpo
 
     def _sem_eco(self, lig, dados):
         """O quadro do microfone sem eco nem ruido; qualquer problema manda o
@@ -849,6 +879,7 @@ class ChamadasWhatsApp:
                     if quadro is False:
                         break
                     if quadro:
+                        quadro = self._sem_retorno(lig, quadro)
                         fluxo.write(quadro)
                         tocados += 1
                         if lig.eco is not None:

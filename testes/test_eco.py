@@ -85,8 +85,10 @@ def test_sem_o_pacote_o_microfone_passa_sem_tratamento():
 
 def test_definir_guarda_o_que_a_janela_pediu():
     eco.definir(False, True)
-    assert eco.LIGADOS == {"eco": False, "ruido": True}
-    eco.definir(True, True)
+    assert eco.LIGADOS == {"eco": False, "ruido": True, "retorno": True}
+    eco.definir(True, True, False)
+    assert eco.LIGADOS["retorno"] is False
+    eco.definir(True, True, True)
 
 
 def test_reducao_de_eco_de_verdade_com_atraso_curto_e_com_retorno_longo():
@@ -113,3 +115,62 @@ def test_reducao_de_eco_de_verdade_com_atraso_curto_e_com_retorno_longo():
         reducao = 20 * np.log10(rms(mic[fim]) / max(rms(s[fim]), 1.0))
         assert reducao > 20, (atraso_ms, reducao)
         assert c.diagnostico()["referencia_segurada_ms"] >= seguro_min
+
+
+def test_diagnostico_mede_o_eco_que_volta_do_outro_lado():
+    """Nossa voz enviada volta, 400 ms depois, dentro do que recebemos: o
+    log precisa mostrar isso (e o eco local, sem relacao, fica baixo)."""
+    c, _ = _cancelador()
+    enviado = _voz(5.0)
+    recebido = np.zeros_like(enviado)
+    atraso = int(0.4 * eco.TAXA)
+    recebido[atraso:] = (enviado[:-atraso] * 0.5).astype(np.int16)
+    passo = 160                                     # 10 ms
+    for i in range(0, enviado.size - passo, passo):
+        c.referencia(recebido[i:i + passo].tobytes())
+        c.processar(enviado[i:i + passo].tobytes())
+    d = c.diagnostico()
+    assert d["eco_do_outro_lado"] > 0.8
+    assert abs(d["eco_do_outro_lado_atraso_ms"] - 400) <= 30
+
+
+def test_retorno_so_troca_o_som_quando_a_voz_nossa_volta():
+    pytest.importorskip("livekit.rtc")
+    nossa, dele = _voz(14, semente=3), _voz(14, semente=8)
+    n = nossa.size
+    atraso = 500 * eco.TAXA // 1000
+    chega = dele.astype(np.int32).copy()
+    chega[atraso:] += (nossa[:n - atraso] * 0.7).astype(np.int32)
+    chega = np.clip(chega, -32768, 32767).astype(np.int16)
+    r = eco.CancelaRetorno()
+    assert r.disponivel
+    saida = []
+    for i in range(0, n, QUADRO_CHAMADA):
+        r.enviado(nossa[i:i + QUADRO_CHAMADA].tobytes())
+        saida.append(np.frombuffer(
+            r.recebido(chega[i:i + QUADRO_CHAMADA].tobytes()), dtype="<i2"))
+    s = np.concatenate(saida)
+    assert r.ativo
+    fim = slice(-3 * eco.TAXA, None)
+    nossa_atrasada = np.zeros(n)
+    nossa_atrasada[atraso:] = nossa[:n - atraso]
+
+    def parecido_com(x, y):
+        x, y = x[fim].astype(np.float64), y[fim].astype(np.float64)
+        return abs(float(np.dot(x, y))) / (np.linalg.norm(x) *
+                                           np.linalg.norm(y) + 1e-9)
+    # o que chega tem a nossa voz atrasada; depois de tirar, bem menos
+    antes = parecido_com(chega, nossa_atrasada)
+    depois = parecido_com(s, nossa_atrasada)
+    assert depois < antes * 0.5, (antes, depois)
+
+
+def test_sem_retorno_o_que_chega_passa_como_veio():
+    r = eco.CancelaRetorno(fabrica=lambda e, rr: ModuloFalso())
+    enviado, chega = _voz(3, semente=1), _voz(3, semente=2)
+    passo = 960
+    for i in range(0, enviado.size - passo, passo):
+        r.enviado(enviado[i:i + passo].tobytes())
+        quadro = chega[i:i + passo].tobytes()
+        assert r.recebido(quadro) == quadro
+    assert not r.ativo

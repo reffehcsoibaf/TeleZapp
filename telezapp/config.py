@@ -542,6 +542,15 @@ OPCOES = (
           "a câmera pode ser ligada na janela da chamada. Marcada, a câmera "
           "liga junto com a chamada. Quem liga uma chamada de vídeo sempre "
           "começa com a câmera ligada."),
+    Opcao("chamada_retorno", "Tirar das chamadas de voz o retorno da minha "
+          "voz", "Mídias", True,
+          "Quando a outra pessoa usa uma mesa de som com retorno (monitor) "
+          "ou ouve a chamada pelo alto-falante, a sua voz volta para você, "
+          "atrasada, misturada com a dela, e você se ouve. Marcada, o "
+          "TeleZapp mede se isso está acontecendo e, só então, tira esse "
+          "retorno do que você ouve. Sem retorno, a voz dela passa "
+          "intacta. Vale a partir da próxima chamada. A solução de verdade "
+          "é do lado dela: um retorno sem a sua voz (mix-minus)."),
     Opcao("midias_baixar", "Quando baixar as mídias", "Mídias", "demanda",
           "Sob demanda baixa só quando você abre a mídia. Automático baixa "
           "ao receber, até o limite escolhido.",
