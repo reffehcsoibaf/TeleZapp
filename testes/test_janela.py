@@ -2902,6 +2902,55 @@ def test_modo_de_selecao_nas_mensagens_favorita_em_massa(j):
     assert not j.modo_msg and not j.marc_msg
 
 
+def test_atalhos_de_conversa_valem_para_todas_as_marcadas(j):
+    j.lista_conv.SetFocus()
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_SPACE, ctrl=True))
+    j.lista_conv.SetSelection(1)
+    j._char_hook(Tecla(wx_falso.WXK_SPACE))
+    assert len(j.marc_conv) == 2
+    j._fixar_conversa()                      # o atalho, sem conversa dada
+    assert all(c.fixada for c in j.indice.values())
+    assert not j.modo_conv and not j.marc_conv
+
+
+def test_apagar_e_arquivar_pelo_atalho_usam_as_marcadas(j):
+    chamadas = []
+    j._massa_conversas = lambda acao: chamadas.append(("c", acao))
+    j._massa_mensagens = lambda acao: chamadas.append(("m", acao))
+    j.lista_conv.SetFocus()
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_SPACE, ctrl=True))
+    j._apagar_conversa()
+    j._arquivar_conversa()
+    j._silenciar_conversa()
+    j._marcar_conversa_lida()
+    assert chamadas == [("c", "apagar"), ("c", "arquivar"),
+                        ("c", "silenciar"), ("c", "lidas")]
+
+
+def test_atalhos_de_mensagem_valem_para_todas_as_marcadas(j):
+    chamadas = []
+    j._massa_mensagens = lambda acao: chamadas.append(acao)
+    _abrir_com_caixa(j)
+    j.lista_msgs.SetFocus()
+    j.lista_msgs.SetSelection(len(j.lista_msgs.itens) - 1)
+    j._char_hook(Tecla(wx_falso.WXK_SPACE, ctrl=True))
+    j._favoritar_mensagem()
+    j._apagar_mensagem()
+    j._copiar()
+    assert chamadas == ["favoritar", "apagar", "copiar"]
+
+
+def test_sem_marcas_o_atalho_age_so_no_item_em_foco(j):
+    chamadas = []
+    j._massa_conversas = lambda acao: chamadas.append(acao)
+    j.lista_conv.SetFocus()
+    j.lista_conv.SetSelection(0)
+    j._fixar_conversa()
+    assert chamadas == [] and j._conversa_selecionada().fixada
+
+
 def test_grupo_limpar_conversa_apaga_mensagens_e_mantem_na_lista(j):
     _abrir_com_caixa(j)
     chave = ("t1", "20")

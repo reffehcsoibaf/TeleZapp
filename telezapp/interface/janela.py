@@ -120,7 +120,9 @@ canais, arquivadas, trancadas)
 Control Shift R: responder à mensagem selecionada
 Control Espaço (nas listas de conversas e de mensagens): ligar o modo de
 seleção e marcar o item em foco; depois, Espaço marca ou desmarca os outros,
-a tecla Menu mostra as ações para todos os marcados e Esc desfaz tudo
+a tecla Menu mostra as ações para todos os marcados e Esc desfaz tudo; os
+atalhos (Delete, Control Shift F, Control Shift C, Control Shift E...) também
+valem para todos os marcados
 Delete: apagar a conversa (na lista de conversas) ou a mensagem (na lista de
 mensagens) selecionada, com confirmação
 Control I: detalhes da conversa selecionada (dados, mídias, membros, grupos em
@@ -2461,9 +2463,30 @@ class Janela(wx.Frame):
             log.exception("erro ao marcar como lida na conta")
         conv.nao_lidas = 0
 
+    def _em_massa_conv(self, acao, conv):
+        """Atalho ou menu de uma conversa, com a lista de conversas em foco e
+        conversas marcadas no modo de selecao: vale para todas as marcadas."""
+        if conv is not None or not self.modo_conv or \
+                self.FindFocus() is not self.lista_conv or \
+                not self._marcadas_conv():
+            return False
+        self._massa_conversas(acao)
+        return True
+
+    def _em_massa_msg(self, acao, x=None):
+        """O mesmo para as mensagens marcadas na lista de mensagens."""
+        if x is not None or not self.modo_msg or \
+                self.FindFocus() is not self.lista_msgs or \
+                not self._marcadas_msg():
+            return False
+        self._massa_mensagens(acao)
+        return True
+
     def _marcar_conversa_lida(self, conv=None):
         """Marca como lida a conversa em foco (ou a do menu de contexto) sem
         abri-la."""
+        if self._em_massa_conv("lidas", conv):
+            return
         conv = conv or self._conversa_em_foco()
         if conv is None:
             self.fala.falar("Nenhuma conversa selecionada.")
@@ -2479,6 +2502,8 @@ class Janela(wx.Frame):
     def _arquivar_conversa(self, conv=None):
         """Arquiva a conversa em foco, ou a tira dos arquivados. A conta
         tambem e avisada (no WhatsApp, pelo aviso de estado `archive`)."""
+        if self._em_massa_conv("arquivar", conv):
+            return
         conv = conv or self._conversa_em_foco()
         if conv is None:
             self.fala.falar("Nenhuma conversa selecionada.")
@@ -2526,6 +2551,8 @@ class Janela(wx.Frame):
     def _fixar_conversa(self, conv=None):
         """Fixa a conversa no topo da lista, ou a desafixa; o servico e
         avisado."""
+        if self._em_massa_conv("fixar", conv):
+            return
         conv = conv or self._conversa_em_foco()
         if conv is None:
             self.fala.falar("Nenhuma conversa selecionada.")
@@ -2545,6 +2572,8 @@ class Janela(wx.Frame):
     def _silenciar_conversa(self, conv=None):
         """Silencia a conversa (8 horas, 1 semana ou sempre) ou reativa o
         som. Conversa silenciada nao avisa mensagens novas."""
+        if self._em_massa_conv("silenciar", conv):
+            return
         conv = conv or self._conversa_em_foco()
         if conv is None:
             self.fala.falar("Nenhuma conversa selecionada.")
@@ -2574,6 +2603,8 @@ class Janela(wx.Frame):
     def _apagar_conversa(self, conv=None):
         """Apaga a conversa e tudo dela neste computador. Fica registrada
         como apagada: so volta com mensagem nova, ou com novo pareamento."""
+        if self._em_massa_conv("apagar", conv):
+            return
         conv = conv or self._conversa_em_foco()
         if conv is None:
             self.fala.falar("Nenhuma conversa selecionada.")
@@ -2703,6 +2734,8 @@ class Janela(wx.Frame):
     def _favoritar_mensagem(self, x=None):
         """Marca a mensagem como favorita, ou tira a marca. Favoritas nao
         entram na limpeza; no WhatsApp a conta tambem e avisada."""
+        if self._em_massa_msg("favoritar", x):
+            return
         if x is None:
             x = self._mensagem_selecionada()
         if x is None:
@@ -2730,6 +2763,10 @@ class Janela(wx.Frame):
         que a pessoa escolher, de qualquer conta conectada. Midia so sai se
         ja foi baixada."""
         from telezapp.interface import encaminhar as je
+        if msgs is None and self.modo_msg and \
+                self.FindFocus() is self.lista_msgs and self._marcadas_msg():
+            msgs = self._marcadas_msg()
+            self._sair_selecao(self.lista_msgs, falar=False)
         if msgs is None:
             x = self._mensagem_selecionada()
             msgs = [x] if x is not None else []
@@ -2842,6 +2879,8 @@ class Janela(wx.Frame):
         """Apaga a mensagem selecionada aqui e na conta (para todos, quando
         e minha e a pessoa escolhe, ou so para mim). Nao volta por historico
         nem por nova leitura."""
+        if self._em_massa_msg("apagar", x):
+            return
         if x is None:
             x = self._mensagem_selecionada()
         if x is None:
@@ -5542,6 +5581,8 @@ class Janela(wx.Frame):
         self.fala.falar("Resposta cancelada.")
 
     def _copiar(self):
+        if self._em_massa_msg("copiar"):
+            return
         x = self._mensagem_selecionada()
         if x is None:
             return
