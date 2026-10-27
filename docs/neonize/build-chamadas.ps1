@@ -27,6 +27,16 @@ git -C $trab clean -q -fdx
 # go.mod/go.sum fixos da variante (replace do whatsmeow local e, nas chamadas, do meowcaller)
 Copy-Item "$raiz\fontes\$Variante\go.mod","$raiz\fontes\$Variante\go.sum" "$trab\goneonize\" -Force
 
+# o neonize poe <bot biz_bot="1"/> em toda mensagem de conversa privada, e o destinatario ve o selo
+# "IA" com botoes de avaliacao, ate de conta que nao e Business. O padrao do neonize e LIGADO (so
+# NEONIZE_BOT_TAG=off desliga); aqui o padrao passa a ser DESLIGADO (so NEONIZE_BOT_TAG=on liga),
+# para o selo nao depender de o Python ter definido a variavel antes
+$pm = "$trab\goneonize\main.go"
+$sm = [IO.File]::ReadAllText($pm)
+if (($sm -split [regex]::Escape('return isPrivate')).Count -ne 2) { throw 'shouldAddBotNode nao encontrada (ou repetida)' }
+$sm = $sm.Replace('return isPrivate', 'return isPrivate && strings.EqualFold(strings.TrimSpace(os.Getenv("NEONIZE_BOT_TAG")), "on")')
+[IO.File]::WriteAllText($pm, $sm)
+
 if ($Variante -eq 'chamadas') {
     Copy-Item "$raiz\fontes\chamadas\calls.go" "$trab\goneonize\calls.go" -Force
     Copy-Item "$raiz\fontes\chamadas\calls_video.go" "$trab\goneonize\calls_video.go" -Force

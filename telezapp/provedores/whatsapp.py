@@ -36,6 +36,13 @@ from telezapp.provedores.base import (DownloadCancelado, ErroBloqueio,
 
 log = logging.getLogger("telezapp.whatsapp")
 
+# O neonize poe <bot biz_bot="1"/> em toda mensagem de conversa privada, e o
+# destinatario ve o selo "IA" com botoes de avaliacao. Desligado ja ao carregar
+# o modulo (e de novo a cada conexao), antes de qualquer envio, para nunca
+# depender da ordem em que as coisas abrem. A DLL do TeleZapp tambem nasce com
+# o selo desligado; so "on" o liga.
+os.environ["NEONIZE_BOT_TAG"] = "off"
+
 EMBRULHOS = ("deviceSentMessage", "ephemeralMessage", "viewOnceMessage",
              "viewOnceMessageV2", "viewOnceMessageV2Extension",
              "documentWithCaptionMessage", "editedMessage",
@@ -1085,6 +1092,8 @@ class ProvedorWhatsApp(Provedor):
             # O neonize poe <bot biz_bot="1"/> em toda mensagem de conversa
             # privada, e o destinatario ve o selo "IA" com botoes de avaliacao
             os.environ["NEONIZE_BOT_TAG"] = "off"
+            log.info("selo de IA nas mensagens enviadas: desligado "
+                     "(NEONIZE_BOT_TAG=%s)", os.environ["NEONIZE_BOT_TAG"])
             self.cliente = self.fabrica_cliente()
             self._preparar_chamadas()
             registros = {

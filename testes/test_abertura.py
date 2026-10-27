@@ -76,3 +76,15 @@ def test_main_nao_tem_import_local_que_esconde_um_modulo_do_topo():
     locais = {a.asname or a.name for n in ast.walk(main)
               if isinstance(n, ast.Import) for a in n.names}
     assert not (topo & locais), topo & locais
+
+
+def test_selo_de_ia_fica_desligado_ao_carregar_o_provedor_do_whatsapp(
+        monkeypatch):
+    """O neonize poe o no de bot em toda mensagem privada; a variavel que o
+    desliga tem de estar valendo desde que o modulo carrega."""
+    import importlib
+    import os
+    monkeypatch.setenv("NEONIZE_BOT_TAG", "on")
+    from telezapp.provedores import whatsapp
+    importlib.reload(whatsapp)
+    assert os.environ["NEONIZE_BOT_TAG"] == "off"
