@@ -999,7 +999,10 @@ class ProvedorWhatsApp(Provedor):
 
     # ----------------------------------------------------------- execucao
     def _criar_cliente(self):
+        inicio = time.monotonic()
         from neonize.client import NewClient
+        log.info("biblioteca do WhatsApp carregada em %.1f s",
+                 time.monotonic() - inicio)
         self._ligar_log_detalhado()
         caminho = caminho_sessao(self.pasta_sessoes, self.conta.id)
         return NewClient(caminho, props=props_do_aparelho(self.historico))

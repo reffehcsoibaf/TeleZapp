@@ -7979,7 +7979,9 @@ class Janela(wx.Frame):
                 if hasattr(evt, "Veto"):
                     evt.Veto()
                 return
-        log.info("fechando a janela")
+        log.info("fechando a janela (%s)",
+                 "pedido do Windows" if hasattr(evt, "CanVeto") and
+                 not evt.CanVeto() else "pedido da pessoa ou do programa")
         self._saindo = True
         self._tirar_bandeja()
         if hasattr(self, "UnregisterHotKey"):
