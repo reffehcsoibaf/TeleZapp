@@ -1610,8 +1610,6 @@ def test_trocar_o_passo_leva_a_velocidade_ao_valor_permitido(j, monkeypatch):
 
 
 def test_configuracoes_aplicam_com_os_efeitos_dos_menus(j):
-    j._aplicar_opcao("estilo", 2)
-    assert j.estilo == 2 and j.cfg.get("estilo") == 2
     j._aplicar_opcao("midias_baixar", "automatico")
     assert j.cfg.get("midias_baixar") == "automatico"
     j._aplicar_opcao("status_no_titulo", False)
@@ -2190,6 +2188,67 @@ def test_item_do_menu_da_lista_nao_deixa_tirar_o_ultimo(j):
     j._alternar_item_da_lista("previa")
     assert ditas[-1] == "Trecho da última mensagem: ativado."
     assert "previa" not in j.cfg.get("lista_conversas")["ocultos"]
+
+
+def test_lista_de_mensagens_muda_os_itens_da_linha_e_o_menu(j):
+    from telezapp.nucleo import lista_mensagens as lmn
+    _abrir_com_caixa(j)
+    x = m.Mensagem("t1", "20", "7", autor="Ana", texto="oi", data=AGORA + 100)
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", [x]))
+    antes = j.lista_msgs.itens[-1]
+    assert antes.startswith("Ana, ") and antes.endswith(": oi")
+    j.fala.falar = lambda t, interromper=False: None
+    j._alternar_item_da_lista_msgs("hora")
+    assert j.lista_msgs.itens[-1] == "Ana: oi"
+    assert "hora" in j.cfg.get("lista_mensagens")["ocultos"]
+    assert not j.itens["listam_hora"].marcado
+    j._aplicar_opcao("lista_mensagens", lmn.padrao())
+    assert j.lista_msgs.itens[-1] == antes and j.itens["listam_hora"].marcado
+    # o menu nao deixa tirar o ultimo item
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._aplicar_opcao("lista_mensagens", {"ordem": list(lmn.CHAVES), "ocultos": [
+        c for c in lmn.CHAVES if c != "conteudo"]})
+    assert j.lista_msgs.itens[-1] == "oi"
+    j.itens["listam_conteudo"].Check(False)
+    j._alternar_item_da_lista_msgs("conteudo")
+    assert ditas[-1] == "Pelo menos um item precisa ficar ativado."
+    assert j.itens["listam_conteudo"].marcado
+
+
+def test_menu_nome_so_quando_muda_e_migracao_do_estilo_antigo(j):
+    from telezapp.nucleo import lista_mensagens as lmn
+    _abrir_com_caixa(j)
+    a = m.Mensagem("t1", "20", "7", autor="Ana", texto="oi", data=AGORA + 100)
+    b = m.Mensagem("t1", "20", "8", autor="Ana", texto="tudo bem?",
+                   data=AGORA + 101)
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", [a, b]))
+    j.fala.falar = lambda t, interromper=False: None
+    assert j.lista_msgs.itens[-1].startswith("Ana, ")
+    j._alternar_so_quando_muda()
+    assert j.cfg.get("lista_mensagens")["autor_so_quando_muda"] is True
+    assert j.itens["listam_so_quando_muda"].marcado
+    assert "Ana" not in j.lista_msgs.itens[-1]             # repetiu o autor
+    assert j.lista_msgs.itens[-1].endswith("tudo bem?")
+    # quem tinha o estilo 3 ganha a lista equivalente, uma vez so
+    class Cfg:
+        def __init__(self, **d):
+            self.dados = dict(d)
+
+        def get(self, chave):
+            return self.dados.get(chave)
+
+        def set(self, chave, valor):
+            self.dados[chave] = valor
+    antigo = Cfg(estilo=3)
+    j._migrar_estilo_antigo(antigo)
+    assert antigo.dados["lista_mensagens"] == lmn.do_estilo(3)
+    ja = Cfg(estilo=3, lista_mensagens=lmn.padrao())
+    j._migrar_estilo_antigo(ja)
+    assert ja.dados["lista_mensagens"] == lmn.padrao()
+    padrao = Cfg(estilo=1)
+    j._migrar_estilo_antigo(padrao)
+    assert "lista_mensagens" not in padrao.dados
 
 
 def test_trecho_da_ultima_mensagem_acompanha_a_conversa(j):
@@ -3378,6 +3437,30 @@ def test_transcrever_audio_guarda_o_texto_na_mensagem_e_mostra_na_linha(
         m.conteudos_copiaveis(x)
 
 
+def test_descrever_foto_de_perfil_usa_os_provedores_de_imagem(
+        j, monkeypatch, tmp_path):
+    x, chamadas = _ia_pronta(j, monkeypatch, tmp_path)
+    foto = tmp_path / "contato.jpg"
+    foto.write_bytes(b"\xff\xd8\xff")
+    ditas, janelas = [], []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    monkeypatch.setattr(jm.dialogos, "mostrar_texto",
+                        lambda pai, titulo, texto, rotulo, **k:
+                        janelas.append((titulo, texto)))
+    abertas = []
+    j._configuracoes = lambda categoria=None: abertas.append(categoria)
+    j.cfg.set("ia_ordem", {"imagem": ["openai"]})
+    j._ia_descrever_arquivo(str(foto), "Foto do contato Ana")
+    assert chamadas[0][0] == "imagem" and chamadas[0][1] == str(foto)
+    assert janelas == [("Foto do contato Ana", "ola, tudo bem?")]
+    assert any(t.startswith("Foto do contato Ana: ola") for t in ditas)
+    assert "openai" in j.cfg.get("ia_consentimento")
+    # sem provedor de imagem marcado: manda para as configuracoes
+    j.cfg.set("ia_ordem", {})
+    j._ia_descrever_arquivo(str(foto), "Foto do contato Ana")
+    assert abertas == ["Inteligência artificial"] and len(chamadas) == 1
+
+
 def test_sem_provedor_ou_sem_chave_manda_para_as_configuracoes(
         j, monkeypatch, tmp_path):
     x, chamadas = _ia_pronta(j, monkeypatch, tmp_path)
@@ -3672,17 +3755,17 @@ def test_reagir_a_mensagem_e_inserir_emoji(j, monkeypatch):
     j.contas.p.reagir = lambda x, emoji: reagidas.append((x.id, emoji))
     j.estados["t1"] = ev.CONECTADA
     # uma das rapidas
-    monkeypatch.setattr(ui, "escolher_reacao", lambda pai, atual="": "👍")
+    monkeypatch.setattr(ui, "escolher_reacao", lambda pai, atual="", fala=None: "👍")
     j._reagir()
     assert reagidas == [("1", "👍")]
     assert "polegar para cima" in ditas[-1]
     # outro emoji: abre a busca completa
-    monkeypatch.setattr(ui, "escolher_reacao", lambda pai, atual="": ui.OUTRO)
-    monkeypatch.setattr(ui, "escolher_emoji", lambda pai, titulo="": "🎂")
+    monkeypatch.setattr(ui, "escolher_reacao", lambda pai, atual="", fala=None: ui.OUTRO)
+    monkeypatch.setattr(ui, "escolher_emoji", lambda pai, titulo="", fala=None: "🎂")
     j._reagir()
     assert reagidas[-1] == ("1", "🎂")
     # desistir nao envia
-    monkeypatch.setattr(ui, "escolher_reacao", lambda pai, atual="": "")
+    monkeypatch.setattr(ui, "escolher_reacao", lambda pai, atual="", fala=None: "")
     j._reagir()
     assert len(reagidas) == 2
     # tirar a minha reacao
@@ -3690,7 +3773,7 @@ def test_reagir_a_mensagem_e_inserir_emoji(j, monkeypatch):
     m.atualizar_extras(x, reacoes=[{"id": "eu", "quem": "Você",
                                     "emoji": "🎂", "minha": True}])
     monkeypatch.setattr(ui, "escolher_reacao",
-                        lambda pai, atual="": ui.TIRAR)
+                        lambda pai, atual="", fala=None: ui.TIRAR)
     j._reagir()
     assert reagidas[-1] == ("1", "") and "removida" in ditas[-1]
     # servico que nao reage
@@ -3698,7 +3781,7 @@ def test_reagir_a_mensagem_e_inserir_emoji(j, monkeypatch):
     j._reagir()
     assert "não aceita reações" in ditas[-1] and len(reagidas) == 3
     # inserir emoji na caixa
-    monkeypatch.setattr(ui, "escolher_emoji", lambda pai, titulo="": "😂")
+    monkeypatch.setattr(ui, "escolher_emoji", lambda pai, titulo="", fala=None: "😂")
     j.caixa.SetValue("oi ")
     j._inserir_emoji()
     assert j.caixa.GetValue().endswith("😂")
@@ -4671,8 +4754,6 @@ def test_menu_midias_agrupa_as_escolhas_e_o_atalho_fala_portugues(j):
     # as escolhas soltas (Só quando eu abrir...) ficam sob um titulo claro
     assert j.atalhos.acoes["baixar_demanda"].rotulo == (
         "Quando baixar as mídias: Só quando eu abrir")
-    assert j.atalhos.acoes["estilo1"].rotulo.startswith(
-        "Como cada mensagem é lida: ")
     assert j.itens["audio_voltar"].rotulo.endswith(
         " (Ctrl+Shift+Seta para a esquerda)")
     assert j.itens["vel_mais"].rotulo.endswith(
@@ -5619,6 +5700,28 @@ def test_menu_ajuda_abre_a_pagina_do_projeto_e_o_feedback(j, monkeypatch):
     assert "Página do projeto" in j.itens["pagina_projeto"].rotulo
     assert "Feedback" in j.itens["feedback"].rotulo
     assert PAGINA_DE_RELATOS.startswith(PAGINA_DO_PROJETO)
+
+
+def test_grupo_de_suporte_entra_pela_conta_ou_abre_o_navegador(j, monkeypatch):
+    from telezapp import GRUPO_DE_SUPORTE
+    abertos, entradas = [], []
+    monkeypatch.setattr(jm.webbrowser, "open",
+                        lambda url: abertos.append(url) or True)
+    monkeypatch.setattr(j, "_entrar_no_grupo", lambda x, acao, prov:
+                        entradas.append((x, acao, prov)))
+    assert "grupo_suporte" in j.itens
+    assert "suporte" in j.itens["grupo_suporte"].rotulo
+    # sem conta conectada: abre o convite no navegador
+    j._entrar_no_grupo_de_suporte()
+    assert abertos == [GRUPO_DE_SUPORTE] and entradas == []
+    # com uma conta de WhatsApp conectada: entra pelo caminho do botao
+    j.contas.p.ENTRA_POR_LINK = True
+    j.contas.p.servico = "whatsapp"
+    j.estados["t1"] = ev.CONECTADA
+    j._entrar_no_grupo_de_suporte()
+    assert entradas == [(None, {"codigo": "JULThiZpj4iFiJGHLGwVVd"},
+                         j.contas.p)]
+    assert abertos == [GRUPO_DE_SUPORTE]
 
 
 def test_sem_navegador_o_endereco_e_mostrado(j, monkeypatch):

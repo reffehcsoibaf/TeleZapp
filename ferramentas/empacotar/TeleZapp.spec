@@ -6,7 +6,9 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 RAIZ = os.path.abspath(os.path.join(SPECPATH, "..", ".."))
 
 datas = [(os.path.join(RAIZ, "telezapp", "ajuda"), "telezapp/ajuda"),
-         (os.path.join(RAIZ, "telezapp", "sons"), "telezapp/sons")]
+         (os.path.join(RAIZ, "telezapp", "sons"), "telezapp/sons"),
+         (os.path.join(RAIZ, "telezapp", "imagens"), "telezapp/imagens")]
+ICONE = os.path.join(RAIZ, "telezapp", "imagens", "telezapp.ico")
 binaries = []
 hiddenimports = []
 hiddenimports += collect_submodules("telethon")
@@ -30,6 +32,6 @@ pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="TeleZapp",
           debug=False, bootloader_ignore_signals=False, strip=False,
           upx=False, console=False, disable_windowed_traceback=False,
-          version=os.environ.get("TELEZAPP_VERSAO"))
+          icon=ICONE, version=os.environ.get("TELEZAPP_VERSAO"))
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False,
                upx_exclude=[], name="TeleZapp")

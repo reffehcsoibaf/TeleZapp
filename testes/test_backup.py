@@ -22,7 +22,8 @@ def preparar(pasta):
                 (str(pasta / "midias" / "w1" / "a.jpg"),))
     con.commit()
     con.close()
-    return {"status_no_titulo": False, "estilo": 3, "contas": [{"id": "w1"}],
+    return {"status_no_titulo": False, "digitar_na_lista": "campo",
+            "contas": [{"id": "w1"}],
             "telegram_api_id": 7, "codigo_trancadas": "hash",
             "trancadas_exigir_codigo": True, "depuracao": True,
             "pasta_anexos": "C:\nao-leva"}
@@ -38,10 +39,11 @@ def test_so_as_opcoes_seguras_vao_no_backup():
 
 
 def test_opcoes_validas_descarta_lixo_e_valores_fora_da_faixa():
-    boas = bk.opcoes_validas({"status_no_titulo": "sim", "estilo": 2, "inexistente": 1,
+    boas = bk.opcoes_validas({"status_no_titulo": "sim",
+                              "digitar_na_lista": "campo", "inexistente": 1,
                               "mensagens_por_conversa": 10 ** 9,
                               "depuracao": True, "audio_velocidade": 1.5})
-    assert boas == {"estilo": 2, "audio_velocidade": 1.5}
+    assert boas == {"digitar_na_lista": "campo", "audio_velocidade": 1.5}
 
 
 def test_backup_com_senha_restaura_configuracoes_e_deixa_o_resto_em_espera(
@@ -70,7 +72,8 @@ def test_backup_com_senha_restaura_configuracoes_e_deixa_o_resto_em_espera(
     opcoes, espera = bk.restaurar(arquivo, "segredo",
                                   ["configuracoes", "contas", "conversas",
                                    "midias"], str(destino))
-    assert opcoes["status_no_titulo"] is False and opcoes["estilo"] == 3
+    assert opcoes["status_no_titulo"] is False
+    assert opcoes["digitar_na_lista"] == "campo"
     assert "depuracao" not in opcoes
     assert espera == ["contas", "conversas", "midias"]
     assert bk.ha_pendente(str(destino))
@@ -100,7 +103,7 @@ def test_backup_sem_senha_e_so_configuracoes(tmp_path):
     assert not bk.precisa_de_senha(arquivo)
     opcoes, espera = bk.restaurar(arquivo, "", ["configuracoes", "midias"],
                                   str(tmp_path / "b"))
-    assert opcoes["estilo"] == 3 and espera == []
+    assert opcoes["digitar_na_lista"] == "campo" and espera == []
     assert not bk.ha_pendente(str(tmp_path / "b"))
 
 
@@ -253,9 +256,86 @@ def test_ida_e_volta_do_backup_leva_o_mapa_de_atalhos(tmp_path):
     cfg = preparar(origem)
     cfg["atalhos"] = {"responder": "Alt+R", "anexar": ""}
     arquivo = str(tmp_path / "b.zip")
-    bk.criar(arquivo, str(origem), cfg, ["configuracoes"])
+    bk.criar(arquivo, str(origem), cfg, ["atalhos"])
     destino = tmp_path / "b"
     os.makedirs(destino)
-    opcoes, espera = bk.restaurar(arquivo, "", ["configuracoes"],
-                                  str(destino))
+    opcoes, espera = bk.restaurar(arquivo, "", ["atalhos"], str(destino))
     assert opcoes["atalhos"] == {"responder": "Alt+R", "anexar": ""}
+
+
+def _com_sons(tmp_path):
+    origem = tmp_path / "a"
+    cfg = preparar(origem)
+    cfg.update({"atalhos": {"responder": "Alt+R"},
+                "pacote_de_sons": "p:Meu", "sons_desativados": {
+                    "p:Meu": ["erro"]}, "mostrar_atalhos": False})
+    os.makedirs(origem / "sons" / "pacotes" / "Meu")
+    (origem / "sons" / "pacotes" / "Meu" / "nova.ogg").write_bytes(b"OGG")
+    return origem, cfg
+
+
+def test_cada_parte_de_configuracao_vai_e_volta_sozinha(tmp_path):
+    origem, cfg = _com_sons(tmp_path)
+    esperado = {
+        "atalhos": {"atalhos", "mostrar_atalhos"},
+        "sons": {"pacote_de_sons", "sons_desativados"}}
+    for parte, chaves in esperado.items():
+        arquivo = str(tmp_path / (parte + ".zip"))
+        resumo = bk.criar(arquivo, str(origem), cfg, [parte])
+        assert set(resumo) == {parte}
+        assert bk.ler_manifesto(arquivo).partes == [parte]
+        destino = tmp_path / ("d-" + parte)
+        os.makedirs(destino)
+        opcoes, espera = bk.restaurar(arquivo, "", [parte], str(destino))
+        assert set(opcoes) == chaves and espera == []
+        tem_sons = (destino / "sons" / "pacotes" / "Meu" / "nova.ogg"
+                    ).exists()
+        assert tem_sons == (parte == "sons")
+
+
+def test_configuracoes_nao_leva_atalhos_nem_sons(tmp_path):
+    origem, cfg = _com_sons(tmp_path)
+    arquivo = str(tmp_path / "c.zip")
+    bk.criar(arquivo, str(origem), cfg, ["configuracoes"])
+    destino = tmp_path / "d"
+    os.makedirs(destino)
+    opcoes, _ = bk.restaurar(arquivo, "", ["configuracoes"], str(destino))
+    assert "digitar_na_lista" in opcoes
+    assert not {"atalhos", "mostrar_atalhos", "pacote_de_sons",
+                "sons_desativados"} & set(opcoes)
+    assert not (destino / "sons").exists()
+
+
+def test_restaurar_so_atalhos_de_um_backup_com_tudo(tmp_path):
+    origem, cfg = _com_sons(tmp_path)
+    arquivo = str(tmp_path / "t.zip")
+    bk.criar(arquivo, str(origem), cfg, ["configuracoes", "atalhos", "sons"])
+    destino = tmp_path / "d"
+    os.makedirs(destino)
+    opcoes, _ = bk.restaurar(arquivo, "", ["atalhos"], str(destino))
+    assert set(opcoes) == {"atalhos", "mostrar_atalhos"}
+    assert not (destino / "sons").exists()
+
+
+def test_backup_antigo_restaura_atalhos_e_sons_com_as_configuracoes(tmp_path):
+    """Antes da 28.0 as tres eram uma parte so ("configuracoes")."""
+    origem, cfg = _com_sons(tmp_path)
+    arquivo = str(tmp_path / "novo.zip")
+    bk.criar(arquivo, str(origem), cfg, ["configuracoes", "atalhos", "sons"])
+    antigo = str(tmp_path / "antigo.zip")
+    with pyzipper.AESZipFile(arquivo) as de, pyzipper.AESZipFile(
+            antigo, "w") as para:
+        for nome in de.namelist():
+            dados = de.read(nome)
+            if nome == bk.MANIFESTO:
+                m = json.loads(dados)
+                m.pop("formato")
+                m["partes"] = ["configuracoes"]
+                dados = json.dumps(m).encode()
+            para.writestr(nome, dados)
+    assert bk.ler_manifesto(antigo).formato == 1
+    destino = tmp_path / "d"
+    os.makedirs(destino)
+    opcoes, _ = bk.restaurar(antigo, "", ["configuracoes"], str(destino))
+    assert {"atalhos", "pacote_de_sons", "digitar_na_lista"} <= set(opcoes)
+    assert (destino / "sons" / "pacotes" / "Meu" / "nova.ogg").exists()

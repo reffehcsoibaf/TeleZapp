@@ -9,6 +9,8 @@ import time
 import unicodedata
 from dataclasses import dataclass
 
+from telezapp.nucleo import lista_mensagens
+
 SERVICOS = {"telegram": "Telegram", "whatsapp": "WhatsApp"}
 
 # Tipos de mensagem
@@ -748,67 +750,110 @@ def trecho_da_ia(msg):
 
 
 def formatar(m, estilo, anterior=None, agora=None, respondida=None,
-             quem=None):
-    """Uma linha da lista de mensagens, no estilo escolhido.
+             quem=None, itens=None, autor_so_quando_muda=None):
+    """Uma linha da lista de mensagens.
 
     respondida: a mensagem respondida (Mensagem), se conhecida; ou só o nome
     do autor (texto). quem: nome de quem enviou, quando a mensagem nao traz
-    o autor (ver quem_enviou).
+    o autor (ver quem_enviou). itens: as partes da linha que valem, na ordem
+    em que entram, e autor_so_quando_muda: o autor so aparece quando muda de
+    uma mensagem para a outra (ver nucleo/lista_mensagens.py). Sem eles, valem
+    os do `estilo` (1 autor e hora primeiro, 2 conteudo primeiro, 3 autor so
+    quando muda), que e como as leituras e os avisos de uma mensagem sozinha
+    continuam sendo montados.
     """
-    cont = conteudo(m).replace("\r", " ").replace("\n", " ")
-    if enquete_de(m):
-        cont = resumo_enquete(m) + " (Enter para ver e votar)"
+    if itens is None:
+        base = lista_mensagens.do_estilo(estilo)
+        itens = lista_mensagens.ativos(base)
+        if autor_so_quando_muda is None:
+            autor_so_quando_muda = base["autor_so_quando_muda"]
     so_link = _so_link(m)
-    if so_link:
-        # mensagem so com o link: a previa vem antes, para saber do que se
-        # trata sem ouvir o endereco inteiro
-        cont = _juntar(trecho_da_previa(m), cont)
-    if extras_de(m)["editada"]:
-        cont = _juntar(cont, "(editada)")
-    if extras_de(m)["apagada_pelo_autor"]:
-        cont = _juntar(cont, "(apagada pelo autor)")
-    if extras_de(m)["favorita"]:
-        cont = _juntar(cont, "(favorita)")
-    if getattr(m, "expira", 0):
-        cont = _juntar(cont, "(temporária)")
-    n_links = len(itens_de_link(m))
-    if n_links:
-        cont = _juntar(cont, "com %d %s (Tab)" % (
-            n_links, "link" if n_links == 1 else "links"))
-    acoes = extras_de(m)["acoes"]
-    if acoes:
-        so_opcoes = all(a.get("tipo") == "lista" for a in acoes)
-        cont = _juntar(cont, "com %d %s (Tab)" % (
-            len(acoes), ("opção" if len(acoes) == 1 else "opções")
-            if so_opcoes else ("botão" if len(acoes) == 1 else "botões")))
-    if not so_link:
-        cont = _juntar(cont, trecho_da_previa(m))
-    cont = _juntar(cont, trecho_da_ia(m))
-    reacoes = resumo_reacoes(m)
-    if reacoes:
-        cont = _juntar(cont, "reações: " + reacoes if " de " in reacoes
-                       else "com " + reacoes)
-    if m.resposta_a:
+    # a previa de um link sozinho vem antes dele, para saber do que se trata
+    # sem ouvir o endereco inteiro
+    previa_na_frente = so_link and "conteudo" in itens and "previa" in itens
+
+    def bloco_conteudo():
+        cont = conteudo(m).replace(chr(13), " ").replace(chr(10), " ")
+        if enquete_de(m):
+            cont = resumo_enquete(m) + " (Enter para ver e votar)"
+        if previa_na_frente:
+            cont = _juntar(trecho_da_previa(m), cont)
+        return cont
+
+    def bloco_marcas():
+        texto = ""
+        if extras_de(m)["editada"]:
+            texto = _juntar(texto, "(editada)")
+        if extras_de(m)["apagada_pelo_autor"]:
+            texto = _juntar(texto, "(apagada pelo autor)")
+        if extras_de(m)["favorita"]:
+            texto = _juntar(texto, "(favorita)")
+        if getattr(m, "expira", 0):
+            texto = _juntar(texto, "(temporária)")
+        return texto
+
+    def bloco_links():
+        texto = ""
+        n_links = len(itens_de_link(m))
+        if n_links:
+            texto = "com %d %s (Tab)" % (
+                n_links, "link" if n_links == 1 else "links")
+        acoes = extras_de(m)["acoes"]
+        if acoes:
+            so_opcoes = all(a.get("tipo") == "lista" for a in acoes)
+            texto = _juntar(texto, "com %d %s (Tab)" % (
+                len(acoes), ("opção" if len(acoes) == 1 else "opções")
+                if so_opcoes else ("botão" if len(acoes) == 1 else "botões")))
+        return texto
+
+    def bloco_reacoes():
+        reacoes = resumo_reacoes(m)
+        if not reacoes:
+            return ""
+        return "reações: " + reacoes if " de " in reacoes else "com " + reacoes
+
+    def bloco_resposta():
+        if not m.resposta_a:
+            return ""
         if isinstance(respondida, Mensagem):
-            quem = "você" if respondida.minha else (
+            de = "você" if respondida.minha else (
                 respondida.autor or "mensagem")
-            cont = _juntar(cont, 'em resposta a %s: "%s"' % (
-                quem, citacao(respondida)))
-        elif respondida:
-            cont = _juntar(cont, "em resposta a %s" % respondida)
-        else:
-            cont = _juntar(cont, "em resposta a uma mensagem mais antiga")
-    autor = "Você" if m.minha else (m.autor or quem or "Desconhecido")
-    estado = m.estado if (m.minha and m.estado) else ""
-    hora = hora_legivel(m.data, agora)
-    if estilo == ESTILO_CONTEUDO_PRIMEIRO:
-        return _juntar(cont, _partes(autor, hora, estado))
-    if estilo == ESTILO_AUTOR_SO_QUANDO_MUDA:
-        mudou = anterior is None or anterior.minha != m.minha or \
-            anterior.autor != m.autor
-        prefixo = ("%s: " % autor) if mudou else ""
-        return _juntar(prefixo + cont, estado)
-    return _juntar("%s, %s: %s" % (autor, hora, cont), estado)
+            return 'em resposta a %s: "%s"' % (de, citacao(respondida))
+        if respondida:
+            return "em resposta a %s" % respondida
+        return "em resposta a uma mensagem mais antiga"
+
+    blocos = {"conteudo": bloco_conteudo, "marcas": bloco_marcas,
+              "links": bloco_links,
+              "previa": lambda: "" if previa_na_frente
+              else trecho_da_previa(m),
+              "ia": lambda: trecho_da_ia(m), "reacoes": bloco_reacoes,
+              "resposta": bloco_resposta}
+    def bloco_autor():
+        if autor_so_quando_muda and not (
+                anterior is None or anterior.minha != m.minha
+                or anterior.autor != m.autor):
+            return ""
+        return "Você" if m.minha else (m.autor or quem or "Desconhecido")
+
+    blocos.update({
+        "autor": bloco_autor,
+        "hora": lambda: hora_legivel(m.data, agora),
+        "estado": lambda: m.estado if (m.minha and m.estado) else ""})
+    partes = [(chave, blocos[chave]()) for chave in itens if chave in blocos]
+    partes = [(chave, texto) for chave, texto in partes if texto]
+    # quem enviou e a hora no comeco formam o cabecalho "Ana, 10:00: ..."; o
+    # resto vai encadeado, sem dobrar a pontuacao
+    lead = 0
+    while lead < len(partes) and partes[lead][0] in ("autor", "hora"):
+        lead += 1
+    cabeca = ", ".join(t for _, t in partes[:lead])
+    resto = ""
+    for _, texto in partes[lead:]:
+        resto = _juntar(resto, texto)
+    if cabeca and resto:
+        return "%s: %s" % (cabeca, resto)
+    return cabeca or resto
 
 
 FILTROS_TIPO = (("todas", "Todas as conversas"),

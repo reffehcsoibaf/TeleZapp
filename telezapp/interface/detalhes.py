@@ -6,7 +6,6 @@ administrador. `ControleDetalhes` junta a janela principal, os provedores e
 o banco; as janelas daqui so desenham e chamam de volta."""
 import logging
 import os
-import tempfile
 import threading
 import time
 import traceback
@@ -440,6 +439,10 @@ class ControleDetalhes:
         if conv.tipo == "privada":
             botoes.append(("&Editar contato", self.editar_contato))
             botoes.append(("&Mídias", self.midias))
+            if getattr(self.prov, "FOTO_DO_CONTATO", False):
+                botoes.append(("Ver a &foto do contato", self.ver_foto))
+                botoes.append(("&Descrever a foto do contato",
+                               self.descrever_foto))
             botoes.append(("&Grupos em comum", self.em_comum))
             if getattr(self.prov, "LISTA_GRUPOS_ADMIN", False):
                 botoes.append(("&Adicionar a um grupo...",
@@ -451,6 +454,8 @@ class ControleDetalhes:
             botoes.append(("&Mídias", self.midias))
             if getattr(self.prov, "FOTO_DO_GRUPO", False):
                 botoes.append(("Ver a &foto do grupo", self.ver_foto))
+                botoes.append(("&Descrever a foto do grupo",
+                               self.descrever_foto))
             if d.get("comunidade"):
                 botoes.append(("&Grupos da comunidade", self.subgrupos))
             if d.get("sou_admin"):
@@ -780,40 +785,64 @@ class ControleDetalhes:
             dlg.Destroy()
 
     def ver_foto(self):
-        """Baixa a foto do grupo e abre no programa de imagens do Windows."""
+        """Baixa a foto do grupo ou do contato e abre no programa de imagens
+        do Windows."""
+        def abrir(caminho):
+            if os.name != "nt":
+                self.jan.fala.falar(caminho)
+                return
+            try:
+                os.startfile(caminho)
+            except OSError:
+                log.error("foto de perfil:\n%s", traceback.format_exc())
+                self.jan.fala.falar("Não consegui abrir a foto.",
+                                    interromper=True)
+                return
+            self.jan.fala.falar("Foto aberta.", interromper=True)
+        self._foto_em_arquivo(abrir)
+
+    def descrever_foto(self):
+        """Baixa a foto do grupo ou do contato e a manda para os provedores
+        de IA de imagem, na ordem escolhida em Configurações."""
+        quem = "grupo" if self.conv.tipo != "privada" else "contato"
+        self._foto_em_arquivo(lambda caminho: self.jan._ia_descrever_arquivo(
+            caminho, "Foto do %s %s" % (quem, self.conv.nome)))
+
+    def _foto_em_arquivo(self, pronta):
+        """Baixa a foto de perfil para a pasta temporaria e chama
+        `pronta(caminho)` na janela; se nao der, diz por que."""
         jan = self.jan
-        jan.fala.falar("Baixando a foto do grupo...", interromper=True)
+        grupo = self.conv.tipo != "privada"
+        quem = "grupo" if grupo else "contato"
+        jan.fala.falar("Baixando a foto do %s..." % quem, interromper=True)
 
         def depois(resultado):
             if not resultado or not resultado[0]:
                 texto = resultado[1] if resultado else "Não consegui a foto."
                 jan.fala.falar(texto, interromper=True)
                 if self.dlg is not None:
-                    wx.MessageBox(texto, "Foto do grupo",
+                    wx.MessageBox(texto, "Foto do %s" % quem,
                                   wx.OK | wx.ICON_INFORMATION, self.dlg)
                 return
             from telezapp.nucleo import grupo as ng
             try:
-                pasta = os.path.join(tempfile.gettempdir(), "TeleZapp-fotos")
+                pasta = ng.pasta_das_fotos()
                 os.makedirs(pasta, exist_ok=True)
-                caminho = os.path.join(pasta, "grupo-%s%s" % (
-                    "".join(c for c in self.conv.id if c.isalnum()),
+                caminho = os.path.join(pasta, "%s-%s%s" % (
+                    quem, "".join(c for c in self.conv.id if c.isalnum()),
                     ng.extensao_da_imagem(resultado[1])))
                 with open(caminho, "wb") as f:
                     f.write(resultado[1])
-                if os.name != "nt":
-                    jan.fala.falar(caminho)
-                    return
-                os.startfile(caminho)
             except OSError:
-                log.error("foto do grupo:\n%s", traceback.format_exc())
-                jan.fala.falar("Não consegui abrir a foto.",
+                log.error("foto de perfil:\n%s", traceback.format_exc())
+                jan.fala.falar("Não consegui guardar a foto.",
                                interromper=True)
                 return
-            jan.fala.falar("Foto aberta.", interromper=True)
-        self._em_segundo_plano(
-            "foto-do-grupo", lambda: self.prov.foto_do_grupo(self.conv.id),
-            depois)
+            pronta(caminho)
+        buscar = self.prov.foto_do_grupo if grupo else \
+            self.prov.foto_do_contato
+        self._em_segundo_plano("foto-do-" + quem,
+                               lambda: buscar(self.conv.id), depois)
 
     def trocar_foto(self, pai=None):
         """Escolhe uma imagem e a poe como foto do grupo."""

@@ -25,6 +25,7 @@ cabeçalhos dos arquivos. Não é parecer jurídico. O TeleZapp usa a
 | numpy | Áudio | BSD-3-Clause (e outras permissivas) | Sim |
 | opencv-python-headless 5.0 | Ler os quadros de um vídeo para descrevê-lo com a IA | Apache-2.0 (o OpenCV); a roda traz o FFmpeg como DLL separada, LGPL-2.1 | Sim, mantendo o aviso do FFmpeg e indicando onde obter o código-fonte (conferir antes do lançamento, como a libsndfile) |
 | emoji 2.16 | Lista de emojis com nomes em português, para reagir e escrever | BSD-3-Clause (os nomes vêm do CLDR, licença Unicode) | Sim |
+| Unicode CLDR (palavras-chave em português) | Sinônimos e termos equivalentes da busca de emojis, em `telezapp/nucleo/emojis_cldr_pt.py`, gerado por `ferramentas/gerar_emojis_cldr.py` | Unicode License v3 (Unicode-3.0), © 1991-2026 Unicode, Inc.; o aviso está no cabeçalho do arquivo | Sim |
 | protobuf | Mensagens do WhatsApp | BSD-3-Clause | Sim |
 | accessible-output2 (só a DLL) | Fala pelo NVDA | MIT (pela classificação do pacote; o campo de licença diz UNKNOWN) | Sim, mas a DLL é do NVDA: ver pendências |
 | PyInstaller 6.22.3 (ferramenta) | Gera o executável | GPL-2.0-ou-posterior com exceção que permite distribuir programas de qualquer licença | Sim: o executável gerado não herda a GPL do PyInstaller |

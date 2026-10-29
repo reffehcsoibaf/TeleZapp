@@ -76,7 +76,7 @@ dispositivo.
 - **Inteligência artificial (opcional, com a sua chave)**: transcreve voz e
   áudio, descreve fotos, figurinhas e vídeos (por quadros, fora do Gemini) e
   converte PDF em texto acessível; pode agir sozinha nas conversas que você
-  escolher. Os provedores são Google Gemini, OpenAI, Claude, Groq e
+  escolher. Os provedores são Google Gemini, OpenAI, Claude, Groq, Mistral e
   OpenRouter, e as chaves ficam cifradas neste computador.
 - **Acessibilidade**: tudo com controles nativos, lidos pelo leitor de tela;
   os avisos falados do programa (mensagens novas, resultados da IA e

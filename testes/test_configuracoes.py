@@ -34,10 +34,10 @@ def test_busca_acrescenta_categoria_de_resultados(mod):
 
 
 def test_pendentes_so_valem_ao_aplicar_e_voltar_ao_atual_desfaz(mod):
-    mod.definir("estilo", 2)
-    assert mod.valor("estilo") == 2
-    assert mod.cfg.get("estilo") == 1
-    mod.definir("estilo", 1)
+    mod.definir("digitar_na_lista", "campo")
+    assert mod.valor("digitar_na_lista") == "campo"
+    assert mod.cfg.get("digitar_na_lista") == "pular"
+    mod.definir("digitar_na_lista", "pular")
     assert mod.mudancas() == []
 
 
@@ -54,10 +54,10 @@ def test_aplicar_na_ordem_das_opcoes_e_zera(mod):
 
 
 def test_indice_da_escolha(mod):
-    o = next(o for o in config.OPCOES if o.chave == "estilo")
+    o = next(o for o in config.OPCOES if o.chave == "digitar_na_lista")
     assert mod.indice_da_escolha(o) == 0
-    mod.definir("estilo", 3)
-    assert mod.indice_da_escolha(o) == 2
+    mod.definir("digitar_na_lista", "campo")
+    assert mod.indice_da_escolha(o) == 1
 
 
 def test_velocidades_seguem_o_passo_pendente(mod):
@@ -247,8 +247,10 @@ def test_interface_e_mensagens_reunem_as_categorias_antigas(mod):
     soltas = {o.chave for o in mod.opcoes("Interface")}
     assert soltas == {"status_no_titulo", "avisar_chamadas_whatsapp",
                       "ocultar_contatos_duplicados",
-                      "trazer_contatos_ao_abrir", "digitar_na_lista"}
-    assert {"ortografia_idioma", "enter_envia", "estilo",
+                      "trazer_contatos_ao_abrir", "digitar_na_lista",
+                      "prioridade_abertura"}
+    assert "estilo" not in {o.chave for o in config.OPCOES}   # virou a lista
+    assert {"ortografia_idioma", "enter_envia",
             "previa_links"} <= {o.chave for o in mod.opcoes("Mensagens")}
 
 

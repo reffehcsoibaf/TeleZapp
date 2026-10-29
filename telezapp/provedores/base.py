@@ -167,6 +167,12 @@ class Provedor(ABC):
         de chamadas enxerga; listas vazias se nao houver."""
         return [], []
 
+    def buscar_mensagens_que_faltam(self, conversa_id):
+        """Pede ao celular as mensagens recentes da conversa que o TeleZapp
+        pode nao ter recebido. Devolve "" se o pedido foi enviado (a resposta
+        chega depois, com um ev.Aviso) ou o motivo de nao ter sido."""
+        return "Este serviço não faz essa busca."
+
     def arquivar_conversa(self, conversa_id, arquivar):
         """Arquiva (ou desarquiva) a conversa na conta do servico. Devolve
         True se o servico foi avisado; False quando so da para guardar no
@@ -239,6 +245,7 @@ class Provedor(ABC):
     # True nos servicos com pedidos de entrada em grupo e foto do grupo
     PEDIDOS_DE_ENTRADA = False
     FOTO_DO_GRUPO = False
+    FOTO_DO_CONTATO = False
     LISTA_GRUPOS_ADMIN = False
     ENTRA_POR_LINK = False       # "Entrar em um grupo por link"
 
@@ -254,6 +261,10 @@ class Provedor(ABC):
     def foto_do_grupo(self, conversa_id):
         """Baixa a foto atual do grupo: (True, bytes) ou (False, texto)."""
         return False, "Esta conta não mostra a foto do grupo."
+
+    def foto_do_contato(self, conversa_id):
+        """Baixa a foto de perfil do contato: (True, bytes) ou (False, texto)."""
+        return False, "Esta conta não mostra a foto do contato."
 
     def grupos_que_administro(self):
         """[(conversa_id, nome)] dos grupos em que a conta e administradora."""

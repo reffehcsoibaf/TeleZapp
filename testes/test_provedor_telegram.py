@@ -217,6 +217,12 @@ class ClienteFalso:
         with open(file, "wb") as f:
             f.write(b"png")
 
+    sem_foto = False
+
+    async def download_profile_photo(self, ent, file=None):
+        self.fotos = getattr(self, "fotos", []) + [(ent.id, file)]
+        return None if self.sem_foto else b"\xff\xd8\xff"
+
     falha_download = False
     conteudo_grande = bytes((i * 7) % 251 for i in range(
         5 * 512 * 1024 + 1000))        # 5 partes e meia
@@ -477,6 +483,26 @@ def test_mensagem_apagada_no_celular_e_apagada_daqui(ambiente):
                 break
             time.sleep(0.05)
         assert cliente.apagadas == [("peer10", [61], True)]
+    finally:
+        p.parar()
+
+
+def test_foto_de_perfil_do_contato_e_do_grupo(ambiente):
+    cliente = ClienteFalso()
+    p = ambiente.criar(cliente)
+    assert p.FOTO_DO_CONTATO and p.FOTO_DO_GRUPO
+    assert p.foto_do_contato("10") == (False, "Sem conexão com o Telegram.")
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ConversasAtualizadas)
+        assert p.foto_do_contato("10") == (True, b"\xff\xd8\xff")
+        assert p.foto_do_grupo("-100") == (True, b"\xff\xd8\xff")
+        assert cliente.fotos == [(777, bytes), (777, bytes)]
+        cliente.sem_foto = True
+        ok, texto = p.foto_do_contato("10")
+        assert not ok and texto.startswith("Este contato não tem foto")
+        ok, texto = p.foto_do_grupo("-100")
+        assert not ok and texto.startswith("Este grupo não tem foto")
     finally:
         p.parar()
 

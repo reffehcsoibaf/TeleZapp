@@ -17,7 +17,8 @@ instante do arquivo e terminam em silêncio. O nome do arquivo é o do evento:
   reconectada       conta reconectada
   desconectada      conta desconectada
   pronto            código ou QR pronto
-  atualizado        QR Code atualizado
+  atualizado        QR Code atualizado
+
   gravando          gravação de voz iniciada
   gravacao_parada   gravação de voz parada
   voto_enquete      voto numa enquete sua
@@ -31,6 +32,8 @@ instante do arquivo e terminam em silêncio. O nome do arquivo é o do evento:
   tarefa_pronta     backup, restauração ou conversa salva
   reacao_recebida   reação a uma mensagem sua
   mencao_ou_resposta   menção ou resposta a você num grupo
+
+Os pacotes Cristal, Marimba, Retrô e Suave, com os mesmos nomes de arquivo, ficam em pacotes\<id>; todos saem de ferramentas/gerar_sons.py (PACOTES).
 
 Esta pasta é o pacote de sons "TeleZapp" (Configurações, Sons, caixa de pacote de sons).
 Os outros são o Padrão (bips do sistema) e os pacotes personalizados que você cria na mesma tela.

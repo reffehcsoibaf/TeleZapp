@@ -194,6 +194,14 @@ OPCOES = (
           "aberta, a lista de mensagens não tem campo e continua pulando.",
           (("pular", "Pular para o item que começa com a letra"),
            ("campo", "Ir direto para o campo de texto"))),
+    Opcao("prioridade_abertura", "Dar prioridade ao TeleZapp ao abrir",
+          "Interface", True,
+          "Ao abrir, o TeleZapp pede ao Windows prioridade acima do normal "
+          "(e sai do modo de economia de energia) por cerca de meio minuto, "
+          "para não esperar atrás dos outros programas que abrem junto, "
+          "como ao ligar o computador. Se o TeleZapp demora a responder "
+          "quando é aberto depois de outros aplicativos, deixe marcada. "
+          "Vale na próxima abertura."),
     Opcao("status_no_titulo",
           "Mostrar status de presença no título da janela",
           "Interface", True,
@@ -372,11 +380,6 @@ OPCOES = (
           "Enter quebra a linha, como no Telegram Web e no Gmail. A tecla "
           "de enviar também pode ser mudada em Atalhos, na função \"Enviar "
           "a mensagem digitada\"."),
-    Opcao("estilo", "Como cada mensagem é lida", "Mensagens", 1,
-          "A ordem em que autor, hora e conteúdo aparecem na lista de "
-          "mensagens.",
-          ((1, "Autor e hora primeiro"), (2, "Conteúdo primeiro"),
-           (3, "Autor só quando muda"))),
     Opcao("mensagens_por_conversa", "Mensagens carregadas por conversa",
           "Mensagens", 1200,
           "Quantas mensagens, no máximo, o TeleZapp mantém na lista ao abrir "
@@ -542,6 +545,13 @@ OPCOES = (
           "a câmera pode ser ligada na janela da chamada. Marcada, a câmera "
           "liga junto com a chamada. Quem liga uma chamada de vídeo sempre "
           "começa com a câmera ligada."),
+    Opcao("chamada_retornar_sem_audio", "Ligar de volta quando a chamada "
+          "recebida ficar sem som", "Mídias", True,
+          "Às vezes você atende uma chamada do WhatsApp e o som da outra "
+          "pessoa não chega. Marcada, depois de 20 segundos sem som o "
+          "TeleZapp encerra a chamada e liga de volta para a mesma pessoa, "
+          "o que costuma funcionar. A pessoa verá a chamada cair e receberá "
+          "outra. Desmarcada, o TeleZapp só encerra e avisa."),
     Opcao("chamada_retorno", "Tirar das chamadas de voz o retorno da minha "
           "voz", "Mídias", True,
           "Quando a outra pessoa usa uma mesa de som com retorno (monitor) "
@@ -717,6 +727,7 @@ def buscar_opcoes(texto):
 
 PADROES = {o.chave: o.padrao for o in OPCOES}
 PADROES.update({
+    "estilo": 1,             # antigo "Como cada mensagem e lida"; so migra
     "atalhos": {},           # funcao -> combinacao escolhida ("" = sem atalho)
     "ia_ordem": {},          # tarefa -> provedores ligados, na ordem de tentativa
     "ia_lista_modelos": {},  # provedor -> modelos que ele ofereceu
@@ -727,6 +738,11 @@ PADROES.update({
                                   "reacoes", "quem_reagiu"],
                         "ocultos": ["previa", "reacoes",
                                     "quem_reagiu"]},  # o que cada linha mostra
+    "lista_mensagens": {"ordem": ["autor", "hora", "conteudo", "marcas",
+                                  "links", "previa", "ia", "reacoes",
+                                  "resposta", "estado"],
+                        "ocultos": [],
+                        "autor_so_quando_muda": False},  # a linha da mensagem
     "ia_automatica_conversas": [],  # [conta, conversa] com a IA automatica
     "ia_idioma_traducao": "English",  # ultimo idioma de destino da traducao
     "ia_consentimento_texto": [],  # provedores que podem receber seu texto

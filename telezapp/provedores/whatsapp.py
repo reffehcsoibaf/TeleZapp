@@ -13,18 +13,22 @@
 
 O registro nunca grava texto de mensagens, telefones completos ou codigos.
 """
+import contextlib
 import hashlib
 import json
 import logging
 import os
+import platform
 import queue
 import re
+import sysconfig
 import threading
 import time
 import uuid
 
 from telezapp import config
 from telezapp.midia import armazem, envio
+from telezapp.midia import tipos_de_arquivo
 from telezapp.nucleo import chamadas as ch
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import grupo as ng
@@ -70,6 +74,17 @@ MAX_GUARDADAS = 2000
 TEMPO_MAX_SINCRONIA = 45
 # espera (segundos) antes de cada nova tentativa de conexao; a ultima repete
 ESPERAS_RECONEXAO = (3, 10, 30, 60, 120)
+# Mensagem nao decifrada: depois de quantos segundos pedir ao celular que a
+# reenvie (uma tentativa por prazo); so se ainda estiver como "aguardando"
+ESPERAS_REENVIO = (20, 180)
+# Nomes de grupo: um pedido por vez, com este intervalo (s) entre eles; se o
+# WhatsApp responder 429 (rate-overlimit), espera ESPERA_LIMITE * tentativa
+PASSO_NOMES_GRUPO = 1.0
+ESPERA_LIMITE = 30
+TENTATIVAS_NOME_GRUPO = 4
+# HistorySync.HistorySyncType.ON_DEMAND e quantas mensagens pedir de cada vez
+SYNC_SOB_DEMANDA = 6
+QUANTAS_SOB_DEMANDA = 50
 # Status de mensagem no historico (WebMessageInfo.Status)
 HIST_ENTREGUE, HIST_LIDA, HIST_OUVIDA = 3, 4, 5
 # Conversas que nao sao conversas para a pessoa
@@ -95,6 +110,32 @@ OPCOES_HISTORICO = {
     "tudo": ("Todo o histórico (pode demorar e ocupar bastante espaço)",
              3650),
 }
+
+
+
+@contextlib.contextmanager
+def arquitetura_do_processo():
+    """O neonize escolhe a DLL pelo platform.machine(), que no Python 3.12+
+    devolve o processador real. Num Windows ARM (maquina virtual em Mac, por
+    exemplo) o TeleZapp x64 roda emulado e a conta pedia a DLL arm64, que
+    nao existe: durante a importacao, diz a arquitetura do proprio processo."""
+    real = platform.machine
+    if sysconfig.get_platform() == "win-amd64" and             real().lower() not in ("amd64", "x86_64"):
+        platform.machine = lambda: "AMD64"
+    try:
+        yield
+    finally:
+        platform.machine = real
+
+
+def eventos_do_neonize():
+    """O modulo de eventos do neonize. E o primeiro a importar o neonize na
+    conexao (o pacote carrega a DLL), entao tambem precisa da arquitetura
+    certa: sem isso, num Windows ARM a DLL arm64 era pedida e a conta nao
+    pareava."""
+    with arquitetura_do_processo():
+        import neonize.events as nev
+    return nev
 
 
 # ----------------------------------------------------- conversao (testavel)
@@ -980,6 +1021,7 @@ class ProvedorWhatsApp(Provedor):
         self.fabrica_cliente = fabrica_cliente or self._criar_cliente
         self.cliente = None
         self._fila = queue.Queue()
+        self._fila_nomes = queue.Queue()    # nomes de grupo a buscar
         self._parar = threading.Event()
         self._threads = []
         self._conversas = {c.id: c for c in banco.conversas(conta.id)}
@@ -1002,17 +1044,20 @@ class ProvedorWhatsApp(Provedor):
         self._ultima_conferencia = 0.0
         self._sincronizando = False
         self._progresso_historico = 0   # 0 = nada em andamento
+        self._pedidos_de_historico = 0  # pedidos de mensagens que faltam
         self._recebidas_na_sincronia = 0
         self._trava = threading.RLock()
 
     # ----------------------------------------------------------- execucao
     def _criar_cliente(self):
         inicio = time.monotonic()
-        from neonize.client import NewClient
+        with arquitetura_do_processo():
+            from neonize.client import NewClient
         log.info("biblioteca do WhatsApp carregada em %.1f s",
                  time.monotonic() - inicio)
         self._ligar_log_detalhado()
         caminho = caminho_sessao(self.pasta_sessoes, self.conta.id)
+        tipos_de_arquivo.consertar_caminho_do_magic()
         return NewClient(caminho, props=props_do_aparelho(self.historico))
 
     @staticmethod
@@ -1037,7 +1082,8 @@ class ProvedorWhatsApp(Provedor):
         if self._threads:
             return
         for alvo, nome in ((self._conectar, "conexao"),
-                           (self._trabalhar, "envios")):
+                           (self._trabalhar, "envios"),
+                           (self._trabalhar_nomes, "nomes")):
             t = threading.Thread(target=alvo, daemon=True,
                                  name="whatsapp-%s-%s" % (nome, self.conta.id))
             self._threads.append(t)
@@ -1088,7 +1134,7 @@ class ProvedorWhatsApp(Provedor):
         """Cria o cliente e conecta (bloqueia ate a conexao acabar).
         Devolve False se houve erro que nao adianta repetir."""
         try:
-            import neonize.events as nev
+            nev = eventos_do_neonize()
             # O neonize poe <bot biz_bot="1"/> em toda mensagem de conversa
             # privada, e o destinatario ve o selo "IA" com botoes de avaliacao
             os.environ["NEONIZE_BOT_TAG"] = "off"
@@ -1171,6 +1217,29 @@ class ProvedorWhatsApp(Provedor):
                 tarefa()
             except Exception:
                 log.exception("erro numa tarefa do WhatsApp")
+
+    def _trabalhar_nomes(self):
+        """Busca o nome dos grupos sem nome, um de cada vez. Abrir a conta
+        com dezenas deles de uma vez fazia o WhatsApp responder 429
+        (rate-overlimit) e os nomes ficavam sem busca."""
+        while not self._parar.is_set():
+            try:
+                cid, chat, tentativa = self._fila_nomes.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            try:
+                self._ler_nome_grupo(cid, chat)
+            except Exception as e:
+                limite = "429" in str(e) or "rate-overlimit" in str(e)
+                if limite and tentativa + 1 < TENTATIVAS_NOME_GRUPO:
+                    espera = ESPERA_LIMITE * (tentativa + 1)
+                    log.info("nome de grupo: o WhatsApp limitou os pedidos; "
+                             "espero %d s e tento de novo", espera)
+                    self._parar.wait(espera)
+                    self._fila_nomes.put((cid, chat, tentativa + 1))
+                else:
+                    log.warning("não consegui o nome de um grupo: %s", e)
+            self._parar.wait(PASSO_NOMES_GRUPO)
 
     def parar(self):
         self._parar.set()
@@ -1538,12 +1607,9 @@ class ProvedorWhatsApp(Provedor):
         jid = _jid_obj(usuario, servidor)
         candidatos = [jid]
         if servidor == "s.whatsapp.net":
-            try:                      # o armazem pode guardar sob o LID
-                lid = self.cliente.get_lid_from_pn(jid)
-                if lid.User:
-                    candidatos.append(lid)
-            except Exception:
-                pass
+            lid = self._lid_do_pn(jid)      # o armazem pode guardar sob o LID
+            if lid is not None and lid.User:
+                candidatos.append(lid)
         for alvo in candidatos:
             try:
                 dados = self.cliente.chat_settings.get_chat_settings(alvo)
@@ -1987,9 +2053,20 @@ class ProvedorWhatsApp(Provedor):
             texto += " %d não deu certo." % len(erros)
         return True, texto
 
+    FOTO_DO_CONTATO = True
+
     def foto_do_grupo(self, conversa_id):
         """Baixa a foto atual do grupo. Devolve (True, bytes) ou (False,
         texto). Sem foto, ou foto escondida, o WhatsApp responde igual."""
+        return self._baixar_foto(conversa_id, "Este grupo")
+
+    def foto_do_contato(self, conversa_id):
+        """Baixa a foto de perfil do contato (True, bytes) ou (False, texto).
+        Sem foto, ou com a foto escondida para quem não é contato dela, o
+        WhatsApp responde igual."""
+        return self._baixar_foto(conversa_id, "Este contato")
+
+    def _baixar_foto(self, conversa_id, quem):
         if self.cliente is None or not self._conectada:
             return False, "Sem conexão com o WhatsApp."
         usuario, servidor = jid_de_texto(conversa_id)
@@ -1998,16 +2075,16 @@ class ProvedorWhatsApp(Provedor):
                 _jid_obj(usuario, servidor))
             url = info.URL if info is not None else ""
         except Exception as e:
-            log.info("foto do grupo: %s", type(e).__name__)
+            log.info("foto de perfil: %s", type(e).__name__)
             url = ""
         if not url:
-            return False, "Este grupo não tem foto (ou ela não está visível)."
+            return False, "%s não tem foto (ou ela não está visível)." % quem
         try:
             import urllib.request
             with urllib.request.urlopen(url, timeout=20) as r:
                 dados = r.read(20 * 1024 * 1024)
         except Exception as e:
-            log.warning("baixar foto do grupo: %s", type(e).__name__)
+            log.warning("baixar foto de perfil: %s", type(e).__name__)
             return False, "Não consegui baixar a foto."
         return (True, dados) if dados else (False, "A foto veio vazia.")
 
@@ -2348,12 +2425,9 @@ class ProvedorWhatsApp(Provedor):
         jid = "%s@%s" % (usuario, servidor)
         acao = ContactAction(fullName=nome, firstName=nome.split()[0],
                              saveOnPrimaryAddressbook=False, pnJID=jid)
-        try:
-            lid = self.cliente.get_lid_from_pn(_jid_obj(usuario, servidor))
-            if lid.User:
-                acao.lidJID = "%s@%s" % (lid.User, lid.Server)
-        except Exception:
-            pass
+        lid = self._lid_do_pn(_jid_obj(usuario, servidor))
+        if lid is not None and lid.User:
+            acao.lidJID = "%s@%s" % (lid.User, lid.Server)
         return self._enviar_estado(
             "contact", 2, PatchInfo.CRITICAL_UNBLOCK_LOW,
             SyncActionValue(contactAction=acao), conversa_id)
@@ -2507,13 +2581,9 @@ class ProvedorWhatsApp(Provedor):
         sao trocadas pelo numero, quando o WhatsApp informa."""
         if chat.Server == "lid" and jid_texto(chat) in self._lid_para_numero:
             return self._lid_para_numero[jid_texto(chat)]
-        if chat.Server == "lid" and self.cliente is not None:
-            try:
-                pn = self.cliente.get_pn_from_lid(chat)
-                if pn.User:
-                    return jid_texto(pn)
-            except Exception:
-                log.info("sem número para um endereço LID")
+        pn = self._pn_do_lid(chat)
+        if pn is not None and pn.User:
+            return jid_texto(pn)
         return jid_texto(chat)
 
     def _numero_do_jid(self, jid):
@@ -2525,14 +2595,33 @@ class ProvedorWhatsApp(Provedor):
         if outro:
             usuario, servidor = jid_de_texto(outro)
             return _jid_obj(usuario, servidor)
-        if self.cliente is not None:
-            try:
-                pn = self.cliente.get_pn_from_lid(jid)
-                if pn.User:
-                    return pn
-            except Exception:
-                log.info("sem número para um endereço LID")
+        pn = self._pn_do_lid(jid)
+        if pn is not None and pn.User:
+            return pn
         return jid
+
+    def _pn_do_lid(self, lid):
+        """JID de telefone que o WhatsApp informa para um endereco LID, ou
+        None. So pergunta com a conexao de pe: o lado em Go so conhece o
+        cliente depois de conectar, e a pergunta antes disso derruba o
+        programa inteiro (relato do Jose Gabriel, 28/10/2026)."""
+        if self.cliente is None or not self._conectada:
+            return None
+        try:
+            return self.cliente.get_pn_from_lid(lid)
+        except Exception:
+            log.info("sem número para um endereço LID")
+            return None
+
+    def _lid_do_pn(self, pn):
+        """O inverso de _pn_do_lid: o endereco LID de um telefone, ou None.
+        Mesma regra: so com a conexao de pe."""
+        if self.cliente is None or not self._conectada:
+            return None
+        try:
+            return self.cliente.get_lid_from_pn(pn)
+        except Exception:
+            return None
 
     def _nome_contato(self, jid, pushname=""):
         """Nome do contato (agenda), senao o nome de registro (perfil da
@@ -2819,13 +2908,10 @@ class ProvedorWhatsApp(Provedor):
         for lid, pn in list(self._lid_para_numero.items()):
             if lid in formas or pn in formas:
                 formas.update((lid, pn))
-        if self.cliente is not None and alvo.Server == "s.whatsapp.net":
-            try:
-                lid = self.cliente.get_lid_from_pn(alvo)
-                if lid.User:
-                    formas.add(jid_texto(lid))
-            except Exception:
-                pass
+        if alvo.Server == "s.whatsapp.net":
+            lid = self._lid_do_pn(alvo)
+            if lid is not None and lid.User:
+                formas.add(jid_texto(lid))
         return {f for f in formas if f and not f.startswith("@")}
 
     def _aprender_do_grupo(self, grupo):
@@ -3344,6 +3430,9 @@ class ProvedorWhatsApp(Provedor):
         self._publicar_conversas()
 
     def _buscar_nome_grupo(self, conversa_id, chat):
+        self._fila_nomes.put((conversa_id, chat, 0))
+
+    def _ler_nome_grupo(self, conversa_id, chat):
         info = self.cliente.get_group_info(chat)
         nome = info.GroupName.Name
         if not nome:
@@ -3361,8 +3450,10 @@ class ProvedorWhatsApp(Provedor):
         try:
             info = evento.Info
             with self._trava:
-                if info.ID in self._vistas:
-                    return
+                repetida = info.ID in self._vistas
+            if repetida:
+                log.info("mensagem repetida ignorada: id=%s", info.ID)
+                return
             origem = info.MessageSource
             grupo = bool(origem.IsGroup)
             cid = self._id_da_conversa(origem.Chat)
@@ -3397,12 +3488,13 @@ class ProvedorWhatsApp(Provedor):
                 ignorados = sorted(set(campos(desembrulhar(evento.Message)))
                                    - {"senderKeyDistributionMessage",
                                       "messageContextInfo"})
-                if ignorados:
-                    log.info("evento sem conteúdo para mostrar: id=%s "
-                             "campos=%s", info.ID, ", ".join(ignorados))
+                log.info("evento sem conteúdo para mostrar: id=%s conversa=%s "
+                         "grupo=%s campos=%s", info.ID, cid, grupo,
+                         ", ".join(ignorados) or "(nenhum)")
                 return
             with self._trava:
                 if info.ID in self._vistas:      # outro evento ja tratou
+                    log.info("mensagem repetida ignorada: id=%s", info.ID)
                     return
                 self._vistas.add(info.ID)
                 if len(self._vistas) > MAX_GUARDADAS:
@@ -3456,6 +3548,9 @@ class ProvedorWhatsApp(Provedor):
                         self._recebidas_na_sincronia += 1
             self.banco.salvar_conversas([conv])
             self.banco.salvar_mensagens([msg])
+            log.info("mensagem guardada: id=%s conversa=%s grupo=%s tipo=%s "
+                     "minha=%s sincronizando=%s", msg.id, cid, grupo, msg.tipo,
+                     msg.minha, silenciosa)
             self.barramento.publicar(ev.MensagemNova(msg, conv,
                                                      silenciosa=silenciosa))
         except Exception:
@@ -3503,8 +3598,39 @@ class ProvedorWhatsApp(Provedor):
             self.banco.salvar_mensagens([msg])
             self.barramento.publicar(ev.MensagemNova(msg, conv,
                                                      silenciosa=True))
+            if not minha and ESPERAS_REENVIO:
+                self._agendar_reenvio(origem.Chat, origem.Sender, info.ID,
+                                      cid, 0)
         except Exception:
             log.exception("erro ao tratar mensagem não decifrada")
+
+    def _agendar_reenvio(self, chat, remetente, id_, cid, tentativa):
+        relogio = threading.Timer(
+            ESPERAS_REENVIO[tentativa], self._pedir_reenvio,
+            (chat, remetente, id_, cid, tentativa))
+        relogio.daemon = True
+        relogio.start()
+
+    def _pedir_reenvio(self, chat, remetente, id_, cid, tentativa):
+        """Pede ao celular a mensagem que ficou "aguardando". O whatsmeow nao
+        faz isso sozinho; a resposta chega como uma mensagem normal e
+        substitui a marca."""
+        try:
+            atual = self.banco.mensagem(self.conta.id, cid, id_)
+            pedir = getattr(self.cliente, "request_unavailable_message", None)
+            if atual is None or atual.tipo != m.AGUARDANDO or not self._conectada:
+                return
+            if pedir is None:
+                log.info("reenvio de %s: esta DLL não sabe pedir", id_)
+                return
+            pedir(chat, remetente, id_)
+            log.info("reenvio pedido ao celular: id=%s conversa=%s "
+                     "tentativa=%d", id_, cid, tentativa + 1)
+            if tentativa + 1 < len(ESPERAS_REENVIO):
+                self._agendar_reenvio(chat, remetente, id_, cid, tentativa + 1)
+        except Exception:
+            log.warning("não consegui pedir o reenvio de %s", id_,
+                        exc_info=True)
 
     def _tratar_alteracao(self, evento, cid, info, origem):
         """Reacao, edicao ou 'apagar para todos' de uma mensagem que ja
@@ -4748,6 +4874,9 @@ class ProvedorWhatsApp(Provedor):
         try:
             log.info("pacote de histórico: %s", ", ".join(
                 "%s=%s" % kv for kv in resumo_historico(e.Data).items()))
+            if int(e.Data.syncType) == SYNC_SOB_DEMANDA:
+                self._historico_sob_demanda(e.Data)
+                return
             self.guardar_historico(e.Data)
             pct = min(100, int(e.Data.progress))
             self._progresso_historico = 0 if pct >= 100 else pct
@@ -4858,6 +4987,97 @@ class ProvedorWhatsApp(Provedor):
             self._publicar_conversas()
             self._fila.put(self._conferir_arquivadas)
 
+    # ---------------------------------------- mensagens que faltam (celular)
+    def buscar_mensagens_que_faltam(self, conversa_id):
+        """Pede ao celular as ~50 mensagens imediatamente anteriores a mais
+        nova que temos na conversa (o pedido do WhatsApp vai "para tras" de
+        uma ancora): preenche buracos no meio e no fim do que ja guardamos.
+        A resposta chega como um pacote de historico ON_DEMAND."""
+        pedir = getattr(self.cliente, "request_history_sync", None)
+        if self.cliente is None or not self._conectada:
+            return "A conta não está conectada."
+        if pedir is None:
+            return "Esta versão do componente do WhatsApp não faz essa busca."
+        if "@" not in (conversa_id or "") or \
+                conversa_id.startswith("status:"):
+            return "Esta conversa não tem busca de mensagens."
+        ancora = next((x for x in reversed(self.banco.mensagens(
+            self.conta.id, conversa_id, 20)) if x.tipo != m.AGUARDANDO), None)
+        if ancora is None:
+            return "Não há mensagem na conversa para servir de referência."
+        grupo = conversa_id.endswith("@g.us")
+        remetente = (self._jid(ancora.remetente) if ancora.remetente
+                     and "@" in ancora.remetente else _jid_obj("", ""))
+        info = info_da_mensagem(self._jid(conversa_id), remetente, ancora.id,
+                                ancora.minha, grupo, ancora.data)
+        self._pedidos_de_historico += 1
+        self._fila.put(lambda: self._pedir_historico(
+            conversa_id, info, ancora.id))
+        return ""
+
+    def _pedir_historico(self, conversa_id, info, ancora_id):
+        try:
+            self.cliente.request_history_sync(info, QUANTAS_SOB_DEMANDA)
+            log.info("histórico pedido ao celular: conversa=%s âncora=%s "
+                     "quantas=%d", conversa_id, ancora_id,
+                     QUANTAS_SOB_DEMANDA)
+        except Exception:
+            self._pedidos_de_historico = max(0, self._pedidos_de_historico - 1)
+            log.warning("não consegui pedir o histórico", exc_info=True)
+            self.barramento.publicar(ev.Aviso(
+                self.conta.id, "Não consegui pedir as mensagens ao celular."))
+
+    def _historico_sob_demanda(self, dados):
+        """Resposta de um pedido de historico: guarda so as mensagens
+        (sem mexer em nao lidas, arquivada, fixada...), sem avisos, e conta
+        as que nao tinhamos ou eram so uma marca "aguardando"."""
+        novas, por_conversa = 0, {}
+        for c in dados.conversations:
+            cid = self._normalizar_id(c.ID)
+            if not cid or cid in IGNORAR_CONVERSAS:
+                continue
+            msgs = []
+            for h in c.messages:
+                x, rem = converter_historico(
+                    h.message, self.conta.id, cid,
+                    self._apelidos.get(h.message.key.participant or
+                                       h.message.participant, ""))
+                if x is None:
+                    continue
+                antes = self.banco.mensagem(self.conta.id, cid, x.id)
+                if antes is not None and antes.tipo != m.AGUARDANDO:
+                    continue          # o que ja temos vale mais
+                novas += 1
+                self._enriquecer_mencoes(x)
+                if not x.minha:
+                    self._remetentes[x.id] = (rem, x.texto)
+                msgs.append(x)
+            if msgs:
+                with self._trava:
+                    conv = self._conversas.get(cid)
+                if conv is not None and not cid.endswith("@g.us"):
+                    for x in msgs:
+                        if not x.minha:
+                            x.autor = (m.nome_para_autor(conv) or x.autor
+                                       or conv.nome)
+                self.banco.salvar_mensagens(msgs)
+                por_conversa[cid] = len(msgs)
+        for cid in por_conversa:
+            self.barramento.publicar(ev.MensagensCarregadas(
+                self.conta.id, cid, self.banco.mensagens(
+                    self.conta.id, cid, 200)))
+        log.info("histórico pedido: chegaram %d mensagens novas em %d "
+                 "conversas", novas, len(por_conversa))
+        if self._pedidos_de_historico > 0:
+            self._pedidos_de_historico -= 1
+            if novas:
+                texto = "Encontrei %d %s." % (
+                    novas, "mensagem que faltava" if novas == 1
+                    else "mensagens que faltavam")
+            else:
+                texto = "O celular não tem mensagens que faltem aqui."
+            self.barramento.publicar(ev.Aviso(self.conta.id, texto))
+
     def _normalizar_id(self, texto):
         usuario, servidor = jid_de_texto(texto)
         cid = "%s@%s" % (usuario, servidor) if usuario else ""
@@ -4887,7 +5107,7 @@ def _jid_obj(usuario, servidor):
     return build_jid(usuario, servidor)
 
 
-def info_da_mensagem(chat, remetente, id_, minha, grupo):
+def info_da_mensagem(chat, remetente, id_, minha, grupo, timestamp=0):
     """MessageInfo que o neonize aceita serializar: todos os campos do
     protobuf sao obrigatorios, entao os que o envio nao usa vao vazios."""
     from neonize.proto.Neonize_pb2 import MessageInfo, MessageSource
@@ -4897,4 +5117,4 @@ def info_da_mensagem(chat, remetente, id_, minha, grupo):
         BroadcastListOwner=_jid_obj("", ""))
     return MessageInfo(
         MessageSource=origem, ID=id_, ServerID=0, Type="", Pushname="",
-        Timestamp=0, Category="", Multicast=False, MediaType="", Edit="")
+        Timestamp=int(timestamp), Category="", Multicast=False, MediaType="", Edit="")

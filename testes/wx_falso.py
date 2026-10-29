@@ -28,6 +28,7 @@ escolha_lista = [0]       # o que o SingleChoiceDialog "escolhe"
 resposta_lista = [ID_OK]
 WXK_ESCAPE, WXK_RETURN, WXK_NUMPAD_ENTER = 27, 13, 370
 WXK_DELETE, WXK_SPACE = 127, 32
+WXK_LEFT, WXK_RIGHT = 314, 316
 WXK_UP, WXK_DOWN, WXK_HOME, WXK_END, WXK_PAGEUP, WXK_PAGEDOWN = range(
     315, 321)
 LC_REPORT = LC_SINGLE_SEL = LC_NO_HEADER = 0
@@ -184,6 +185,9 @@ class MultiChoiceDialog(SingleChoiceDialog):
 class Dialog(Frame):
     def SetSizer(self, s):
         pass
+
+    def EndModal(self, codigo):
+        self.encerrado = codigo
 
     def SetEscapeId(self, i):
         pass

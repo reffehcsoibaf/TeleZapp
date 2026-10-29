@@ -45,6 +45,16 @@ FIM_DO_VIDEO = -2                # retorno da DLL: a chamada acabou
 # CallVideo: o que fazer com o video da chamada
 VIDEO_PEDIR, VIDEO_ACEITAR, VIDEO_PARAR, VIDEO_LIGAR, VIDEO_DESLIGAR = (
     1, 2, 3, 4, 5)
+# Ligado pela janela a partir da opcao `chamada_retornar_sem_audio`
+RETORNAR_SEM_AUDIO = {"ligado": True}
+
+
+def definir_retornar_sem_audio(ligado):
+    RETORNAR_SEM_AUDIO["ligado"] = bool(ligado)
+
+
+SEM_AUDIO_COM_RETORNO = ("A chamada foi atendida, mas o som do outro lado "
+                         "não chegou. Ligando de volta para a pessoa.")
 SEM_AUDIO = ("A chamada foi atendida, mas o som do outro lado não chegou. "
              "Pode ser a rede ou o firewall do Windows bloqueando o áudio "
              "da chamada. Veja se o TeleZapp está liberado no firewall e "
@@ -442,11 +452,39 @@ class ChamadasWhatsApp:
             if lig.chamada.estado == ch.CONECTANDO:
                 log.warning("chamada atendida, mas sem som do outro lado "
                             "em %ds; encerrando", self.espera_audio_s)
-                lig.intencao, lig.erro = ch.FALHA, SEM_AUDIO
+                voltar = lig.chamada.entrante and \
+                    RETORNAR_SEM_AUDIO["ligado"]
+                erro = SEM_AUDIO_COM_RETORNO if voltar else SEM_AUDIO
+                lig.intencao, lig.erro = ch.FALHA, erro
                 if not self.ponte.desligar(lig.call_id):
-                    self._mudar(cid, ch.ENCERRADA, ch.FALHA, SEM_AUDIO)
+                    self._mudar(cid, ch.ENCERRADA, ch.FALHA, erro)
+                if voltar:
+                    threading.Thread(target=self._ligar_de_volta,
+                                     args=(cid, lig),
+                                     name="chamada-de-volta",
+                                     daemon=True).start()
         threading.Thread(target=vigia, name="chamada-vigia-audio",
                          daemon=True).start()
+
+    def _ligar_de_volta(self, cid, lig):
+        """Chamada recebida sem som do outro lado: a de saida costuma
+        funcionar, entao liga para a mesma pessoa assim que a anterior
+        terminar (a de saida nunca volta a ligar, sem repeticao)."""
+        fim = time.monotonic() + 8
+        while time.monotonic() < fim:
+            if self._parar.is_set():
+                return
+            with self._trava:
+                livre = cid not in self.ligacoes
+            if livre:
+                break
+            time.sleep(0.2)
+        else:
+            log.warning("não liguei de volta: a chamada anterior não acabou")
+            return
+        log.info("ligando de volta para a conversa da chamada sem som")
+        self.ligar(cid, lig.mic, lig.saida, video=lig.chamada.video,
+                   camera=lig.camera_nome)
 
     def _ao_receber(self, call_id, peer, video=False):
         cid = self.conversa_do_peer(peer)

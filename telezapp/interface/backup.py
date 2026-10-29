@@ -20,7 +20,7 @@ class DialogoBackup(wx.Dialog):
         self.caixas = {}
         for parte, rotulo in bk.PARTES:
             c = wx.CheckBox(self, label=rotulo)
-            c.SetValue(parte == "configuracoes")
+            c.SetValue(parte in ("configuracoes", "atalhos", "sons"))
             lay.Add(c, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
             self.caixas[parte] = c
         lay.Add(wx.StaticText(
@@ -87,7 +87,11 @@ class DialogoRestaurar(wx.Dialog):
             0, wx.ALL, 10)
         self.caixas = {}
         for parte in manifesto.partes:
-            c = wx.CheckBox(self, label=bk.NOMES_PARTES[parte])
+            rotulo = bk.NOMES_PARTES[parte]
+            if parte == "configuracoes" and manifesto.formato < 2:
+                rotulo = ("Configurações do TeleZapp, com os atalhos e os "
+                          "sons (as opções da janela de Configurações)")
+            c = wx.CheckBox(self, label=rotulo)
             c.SetValue(True)
             lay.Add(c, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
             self.caixas[parte] = c

@@ -13,6 +13,11 @@ atrasados ou perdidos, e as pessoas deixam de se ouvir. Durante a chamada:
 - `thread_de_audio()` poe a thread que lê ou toca o som no grupo "Audio" do
   Windows (MMCSS), que o sistema atende antes das outras.
 
+Tambem na abertura: `abertura(True)` pede prioridade acima do normal e tira o
+processo do modo de eficiencia enquanto o programa abre, para nao esperar na
+fila atras dos outros programas que o Windows abre junto; `abertura(False)`
+devolve tudo ao normal (a janela chama isso uns segundos depois de aparecer).
+
 Tudo e melhor esforco: se uma chamada ao Windows falhar, so fica no log. Fora
 do Windows nao faz nada.
 """
@@ -34,8 +39,15 @@ _IGNORAR_RESOLUCAO_DO_RELOGIO = 0x4
 _ES_CONTINUOUS = 0x80000000
 _ES_SYSTEM_REQUIRED = 0x00000001
 
+# SetPriorityClass
+_ACIMA_DO_NORMAL = 0x00008000
+_NORMAL = 0x00000020
+# quanto tempo depois da janela aparecer a prioridade da abertura volta ao normal
+SEGUNDOS_DE_ABERTURA = 30
+
 _trava = threading.Lock()
 _ativa = [False]
+_na_abertura = [False]
 
 
 class _EstadoDeEnergia(ctypes.Structure):
@@ -81,6 +93,40 @@ def chamada_em_curso(ligado):
         log.info("modo chamada %s", "ligado" if ligado else "desligado")
     except Exception:
         log.exception("erro ao ajustar a energia para a chamada")
+
+
+def _classe_do_processo(classe):
+    k32 = ctypes.windll.kernel32
+    k32.GetCurrentProcess.restype = ctypes.c_void_p
+    k32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+    if not k32.SetPriorityClass(k32.GetCurrentProcess(), classe):
+        log.info("o Windows não aceitou mudar a prioridade (%d)",
+                 ctypes.get_last_error() or ctypes.GetLastError())
+
+
+def abertura(ligado):
+    """Liga ou desliga a prioridade da abertura: acima do normal e fora do
+    modo de eficiencia. Ao desligar, o modo de eficiencia so volta a ser
+    decidido pelo Windows se nao houver chamada em curso. Pode ser chamada
+    varias vezes seguidas com o mesmo valor."""
+    if not _WINDOWS:
+        return
+    with _trava:
+        if _na_abertura[0] == bool(ligado):
+            return
+        _na_abertura[0] = bool(ligado)
+    try:
+        _classe_do_processo(_ACIMA_DO_NORMAL if ligado else _NORMAL)
+        if ligado or not _ativa[0]:
+            _energia_do_processo(bool(ligado))
+        log.info("prioridade da abertura %s",
+                 "ligada" if ligado else "desligada")
+    except Exception:
+        log.exception("erro ao ajustar a prioridade da abertura")
+
+
+def na_abertura():
+    return _na_abertura[0]
 
 
 def esta_ativa():

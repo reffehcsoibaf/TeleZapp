@@ -36,6 +36,7 @@ class DialogoBusca(wx.Dialog):
         self.escolhido = None           # o Achado aberto, ao fechar com OK
         self.criterios = None           # os criterios da ultima busca
         self.grupos = []                # (caixa, [controles])
+        self._linhas = {}               # caixa -> a linha dela
 
         painel = wx.ScrolledWindow(self, style=wx.VSCROLL)
         painel.SetScrollRate(0, 24)
@@ -48,11 +49,12 @@ class DialogoBusca(wx.Dialog):
             0, wx.ALL, 8)
 
         # --- texto
-        self.frase = wx.CheckBox(painel, label="Só &frase exata (as palavras "
-                                 "juntas e na ordem)")
         self.cb_termo, self.termo = self._com_texto(
             "&Texto da mensagem, legenda, nome do arquivo ou transcrição:",
-            "Texto procurado", (self.frase,))
+            "Texto procurado")
+        self.frase = wx.CheckBox(painel, label="Só &frase exata (as palavras "
+                                 "juntas e na ordem)")
+        self._junta(self.cb_termo, self.frase)
         # --- onde
         self.cb_servico, self.servicos = self._com_lista(
             "&Serviço:", "Serviços",
@@ -75,33 +77,36 @@ class DialogoBusca(wx.Dialog):
             "Características da mensa&gem (todas as marcadas):",
             "Características da mensagem", busca.CARACTERISTICAS)
         self.cb_quem = wx.CheckBox(painel, label="&Quem enviou:")
+        rot = wx.StaticText(painel, label="Quem enviou:")
         self.quem = wx.Choice(painel, choices=[
             "Eu (mensagens que enviei)", "Outras pessoas"], name="Quem enviou")
         self.quem.SetSelection(0)
-        self._soma(self.cb_quem, self.quem)
+        self._soma(self.cb_quem, rot, self.quem)
         self.cb_autor, self.autor = self._com_texto(
             "Nome de quem enviou &contém:", "Nome de quem enviou")
         # --- quando
         self.cb_data = wx.CheckBox(painel, label="&Período (dia/mês/ano):")
-        self.data_de = wx.TextCtrl(painel, name="De, dia/mês/ano")
-        self.data_ate = wx.TextCtrl(painel, name="Até, dia/mês/ano")
-        self._soma(self.cb_data, wx.StaticText(painel, label="De:"),
-                   self.data_de, wx.StaticText(painel, label="até:"),
-                   self.data_ate)
+        rot_de = wx.StaticText(painel, label="Data inicial, dia/mês/ano:")
+        self.data_de = wx.TextCtrl(painel, name="Data inicial, dia/mês/ano")
+        rot_ate = wx.StaticText(painel, label="Data final, dia/mês/ano:")
+        self.data_ate = wx.TextCtrl(painel, name="Data final, dia/mês/ano")
+        self._soma(self.cb_data, rot_de, self.data_de, rot_ate, self.data_ate)
         # --- medidas
         self.cb_duracao = wx.CheckBox(
             painel, label="&Duração de áudio, voz ou vídeo, em segundos:")
+        rot_min = wx.StaticText(painel, label="Duração mínima em segundos:")
         self.seg_min = wx.TextCtrl(painel, name="Duração mínima em segundos")
+        rot_max = wx.StaticText(painel, label="Duração máxima em segundos:")
         self.seg_max = wx.TextCtrl(painel, name="Duração máxima em segundos")
-        self._soma(self.cb_duracao, wx.StaticText(painel, label="mínimo:"),
-                   self.seg_min, wx.StaticText(painel, label="máximo:"),
+        self._soma(self.cb_duracao, rot_min, self.seg_min, rot_max,
                    self.seg_max)
         self.cb_tamanho = wx.CheckBox(painel,
                                       label="Tamanho do arqui&vo, em MB:")
+        rot_min = wx.StaticText(painel, label="Tamanho mínimo em MB:")
         self.tam_min = wx.TextCtrl(painel, name="Tamanho mínimo em MB")
+        rot_max = wx.StaticText(painel, label="Tamanho máximo em MB:")
         self.tam_max = wx.TextCtrl(painel, name="Tamanho máximo em MB")
-        self._soma(self.cb_tamanho, wx.StaticText(painel, label="mínimo:"),
-                   self.tam_min, wx.StaticText(painel, label="máximo:"),
+        self._soma(self.cb_tamanho, rot_min, self.tam_min, rot_max,
                    self.tam_max)
         self.cb_envio, self.estados = self._com_lista(
             "Estado das mi&nhas mensagens enviadas:", "Estado do envio",
@@ -156,6 +161,7 @@ class DialogoBusca(wx.Dialog):
         linha.Add(caixa, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 6)
         for c in controles:
             linha.Add(c, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 6)
+        self._linhas[caixa] = linha
         self._col.Add(linha, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 8)
         # a caixa marcada libera os campos; os rotulos (StaticText) ficam
         reais = [c for c in controles if not isinstance(c, wx.StaticText)]
@@ -172,20 +178,33 @@ class DialogoBusca(wx.Dialog):
         if marcada and controles:
             controles[0].SetFocus()
 
-    def _com_texto(self, rotulo, nome, extras=()):
+    def _junta(self, caixa, extra):
+        """Poe mais um controle na linha de um criterio ja montado."""
+        for cx, reais in self.grupos:
+            if cx is caixa:
+                reais.append(extra)
+                extra.Enable(False)
+                break
+        self._linhas[caixa].Add(extra, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL,
+                                6)
+
+    def _com_texto(self, rotulo, nome):
+        # o leitor de tela le o StaticText criado logo antes do campo
         caixa = wx.CheckBox(self._painel, label=rotulo)
+        rot = wx.StaticText(self._painel, label=nome + ":")
         campo = wx.TextCtrl(self._painel, name=nome, size=(260, -1))
-        self._soma(caixa, campo, *extras)
+        self._soma(caixa, rot, campo)
         return caixa, campo
 
     def _com_lista(self, rotulo, nome, itens):
         """Caixa de marcar + lista de itens marcaveis. `itens`: [(valor,
         rotulo)]."""
         caixa = wx.CheckBox(self._painel, label=rotulo)
+        rot = wx.StaticText(self._painel, label=nome + ":")
         lista = wx.CheckListBox(self._painel, choices=[r for _, r in itens],
                                 name=nome, size=(300, 110))
         lista.valores = [v for v, _ in itens]
-        self._soma(caixa, lista)
+        self._soma(caixa, rot, lista)
         return caixa, lista
 
     @staticmethod

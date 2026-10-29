@@ -6,6 +6,7 @@ from telezapp import config
 from telezapp.midia import velocidade as vel
 from telezapp.nucleo import codigo_secreto as cs
 from telezapp.nucleo import lista_conversas as lc
+from telezapp.nucleo import lista_mensagens as lm
 from telezapp.nucleo.pacotes_de_som import EstadoDeSons
 from telezapp.nucleo import privacidade_conta as pw
 
@@ -51,6 +52,7 @@ class ModeloConfiguracoes:
         self.registro = None      # nucleo.atalhos.Registro, dado pela janela
         self.atalhos_pendentes = None    # personalizados ainda nao aplicados
         self.lista_pendente = None       # lista de conversas ainda nao aplicada
+        self.lista_msg_pendente = None   # lista de mensagens, idem
 
     # ------------------------------------------------------------ consulta
     def lista_de_categorias(self):
@@ -295,6 +297,20 @@ class ModeloConfiguracoes:
         else:
             self.lista_pendente = valor
 
+    def lista_msg_em_uso(self):
+        """O que a lista de mensagens mostra, com o que ainda nao foi
+        aplicado."""
+        if self.lista_msg_pendente is not None:
+            return self.lista_msg_pendente
+        return lm.normalizar(self.cfg.get("lista_mensagens"))
+
+    def lista_msg_definir(self, valor):
+        valor = lm.normalizar(valor)
+        if valor == lm.normalizar(self.cfg.get("lista_mensagens")):
+            self.lista_msg_pendente = None
+        else:
+            self.lista_msg_pendente = valor
+
     def aplicar(self, aplicador):
         """Entrega cada mudanca ao aplicador(chave, valor) e zera."""
         feitas = self.mudancas()
@@ -302,6 +318,8 @@ class ModeloConfiguracoes:
         self.atalhos_pendentes = None
         lista = self.lista_pendente
         self.lista_pendente = None
+        lista_msg = self.lista_msg_pendente
+        self.lista_msg_pendente = None
         ia = self.ia_mudancas()
         self.ia_chaves, self.ia_modelos, self.ia_ordens = {}, {}, {}
         acao = self.acao_codigo() if not self.erro_codigo() else None
@@ -327,6 +345,9 @@ class ModeloConfiguracoes:
         if lista is not None:
             aplicador("lista_conversas", lista)
             feitas.append(("lista_conversas", lista))
+        if lista_msg is not None:
+            aplicador("lista_mensagens", lista_msg)
+            feitas.append(("lista_mensagens", lista_msg))
         if atalhos is not None:
             aplicador("atalhos", atalhos)
             feitas.append(("atalhos", atalhos))

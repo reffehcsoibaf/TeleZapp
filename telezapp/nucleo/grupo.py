@@ -4,7 +4,9 @@
 convite com QR). Sem wx, para testar em qualquer sistema; quem fala com o
 servico sao os provedores."""
 import io
+import os
 import re
+import tempfile
 import time
 
 
@@ -42,6 +44,34 @@ def extensao_da_imagem(dados):
     if dados[:4] == b"RIFF" and dados[8:12] == b"WEBP":
         return ".webp"
     return ".jpg"
+
+
+def pasta_das_fotos():
+    """Onde ficam, so por um tempo, as fotos de perfil que a pessoa pediu
+    para ver ou descrever."""
+    return os.path.join(tempfile.gettempdir(), "TeleZapp-fotos")
+
+
+def limpar_fotos_temporarias():
+    """Apaga as fotos de perfil guardadas para ver ou descrever (ao abrir e ao
+    fechar o programa); as que um visualizador ainda segura ficam."""
+    pasta = pasta_das_fotos()
+    try:
+        nomes = os.listdir(pasta)
+    except OSError:
+        return 0
+    apagadas = 0
+    for nome in nomes:
+        try:
+            os.remove(os.path.join(pasta, nome))
+            apagadas += 1
+        except OSError:
+            pass
+    try:
+        os.rmdir(pasta)
+    except OSError:
+        pass
+    return apagadas
 
 
 def codigo_do_convite(texto):

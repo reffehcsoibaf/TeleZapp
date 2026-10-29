@@ -142,10 +142,22 @@ def test_admin_ve_pedidos_e_todos_veem_a_foto_do_grupo():
     prov = types.SimpleNamespace(FOTO_DO_GRUPO=True, PEDIDOS_DE_ENTRADA=True)
     admin = _rotulos(_controle(prov, "grupo", {"sou_admin": True}))
     assert "Ver a foto do grupo" in admin
+    assert "Descrever a foto do grupo" in admin
     assert "Pedidos de entrada..." in admin
     comum = _rotulos(_controle(prov, "grupo", {"sou_admin": False}))
     assert "Ver a foto do grupo" in comum
     assert "Pedidos de entrada..." not in comum
+
+
+def test_conversa_privada_oferece_a_foto_do_contato():
+    prov = types.SimpleNamespace(FOTO_DO_CONTATO=True)
+    assert "Ver a foto do contato" in _rotulos(_controle(prov, "privada", {}))
+    assert "Descrever a foto do contato" in _rotulos(
+        _controle(prov, "privada", {}))
+    assert "Ver a foto do contato" not in _rotulos(
+        _controle(types.SimpleNamespace(), "privada", {}))
+    assert "Ver a foto do contato" not in _rotulos(
+        _controle(prov, "grupo", {}))
 
 
 def test_servico_sem_o_recurso_nao_mostra_os_botoes():

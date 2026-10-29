@@ -28,8 +28,10 @@ def som(pasta, nome):
 
 
 def test_pacotes_da_casa_e_personalizados_listados(dados):
-    assert pk.listar() == [("padrao", "Padrão: bips do sistema"),
-                           ("telezapp", "TeleZapp")]
+    casa = [("padrao", "Padrão: bips do sistema"), ("telezapp", "TeleZapp"),
+            ("cristal", "Cristal"), ("marimba", "Marimba"),
+            ("retro", "Retrô"), ("suave", "Suave")]
+    assert pk.listar() == casa
     pacote_id, erro = pk.criar("  Meu   pacote ")
     assert (pacote_id, erro) == ("p:Meu pacote", "")
     assert pk.listar()[-1] == ("p:Meu pacote", "Meu pacote")
@@ -39,7 +41,16 @@ def test_pacotes_da_casa_e_personalizados_listados(dados):
     assert pk.criar("")[1] and pk.criar("a/b")[1] and pk.criar("x" * 41)[1]
     pk.excluir(pacote_id)
     pk.excluir("telezapp")                             # nao exclui os da casa
-    assert [i for i, _ in pk.listar()] == ["padrao", "telezapp"]
+    assert pk.listar() == casa
+    assert pk.criar("Cristal")[1] and pk.criar("retrô")[1]    # nomes da casa
+
+
+def test_pacotes_da_casa_trazem_um_arquivo_por_evento(dados):
+    for pacote in ("telezapp", "cristal", "marimba", "retro", "suave"):
+        assert not pk.editavel(pacote) and pk.da_casa(pacote)
+        for evento, _ in pk.eventos():
+            assert os.path.isfile(pk.arquivo_do_evento(pacote, evento)), (
+                pacote, evento)
 
 
 def test_mapa_de_cada_pacote_para_o_modulo_de_sons(dados):

@@ -1,0 +1,140 @@
+--- session.go (antes)
++++ session.go (depois)
+@@ -1,6 +1,7 @@
+ package meowcaller
+ 
+ import (
++	"crypto/sha1"
+ 	"sync"
+ 	"sync/atomic"
+ 
+@@ -168,6 +169,9 @@
+ 	recvMu       sync.Mutex
+ 	recvRoc      srtp.RecvRocTracker
+ 	unprotectBad atomic.Int64 // pacotes de audio que nao autenticaram (para o log)
++	unprotectOK  atomic.Int64 // pacotes de audio que autenticaram (para o log)
++	lastGoodSeq  atomic.Uint32
++	unprotectRecovered atomic.Bool
+ 	packetsSent  atomic.Uint32
+ 	octetsSent   atomic.Uint32
+ 	rtpTimestamp atomic.Uint32
+@@ -382,6 +386,12 @@
+ 					Uint32("roc_estimado", estimado).Uint32("roc_atual", r).Uint16("ultima_seq", sL).
+ 					Bool("iniciado", ini).Int64("falhas", n).Msg("unprotect: authentication failed")
+ 			}
++			if n == 1 || n == 2 {
++				// TeleZapp (diagnostico): o que ha de diferente no pacote que falhou? Campos do
++				// cabecalho, e se ele autenticaria com outro tamanho de etiqueta ou outro ROC.
++				// Nada aqui muda o resultado: o pacote continua rejeitado.
++				p.logUnprotectDiag(packet, header, estimado, n)
++			}
+ 			p.recvMu.Unlock()
+ 			p.log.Debug().Uint32("ssrc", header.Ssrc).Uint16("seq", header.SequenceNumber).Uint32("roc", roc).Msg("unprotect: WARP MI authentication failed")
+ 			return rtp.RtpHeader{}, nil, false
+@@ -390,6 +400,13 @@
+ 	p.recvRoc.CommitRoc(roc, header.SequenceNumber)
+ 	plain, err := srtp.CryptPayload(&p.recvKeys, header.Ssrc, header.SequenceNumber, roc, withoutTag[headerLen:])
+ 	p.recvMu.Unlock()
++	p.lastGoodSeq.Store(uint32(header.SequenceNumber))
++	if ok := p.unprotectOK.Add(1); ok == 1 {
++		p.log.Info().Uint32("ssrc", header.Ssrc).Uint16("seq", header.SequenceNumber).Msg("unprotect: first audio packet authenticated")
++	} else if bad := p.unprotectBad.Load(); bad > 0 && p.unprotectRecovered.CompareAndSwap(false, true) {
++		p.log.Warn().Uint32("ssrc", header.Ssrc).Uint16("seq", header.SequenceNumber).
++			Int64("falhas_antes", bad).Int64("autenticados", ok).Msg("unprotect: authentication recovered after failures")
++	}
+ 	if err != nil {
+ 		p.log.Debug().Err(err).Uint32("ssrc", header.Ssrc).Uint16("seq", header.SequenceNumber).Uint32("roc", roc).Msg("unprotect: SRTP decrypt failed")
+ 		return rtp.RtpHeader{}, nil, false
+@@ -398,3 +415,39 @@
+ 		Int("plain_bytes", len(plain)).Msg("unprotected audio frame")
+ 	return header, plain, true
+ }
++
++// logUnprotectDiag registra, so para os dois primeiros pacotes de audio que nao autenticaram, o
++// que o diferencia de um pacote normal: tamanho, tipo, marcador, palavra de extensao, e se ele
++// autenticaria com outro tamanho de etiqueta ou outro ROC (o que apontaria para o formato do
++// pacote, e nao para uma troca de chave). Chamado com recvMu travado. TeleZapp.
++func (p *MediaPipeline) logUnprotectDiag(packet []byte, header rtp.RtpHeader, roc uint32, n int64) {
++	ext := byte(0)
++	cc := byte(0)
++	if len(packet) > 0 {
++		ext = (packet[0] >> 4) & 1
++		cc = packet[0] & 0x0f
++	}
++	ev := p.log.Warn().Int64("falha_n", n).Int("packet_bytes", len(packet)).
++		Uint32("ssrc", header.Ssrc).Uint16("seq", header.SequenceNumber).
++		Uint8("payload_type", header.PayloadType).Bool("marker", header.Marker).
++		Uint8("flag_extensao", ext).Uint8("csrc_count", cc).
++		Bool("palavra_extensao", header.ExtensionWord != nil).
++		Bool("extensao_video", header.VideoExtension != nil).
++		Uint32("ultima_seq_boa", p.lastGoodSeq.Load()).
++		Int64("autenticados_antes", p.unprotectOK.Load()).
++		Int("tag_len_usado", p.warpMITagLen)
++	var achou []int
++	for tl := 1; tl <= sha1.Size; tl++ {
++		if len(packet) < 12+tl {
++			break
++		}
++		semTag := packet[:len(packet)-tl]
++		tag := packet[len(packet)-tl:]
++		for _, r := range []uint32{roc, roc + 1, roc + 2} {
++			if srtp.VerifyWarpMITag(p.recvKeys.AuthKey[:], semTag, r, tl, tag, p.log) {
++				achou = append(achou, tl*10+int(r-roc))
++			}
++		}
++	}
++	ev.Ints("tag_len_que_autentica_x10_mais_delta_roc", achou).Msg("unprotect: diagnostico do pacote que falhou")
++}
+--- engine.go (antes)
++++ engine.go (depois)
+@@ -8,6 +8,7 @@
+ 	"errors"
+ 	"fmt"
+ 	"reflect"
++	"sort"
+ 	"strconv"
+ 	"strings"
+ 	"sync"
+@@ -1072,6 +1073,10 @@
+ 	if len(kids) == 0 {
+ 		return false
+ 	}
++	// TeleZapp (diagnostico): toda mensagem de controle de uma chamada, com a hora do log, o nome e
++	// os atributos do primeiro filho (sem o conteudo cifrado), para ver se uma troca de chave, de
++	// aparelho ou de modo (video) chega perto de uma falha de autenticacao do audio.
++	e.logControleDaChamada(callNode, kids[0])
+ 	switch kids[0].Tag {
+ 	case "group_update", "enc_rekey", "waiting_room_update", "user_action", "screen_share":
+ 		// Source of truth: https://github.com/purpshell/meowcaller/blob/36d54857c74e45ccb08f6444a32d2afa13f20be9/datasheets/group-video-reactions.md#L31-L56
+@@ -1698,3 +1703,18 @@
+ 	}
+ 	return nil
+ }
++
++// logControleDaChamada registra o nome e os atributos (nunca o conteudo) de uma mensagem de
++// controle da chamada. Os atributos de chave de criptografia nao existem aqui: a chave viaja
++// cifrada nos filhos, que nao sao lidos. TeleZapp.
++func (e *engine) logControleDaChamada(callNode *waBinary.Node, filho waBinary.Node) {
++	attrs := make([]string, 0, len(filho.Attrs))
++	for k, v := range filho.Attrs {
++		attrs = append(attrs, fmt.Sprintf("%s=%v", k, v))
++	}
++	sort.Strings(attrs)
++	e.c.log.Info().Str("controle", filho.Tag).
++		Str("atributos", strings.Join(attrs, " ")).
++		Int("filhos", len(filho.GetChildren())).
++		Msg("controle da chamada recebido: " + filho.Tag) // a mensagem entra na chave de repeticao do log
++}
+--- engine_media.go (antes)
++++ engine_media.go (depois)
+@@ -1097,6 +1097,10 @@
+ 		if !ok {
+ 			if unprotectFail++; unprotectFail == 1 {
+ 				log.Warn().Uint32("ssrc", vh.Ssrc).Int("bytes", n).Msg("audio RTP did not match an authenticated active participant")
++			} else if unprotectFail%100 == 0 {
++				// TeleZapp (diagnostico): se continua falhando, a chave mudou; se parou, foi so um pacote.
++				log.Warn().Uint32("ssrc", vh.Ssrc).Uint16("seq", vh.SequenceNumber).Uint64("falhas", unprotectFail).
++					Msg("audio RTP still not authenticating")
+ 			}
+ 			e.c.diag.Emit("srtp", map[string]any{"event": "unprotect_failed", "ssrc": vh.Ssrc, "bytes": n})
+ 			continue

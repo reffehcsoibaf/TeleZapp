@@ -159,6 +159,8 @@ class DialogoConfiguracoes(wx.Dialog):
                 self._criar_botao_grupo(categoria, grupo)
         if categoria == "Interface" and not self.modelo.busca.strip():
             self._criar_botao_lista_conversas()
+        if categoria == "Mensagens" and not self.modelo.busca.strip():
+            self._criar_botao_lista_mensagens()
         if categoria == "Privacidade" and self.privacidade is not None \
                 and not self.modelo.busca.strip():
             self._criar_privacidade_conta()
@@ -496,6 +498,29 @@ class DialogoConfiguracoes(wx.Dialog):
         b.Bind(wx.EVT_BUTTON, lambda e: self._abrir_lista_conversas())
         self.lay_painel.Add(b, 0, wx.ALL, 8)
         self.controles["lista_conversas"] = b
+
+    def _criar_botao_lista_mensagens(self):
+        """Botao que abre o que a lista de mensagens mostra e a ordem."""
+        b = wx.Button(self.painel, label="Lista de mensagens")
+        b.Bind(wx.EVT_BUTTON, lambda e: self._abrir_lista_mensagens())
+        self.lay_painel.Add(b, 0, wx.ALL, 8)
+        self.controles["lista_mensagens"] = b
+
+    def _abrir_lista_mensagens(self):
+        from telezapp.interface.lista_conversas import DialogoListaConversas
+        from telezapp.nucleo import lista_mensagens as lm
+        dlg = DialogoListaConversas(
+            self, self.modelo.lista_msg_em_uso, self.modelo.lista_msg_definir,
+            self.fala, nucleo=lm, titulo="Lista de mensagens",
+            explicacao="O que cada mensagem mostra na lista de uma conversa "
+                       "e em que ordem. Pelo menos um item fica ativado.")
+        try:
+            dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+        b = self.controles.get("lista_mensagens")
+        if b:
+            b.SetFocus()
 
     def _abrir_lista_conversas(self):
         from telezapp.interface.lista_conversas import DialogoListaConversas

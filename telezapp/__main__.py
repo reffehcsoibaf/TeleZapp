@@ -190,6 +190,16 @@ def main():
                           args.exc_type, args.exc_value, args.exc_traceback)))
     threading.excepthook = erro_em_thread
     descrever_ambiente(log)
+    prioridade = None
+    try:
+        from telezapp.midia import prioridade
+        if config.Config().get("prioridade_abertura"):
+            prioridade.abertura(True)     # volta ao normal depois da abertura
+        else:
+            prioridade = None
+    except Exception:
+        log.exception("não consegui ajustar a prioridade da abertura")
+        prioridade = None
 
     try:
         import wx
@@ -278,6 +288,11 @@ def main():
         janela.Iconize(True)
     janela.Show()
     etapa(log, "janela mostrada")
+    if prioridade is not None:
+        temporizador = threading.Timer(prioridade.SEGUNDOS_DE_ABERTURA,
+                                       prioridade.abertura, args=(False,))
+        temporizador.daemon = True
+        temporizador.start()
     if cfg.get("iniciar_com_windows"):
         from telezapp.nucleo import inicializacao
         inicializacao.definir(True)      # mantem o caminho em dia
