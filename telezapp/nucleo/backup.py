@@ -3,8 +3,9 @@
 """Backup e restauracao: um arquivo .zip, com senha opcional (AES-256, que o
 7-Zip tambem abre), com as partes que a pessoa escolher.
 
-Partes: configuracoes (as opcoes da janela de Configuracoes e a pasta de
-sons dos avisos), contas (contas,
+Partes: configuracoes (as opcoes da janela de Configuracoes, fora atalhos e
+sons), atalhos (os atalhos personalizados), sons (o pacote de sons, os
+eventos ligados ou desligados e a pasta de sons), contas (contas,
 sessoes e codigo secreto das trancadas: dao acesso as contas), conversas
 (banco com mensagens e contatos) e midias (arquivos baixados).
 
@@ -29,13 +30,32 @@ log = logging.getLogger("telezapp.backup")
 
 PARTES = (
     ("configuracoes", "Configurações do TeleZapp (as opções da janela de "
-                      "Configurações)"),
+                      "Configurações, fora os atalhos e os sons)"),
+    ("atalhos", "Atalhos personalizados (as teclas que você escolheu)"),
+    ("sons", "Configurações de sons (o pacote escolhido, os sons ligados e "
+             "desligados e os sons que você importou)"),
     ("contas", "Contas e sessões, com o código secreto das conversas "
                "trancadas (dão acesso às suas contas)"),
     ("conversas", "Conversas, mensagens e contatos guardados"),
     ("midias", "Mídias baixadas"),
 )
 NOMES_PARTES = dict(PARTES)
+
+# As tres partes que moram no configuracoes.json; as demais opcoes, e as que
+# nao estao aqui, sao da parte "configuracoes". Nos backups antigos
+# (formato 1) tudo isso era uma parte so, "configuracoes"
+PARTES_DE_OPCOES = ("configuracoes", "atalhos", "sons")
+OPCOES_DE_PARTE = {"atalhos": ("atalhos", "mostrar_atalhos"),
+                   "sons": ("pacote_de_sons", "sons_desativados")}
+FORMATO = 2
+
+
+def parte_da_opcao(chave):
+    for parte, chaves in OPCOES_DE_PARTE.items():
+        if chave in chaves:
+            return parte
+    return "configuracoes"
+
 
 # Opcoes que um arquivo de backup nunca muda sozinho: a exigencia do codigo
 # secreto (trocar o arquivo nao pode abrir as conversas trancadas), o modo
@@ -64,21 +84,26 @@ class Manifesto:
     data: float = 0.0
     partes: list = field(default_factory=list)
     pasta_midias: str = ""      # onde estavam as midias (os caminhos no banco)
+    formato: int = 1            # 2: atalhos e sons sao partes proprias
 
 
 # ------------------------------------------------------------- opcoes
 # Preferencias fora de config.OPCOES que tambem vao (a ordem dos provedores
 # de IA e os modelos; as chaves so em backup com senha, ver CHAVES_IA)
 EXTRAS = ("ia_ordem", "ia_modelos", "pacote_de_sons", "sons_desativados",
-          "atalhos", "lista_conversas")
+          "atalhos", "lista_conversas", "lista_mensagens")
 
 
-def opcoes_do_backup(dados):
-    """{chave: valor} das opcoes de config.OPCOES que o backup leva."""
+def opcoes_do_backup(dados, partes=None):
+    """{chave: valor} das opcoes de config.OPCOES que o backup leva; `partes`
+    (de "configuracoes", "atalhos" e "sons") limita ao que for escolhido."""
     levadas = {o.chave: dados.get(o.chave, o.padrao) for o in config.OPCOES
                if o.chave not in OPCOES_FORA}
     for chave in EXTRAS:
         levadas[chave] = dados.get(chave, config.PADROES.get(chave, {}))
+    if partes is not None:
+        levadas = {c: v for c, v in levadas.items()
+                   if parte_da_opcao(c) in partes}
     return levadas
 
 
@@ -104,8 +129,9 @@ def atalhos_validos(lidos):
     return boas
 
 
-def opcoes_validas(lidas):
-    """So as opcoes conhecidas, com valor do tipo e da faixa certos."""
+def opcoes_validas(lidas, partes=None):
+    """So as opcoes conhecidas, com valor do tipo e da faixa certos; `partes`
+    limita as opcoes `as partes escolhidas."""
     boas = {}
     if not isinstance(lidas, dict):
         return boas
@@ -148,13 +174,23 @@ def opcoes_validas(lidas):
     if isinstance(lista, dict):
         from telezapp.nucleo import lista_conversas
         boas["lista_conversas"] = lista_conversas.normalizar(lista)
+    lista = lidas.get("lista_mensagens")
+    if isinstance(lista, dict):
+        from telezapp.nucleo import lista_mensagens
+        boas["lista_mensagens"] = lista_mensagens.normalizar(lista)
+    elif lidas.get("estilo") in (2, 3):
+        # backup antigo: o estilo de "Como cada mensagem e lida" virou a
+        # lista de mensagens
+        from telezapp.nucleo import lista_mensagens
+        boas["lista_mensagens"] = lista_mensagens.do_estilo(lidas["estilo"])
     desativados = lidas.get("sons_desativados")
     if isinstance(desativados, dict):
         boas["sons_desativados"] = {
             p: [e for e in v if isinstance(e, str)]
             for p, v in desativados.items()
             if isinstance(p, str) and isinstance(v, list)}
-
+    if partes is not None:
+        boas = {c: v for c, v in boas.items() if parte_da_opcao(c) in partes}
     return boas
 
 
@@ -208,8 +244,11 @@ def criar(destino, pasta_dados, cfg_dados, partes, senha="",
     os.makedirs(temporarios, exist_ok=True)
     resumo = {}
     total = 1
-    if "configuracoes" in partes:
-        total += 1 + _contar_arquivos(os.path.join(pasta_dados, "sons"))
+    grupos = [p for p in PARTES_DE_OPCOES if p in partes]
+    if grupos:
+        total += 1
+    if "sons" in partes:
+        total += _contar_arquivos(os.path.join(pasta_dados, "sons"))
     if "contas" in partes:
         total += 1 + _contar_arquivos(os.path.join(pasta_dados, "sessoes"),
                                       ("-wal", "-shm", ".tmp"))
@@ -231,21 +270,24 @@ def criar(destino, pasta_dados, cfg_dados, partes, senha="",
                 z.setpassword(senha.encode("utf-8"))
                 z.setencryption(pyzipper.WZ_AES, nbits=256)
             midias = os.path.join(pasta_dados, "midias")
-            manifesto = Manifesto(VERSAO, time.time(), partes, midias)
+            manifesto = Manifesto(VERSAO, time.time(), partes, midias, FORMATO)
             z.writestr(MANIFESTO, json.dumps(manifesto.__dict__,
                                              ensure_ascii=False, indent=1))
-            if "configuracoes" in partes:
+            if grupos:
                 z.writestr("configuracoes.json", json.dumps(
-                    {"opcoes": opcoes_do_backup(cfg_dados)},
+                    {"opcoes": opcoes_do_backup(cfg_dados, grupos)},
                     ensure_ascii=False, indent=1))
-                resumo["configuracoes"] = 1
+                for parte in grupos:
+                    resumo[parte] = 1
                 andou("Copiando as configurações")
+            if "configuracoes" in partes:
                 # as chaves de IA so vao dentro de um zip cifrado: sem senha
                 # ficariam legiveis para quem pegasse o arquivo
                 chaves = _chaves_de_ia(pasta_dados) if senha else {}
                 if chaves:
                     z.writestr(CHAVES_IA, json.dumps(chaves))
                     resumo["ia_chaves"] = len(chaves)
+            if "sons" in partes:
                 sons = os.path.join(pasta_dados, "sons")
                 for atual, _, arquivos in os.walk(sons):
                     for a in arquivos:
@@ -253,8 +295,8 @@ def criar(destino, pasta_dados, cfg_dados, partes, senha="",
                         z.write(origem, "sons/" + os.path.relpath(
                             origem, sons).replace("\\", "/"),
                             compress_type=pyzipper.ZIP_STORED)
-                        resumo["configuracoes"] += 1
-                        andou("Copiando as configurações")
+                        resumo["sons"] += 1
+                        andou("Copiando os sons")
             if "contas" in partes:
                 z.writestr("contas.json", json.dumps(
                     {c: cfg_dados[c] for c in CHAVES_CONTAS if c in cfg_dados},
@@ -351,7 +393,8 @@ def ler_manifesto(arquivo, senha=""):
     return Manifesto(str(dados.get("versao", "")),
                      float(dados.get("data") or 0),
                      [p for p in dados["partes"] if p in NOMES_PARTES],
-                     str(dados.get("pasta_midias", "")))
+                     str(dados.get("pasta_midias", "")),
+                     int(dados.get("formato") or 1))
 
 
 def _extrair(z, nome, destino):
@@ -402,14 +445,19 @@ def restaurar(arquivo, senha, partes, pasta_dados, resultado=None,
     z = _abrir(arquivo, senha)
     try:
         try:
-            if "configuracoes" in escolhidas:
+            grupos = [p for p in PARTES_DE_OPCOES if p in escolhidas]
+            if "configuracoes" in grupos and manifesto.formato < 2:
+                # backup antigo: configuracoes, atalhos e sons eram uma so
+                grupos = list(PARTES_DE_OPCOES)
+            if grupos:
                 lidas = json.loads(z.read("configuracoes.json").decode(
                     "utf-8"))
-                opcoes = opcoes_validas(lidas.get("opcoes"))
-                if senha:
+                opcoes = opcoes_validas(lidas.get("opcoes"), grupos)
+                if senha and "configuracoes" in grupos:
                     voltaram = _restaurar_chaves(z, pasta_dados)
                     if resultado is not None:
                         resultado["ia_chaves"] = voltaram
+            if "sons" in grupos:
                 # os sons escolhidos voltam na hora, para a pasta de sons
                 for nome in z.namelist():
                     if nome.startswith("sons/") and not nome.endswith("/"):

@@ -55,6 +55,12 @@ PROVEDORES = {
         "groq", "Groq", "qwen/qwen3.8-27b", frozenset({"texto", "audio", "imagem"}),
         "https://console.groq.com/keys", "https://groq.com/privacy-policy",
         modelo_transcricao="whisper-large-v3-turbo"),
+    "mistral": Provedor(
+        "mistral", "Mistral", "mistral-small-latest",
+        frozenset({"texto", "audio", "imagem"}),
+        "https://console.mistral.ai/api-keys",
+        "https://legal.mistral.ai/terms/privacy-policy",
+        modelo_transcricao="voxtral-mini-latest"),
     "openrouter": Provedor(
         "openrouter", "OpenRouter", "google/gemini-3.5-flash-lite",
         frozenset({"texto", "imagem", "pdf"}), "https://openrouter.ai/settings/keys",

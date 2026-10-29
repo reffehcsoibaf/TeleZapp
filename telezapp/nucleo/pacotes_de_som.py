@@ -4,7 +4,7 @@
 vem com o programa) e os pacotes personalizados da pessoa, cada um numa pasta
 com um arquivo por evento (`nova.ogg`, `erro.mp3`...). Sem wx, para testar.
 
-Os dois primeiros nao se editam. Em um personalizado, o som de cada evento e
+O Padrao e os da casa (TeleZapp, Cristal, Marimba, Retro e Suave) nao se editam. Em um personalizado, o som de cada evento e
 um arquivo importado para a pasta do pacote quando a pessoa aplica. Cada
 evento de cada pacote pode estar ativado ou desativado.
 """
@@ -17,9 +17,23 @@ from telezapp.acessibilidade.fala import BIP
 
 PADRAO, TELEZAPP = "padrao", "telezapp"
 PREFIXO = "p:"                       # id de um pacote personalizado
-NOMES_FIXOS = {PADRAO: "Padrão: bips do sistema", TELEZAPP: "TeleZapp"}
+# pacotes que vem com o programa: o TeleZapp fica em sons/ e os outros em
+# sons/pacotes/<id>/ (gerados por ferramentas/gerar_sons.py)
+NOMES_DA_CASA = {TELEZAPP: "TeleZapp", "cristal": "Cristal",
+                 "marimba": "Marimba", "retro": "Retrô", "suave": "Suave"}
+NOMES_FIXOS = {PADRAO: "Padrão: bips do sistema", **NOMES_DA_CASA}
 PASTA_TELEZAPP = os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "sons")
+
+
+def da_casa(pacote_id):
+    return pacote_id in NOMES_DA_CASA
+
+
+def _pasta_da_casa(pacote_id):
+    if pacote_id == TELEZAPP:
+        return PASTA_TELEZAPP
+    return os.path.join(PASTA_TELEZAPP, "pacotes", pacote_id)
 EXTENSOES = (".ogg", ".opus", ".mp3", ".wav", ".flac")
 _PROIBIDOS = re.compile(r'[\\/:*?"<>|]')
 
@@ -52,9 +66,9 @@ def pasta_do_pacote(pacote_id):
 
 
 def listar():
-    """[(id, nome)] dos pacotes que existem: os dois da casa e depois os
+    """[(id, nome)] dos pacotes que existem: os da casa e depois os
     personalizados, em ordem alfabetica."""
-    achados = [(PADRAO, NOMES_FIXOS[PADRAO]), (TELEZAPP, NOMES_FIXOS[TELEZAPP])]
+    achados = list(NOMES_FIXOS.items())
     raiz = pasta_dos_pacotes()
     for nome in sorted(os.listdir(raiz), key=str.lower):
         if os.path.isdir(os.path.join(raiz, nome)):
@@ -78,8 +92,8 @@ def nome_valido(nome, existentes=()):
 
 def arquivo_do_evento(pacote_id, evento):
     """O arquivo do evento no pacote, ou "" se nao ha."""
-    if pacote_id == TELEZAPP:
-        pasta = PASTA_TELEZAPP
+    if da_casa(pacote_id):
+        pasta = _pasta_da_casa(pacote_id)
     elif editavel(pacote_id):
         pasta = pasta_do_pacote(pacote_id)
     else:
@@ -146,7 +160,7 @@ def migrar_antigos(cfg):
     antigas saem da configuracao."""
     antigas = {k[4:]: cfg.dados.pop(k) for k in list(cfg.dados)
                if k.startswith("som_") and k != "som"}
-    if cfg.get("pacote_de_sons") not in (PADRAO, TELEZAPP) and \
+    if cfg.get("pacote_de_sons") not in NOMES_FIXOS and \
             not str(cfg.get("pacote_de_sons") or "").startswith(PREFIXO):
         cfg.dados["pacote_de_sons"] = PADRAO      # valor de versao antiga
     escolhas = {e: v for e, v in antigas.items()
@@ -197,7 +211,7 @@ def migrar_liga_desliga(cfg):
     if desligar:
         guardado = {k: list(v) for k, v in
                     (cfg.get("sons_desativados") or {}).items()}
-        for pacote in {PADRAO, TELEZAPP, cfg.get("pacote_de_sons")}:
+        for pacote in {*NOMES_FIXOS, cfg.get("pacote_de_sons")}:
             if pacote:
                 guardado[pacote] = sorted(set(guardado.get(pacote, []))
                                           | desligar)
@@ -235,7 +249,7 @@ class EstadoDeSons:
     def arquivo(self, pacote_id, evento):
         """O arquivo que o evento terá: o escolhido agora, o que já está no
         pacote, ou "" (bip do sistema)."""
-        if not editavel(pacote_id) and pacote_id != TELEZAPP:
+        if not editavel(pacote_id) and not da_casa(pacote_id):
             return ""
         pendente = self.arquivos.get(pacote_id, {}).get(evento)
         if pendente:

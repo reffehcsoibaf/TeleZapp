@@ -3,6 +3,8 @@
 """Icone do TeleZapp na area de notificacao do Windows: com a janela
 escondida o programa segue conectado e dando os avisos. Clique no icone
 mostra a janela; o menu do icone tem Abrir e Sair."""
+import os
+
 import wx
 
 try:
@@ -13,9 +15,25 @@ except Exception:                      # sem wx.adv: sem bandeja
 NOME_DO_ICONE = "TeleZapp"
 
 
+ARQUIVO_DO_ICONE = os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "imagens", "telezapp.ico")
+
+
+def icone_do_app():
+    """O icone do TeleZapp (um teclado com fone de ouvido), do arquivo
+    telezapp.ico; sem o arquivo, o quadrado verde com um T."""
+    try:
+        icone = wx.Icon(ARQUIVO_DO_ICONE, wx.BITMAP_TYPE_ICO)
+        if icone.IsOk():
+            return icone
+    except Exception:
+        pass
+    return _icone()
+
+
 def _icone():
-    """Um quadrado verde com um T branco, desenhado na hora (o programa nao
-    traz arquivo de icone)."""
+    """Um quadrado verde com um T branco, desenhado na hora, para quando o
+    arquivo de icone nao esta la."""
     bmp = wx.Bitmap(32, 32)
     dc = wx.MemoryDC(bmp)
     dc.SetBackground(wx.Brush(wx.Colour(37, 160, 90)))
@@ -34,7 +52,7 @@ if _adv is not None:
         def __init__(self, janela):
             super().__init__()
             self.janela = janela
-            self.SetIcon(_icone(), NOME_DO_ICONE)
+            self.SetIcon(icone_do_app(), NOME_DO_ICONE)
             self.Bind(_adv.EVT_TASKBAR_LEFT_DCLICK,
                       lambda e: self.janela._mostrar_da_bandeja())
             self.Bind(_adv.EVT_TASKBAR_LEFT_UP,

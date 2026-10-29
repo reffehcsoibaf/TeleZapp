@@ -1096,6 +1096,33 @@ class ProvedorTelegram(Provedor):
             return dados
         return self._sincrono(ler()) or {}
 
+    FOTO_DO_GRUPO = True
+    FOTO_DO_CONTATO = True
+
+    def foto_do_grupo(self, conversa_id):
+        """Baixa a foto atual do grupo: (True, bytes) ou (False, texto)."""
+        return self._baixar_foto(conversa_id, "Este grupo")
+
+    def foto_do_contato(self, conversa_id):
+        """Baixa a foto de perfil do contato: (True, bytes) ou (False,
+        texto)."""
+        return self._baixar_foto(conversa_id, "Este contato")
+
+    def _baixar_foto(self, conversa_id, quem):
+        async def ler():
+            ent = await self.cliente.get_entity(self._chat_id(conversa_id))
+            return await self.cliente.download_profile_photo(ent, file=bytes)
+        try:
+            dados = self._executar(ler(), 40)
+        except ErroPrivacidade:
+            return False, "Sem conexão com o Telegram."
+        except Exception as e:
+            log.info("foto de perfil: %s", type(e).__name__)
+            return False, "Não consegui baixar a foto."
+        if not dados:
+            return False, "%s não tem foto (ou ela não está visível)." % quem
+        return True, bytes(dados)
+
     def detalhes_do_grupo(self, conversa_id):
         async def ler():
             from telethon.tl import functions, types as T

@@ -20,10 +20,10 @@ def pedido(provedor, midia, modelo="m", perfil="medio"):
 
 def test_cada_tarefa_tem_provedores_e_so_o_gemini_recebe_o_video_inteiro():
     assert {c for c, _ in cat.provedores_da_tarefa("video")} == {
-        "gemini", "openai", "claude", "groq", "openrouter"}
+        "gemini", "openai", "claude", "groq", "mistral", "openrouter"}
     assert [c for c in cat.PROVEDORES if cat.video_nativo(c)] == ["gemini"]
     assert {c for c, _ in cat.provedores_da_tarefa("audio")} == {
-        "gemini", "openai", "groq"}
+        "gemini", "openai", "groq", "mistral"}
     assert {c for c, _ in cat.provedores_da_tarefa("pdf")} == {
         "gemini", "openai", "claude", "openrouter"}
     assert cat.aceita("claude", "figurinha")
@@ -65,6 +65,14 @@ def test_pedidos_do_gemini_claude_e_chat():
     assert o.json["messages"][1]["content"][1]["type"] == "image_url"
     assert pedido("groq", AUDIO).url.startswith(
         "https://api.groq.com/openai/v1/audio/transcriptions")
+    m = pedido("mistral", AUDIO)
+    assert m.url == "https://api.mistral.ai/v1/audio/transcriptions"
+    assert b"voxtral-mini-latest" in m.corpo
+    mi = pedido("mistral", IMG)
+    assert mi.url == "https://api.mistral.ai/v1/chat/completions"
+    assert mi.json["messages"][1]["content"][1]["image_url"].startswith(
+        "data:image/")
+    assert prov.ler_resposta("mistral", {"text": "fala"}, "audio") == "fala"
 
 
 def test_pedido_que_o_provedor_nao_aceita_vira_erro():
@@ -284,6 +292,7 @@ def test_pedidos_de_lista_sao_get_e_usam_a_chave_do_provedor():
                                 ("openai", "Authorization"),
                                 ("claude", "x-api-key"),
                                 ("groq", "Authorization"),
+                                ("mistral", "Authorization"),
                                 ("openrouter", "Authorization")):
         p = prov.pedido_de_modelos(provedor, "CHAVE")
         assert p.metodo == "GET" and p.json is None and p.corpo is None

@@ -194,6 +194,52 @@ def test_foto_do_grupo_sem_foto_ou_escondida(tmp_path):
     banco.fechar()
 
 
+def test_foto_do_contato_usa_o_endereco_do_contato(tmp_path, monkeypatch):
+    import urllib.request
+
+    class Resposta:
+        def read(self, n=-1):
+            return b"\x89PNG"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+    vistos = []
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda url, timeout=0: Resposta())
+    p, banco = _provedor_com_cliente(tmp_path, types.SimpleNamespace(
+        get_profile_picture=lambda j_: vistos.append(j_.User) or
+        N.ProfilePictureInfo(URL="https://pps.whatsapp.net/c.png")))
+    assert p.foto_do_contato("5551@s.whatsapp.net") == (True, b"\x89PNG")
+    assert vistos == ["5551"]
+    banco.fechar()
+
+
+def test_foto_do_contato_sem_foto_fala_de_contato(tmp_path):
+    p, banco = _provedor_com_cliente(tmp_path, types.SimpleNamespace(
+        get_profile_picture=lambda j_: N.ProfilePictureInfo()))
+    ok, texto = p.foto_do_contato("5551@s.whatsapp.net")
+    assert not ok and texto.startswith("Este contato não tem foto")
+    banco.fechar()
+
+
+def test_fotos_temporarias_sao_apagadas(tmp_path, monkeypatch):
+    import os
+    import tempfile
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    assert ng.limpar_fotos_temporarias() == 0         # sem a pasta: nada
+    pasta = ng.pasta_das_fotos()
+    assert pasta == str(tmp_path / "TeleZapp-fotos")
+    os.makedirs(pasta)
+    for nome in ("contato-1.jpg", "grupo-2.png"):
+        with open(os.path.join(pasta, nome), "wb") as f:
+            f.write(b"x")
+    assert ng.limpar_fotos_temporarias() == 2
+    assert not os.path.exists(pasta)
+
+
 # ------------------------------------------------ grupos que eu administro
 def test_grupos_que_administro_so_os_que_a_conta_administra(tmp_path):
     outro = N.GroupInfo(
@@ -243,8 +289,10 @@ def test_servicos_sem_o_recurso_dizem_que_nao_tem():
     assert P.pedidos_de_entrada(None, "1")[0] is False
     assert P.responder_pedidos(None, "1", ["2"], True)[0] is False
     assert P.foto_do_grupo(None, "1")[0] is False
+    assert P.foto_do_contato(None, "1")[0] is False
     assert P.grupos_que_administro(None) == []
     assert not (base.Provedor.PEDIDOS_DE_ENTRADA
                 or base.Provedor.FOTO_DO_GRUPO
+                or base.Provedor.FOTO_DO_CONTATO
                 or base.Provedor.LISTA_GRUPOS_ADMIN
                 or base.Provedor.ENTRA_POR_LINK)

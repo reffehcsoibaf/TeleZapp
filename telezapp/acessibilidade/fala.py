@@ -157,7 +157,7 @@ BIP = "<bip>"
 def caminho_do_som(valor):
     """Arquivo de som de uma escolha: um nome vai para a pasta de sons do
     TeleZapp; um caminho completo (versoes antigas) vale como esta."""
-    if not valor or valor == "desligado":
+    if not valor or valor in ("desligado", BIP):
         return ""
     if os.path.isabs(valor):
         return valor

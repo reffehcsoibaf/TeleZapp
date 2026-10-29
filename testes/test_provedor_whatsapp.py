@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Provedor do WhatsApp com mensagens protobuf de verdade do neonize e um
 cliente simulado (sem rede)."""
+import contextlib
 import time
 import logging
 import os
@@ -365,7 +366,28 @@ def test_conectar_receber_responder_e_ler(amb):
     assert amb.banco.mudar_estado("w1", cid, ["EU1"], m.ENTREGUE) == []
 
 
+def test_lid_nao_e_perguntado_antes_de_conectar(amb):
+    """Relato do Jose Gabriel (28/10/2026): o lado em Go so conhece o cliente
+    depois de conectar, e get_pn_from_lid/get_lid_from_pn antes disso
+    derrubavam o programa (ponteiro nulo). Sem conexao, nem pergunta."""
+    perguntas = []
+    amb.c.get_pn_from_lid = lambda j: perguntas.append(j) or jid("5551")
+    amb.c.get_lid_from_pn = lambda j: perguntas.append(j) or jid("l", "lid")
+    amb.p._conectada = False
+    lid = jid("lid1", "lid")
+    assert amb.p._pn_do_lid(lid) is None
+    assert amb.p._lid_do_pn(jid("5551")) is None
+    assert amb.p._id_da_conversa(lid) == "lid1@lid"
+    assert amb.p._numero_do_jid(lid) is lid
+    assert perguntas == []
+    amb.p._conectada = True
+    assert amb.p._pn_do_lid(lid).User == "5551"
+    assert amb.p._lid_do_pn(jid("5551")).User == "l"
+    assert len(perguntas) == 2
+
+
 def test_grupo_busca_o_nome_e_lid_vira_numero(amb):
+    amb.p._conectada = True
     amb.f["Message"](amb.c, evento(
         "G1", E.Message(conversation="oi grupo"), chat="12345", grupo=True,
         remetente="5551988887777"))
@@ -1606,6 +1628,31 @@ def test_mensagem_nao_decifrada_deixa_marca_e_a_de_verdade_a_substitui(amb):
     assert real.mensagem.id == "G9" and real.mensagem.texto == "oi do grupo"
     guardadas = amb.banco.mensagens("w1", "123@g.us")
     assert [(x.id, x.tipo) for x in guardadas] == [("G9", m.TEXTO)]
+
+
+def test_mensagem_nao_decifrada_pede_o_reenvio_so_enquanto_aguarda(amb):
+    pedidos = []
+    amb.p.cliente.request_unavailable_message =         lambda chat, quem, id_: pedidos.append(id_)
+    amb.p._conectada = True
+    info = N.MessageInfo(
+        MessageSource=N.MessageSource(
+            Chat=jid("123", "g.us"), IsGroup=True, Sender=jid("5552")),
+        ID="G10", Pushname="Bia", Timestamp=TS)
+    amb.f["UndecryptableMessage"](amb.c, N.UndecryptableMessage(
+        Info=info, IsUnavailable=False,
+        DecryptFailMode=N.UndecryptableMessage.DECRYPT_FAIL_SHOW))
+    esperar(amb.fila, ev.MensagemNova)
+    cid = "123@g.us"
+    amb.p._pedir_reenvio(info.MessageSource.Chat, info.MessageSource.Sender,
+                         "G10", cid, 1)          # ainda aguardando: pede
+    assert pedidos == ["G10"]
+    amb.f["Message"](amb.c, evento(
+        "G10", E.Message(conversation="oi"), chat="123", grupo=True,
+        remetente="5552"))
+    esperar(amb.fila, ev.MensagemNova)
+    amb.p._pedir_reenvio(info.MessageSource.Chat, info.MessageSource.Sender,
+                         "G10", cid, 1)          # ja chegou: nao pede
+    assert pedidos == ["G10"]
 
 
 def test_mensagem_nao_decifrada_que_o_whatsapp_manda_esconder_so_registra(amb):
@@ -3214,3 +3261,92 @@ def test_busca_periodica_do_estado_pula_a_colecao_em_reparo(tmp_path):
 def test_nao_marca_as_mensagens_enviadas_como_de_bot(amb):
     # sem isto o neonize poe <bot biz_bot="1"/> e o destinatario ve "IA"
     assert os.environ.get("NEONIZE_BOT_TAG") == "off"
+
+
+def test_arquitetura_do_processo_corrige_windows_arm(monkeypatch):
+    import platform
+    from telezapp.provedores import whatsapp as w
+    monkeypatch.setattr(w.sysconfig, "get_platform", lambda: "win-amd64")
+    monkeypatch.setattr(platform, "machine", lambda: "ARM64")
+    with w.arquitetura_do_processo():
+        assert platform.machine() == "AMD64"
+    assert platform.machine() == "ARM64"
+
+
+def test_buscar_mensagens_que_faltam_pede_ao_celular_e_guarda_a_resposta(amb):
+    pedidos = []
+    amb.p.cliente.request_history_sync = lambda info, n: pedidos.append(
+        (info.ID, n))
+    cid = "5551988887777@s.whatsapp.net"
+    assert "não está conectada" in amb.p.buscar_mensagens_que_faltam(cid)
+    amb.p._conectada = True
+    assert "referência" in amb.p.buscar_mensagens_que_faltam(cid)
+    amb.f["Message"](amb.c, evento("H5", E.Message(conversation="atual")))
+    esperar(amb.fila, ev.MensagemNova)
+    assert amb.p.buscar_mensagens_que_faltam(cid) == ""
+    for _ in range(50):
+        if pedidos:
+            break
+        threading.Event().wait(0.1)
+    assert pedidos == [("H5", wa.QUANTAS_SOB_DEMANDA)]
+    # a resposta (ON_DEMAND): uma mensagem nova e uma que ja existia
+    h = H.HistorySync(syncType=wa.SYNC_SOB_DEMANDA, conversations=[
+        H.Conversation(ID=cid, unreadCount=9, messages=[
+            H.HistorySyncMsg(message=wmi("H4", "perdida", ts=TS - 10)),
+            H.HistorySyncMsg(message=wmi("H5", "atual", ts=TS))])])
+    amb.f["HistorySync"](amb.c, N.HistorySync(Data=h))
+    aviso = esperar(amb.fila, ev.Aviso)
+    assert aviso.texto == "Encontrei 1 mensagem que faltava."
+    ids = [x.id for x in amb.banco.mensagens("w1", cid)]
+    assert ids == ["H4", "H5"]
+    assert amb.banco.conversas("w1")[0].nao_lidas != 9   # nao mexe nas contas
+
+
+def test_nomes_de_grupo_esperam_e_tentam_de_novo_quando_o_whatsapp_limita(
+        amb, monkeypatch):
+    monkeypatch.setattr(wa, "ESPERA_LIMITE", 0)
+    monkeypatch.setattr(wa, "PASSO_NOMES_GRUPO", 0)
+    amb.p._conectada = True
+    chamadas = []
+
+    def info(j):
+        chamadas.append(1)
+        if len(chamadas) == 1:
+            raise RuntimeError("info query returned status 429: "
+                               "rate-overlimit")
+        return N.GroupInfo(GroupName=N.GroupName(Name="Turma"))
+    amb.c.get_group_info = info
+    gid = "123@g.us"
+    amb.banco.salvar_conversas([m.Conversa("w1", gid, "Grupo", "whatsapp",
+                                           "grupo", data=1)])
+    amb.p._conversas[gid] = amb.banco.conversas("w1")[0]
+    amb.p._buscar_nome_grupo(gid, jid("123", "g.us"))
+    for _ in range(100):
+        if len(chamadas) >= 2 and amb.p._conversas[gid].nome == "Turma":
+            break
+        threading.Event().wait(0.05)
+    assert len(chamadas) == 2 and amb.p._conversas[gid].nome == "Turma"
+
+
+def test_o_modulo_de_eventos_tambem_carrega_com_a_arquitetura_do_processo(
+        monkeypatch):
+    """Windows ARM: o primeiro import do neonize na conexao e o dos eventos;
+    fora da arquitetura do processo ele pedia a DLL arm64 (que nao existe)."""
+    dentro = []
+
+    @contextlib.contextmanager
+    def contexto():
+        dentro.append(True)
+        yield
+        dentro.append(False)
+    monkeypatch.setattr(wa, "arquitetura_do_processo", contexto)
+    assert wa.eventos_do_neonize().__name__ == "neonize.events"
+    assert dentro == [True, False]
+
+
+def test_arquitetura_do_processo_mostra_amd64_num_windows_arm(monkeypatch):
+    monkeypatch.setattr(wa.sysconfig, "get_platform", lambda: "win-amd64")
+    monkeypatch.setattr(wa.platform, "machine", lambda: "ARM64")
+    with wa.arquitetura_do_processo():
+        assert wa.platform.machine() == "AMD64"
+    assert wa.platform.machine() == "ARM64"

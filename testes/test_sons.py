@@ -123,17 +123,16 @@ def test_nome_de_som_vale_na_pasta_de_sons_e_arquivo_que_sumiu_cai_no_padrao(
     fala.definir_sons({})
 
 
-def test_backup_das_configuracoes_leva_a_pasta_de_sons(tmp_path):
+def test_backup_dos_sons_leva_a_pasta_de_sons(tmp_path):
     origem = tmp_path / "a"
     (origem / "sons").mkdir(parents=True)
     wav(origem / "sons" / "meu.wav")
     arquivo = str(tmp_path / "b.zip")
     resumo = backup.criar(arquivo, str(origem), {"pacote_de_sons": "p:Meu"},
-                          ["configuracoes"])
-    assert resumo["configuracoes"] == 2
+                          ["sons"])
+    assert resumo["sons"] == 2
     destino = tmp_path / "b"
-    opcoes, espera = backup.restaurar(arquivo, "", ["configuracoes"],
-                                      str(destino))
+    opcoes, espera = backup.restaurar(arquivo, "", ["sons"], str(destino))
     assert opcoes["pacote_de_sons"] == "p:Meu" and espera == []
     assert (destino / "sons" / "meu.wav").exists()          # na hora
 

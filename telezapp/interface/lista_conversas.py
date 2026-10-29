@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Fábio Scheffer Moraes
-"""Janela do que a lista de conversas mostra: ativar e desativar cada
-informacao e escolher a ordem em que aparecem.
+"""Janela do que a lista de conversas (ou a de mensagens) mostra: ativar e
+desativar cada informacao e escolher a ordem em que aparecem.
 
 Serve a janela de configuracoes (onde as mudancas ficam pendentes ate OK ou
 Aplicar) e o menu Exibir (onde valem na hora): quem chama diz como ler e como
@@ -14,24 +14,33 @@ from telezapp.nucleo import lista_conversas as lc
 
 class DialogoListaConversas(wx.Dialog):
     """Lista de quatro informacoes, na ordem em que aparecem na lista de
-    conversas; Enter ou Espaco ativa e desativa, e dois botoes mudam a ordem."""
+    conversas; Enter ou Espaco ativa e desativa, e dois botoes mudam a ordem.
+    Com `nucleo=lista_mensagens`, serve a lista de mensagens."""
 
-    def __init__(self, pai, ler, gravar, fala=None):
+    def __init__(self, pai, ler, gravar, fala=None, nucleo=lc,
+                 titulo="Lista de conversas",
+                 explicacao="O que cada conversa mostra na lista, na ordem em "
+                            "que aparece. Pelo menos um item fica ativado."):
         """ler() -> valor atual; gravar(valor) guarda o novo; fala, se houver,
-        diz o que mudou."""
-        super().__init__(pai, title="Lista de conversas",
-                         style=wx.DEFAULT_DIALOG_STYLE)
+        diz o que mudou. `nucleo`: lista_conversas ou lista_mensagens."""
+        super().__init__(pai, title=titulo, style=wx.DEFAULT_DIALOG_STYLE)
         self.ler, self.gravar, self.fala = ler, gravar, fala
+        self.lc, self.titulo = nucleo, titulo
         lay = wx.BoxSizer(wx.VERTICAL)
-        lay.Add(wx.StaticText(
-            self, label="O que cada conversa mostra na lista, na ordem em que "
-                        "aparece. Pelo menos um item fica ativado."), 0,
-                wx.ALL, 10)
+        lay.Add(wx.StaticText(self, label=explicacao), 0, wx.ALL, 10)
         lay.Add(wx.StaticText(
             self, label="&Informações (Enter ou Espaço ativa e desativa):"),
             0, wx.LEFT | wx.RIGHT, 10)
-        self.lista = wx.ListBox(self, name="Informações", size=(420, 120))
+        self.lista = wx.ListBox(self, name="Informações", size=(420, 120 if nucleo is lc else 220))
         lay.Add(self.lista, 1, wx.EXPAND | wx.ALL, 10)
+        self.so_muda = None
+        if hasattr(nucleo, "ROTULO_SO_QUANDO_MUDA"):
+            self.so_muda = wx.CheckBox(self,
+                                       label=nucleo.ROTULO_SO_QUANDO_MUDA)
+            self.so_muda.SetValue(nucleo.so_quando_muda(self.ler()))
+            lay.Add(self.so_muda, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+            self.so_muda.Bind(wx.EVT_CHECKBOX,
+                              lambda e: self.mudar_so_quando_muda())
         linha = wx.WrapSizer(wx.HORIZONTAL)
         self.botoes = {}
         for chave, rotulo in (("cima", "Mover para &cima"),
@@ -56,15 +65,15 @@ class DialogoListaConversas(wx.Dialog):
 
     # -------------------------------------------------------------- lista
     def preencher(self, selecionar=0):
-        lay = lc.normalizar(self.ler())
-        self.lista.Set([lc.texto_do_item(lay, c) for c in lay["ordem"]])
+        lay = self.lc.normalizar(self.ler())
+        self.lista.Set([self.lc.texto_do_item(lay, c) for c in lay["ordem"]])
         self.lista.SetSelection(min(max(selecionar, 0),
                                     len(lay["ordem"]) - 1))
-        self.botoes["padrao"].Enable(not lc.eh_padrao(lay))
+        self.botoes["padrao"].Enable(not self.lc.eh_padrao(lay))
 
     def chave(self):
         """A informacao selecionada, ou None."""
-        ordem = lc.normalizar(self.ler())["ordem"]
+        ordem = self.lc.normalizar(self.ler())["ordem"]
         i = self.lista.GetSelection()
         return ordem[i] if 0 <= i < len(ordem) else None
 
@@ -85,9 +94,9 @@ class DialogoListaConversas(wx.Dialog):
         chave = self.chave()
         if chave is None:
             return
-        novo, ativado = lc.alternar(self.ler(), chave)
+        novo, ativado = self.lc.alternar(self.ler(), chave)
         if ativado is None:
-            self._dizer(lc.MENSAGEM_DO_MINIMO)
+            self._dizer(self.lc.MENSAGEM_DO_MINIMO)
             return
         self.gravar(novo)
         i = self.lista.GetSelection()
@@ -98,7 +107,7 @@ class DialogoListaConversas(wx.Dialog):
         chave = self.chave()
         if chave is None:
             return
-        novo, posicao = lc.mover(self.ler(), chave, delta)
+        novo, posicao = self.lc.mover(self.ler(), chave, delta)
         if posicao == self.lista.GetSelection():
             self._dizer("Já é o primeiro item." if delta < 0
                         else "Já é o último item.")
@@ -106,11 +115,19 @@ class DialogoListaConversas(wx.Dialog):
         self.gravar(novo)
         self.preencher(posicao)
         self._dizer("%s, posição %d de %d." % (
-            lc.ROTULOS[chave], posicao + 1, len(lc.CHAVES)))
+            self.lc.ROTULOS[chave], posicao + 1, len(self.lc.CHAVES)))
         self.lista.SetFocus()
 
+    def mudar_so_quando_muda(self):
+        ligado = bool(self.so_muda.GetValue())
+        self.gravar(self.lc.definir_so_quando_muda(self.ler(), ligado))
+        self._dizer("Nome de quem enviou só quando muda: %s." % (
+            "ativado" if ligado else "desativado"))
+
     def restaurar(self):
-        self.gravar(lc.padrao())
+        if self.so_muda is not None:
+            self.so_muda.SetValue(False)
+        self.gravar(self.lc.padrao())
         self.preencher(0)
-        self._dizer("Lista de conversas no padrão.")
+        self._dizer("%s no padrão." % self.titulo)
         self.lista.SetFocus()

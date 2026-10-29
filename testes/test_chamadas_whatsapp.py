@@ -459,6 +459,46 @@ def test_entrada_atendida_sem_som_encerra_explicando(mundo):
     assert esperar(lambda: (ch.ENCERRADA, ch.FALHA) in bus.estados())
 
 
+def test_entrada_sem_som_liga_de_volta_para_a_mesma_pessoa(mundo):
+    v, ponte, bus, audio = mundo
+    v.espera_audio_s = 0.3
+    chamada_recebida(ponte, bus)
+    v.atender(CID)
+    assert esperar(lambda: ponte.desligadas == ["R1"], 3.0)
+    ponte.fila.put({"ev": "end", "call": "R1", "reason": "hangup"})
+    assert esperar(lambda: ponte.ligadas == ["5551"], 5.0)
+    assert (ch.ENCERRADA, ch.FALHA) in bus.estados()
+    assert esperar(lambda: (ch.CHAMANDO, "") in bus.estados())
+
+
+def test_entrada_sem_som_nao_liga_de_volta_com_a_opcao_desligada(mundo):
+    v, ponte, bus, audio = mundo
+    cw.definir_retornar_sem_audio(False)
+    try:
+        v.espera_audio_s = 0.3
+        chamada_recebida(ponte, bus)
+        v.atender(CID)
+        assert esperar(lambda: ponte.desligadas == ["R1"], 3.0)
+        ponte.fila.put({"ev": "end", "call": "R1", "reason": "hangup"})
+        assert esperar(lambda: (ch.ENCERRADA, ch.FALHA) in bus.estados())
+        time.sleep(1.0)
+        assert ponte.ligadas == []
+    finally:
+        cw.definir_retornar_sem_audio(True)
+
+
+def test_saida_sem_som_nao_liga_de_volta_em_laco(mundo):
+    v, ponte, bus, audio = mundo
+    v.espera_audio_s = 0.3
+    v.ligar(CID)
+    assert esperar(lambda: ponte.ligadas)
+    ponte.fila.put({"ev": "accepted", "call": "C1"})
+    assert esperar(lambda: ponte.desligadas == ["C1"], 3.0)
+    ponte.fila.put({"ev": "end", "call": "C1", "reason": "hangup"})
+    time.sleep(1.0)
+    assert ponte.ligadas == ["5551"]            # so a original
+
+
 # ------------------------------------------------------------------ video
 class VideoFalso:
     """No lugar de midia.video: sem camera nem codec de verdade."""

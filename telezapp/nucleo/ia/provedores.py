@@ -39,7 +39,9 @@ _GEMINI = "https://generativelanguage.googleapis.com/v1beta"
 _CLAUDE = "https://api.anthropic.com/v1/messages"
 _GROQ = "https://api.groq.com/openai/v1"
 _OPENROUTER = "https://openrouter.ai/api/v1"
-_CHAT = {"groq": _GROQ, "openrouter": _OPENROUTER}
+_MISTRAL = "https://api.mistral.ai/v1"
+_CHAT = {"groq": _GROQ, "openrouter": _OPENROUTER, "mistral": _MISTRAL}
+_TRANSCRICAO = {"openai": _OPENAI, "groq": _GROQ, "mistral": _MISTRAL}
 # a Groq documenta cerca de 4 MB de imagem em base64 por pedido
 LIMITE_IMAGEM_GROQ = 4_000_000
 
@@ -57,7 +59,7 @@ _NAO_SERVE = ("tts", "live", "embed", "imagen", "veo", "image", "robotics",
               "lyria", "computer-use", "aqa", "native-audio", "whisper",
               "guard", "orpheus", "playai", "moderation", "realtime",
               "transcribe", "audio-preview", "dall-e", "sora", "codex",
-              "search", "instruct", "davinci", "babbage")
+              "search", "instruct", "davinci", "babbage", "voxtral", "ocr")
 
 
 def pedido_de_modelos(provedor, chave):
@@ -86,6 +88,9 @@ def ler_modelos(provedor, corpo):
             ids = [m["name"].split("/", 1)[-1] for m in corpo["models"]
                    if "generateContent" in m.get("supportedGenerationMethods",
                                                  ["generateContent"])]
+        elif provedor == "mistral":
+            ids = [m["id"] for m in corpo["data"]
+                   if (m.get("capabilities") or {}).get("vision", True)]
         elif provedor == "openrouter":
             ids = [m["id"] for m in corpo["data"]
                    if "image" in (m.get("architecture") or {}).get(
@@ -102,7 +107,7 @@ def ler_modelos(provedor, corpo):
 
 def e_transcricao(provedor, midia):
     """Audio vai a um endpoint proprio de transcricao onde o provedor tem um
-    (OpenAI e Groq); o Gemini recebe o audio como entrada de conversa."""
+    (OpenAI, Groq e Mistral); o Gemini recebe o audio como entrada de conversa."""
     return midia.genero == "audio" and bool(
         cat.PROVEDORES[provedor].modelo_transcricao)
 
@@ -154,10 +159,12 @@ def montar_pedido(provedor, modelo, chave, midia, instrucoes, pergunta,
     if provedor == "groq" and midia.genero in ("imagem", "figurinha") and \
             len(_b64(midia)) > LIMITE_IMAGEM_GROQ:
         raise ErroIA("grande", "A imagem é grande demais para a Groq.")
-    # Groq e OpenRouter falam o dialeto de chat da OpenAI
+    # Groq, Mistral e OpenRouter falam o dialeto de chat da OpenAI
     if midia.genero == "pdf":
         parte = {"type": "file", "file": {"filename": midia.nome,
                                           "file_data": _url_de_dados(midia)}}
+    elif provedor == "mistral":          # aqui a imagem e o texto da URL
+        parte = {"type": "image_url", "image_url": _url_de_dados(midia)}
     else:
         parte = {"type": "image_url",
                  "image_url": {"url": _url_de_dados(midia)}}
@@ -211,7 +218,7 @@ def _transcricao(provedor, chave, midia):
     """Pedido multipart. O idioma fica por conta da deteccao do modelo: forcar
     um idioma estragaria uma mensagem em outro."""
     limite = "----telezapp" + uuid.uuid4().hex
-    base = _OPENAI if provedor == "openai" else _GROQ
+    base = _TRANSCRICAO[provedor]
     campos = [("model", cat.PROVEDORES[provedor].modelo_transcricao),
               ("response_format", "json")]
     partes = []
@@ -235,7 +242,7 @@ def ler_resposta(provedor, corpo, genero):
     """O texto da resposta do provedor. ErroIA se ele recusou ou cortou."""
     limite = cat.MAX_CARACTERES[genero]
     try:
-        if provedor in ("openai", "groq") and "text" in corpo and \
+        if provedor in _TRANSCRICAO and "text" in corpo and \
                 "output" not in corpo and "choices" not in corpo:
             texto = corpo["text"]                    # transcricao
         elif provedor == "openai":
