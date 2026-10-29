@@ -62,7 +62,8 @@ class DialogoContas(wx.Dialog):
 
     def _marcou(self, evt):
         n = evt.GetInt()
-        if 0 <= n < len(self._ids):
+        # a lista pode ter encolhido (conta excluida) antes do aviso chegar
+        if 0 <= n < min(len(self._ids), self.lista.GetCount()):
             self._ao_marcar(self._ids[n], self.lista.IsChecked(n))
             self._preencher(n)
 

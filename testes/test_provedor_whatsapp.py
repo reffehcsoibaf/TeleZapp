@@ -289,6 +289,8 @@ def dados_midia(tmp_path, monkeypatch):
 
 @pytest.fixture
 def amb(tmp_path, monkeypatch):
+    # a configuracao que o provedor le fica na pasta temporaria, nunca na real
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path / "dados"))
     monkeypatch.setattr(wa.time, "sleep", lambda s: None)
     fila = queue.Queue()
     b = ev.Barramento()
@@ -533,6 +535,7 @@ def test_props_pedem_o_periodo_escolhido():
 
 def test_historico_guarda_conversas_nomes_e_mensagens(amb):
     import time as t
+    amb.p._go_pronto.set()
     agora = int(t.time())
     h = H.HistorySync(
         syncType=0,
@@ -3273,7 +3276,9 @@ def test_arquitetura_do_processo_corrige_windows_arm(monkeypatch):
     assert platform.machine() == "ARM64"
 
 
-def test_buscar_mensagens_que_faltam_pede_ao_celular_e_guarda_a_resposta(amb):
+def test_buscar_mensagens_que_faltam_pede_ao_celular_e_guarda_a_resposta(
+        amb, monkeypatch):
+    monkeypatch.setattr(wa, "ESPERA_ENTRE_RODADAS", 0)
     pedidos = []
     amb.p.cliente.request_history_sync = lambda info, n: pedidos.append(
         (info.ID, n))
@@ -3295,8 +3300,18 @@ def test_buscar_mensagens_que_faltam_pede_ao_celular_e_guarda_a_resposta(amb):
             H.HistorySyncMsg(message=wmi("H4", "perdida", ts=TS - 10)),
             H.HistorySyncMsg(message=wmi("H5", "atual", ts=TS))])])
     amb.f["HistorySync"](amb.c, N.HistorySync(Data=h))
+    # a varredura segue para tras: a mais antiga (H4) vira a proxima ancora
+    for _ in range(100):
+        if len(pedidos) == 2:
+            break
+        threading.Event().wait(0.05)
+    assert pedidos[1] == ("H4", wa.QUANTAS_SOB_DEMANDA)
+    vazio = H.HistorySync(syncType=wa.SYNC_SOB_DEMANDA, conversations=[
+        H.Conversation(ID=cid, messages=[])])
+    amb.f["HistorySync"](amb.c, N.HistorySync(Data=vazio))
     aviso = esperar(amb.fila, ev.Aviso)
-    assert aviso.texto == "Encontrei 1 mensagem que faltava."
+    assert aviso.texto == ("Encontrei 1 mensagem que faltava (conferi 2 "
+                           "mensagens do celular).")
     ids = [x.id for x in amb.banco.mensagens("w1", cid)]
     assert ids == ["H4", "H5"]
     assert amb.banco.conversas("w1")[0].nao_lidas != 9   # nao mexe nas contas
@@ -3350,3 +3365,422 @@ def test_arquitetura_do_processo_mostra_amd64_num_windows_arm(monkeypatch):
     with wa.arquitetura_do_processo():
         assert wa.platform.machine() == "AMD64"
     assert wa.platform.machine() == "ARM64"
+
+
+def test_localizacao_fixa_e_em_tempo_real_mostram_lugar_coordenadas_e_mapa():
+    fixa = E.LocationMessage(degreesLatitude=-23.5505, degreesLongitude=-46.6333,
+                             name="Praça da Sé", address="Centro, São Paulo",
+                             comment="Encontro aqui")
+    tipo, texto, *_ = wa.conteudo_de(E.Message(locationMessage=fixa))
+    assert tipo == m.OUTRO
+    assert texto.split("\n") == [
+        "localização: Praça da Sé, Centro, São Paulo", "Encontro aqui",
+        "coordenadas -23.55050, -46.63330",
+        "https://www.google.com/maps?q=-23.550500,-46.633300"]
+
+    viva = E.LiveLocationMessage(degreesLatitude=1.5, degreesLongitude=2.5,
+                                 caption="A caminho")
+    texto = wa.conteudo_de(E.Message(liveLocationMessage=viva))[1]
+    assert texto.startswith("localização em tempo real\nA caminho\n")
+    assert texto.endswith("https://www.google.com/maps?q=1.500000,2.500000")
+
+    sem = wa.conteudo_de(E.Message(locationMessage=E.LocationMessage()))[1]
+    assert sem == "localização"
+
+
+def _pedir_historico_de_teste(amb, monkeypatch, espera):
+    monkeypatch.setattr(wa, "ESPERA_DO_HISTORICO", espera)
+    amb.p.cliente.request_history_sync = lambda info, n: None
+    cid = "5551988887777@s.whatsapp.net"
+    amb.p._conectada = True
+    amb.f["Message"](amb.c, evento("H5", E.Message(conversation="atual")))
+    esperar(amb.fila, ev.MensagemNova)
+    assert amb.p.buscar_mensagens_que_faltam(cid) == ""
+    return cid
+
+
+def test_celular_que_nao_responde_ao_pedido_de_historico_e_avisado(
+        amb, monkeypatch):
+    _pedir_historico_de_teste(amb, monkeypatch, 0.2)
+    aviso = esperar(amb.fila, ev.Aviso)
+    assert "não respondeu" in aviso.texto
+    assert amb.p._pedidos_de_historico == 0
+
+
+def test_resposta_do_historico_cancela_o_aviso_de_sem_resposta(
+        amb, monkeypatch):
+    cid = _pedir_historico_de_teste(amb, monkeypatch, 0.5)
+    for _ in range(50):
+        if amb.p._relogios_de_historico:
+            break
+        threading.Event().wait(0.05)
+    h = H.HistorySync(syncType=wa.SYNC_SOB_DEMANDA, conversations=[
+        H.Conversation(ID=cid, messages=[
+            H.HistorySyncMsg(message=wmi("H5", "atual", ts=TS))])])
+    amb.f["HistorySync"](amb.c, N.HistorySync(Data=h))
+    assert esperar(amb.fila, ev.Aviso).texto.startswith(
+        "O celular não tem mensagens que faltem aqui")
+    threading.Event().wait(0.8)
+    assert amb.fila.empty() or "não respondeu" not in str(
+        getattr(amb.fila.queue[0], "texto", ""))
+
+
+def test_resposta_do_historico_que_falha_ainda_avisa(amb, monkeypatch):
+    cid = _pedir_historico_de_teste(amb, monkeypatch, 30)
+    for _ in range(50):
+        if amb.p._relogios_de_historico:
+            break
+        threading.Event().wait(0.05)
+
+    def quebra(dados):
+        raise RuntimeError("falhou")
+    monkeypatch.setattr(amb.p, "_guardar_sob_demanda", quebra)
+    h = H.HistorySync(syncType=wa.SYNC_SOB_DEMANDA, conversations=[
+        H.Conversation(ID=cid, messages=[])])
+    amb.f["HistorySync"](amb.c, N.HistorySync(Data=h))
+    assert "não consegui ler" in esperar(amb.fila, ev.Aviso).texto
+
+
+def test_historico_nao_consulta_a_rede_para_nomes_de_mencoes(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    consultas = []
+    amb.c.get_user_info = lambda *jids: consultas.append(jids) or []
+    amb.p._aprender_do_grupo = lambda g: consultas.append(g)
+
+    def mensagem(numero):
+        x = m.Mensagem("w1", "1203@g.us", "H" + numero, data=TS,
+                       texto="oi @" + numero)
+        m.guardar_extras(x, [], [], [{"jid": numero + "@s.whatsapp.net"}],
+                         [], None)
+        return x
+    amb.p._enriquecer_mencoes(mensagem("5551900000001"), rede=False)
+    assert consultas == []
+    amb.p._enriquecer_mencoes(mensagem("5551900000002"), rede=True)
+    assert consultas                              # ao vivo continua consultando
+
+
+def _conversa_so_com_telefone(amb, usuario="5551900001111"):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    cid = usuario + "@s.whatsapp.net"
+    conv = m.Conversa("w1", cid, "+" + usuario, "whatsapp", "privada", data=1)
+    amb.banco.salvar_conversas([conv])
+    amb.p._conversas[cid] = conv
+    return cid, conv
+
+
+def test_completar_nome_acha_o_perfil_no_cadastro_de_contatos(amb):
+    cid, conv = _conversa_so_com_telefone(amb)
+    amb.c.outros = {"5551900001111": dict(PushName="Carla do Perfil")}
+    assert amb.p.completar_nome(cid) == "Carla do Perfil"
+    assert conv.nome == "Carla do Perfil"
+    assert amb.banco.conversas("w1")[0].nome == "Carla do Perfil"
+    nomes = []
+    while "Carla do Perfil" not in nomes:
+        nomes = [c.nome for c in esperar(
+            amb.fila, ev.ConversasAtualizadas).conversas]
+
+
+def test_completar_nome_procura_nos_participantes_dos_grupos(amb):
+    cid, conv = _conversa_so_com_telefone(amb, "5551900002222")
+    amb.c.grupos = [N.GroupInfo(
+        JID=jid("123", "g.us"), GroupName=N.GroupName(Name="Turma"),
+        Participants=[N.GroupParticipant(
+            JID=jid("5551900002222"), DisplayName="Beto do Grupo")])]
+    assert amb.p.completar_nome(cid) == "Beto do Grupo"
+    assert conv.nome == "Beto do Grupo"
+
+
+def test_completar_nome_nao_mexe_em_quem_ja_tem_nome_e_so_busca_a_cada_10_min(
+        amb):
+    cid, conv = _conversa_so_com_telefone(amb, "5551900003333")
+    assert amb.p.completar_nome(cid) == ""          # nada achado
+    assert conv.nome == "+5551900003333"
+    amb.c.outros = {"5551900003333": dict(PushName="Dani")}
+    assert amb.p.completar_nome(cid) == ""          # muito cedo para repetir
+    amb.p._nomes_completados[cid] -= 700
+    assert amb.p.completar_nome(cid) == "Dani"
+    assert amb.p.completar_nome(cid) == ""          # ja tem nome
+    amb.c.grupos = None                              # sem rede: nao quebra
+    outro, _ = ("5551900004444@s.whatsapp.net", None)
+    amb.p._conversas[outro] = m.Conversa("w1", outro, "+5551900004444",
+                                         "whatsapp", "privada", data=1)
+    assert amb.p.completar_nome(outro) == ""
+
+
+def test_detalhes_do_contato_trazem_o_recado_ou_dizem_que_nao_veio(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    cid = "5551900005555@s.whatsapp.net"
+
+    def com_recado(*jids):
+        return [N.GetUserInfoSingleReturnFunction(
+            JID=jids[0], UserInfo=N.UserInfo(Status="Ocupado, falo depois"))]
+    amb.c.get_user_info = com_recado
+    dados = amb.p.dados_do_contato(cid)
+    assert dados["recado"] == "Ocupado, falo depois"
+    assert dados["recado_consultado"]
+
+    amb.c.get_user_info = lambda *jids: [N.GetUserInfoSingleReturnFunction(
+        JID=jids[0], UserInfo=N.UserInfo())]
+    dados = amb.p.dados_do_contato(cid)
+    assert "recado" not in dados and dados["recado_consultado"]
+
+    amb.c.get_user_info = lambda *jids: []
+    assert "recado_consultado" not in amb.p.dados_do_contato(cid)
+
+
+def test_recado_so_com_espacos_ou_invisiveis_conta_como_vazio():
+    assert wa.recado_visivel("  Ocupado \n") == "Ocupado"
+    assert wa.recado_visivel(" ") == ""
+    assert wa.recado_visivel("‎ ​⠀") == ""
+    assert wa.recado_visivel("") == "" and wa.recado_visivel(None) == ""
+
+
+def test_ler_contatos_antes_da_dll_registrar_o_cliente_nao_derruba_o_programa(
+        amb):
+    """A DLL derruba o processo (nil pointer em Go) se o cadastro de contatos
+    for lido antes de ela registrar o cliente; aqui vira um erro comum."""
+    lidos = []
+    amb.c.contact = types.SimpleNamespace(
+        get_contact=lambda j: lidos.append(j) or N.ContactInfo())
+    amb.p._go_pronto.clear()
+    with pytest.raises(RuntimeError):
+        amb.p._contatos()
+    nome = amb.p._nome_contato(jid("5551900009999"))
+    assert nome == "+5551900009999" and lidos == []
+    amb.f["Connected"](amb.c, N.Connected())     # o primeiro aviso prova
+    esperar(amb.fila, ev.ContaPronta)
+    amb.p._nome_contato(jid("5551900009999"))
+    assert lidos
+
+
+# ----------------------------------------- varredura para tras (historico)
+def _resposta_de_historico(cid, ids_e_horas):
+    return N.HistorySync(Data=H.HistorySync(
+        syncType=wa.SYNC_SOB_DEMANDA, conversations=[
+            H.Conversation(ID=cid, messages=[
+                H.HistorySyncMsg(message=wmi(i, "texto " + i, ts=ts))
+                for i, ts in ids_e_horas])]))
+
+
+def _preparar_varredura(amb, monkeypatch, local=("L5",), maximo=60):
+    """Conversa com `local` guardado (a ultima e a ancora) e um celular de
+    mentira que so anota os pedidos."""
+    monkeypatch.setattr(wa, "ESPERA_ENTRE_RODADAS", 0)
+    monkeypatch.setattr(wa, "RODADAS_MAXIMAS", maximo)
+    pedidos = []
+    amb.c.request_history_sync = lambda info, n: pedidos.append(info.ID)
+    amb.p._conectada = True
+    cid = "5551988887777@s.whatsapp.net"
+    for k, i in enumerate(local):
+        amb.f["Message"](amb.c, evento(i, E.Message(conversation="x"),
+                                       ts=TS + k))
+        esperar(amb.fila, ev.MensagemNova)
+    return cid, pedidos
+
+
+def _esperar_pedidos(pedidos, n):
+    for _ in range(200):
+        if len(pedidos) >= n:
+            return
+        threading.Event().wait(0.02)
+    raise AssertionError("o pedido %d nao saiu: %r" % (n, pedidos))
+
+
+def _ultimo_aviso(amb):
+    ultimo = None
+    for _ in range(100):
+        try:
+            e = amb.fila.get(timeout=0.05)
+        except queue.Empty:
+            if ultimo is not None:
+                return ultimo
+            continue
+        if isinstance(e, ev.Aviso):
+            ultimo = e
+    return ultimo
+
+
+def test_varredura_pede_para_tras_ate_o_celular_nao_ter_mais_nada(
+        amb, monkeypatch):
+    cid, pedidos = _preparar_varredura(amb, monkeypatch, ("L5",))
+    assert amb.p.buscar_mensagens_que_faltam(cid) == ""
+    assert "Já estou" in amb.p.buscar_mensagens_que_faltam(cid)
+    _esperar_pedidos(pedidos, 1)
+    # rodada 1: duas novas; a mais antiga (A1) e a proxima ancora
+    amb.f["HistorySync"](amb.c, _resposta_de_historico(
+        cid, [("A2", TS - 5), ("A1", TS - 10)]))
+    _esperar_pedidos(pedidos, 2)
+    assert pedidos == ["L5", "A1"]
+    # rodada 2: mais uma nova
+    amb.f["HistorySync"](amb.c, _resposta_de_historico(cid, [("B1", TS - 20)]))
+    _esperar_pedidos(pedidos, 3)
+    assert pedidos[2] == "B1"
+    # rodada 3: o celular nao tem mais nada
+    amb.f["HistorySync"](amb.c, _resposta_de_historico(cid, []))
+    aviso = _ultimo_aviso(amb)
+    assert aviso.texto == ("Encontrei 3 mensagens que faltavam (conferi 3 "
+                           "mensagens do celular).")
+    assert [x.id for x in amb.banco.mensagens("w1", cid)] == [
+        "B1", "A1", "A2", "L5"]
+    assert cid not in amb.p._varreduras
+
+
+def test_varredura_para_quando_ja_cobriu_o_que_havia_e_nada_e_novo(
+        amb, monkeypatch):
+    cid, pedidos = _preparar_varredura(amb, monkeypatch, ("L4", "L5"))
+    amb.p.buscar_mensagens_que_faltam(cid)
+    _esperar_pedidos(pedidos, 1)
+    amb.f["HistorySync"](amb.c, _resposta_de_historico(
+        cid, [("L3x", TS - 50), ("L2x", TS - 60)]))
+    _esperar_pedidos(pedidos, 2)       # ha novas: continua
+    # a segunda rodada so traz o que ja temos, e mais antigo que o guardado
+    amb.f["HistorySync"](amb.c, _resposta_de_historico(cid, [("L3x", TS - 50)]))
+    aviso = _ultimo_aviso(amb)
+    assert aviso.texto == ("Encontrei 2 mensagens que faltavam (conferi 3 "
+                           "mensagens do celular).")
+    assert len(pedidos) == 2
+
+
+def test_varredura_nao_entra_em_laco_e_respeita_o_limite(amb, monkeypatch):
+    cid, pedidos = _preparar_varredura(amb, monkeypatch, ("L5",), maximo=2)
+    amb.p.buscar_mensagens_que_faltam(cid)
+    _esperar_pedidos(pedidos, 1)
+    amb.f["HistorySync"](amb.c, _resposta_de_historico(cid, [("A1", TS - 10)]))
+    _esperar_pedidos(pedidos, 2)
+    amb.f["HistorySync"](amb.c, _resposta_de_historico(cid, [("B1", TS - 20)]))
+    aviso = _ultimo_aviso(amb)
+    assert "limite de 2 rodadas" in aviso.texto and len(pedidos) == 2
+    # resposta que repete a propria ancora: para sem pedir de novo
+    cid2, pedidos2 = pedidos, None
+    amb.p.buscar_mensagens_que_faltam(cid)
+    _esperar_pedidos(pedidos, 3)
+    amb.f["HistorySync"](amb.c, _resposta_de_historico(cid, [("L5", TS)]))
+    aviso = _ultimo_aviso(amb)
+    assert aviso.texto.startswith("O celular não tem mensagens que faltem")
+    assert len(pedidos) == 3
+
+
+def test_varredura_que_perde_a_resposta_no_meio_diz_o_que_achou(
+        amb, monkeypatch):
+    cid, pedidos = _preparar_varredura(amb, monkeypatch, ("L5",))
+    monkeypatch.setattr(wa, "ESPERA_DO_HISTORICO", 0.3)
+    amb.p.buscar_mensagens_que_faltam(cid)
+    _esperar_pedidos(pedidos, 1)
+    amb.f["HistorySync"](amb.c, _resposta_de_historico(cid, [("A1", TS - 10)]))
+    _esperar_pedidos(pedidos, 2)       # a rodada 2 nunca recebe resposta
+    aviso = _ultimo_aviso(amb)
+    assert "parou de responder" in aviso.texto
+    assert "encontrei 1 mensagem que faltava" in aviso.texto
+    assert cid not in amb.p._varreduras
+
+
+# ------------------ busca sozinha ao reconectar (mensagens atrasadas)
+def _reconectar_com_atrasadas(amb, monkeypatch, antes=("OLD", TS - 3600),
+                              entregues=(("NEW1", TS), ("NEW2", TS + 5))):
+    """Conversa com uma mensagem antiga guardada; a conta reconecta e o
+    WhatsApp entrega so as `entregues` na sincronia."""
+    monkeypatch.setattr(wa, "ESPERA_ENTRE_RODADAS", 0)
+    cid = "5551988887777@s.whatsapp.net"
+    if antes:
+        amb.f["Message"](amb.c, evento(antes[0], E.Message(conversation="x"),
+                                       ts=antes[1]))
+        esperar(amb.fila, ev.MensagemNova)
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    pedidos = []
+    amb.c.request_history_sync = lambda info, n: pedidos.append(info.ID)
+    for i, ts in entregues:
+        amb.f["Message"](amb.c, evento(i, E.Message(conversation="y"), ts=ts))
+        esperar(amb.fila, ev.MensagemNova)
+    amb.f["OfflineSyncCompleted"](amb.c, N.OfflineSyncCompleted(Count=2))
+    return cid, pedidos
+
+
+def test_ao_reconectar_busca_sozinha_o_buraco_antes_da_mais_antiga_entregue(
+        amb, monkeypatch):
+    cid, pedidos = _reconectar_com_atrasadas(amb, monkeypatch)
+    _esperar_pedidos(pedidos, 1)
+    assert pedidos == ["NEW1"]           # a mais antiga entregue, nao a mais nova
+    amb.f["HistorySync"](amb.c, _resposta_de_historico(
+        cid, [("G2", TS - 10), ("G1", TS - 20)]))
+    _esperar_pedidos(pedidos, 2)
+    assert pedidos[1] == "G1"
+    # a rodada seguinte so traz o que ja havia: o buraco acabou
+    amb.f["HistorySync"](amb.c, _resposta_de_historico(
+        cid, [("OLD", TS - 3600)]))
+    aviso = None
+    for _ in range(100):
+        try:
+            e = amb.fila.get(timeout=0.05)
+        except queue.Empty:
+            continue
+        if isinstance(e, ev.Aviso) and e.texto.startswith("Busca automática"):
+            aviso = e
+            break
+    assert aviso is not None
+    assert aviso.texto.startswith("Busca automática: encontrei 2 mensagens")
+    assert len(pedidos) == 2 and not amb.p._varreduras
+    ids = [x.id for x in amb.banco.mensagens("w1", cid)]
+    assert ids == ["OLD", "G1", "G2", "NEW1", "NEW2"]
+
+
+def test_busca_sozinha_e_silenciosa_quando_nao_acha_nada(amb, monkeypatch):
+    cid, pedidos = _reconectar_com_atrasadas(amb, monkeypatch)
+    _esperar_pedidos(pedidos, 1)
+    amb.f["HistorySync"](amb.c, _resposta_de_historico(
+        cid, [("OLD", TS - 3600)]))
+    for _ in range(30):
+        threading.Event().wait(0.02)
+    avisos = []
+    while not amb.fila.empty():
+        e = amb.fila.get_nowait()
+        if isinstance(e, ev.Aviso):
+            avisos.append(e.texto)
+    assert not [a for a in avisos if "mensagens" in a or "celular" in a]
+    assert len(pedidos) == 1 and not amb.p._varreduras
+
+
+def test_busca_sozinha_nao_roda_sem_buraco_nem_sem_a_opcao(
+        amb, monkeypatch):
+    # a mensagem entregue vem logo depois da guardada: nao ha buraco
+    cid, pedidos = _reconectar_com_atrasadas(
+        amb, monkeypatch, antes=("OLD", TS - 10),
+        entregues=(("NEW1", TS), ("NEW2", TS + 5)))
+    threading.Event().wait(0.3)
+    assert pedidos == []
+    # conversa nova (nada guardado antes): tambem nao
+    nova = "5551900009999@s.whatsapp.net"
+    amb.p._ancoras_da_sincronia = {nova: ("Z", False, "", TS)}
+    amb.p._agendar_varreduras_automaticas()
+    threading.Event().wait(0.3)
+    assert pedidos == []
+
+
+def test_busca_sozinha_respeita_a_caixa_de_configuracoes(amb, monkeypatch):
+    from telezapp import config
+    cfg = config.Config()
+    cfg.set("varrer_ao_reconectar", False)
+    cid, pedidos = _reconectar_com_atrasadas(amb, monkeypatch)
+    threading.Event().wait(0.3)
+    assert pedidos == []
+
+
+def test_fila_offline_anunciada_pelo_whatsapp_fica_no_log(amb, caplog):
+    import logging
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    with caplog.at_level(logging.INFO, logger="telezapp.whatsapp"):
+        amb.f["OfflineSyncPreview"](amb.c, N.OfflineSyncPreview(
+            Total=900, AppDataChanges=3, Message=750, Notifications=100,
+            Receipts=47))
+        amb.f["Message"](amb.c, evento("P1", E.Message(conversation="a")))
+        esperar(amb.fila, ev.MensagemNova)
+        amb.f["OfflineSyncCompleted"](amb.c, N.OfflineSyncCompleted(Count=1))
+        esperar(amb.fila, ev.SincronizacaoConcluida)
+    texto = caplog.text
+    assert "fila do WhatsApp para este aparelho: 900 itens (750 mensagens" \
+        in texto
+    assert "1 mensagens recebidas; o WhatsApp anunciou 750 e contou 1" in texto

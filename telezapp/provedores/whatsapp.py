@@ -14,6 +14,7 @@
 O registro nunca grava texto de mensagens, telefones completos ou codigos.
 """
 import contextlib
+import functools
 import hashlib
 import json
 import logging
@@ -24,6 +25,8 @@ import re
 import sysconfig
 import threading
 import time
+import traceback
+import unicodedata
 import uuid
 
 from telezapp import config
@@ -32,6 +35,7 @@ from telezapp.midia import tipos_de_arquivo
 from telezapp.nucleo import chamadas as ch
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import grupo as ng
+from telezapp.nucleo import localizacao
 from telezapp.nucleo import mencoes as nucleo_mencoes
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import previa_links
@@ -85,6 +89,15 @@ TENTATIVAS_NOME_GRUPO = 4
 # HistorySync.HistorySyncType.ON_DEMAND e quantas mensagens pedir de cada vez
 SYNC_SOB_DEMANDA = 6
 QUANTAS_SOB_DEMANDA = 50
+# quanto esperar a resposta do celular antes de dizer que ele nao respondeu
+ESPERA_DO_HISTORICO = 45
+# a varredura para tras pede ate este numero de rodadas de ~50 mensagens, com
+# uma pausa entre elas para nao saturar o celular
+RODADAS_MAXIMAS = 60
+ESPERA_ENTRE_RODADAS = 1.0
+# busca sozinha ao reconectar: quantas conversas e quantas rodadas no maximo
+LIMITE_AUTOMATICAS = 40
+RODADAS_AUTOMATICAS = 20
 # Status de mensagem no historico (WebMessageInfo.Status)
 HIST_ENTREGUE, HIST_LIDA, HIST_OUVIDA = 3, 4, 5
 # Conversas que nao sao conversas para a pessoa
@@ -167,6 +180,34 @@ CANAL_SEM_NOME = "Canal"
 
 class ListaDeTransmissao(Exception):
     """Envio para uma lista de transmissao: a biblioteca nao suporta."""
+
+
+# caracteres que parecem vazios mas nao sao espaco (braille em branco etc.)
+BRANCOS = "⠀ㅤᅟᅠ᠎"
+
+
+def _achadas(n, _=True):
+    """'1 mensagem que faltava' / 'N mensagens que faltavam'."""
+    return "%d %s" % (n, "mensagem que faltava" if n == 1
+                      else "mensagens que faltavam")
+
+
+def recado_visivel(texto):
+    """O recado sem espacos nas pontas; "" se so tem espacos e caracteres
+    invisiveis (algumas pessoas deixam o recado em branco de proposito)."""
+    texto = (texto or "").strip()
+    if not any(unicodedata.category(c)[0] not in "CZ" and c not in BRANCOS
+               for c in texto):
+        return ""
+    return texto
+
+
+def so_numero(nome):
+    """O nome da conversa e so o telefone (ou nada)? Esses sao os que a busca
+    de nome tenta completar."""
+    nome = (nome or "").strip()
+    return (not nome or nome == SEM_NOME or nome.startswith("+")
+            or parece_codigo(nome))
 
 
 def parece_codigo(nome):
@@ -719,8 +760,16 @@ def conteudo_de(interna):
         if nome in presentes:
             return m.OUTRO, "enquete: " + getattr(interna, nome).name, 0, \
                 "", 0
-    if "locationMessage" in presentes or "liveLocationMessage" in presentes:
-        return m.OUTRO, "localização", 0, "", 0
+    if "locationMessage" in presentes:
+        x = interna.locationMessage
+        return m.OUTRO, localizacao.descrever(
+            x.degreesLatitude, x.degreesLongitude, x.name, x.address,
+            x.isLive, x.comment), 0, "", 0
+    if "liveLocationMessage" in presentes:
+        x = interna.liveLocationMessage
+        return m.OUTRO, localizacao.descrever(
+            x.degreesLatitude, x.degreesLongitude, ao_vivo=True,
+            legenda=x.caption), 0, "", 0
     if "groupInviteMessage" in presentes:
         x = interna.groupInviteMessage
         return m.OUTRO, _partes_texto(
@@ -1030,8 +1079,10 @@ class ProvedorWhatsApp(Provedor):
         self._vistas = set()
         self._nomes_grupo_pedidos = set()
         self._nomes_empresa_pedidos = set()
+        self._nomes_completados = {}    # conversa -> quando a busca foi feita
         self._sem_nome_registrados = set()
         self._conectada = False
+        self._go_pronto = threading.Event()   # a DLL ja registrou o cliente
         self._cache_mencoes = {}   # jid mencionado -> nome, id, telefone
         self._mencoes_tentadas = {}  # jid sem nome -> quando procurei por ultimo
         self._escrita_conferida = {}   # grupo -> quando conferi se posso escrever
@@ -1045,6 +1096,11 @@ class ProvedorWhatsApp(Provedor):
         self._sincronizando = False
         self._progresso_historico = 0   # 0 = nada em andamento
         self._pedidos_de_historico = 0  # pedidos de mensagens que faltam
+        self._relogios_de_historico = []  # um por pedido sem resposta
+        self._varreduras = {}   # conversa -> andamento da busca para tras
+        self._ancoras_da_sincronia = {}   # conversa -> mais antiga entregue
+        self._auto_fila = []    # buscas sozinhas esperando a vez
+        self._fila_anunciada = None   # mensagens na fila offline (aviso)
         self._recebidas_na_sincronia = 0
         self._trava = threading.RLock()
 
@@ -1058,7 +1114,30 @@ class ProvedorWhatsApp(Provedor):
         self._ligar_log_detalhado()
         caminho = caminho_sessao(self.pasta_sessoes, self.conta.id)
         tipos_de_arquivo.consertar_caminho_do_magic()
-        return NewClient(caminho, props=props_do_aparelho(self.historico))
+        return NewClient(dsn_da_sessao(caminho),
+                         props=props_do_aparelho(self.historico))
+
+    def _contatos(self):
+        """O cadastro de contatos do cliente. Antes de a DLL registrar o
+        cliente (o primeiro evento prova que registrou), ler o cadastro
+        derruba o programa inteiro com um "nil pointer" em Go: aqui vira um
+        erro comum, com a pilha no log, e quem chama usa o que tem."""
+        if not self._go_pronto.is_set():
+            if not getattr(self, "_avisou_contatos_cedo", False):
+                self._avisou_contatos_cedo = True
+                log.warning("leitura de contatos antes de a DLL registrar o "
+                            "cliente (evitada):\n%s",
+                            "".join(traceback.format_stack(limit=12)))
+            raise RuntimeError("o cliente ainda não conectou")
+        return self.cliente.contact
+
+    def _vivo(self, funcao):
+        """Aviso do WhatsApp que, ao chegar, prova que a DLL ja tem o cliente."""
+        @functools.wraps(funcao)
+        def interna(*args, **kwargs):
+            self._go_pronto.set()
+            return funcao(*args, **kwargs)
+        return interna
 
     @staticmethod
     def _ligar_log_detalhado():
@@ -1140,6 +1219,7 @@ class ProvedorWhatsApp(Provedor):
             os.environ["NEONIZE_BOT_TAG"] = "off"
             log.info("selo de IA nas mensagens enviadas: desligado "
                      "(NEONIZE_BOT_TAG=%s)", os.environ["NEONIZE_BOT_TAG"])
+            self._go_pronto.clear()
             self.cliente = self.fabrica_cliente()
             self._preparar_chamadas()
             registros = {
@@ -1164,6 +1244,7 @@ class ProvedorWhatsApp(Provedor):
                 "StreamReplacedEv": self._ao_substituida,
                 "ConnectFailureEv": self._ao_falha_conexao,
                 "ClientOutdatedEv": self._ao_desatualizado,
+                "OfflineSyncPreviewEv": self._ao_previa_sincronia,
                 "OfflineSyncCompletedEv": self._ao_fim_sincronia,
             }
             for nome, funcao in registros.items():
@@ -1171,7 +1252,7 @@ class ProvedorWhatsApp(Provedor):
                 if classe is None:
                     log.warning("evento %s não existe nesta versão", nome)
                     continue
-                self.cliente.event(classe)(funcao)
+                self.cliente.event(classe)(self._vivo(funcao))
             # avisos de estado do celular (arquivar, trancar): so as versoes
             # novas do neonize os repassam; nas antigas vale a conferencia
             # periodica das arquivadas
@@ -1183,9 +1264,9 @@ class ProvedorWhatsApp(Provedor):
                                  ("ChatMarkAsReadEv", self._ao_marcar_lida)):
                 classe = getattr(nev, nome, None)
                 if classe is not None:
-                    self.cliente.event(classe)(funcao)
+                    self.cliente.event(classe)(self._vivo(funcao))
                     log.info("aviso %s ligado", nome)
-            self.cliente.event.qr(self._ao_qr)
+            self.cliente.event.qr(self._vivo(self._ao_qr))
             if self._ouvinte is None:
                 self._ouvir_falhas_do_pareamento()
             self._estado(ev.CONECTANDO)
@@ -1539,18 +1620,35 @@ class ProvedorWhatsApp(Provedor):
             with self._trava:
                 self._recuperando.discard(nome)
 
+    def _ao_previa_sincronia(self, cliente, e):
+        """O WhatsApp diz, antes de entregar, quantos itens estao na fila
+        deste aparelho (o que chegou com o programa fechado). Fica no log
+        para comparar com o que de fato chegou."""
+        try:
+            self._fila_anunciada = int(e.Message)
+            log.info("fila do WhatsApp para este aparelho: %d itens (%d "
+                     "mensagens, %d avisos, %d recibos, %d mudanças do "
+                     "estado)", e.Total, e.Message, e.Notifications,
+                     e.Receipts, e.AppDataChanges)
+        except Exception:
+            log.exception("erro ao ler o aviso da fila offline")
+
     def _ao_fim_sincronia(self, cliente, e):
         with self._trava:
             if not self._sincronizando:
                 return
             self._sincronizando = False
             quantas = self._recebidas_na_sincronia
-        log.info("sincronia inicial concluída (%d mensagens recebidas)",
-                 quantas)
+        log.info("sincronia inicial concluída (%d mensagens recebidas; o "
+                 "WhatsApp anunciou %s e contou %s)", quantas,
+                 self._fila_anunciada if self._fila_anunciada is not None
+                 else "nada", getattr(e, "Count", "?"))
+        self._fila_anunciada = None
         self.barramento.publicar(ev.SincronizacaoConcluida(self.conta.id,
                                                            quantas))
         # grupos renomeados com o app fechado: o WhatsApp so avisa na hora
         self._fila.put(self._atualizar_nomes_de_grupos)
+        self._agendar_varreduras_automaticas()
 
     def _ao_sair(self, cliente, e):
         self._conectada = False
@@ -1887,20 +1985,91 @@ class ProvedorWhatsApp(Provedor):
             dados["telefone"] = "+" + jid.User
         try:
             apelido = self._apelidos.get(jid_texto(jid), "")
-            info = self.cliente.contact.get_contact(jid)
+            info = self._contatos().get_contact(jid)
             apelido = info.PushName or apelido
             if apelido and not parece_codigo(apelido):
                 dados["nome_no_perfil"] = apelido
         except Exception:
             pass
         try:
+            achou = False
             for u in self.cliente.get_user_info(jid):
-                if u.UserInfo.Status:
-                    dados["recado"] = u.UserInfo.Status
+                achou = True
+                dados["recado_consultado"] = True
+                bruto = u.UserInfo.Status or ""
+                recado = recado_visivel(bruto)
+                if recado:
+                    dados["recado"] = recado
+                log.info("recado do contato: %d caracteres (%d visíveis; "
+                         "categorias %s), foto %s", len(bruto),
+                         len(recado), ",".join(sorted(
+                             {unicodedata.category(c) for c in bruto})),
+                         "sim" if u.UserInfo.PictureID else "não")
                 break
+            if not achou:
+                log.info("recado do contato: o WhatsApp não devolveu a pessoa")
         except Exception:
-            log.info("sem o recado do contato")
+            log.info("sem o recado do contato", exc_info=True)
         return dados
+
+    def completar_nome(self, conversa_id):
+        """Conversa so com o telefone: procura o nome na rede (agenda e
+        cadastro de contatos, nome de perfil visto nas mensagens, nome
+        verificado de empresa e nome nos grupos em que a pessoa esta) e, se
+        achar, poe na lista. Devolve o nome achado ou "". No maximo uma busca
+        por conversa a cada 10 minutos. Bloqueia ate o WhatsApp responder."""
+        if self.cliente is None or not self._conectada or                 not conversa_id.endswith(("@s.whatsapp.net", "@lid")):
+            return ""
+        with self._trava:
+            conv = self._conversas.get(conversa_id)
+            if conv is None or not so_numero(conv.nome):
+                return ""
+            agora = time.time()
+            if agora - self._nomes_completados.get(conversa_id, 0) < 600:
+                return ""
+            self._nomes_completados[conversa_id] = agora
+        usuario, servidor = jid_de_texto(conversa_id)
+        jid = _jid_obj(usuario, servidor)
+        nome = self._nome_contato(jid)
+        if so_numero(nome):
+            try:
+                nome = self._dados_mencao(conversa_id, rede=True)["nome"]
+            except Exception:
+                log.info("não consegui buscar o nome da conversa")
+        if so_numero(nome):
+            nome = self._nome_nos_grupos(jid)
+        if so_numero(nome):
+            log.info("busca de nome: nada achado para a conversa")
+            return ""
+        self._apelidos.setdefault(conversa_id, nome)
+        with self._trava:
+            conv = self._conversas.get(conversa_id)
+            if conv is None or not so_numero(conv.nome):
+                return ""
+            conv.nome = nome
+        self.banco.salvar_conversas([conv])
+        self._publicar_conversas()
+        log.info("busca de nome: achei o nome de uma conversa")
+        return nome
+
+    def _nome_nos_grupos(self, jid):
+        """Nome que o WhatsApp mostra para a pessoa nos grupos em que ela
+        esta (a lista de participantes traz o nome em alguns grupos)."""
+        alvo = self._numero_do_jid(jid)
+        procurados = {jid.User, alvo.User} - {""}
+        try:
+            grupos = list(self.cliente.get_joined_groups())
+        except Exception:
+            log.info("não consegui ler os grupos para achar um nome")
+            return ""
+        for g in grupos:
+            for p in g.Participants:
+                aparece = procurados & {p.JID.User, p.LID.User,
+                                        p.PhoneNumber.User}
+                if aparece and p.DisplayName and \
+                        not parece_codigo(p.DisplayName):
+                    return p.DisplayName
+        return ""
 
     def detalhes_do_grupo(self, conversa_id):
         if self.cliente is None or not self._conectada or \
@@ -2636,7 +2805,7 @@ class ProvedorWhatsApp(Provedor):
         empresa = ""
         for tentativa in (alvo, jid) if alvo is not jid else (jid,):
             try:
-                info = self.cliente.contact.get_contact(tentativa)
+                info = self._contatos().get_contact(tentativa)
             except Exception:
                 continue
             nome = info.FullName or info.FirstName
@@ -2666,7 +2835,7 @@ class ProvedorWhatsApp(Provedor):
                 conversa_id, "")
             for tentativa in (alvo, jid) if alvo is not jid else (jid,):
                 try:
-                    info = self.cliente.contact.get_contact(tentativa)
+                    info = self._contatos().get_contact(tentativa)
                 except Exception as e:
                     dados["contato_%s" % tentativa.Server] = \
                         "erro: %s" % type(e).__name__
@@ -2842,7 +3011,7 @@ class ProvedorWhatsApp(Provedor):
         """[(id, nome, telefone)] da agenda sincronizada com a conta (os
         contatos salvos no celular ou so no WhatsApp). Leitura local."""
         achados = []
-        for c in self.cliente.contact.get_all_contacts():
+        for c in self._contatos().get_all_contacts():
             nome = c.Info.FullName or c.Info.FirstName
             if not nome or parece_codigo(nome):
                 continue
@@ -2999,9 +3168,10 @@ class ProvedorWhatsApp(Provedor):
             self._cache_mencoes[jid_txt] = achado
         return achado
 
-    def _enriquecer_mencoes(self, msg):
+    def _enriquecer_mencoes(self, msg, rede=True):
         """Poe nome, telefone e id em cada @ e troca '@numero' por '@nome'
-        no texto da mensagem."""
+        no texto da mensagem. `rede=False` (historico) nao consulta o
+        WhatsApp: um pacote de 5000 mensagens levou 413 s por isso."""
         extras = m.extras_de(msg)
         if not extras["mencoes"]:
             return
@@ -3010,7 +3180,8 @@ class ProvedorWhatsApp(Provedor):
             if not men.get("jid") or men.get("nome"):
                 continue
             try:
-                men.update(self._dados_mencao(men["jid"], msg.conversa_id))
+                men.update(self._dados_mencao(men["jid"], msg.conversa_id,
+                                              rede=rede))
             except Exception:
                 log.exception("erro ao achar o nome de uma menção")
                 continue
@@ -3195,7 +3366,7 @@ class ProvedorWhatsApp(Provedor):
                 usuario, servidor = jid_de_texto(cid)
                 for tentativa in (jid, _jid_obj(usuario, servidor)):
                     try:
-                        info = self.cliente.contact.get_contact(tentativa)
+                        info = self._contatos().get_contact(tentativa)
                     except Exception:
                         continue
                     if info.BusinessName:
@@ -3537,6 +3708,12 @@ class ProvedorWhatsApp(Provedor):
                 conv.data = max(conv.data, msg.data)
                 self._remetentes[msg.id] = (remetente, msg.texto)
                 silenciosa = self._sincronizando
+                if silenciosa:
+                    ancora_s = (msg.id, msg.minha,
+                                "" if msg.minha else remetente, msg.data)
+                    antiga = self._ancoras_da_sincronia.get(cid)
+                    if antiga is None or ancora_s[3] < antiga[3]:
+                        self._ancoras_da_sincronia[cid] = ancora_s
                 if conv.temporaria_s != prazo:
                     conv.temporaria_s = prazo
                 if not msg.minha:
@@ -3555,6 +3732,10 @@ class ProvedorWhatsApp(Provedor):
                                                      silenciosa=silenciosa))
         except Exception:
             log.exception("erro ao tratar mensagem recebida")
+            # sem isto um reenvio da mesma mensagem seria ignorado como
+            # "repetida" mesmo sem ela ter sido guardada
+            with self._trava:
+                self._vistas.discard(getattr(evento.Info, "ID", None))
 
     def _ao_indecifravel(self, cliente, evento):
         """O WhatsApp entregou uma mensagem que nao deu para decifrar (chave
@@ -4915,7 +5096,7 @@ class ProvedorWhatsApp(Provedor):
                                        h.message.participant, ""))
                 if x is None or (limite and x.data < limite):
                     continue
-                self._enriquecer_mencoes(x)
+                self._enriquecer_mencoes(x, rede=False)
                 if self.banco.depuracao:
                     self.banco.guardar_depuracao(
                         self.conta.id, cid, x.id, estrutura_bruta(h.message))
@@ -4989,10 +5170,12 @@ class ProvedorWhatsApp(Provedor):
 
     # ---------------------------------------- mensagens que faltam (celular)
     def buscar_mensagens_que_faltam(self, conversa_id):
-        """Pede ao celular as ~50 mensagens imediatamente anteriores a mais
-        nova que temos na conversa (o pedido do WhatsApp vai "para tras" de
-        uma ancora): preenche buracos no meio e no fim do que ja guardamos.
-        A resposta chega como um pacote de historico ON_DEMAND."""
+        """Varre o historico do celular para tras, a partir da mensagem mais
+        nova que temos na conversa: cada pedido traz ~50 mensagens
+        imediatamente anteriores a uma ancora e a resposta (pacote de
+        historico ON_DEMAND) vira a proxima ancora, ate cobrir o que ja
+        guardamos, o celular nao ter mais nada ou chegar ao limite de
+        rodadas. So guarda o que faltava; o resultado vem num aviso."""
         pedir = getattr(self.cliente, "request_history_sync", None)
         if self.cliente is None or not self._conectada:
             return "A conta não está conectada."
@@ -5005,15 +5188,103 @@ class ProvedorWhatsApp(Provedor):
             self.conta.id, conversa_id, 20)) if x.tipo != m.AGUARDANDO), None)
         if ancora is None:
             return "Não há mensagem na conversa para servir de referência."
-        grupo = conversa_id.endswith("@g.us")
-        remetente = (self._jid(ancora.remetente) if ancora.remetente
-                     and "@" in ancora.remetente else _jid_obj("", ""))
-        info = info_da_mensagem(self._jid(conversa_id), remetente, ancora.id,
-                                ancora.minha, grupo, ancora.data)
-        self._pedidos_de_historico += 1
-        self._fila.put(lambda: self._pedir_historico(
-            conversa_id, info, ancora.id))
+        if not self._iniciar_varredura(conversa_id, (
+                ancora.id, ancora.minha, ancora.remetente, ancora.data)):
+            return "Já estou buscando as mensagens desta conversa."
         return ""
+
+    def _iniciar_varredura(self, conversa_id, ancora, auto=False):
+        """Abre a varredura da conversa e pede a primeira rodada. False se
+        ja ha uma em andamento nela."""
+        with self._trava:
+            if conversa_id in self._varreduras:
+                return False
+            self._varreduras[conversa_id] = dict(
+                rodadas=0, novas=0, consultadas=0, ancora_anterior="",
+                auto=auto, mais_antiga_local=self.banco.data_mais_antiga(
+                    self.conta.id, conversa_id))
+        self._pedir_rodada(conversa_id, ancora)
+        return True
+
+    def _agendar_varreduras_automaticas(self):
+        """Depois da sincronia ao reconectar: o WhatsApp so entrega a parte
+        final do que chegou com o programa fechado. Cada conversa que
+        recebeu mensagens atrasadas tem um buraco logo antes da mais antiga
+        entregue; a busca sozinha pede ao celular o que ha antes dela."""
+        with self._trava:
+            ancoras = self._ancoras_da_sincronia
+            self._ancoras_da_sincronia = {}
+        if not ancoras:
+            return
+        if not config.Config().get("varrer_ao_reconectar"):
+            log.info("busca sozinha ao reconectar: desligada nas opções")
+            return
+        if getattr(self.cliente, "request_history_sync", None) is None:
+            log.info("busca sozinha ao reconectar: esta DLL não faz a busca")
+            return
+        itens = [(cid, a) for cid, a in ancoras.items()
+                 if "@" in cid and cid not in IGNORAR_CONVERSAS
+                 and not cid.endswith(("@newsletter", "@broadcast"))
+                 and not cid.startswith("status:")]
+        itens.sort(key=lambda x: -x[1][3])
+        itens = itens[:LIMITE_AUTOMATICAS]
+        if not itens:
+            return
+        log.info("busca sozinha ao reconectar: %d conversas com mensagens "
+                 "atrasadas", len(itens))
+        with self._trava:
+            self._auto_fila.extend(itens)
+        self._fila.put(self._seguir_automaticas)
+
+    def _seguir_automaticas(self):
+        """Uma busca sozinha de cada vez, so quando nao ha outra andando."""
+        while True:
+            with self._trava:
+                ocupado = bool(self._varreduras)
+                if ocupado or not self._auto_fila or not self._conectada:
+                    return
+                cid, ancora = self._auto_fila.pop(0)
+            if not self._ha_buraco_antes(cid, ancora):
+                continue
+            if self._iniciar_varredura(cid, ancora, auto=True):
+                return
+
+    def _ha_buraco_antes(self, conversa_id, ancora):
+        """Ha mensagem guardada antes da ancora e uma folga entre as duas?
+        Sem mensagem antes, nao e buraco: e uma conversa nova."""
+        try:
+            antes = self.banco.data_antes_de(self.conta.id, conversa_id,
+                                             ancora[3])
+        except Exception:
+            return False
+        return bool(antes) and ancora[3] - antes > 60
+
+    def _info_da_ancora(self, conversa_id, ancora):
+        id_, minha, remetente, data = ancora
+        grupo = conversa_id.endswith("@g.us")
+        quem = (self._jid(remetente) if remetente and "@" in remetente
+                else _jid_obj("", ""))
+        return info_da_mensagem(self._jid(conversa_id), quem, id_, minha,
+                                grupo, data)
+
+    def _pedir_rodada(self, conversa_id, ancora):
+        """Uma rodada da varredura: pede ao celular as mensagens anteriores
+        a `ancora` (id, minha, remetente, data)."""
+        with self._trava:
+            if conversa_id not in self._varreduras:
+                return
+            self._varreduras[conversa_id]["ancora_anterior"] = ancora[0]
+            self._pedidos_de_historico += 1
+        try:
+            info = self._info_da_ancora(conversa_id, ancora)
+        except Exception:
+            log.warning("não montei a âncora do pedido", exc_info=True)
+            with self._trava:
+                self._pedidos_de_historico = max(
+                    0, self._pedidos_de_historico - 1)
+            self._terminar_varredura(conversa_id)
+            return
+        self._pedir_historico(conversa_id, info, ancora[0])
 
     def _pedir_historico(self, conversa_id, info, ancora_id):
         try:
@@ -5021,34 +5292,180 @@ class ProvedorWhatsApp(Provedor):
             log.info("histórico pedido ao celular: conversa=%s âncora=%s "
                      "quantas=%d", conversa_id, ancora_id,
                      QUANTAS_SOB_DEMANDA)
+            relogio = threading.Timer(ESPERA_DO_HISTORICO,
+                                      self._pedido_sem_resposta,
+                                      args=(conversa_id,))
+            relogio.daemon = True
+            with self._trava:
+                self._relogios_de_historico.append(relogio)
+            relogio.start()
         except Exception:
-            self._pedidos_de_historico = max(0, self._pedidos_de_historico - 1)
+            with self._trava:
+                self._pedidos_de_historico = max(
+                    0, self._pedidos_de_historico - 1)
             log.warning("não consegui pedir o histórico", exc_info=True)
+            varredura = self._terminar_varredura(conversa_id)
+            if varredura and varredura.get("auto"):
+                return
             self.barramento.publicar(ev.Aviso(
                 self.conta.id, "Não consegui pedir as mensagens ao celular."))
 
+    def _terminar_varredura(self, conversa_id):
+        with self._trava:
+            varredura = self._varreduras.pop(conversa_id, None)
+            tem_fila = bool(self._auto_fila)
+        if tem_fila:
+            self._fila.put(self._seguir_automaticas)
+        return varredura
+
+    def _pedido_sem_resposta(self, conversa_id):
+        """O celular nao respondeu ao pedido a tempo: diz isso em vez de
+        ficar em silencio (desligado, sem internet ou sem a mensagem)."""
+        with self._trava:
+            if not self._relogios_de_historico or \
+                    self._pedidos_de_historico <= 0:
+                return
+            self._relogios_de_historico.pop(0)
+            self._pedidos_de_historico -= 1
+        varredura = self._terminar_varredura(conversa_id)
+        log.warning("o celular não respondeu ao pedido de histórico: "
+                    "conversa=%s (rodadas feitas: %d)", conversa_id,
+                    varredura["rodadas"] if varredura else 0)
+        if varredura and varredura.get("auto"):
+            return                       # busca sozinha: fica so no log
+        if varredura and varredura["rodadas"]:
+            texto = ("O celular parou de responder à busca de mensagens que "
+                     "faltam. Até aqui encontrei %s." % _achadas(
+                         varredura["novas"]))
+        else:
+            texto = ("O celular não respondeu ao pedido de mensagens que "
+                     "faltam. Ele precisa estar ligado e com internet.")
+        self.barramento.publicar(ev.Aviso(self.conta.id, texto))
+
     def _historico_sob_demanda(self, dados):
+        """Guarda a resposta de uma rodada e decide se pede a proxima ou
+        avisa o resultado; se algo falhar no meio, avisa mesmo assim."""
+        with self._trava:
+            esperando = self._pedidos_de_historico > 0
+            if esperando and self._relogios_de_historico:
+                self._relogios_de_historico.pop(0).cancel()
+            if esperando:
+                self._pedidos_de_historico -= 1
+        try:
+            novas, resumo = self._guardar_sob_demanda(dados)
+        except Exception:
+            log.exception("erro ao guardar a resposta do pedido de histórico")
+            autos = all(v.get("auto") for v in self._varreduras.values())
+            for cid in list(self._varreduras):
+                self._terminar_varredura(cid)
+            if esperando and not autos:
+                self.barramento.publicar(ev.Aviso(
+                    self.conta.id, "O celular respondeu, mas não consegui "
+                    "ler as mensagens."))
+            return
+        cid = resumo["conversa"]
+        with self._trava:
+            varredura = self._varreduras.get(cid)
+            if varredura is not None:
+                varredura["rodadas"] += 1
+                varredura["novas"] += novas
+                varredura["consultadas"] += resumo["total"]
+        if varredura is None:
+            # parte atrasada de uma resposta, ou pedido sem varredura
+            if novas:
+                self.barramento.publicar(ev.Aviso(
+                    self.conta.id, "Encontrei %s." % _achadas(novas, False)))
+            return
+        motivo = self._motivo_de_parar(varredura, resumo, novas)
+        if not motivo:
+            ancora = resumo["ancora"]
+            relogio = threading.Timer(
+                ESPERA_ENTRE_RODADAS, lambda: self._fila.put(
+                    lambda: self._pedir_rodada(cid, ancora)))
+            relogio.daemon = True
+            relogio.start()
+            return
+        self._terminar_varredura(cid)
+        log.info("busca de mensagens que faltam terminou (%s)%s: %d rodadas, "
+                 "%d mensagens do celular, %d novas", motivo,
+                 " [sozinha]" if varredura.get("auto") else "",
+                 varredura["rodadas"], varredura["consultadas"],
+                 varredura["novas"])
+        if varredura.get("auto"):
+            if varredura["novas"]:
+                conv = self._conversas.get(cid)
+                self.barramento.publicar(ev.Aviso(
+                    self.conta.id, "Busca automática: encontrei %s em %s." % (
+                        _achadas(varredura["novas"], False),
+                        conv.nome if conv is not None and conv.nome
+                        else "uma conversa")))
+            return
+        if varredura["novas"]:
+            texto = "Encontrei %s (conferi %d mensagens do celular)." % (
+                _achadas(varredura["novas"], False), varredura["consultadas"])
+        else:
+            texto = ("O celular não tem mensagens que faltem aqui (conferi "
+                     "%d mensagens)." % varredura["consultadas"])
+        if motivo == "limite":
+            texto += (" A busca parou no limite de %d rodadas; use de novo "
+                      "para continuar." % RODADAS_MAXIMAS)
+        self.barramento.publicar(ev.Aviso(self.conta.id, texto))
+
+    @staticmethod
+    def _motivo_de_parar(varredura, resumo, novas):
+        """"" se a varredura deve pedir mais uma rodada; senao por que parou."""
+        ancora = resumo["ancora"]
+        if ancora is None or not resumo["total"]:
+            return "fim do histórico"
+        if ancora[0] == varredura["ancora_anterior"]:
+            return "sem avanço"
+        if varredura["rodadas"] >= RODADAS_MAXIMAS:
+            return "limite"
+        if varredura.get("auto"):
+            # a busca sozinha so quer o buraco que fica logo antes do que
+            # chegou: acabou quando uma rodada nao traz nada novo
+            if not novas:
+                return "sem mais buracos"
+            if varredura["rodadas"] >= RODADAS_AUTOMATICAS:
+                return "limite"
+            return ""
+        local = varredura["mais_antiga_local"]
+        if local and resumo["mais_antiga"] < local and not novas:
+            return "cobriu o que já havia"
+        return ""
+
+    def _guardar_sob_demanda(self, dados):
         """Resposta de um pedido de historico: guarda so as mensagens
         (sem mexer em nao lidas, arquivada, fixada...), sem avisos, e conta
-        as que nao tinhamos ou eram so uma marca "aguardando"."""
+        as que nao tinhamos ou eram so uma marca "aguardando". Devolve
+        (novas, resumo): o resumo diz a conversa, quantas mensagens vieram e
+        qual a mais antiga (a ancora da proxima rodada)."""
         novas, por_conversa = 0, {}
+        total = ja_tinha = sem_conteudo = 0
+        conversa, antiga = "", None
         for c in dados.conversations:
             cid = self._normalizar_id(c.ID)
             if not cid or cid in IGNORAR_CONVERSAS:
                 continue
+            conversa = conversa or cid
             msgs = []
             for h in c.messages:
+                total += 1
                 x, rem = converter_historico(
                     h.message, self.conta.id, cid,
                     self._apelidos.get(h.message.key.participant or
                                        h.message.participant, ""))
                 if x is None:
+                    sem_conteudo += 1
                     continue
+                if antiga is None or x.data < antiga[3]:
+                    antiga = (x.id, x.minha, rem, x.data)
                 antes = self.banco.mensagem(self.conta.id, cid, x.id)
                 if antes is not None and antes.tipo != m.AGUARDANDO:
+                    ja_tinha += 1
                     continue          # o que ja temos vale mais
                 novas += 1
-                self._enriquecer_mencoes(x)
+                self._enriquecer_mencoes(x, rede=False)
                 if not x.minha:
                     self._remetentes[x.id] = (rem, x.texto)
                 msgs.append(x)
@@ -5067,16 +5484,11 @@ class ProvedorWhatsApp(Provedor):
                 self.conta.id, cid, self.banco.mensagens(
                     self.conta.id, cid, 200)))
         log.info("histórico pedido: chegaram %d mensagens novas em %d "
-                 "conversas", novas, len(por_conversa))
-        if self._pedidos_de_historico > 0:
-            self._pedidos_de_historico -= 1
-            if novas:
-                texto = "Encontrei %d %s." % (
-                    novas, "mensagem que faltava" if novas == 1
-                    else "mensagens que faltavam")
-            else:
-                texto = "O celular não tem mensagens que faltem aqui."
-            self.barramento.publicar(ev.Aviso(self.conta.id, texto))
+                 "conversas (no pacote: %d mensagens, %d já existiam, %d "
+                 "sem conteúdo)", novas, len(por_conversa), total, ja_tinha,
+                 sem_conteudo)
+        return novas, dict(conversa=conversa, total=total, ancora=antiga,
+                           mais_antiga=antiga[3] if antiga else 0)
 
     def _normalizar_id(self, texto):
         usuario, servidor = jid_de_texto(texto)
@@ -5100,6 +5512,15 @@ DESCONECTADA_PELO_CELULAR = "desconectada pelo celular"
 
 def caminho_sessao(pasta, conta_id):
     return os.path.join(pasta, conta_id + ".db")
+
+
+def dsn_da_sessao(caminho):
+    """A DLL monta "file:<nome>?_foreign_keys=on"; os parametros que damos
+    depois do "?" valem junto, e o "_fim=" engole o trecho que ela acrescenta.
+    WAL e espera de 30 s evitam "database is locked" enquanto o historico
+    chega e as mensagens sao decifradas ao mesmo tempo."""
+    return caminho + ("?_foreign_keys=on&_journal_mode=WAL"
+                      "&_busy_timeout=30000&_fim=")
 
 
 def _jid_obj(usuario, servidor):

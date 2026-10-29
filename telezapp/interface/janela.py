@@ -475,6 +475,7 @@ class Janela(wx.Frame):
         self._gravacao_rapida = None  # {"gravador", "origem"} gravando por atalho
         self._bandeja = None          # icone da area de notificacao
         self._saindo = False          # True: fechar e sair de verdade
+        self._windows_ate = 0.0       # o Windows pediu para encerrar a sessao
         self._fora_do_alttab = False  # em segundo plano: so na barra de tarefas
         # atalhos que valem em qualquer programa (RegisterHotKey), cada um
         # com o seu id: funcao -> id
@@ -8296,13 +8297,32 @@ class Janela(wx.Frame):
             "Sobre o %s" % NOME, wx.OK | wx.ICON_INFORMATION, self)
 
     # ================================================================ saida
+    def windows_encerrando(self):
+        """O Windows avisou (desligar, reiniciar, sair da conta) ha pouco:
+        nada de esconder na bandeja nem de perguntar, que seguram o
+        desligamento. Vale por um minuto, caso outro programa recuse."""
+        return time.monotonic() < self._windows_ate
+
+    def marcar_windows_encerrando(self):
+        self._windows_ate = time.monotonic() + 60
+
+    def _parar_contas_com_pressa(self):
+        """O Windows espera poucos segundos por um programa: para as contas
+        numa thread e segue depois de 2 s."""
+        parada = threading.Thread(target=self.contas.parar_todos,
+                                  daemon=True)
+        parada.start()
+        parada.join(timeout=2)
+
     def _ao_fechar(self, evt):
+        windows = self.windows_encerrando() or (
+            hasattr(evt, "CanVeto") and not evt.CanVeto())
         if self.cfg.get("segundo_plano") and not self._saindo and \
-                hasattr(evt, "CanVeto") and evt.CanVeto():
+                not windows and hasattr(evt, "CanVeto") and evt.CanVeto():
             evt.Veto()
             self._esconder_na_bandeja()
             return
-        if self.chamada is not None and self.chamada.ativa:
+        if self.chamada is not None and self.chamada.ativa and not windows:
             r = wx.MessageBox(
                 "Há uma chamada em andamento. Fechar o TeleZapp encerra a "
                 "chamada. Fechar mesmo?", NOME,
@@ -8312,8 +8332,8 @@ class Janela(wx.Frame):
                     evt.Veto()
                 return
         log.info("fechando a janela (%s)",
-                 "pedido do Windows" if hasattr(evt, "CanVeto") and
-                 not evt.CanVeto() else "pedido da pessoa ou do programa")
+                 "pedido do Windows" if windows
+                 else "pedido da pessoa ou do programa")
         self._saindo = True
         self._tirar_bandeja()
         if hasattr(self, "UnregisterHotKey"):
@@ -8329,7 +8349,10 @@ class Janela(wx.Frame):
         self._parar_audio(falar=False)
         try:
             if self.contas is not None:
-                self.contas.parar_todos()
+                if windows:
+                    self._parar_contas_com_pressa()
+                else:
+                    self.contas.parar_todos()
         finally:
             from telezapp.nucleo import grupo as ng
             ng.limpar_fotos_temporarias()

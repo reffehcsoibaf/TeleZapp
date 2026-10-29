@@ -349,6 +349,16 @@ OPCOES = (
           "e não com o número. Não troca o nome de quem você já nomeou "
           "aqui. Desmarcada, só entram os contatos que você adicionar. A "
           "mesma caixa está na janela Contatos."),
+    Opcao("varrer_ao_reconectar",
+          "Buscar sozinho as mensagens que faltam ao reconectar", "Mensagens",
+          True,
+          "Quando o TeleZapp reconecta depois de ficar fechado, o WhatsApp "
+          "entrega só a parte final das mensagens que chegaram nesse tempo. "
+          "Com esta caixa marcada, o TeleZapp pede ao celular, uma conversa "
+          "de cada vez, as mensagens que ficaram faltando antes dessas e "
+          "avisa quando encontra alguma. O celular precisa estar ligado e "
+          "com internet. Desmarcada, só a busca que você pede em Buscar "
+          "mensagens que faltam no celular."),
     Opcao("ocultar_contatos_duplicados", "Ocultar contatos duplicados",
           "Interface", True,
           "Nas listas de contatos (Contatos e a escolha de quem recebe em "

@@ -2,6 +2,7 @@
 """Bloquear, desbloquear e a lista de bloqueados (WhatsApp, Telegram e a
 janela), com clientes simulados."""
 import asyncio
+import threading
 import sys
 import types
 
@@ -75,6 +76,8 @@ def whatsapp(bloqueados=()):
     p = wa.ProvedorWhatsApp.__new__(wa.ProvedorWhatsApp)
     p.cliente = ClienteWhatsApp(bloqueados)
     p._conectada = True
+    p._go_pronto = threading.Event()
+    p._go_pronto.set()
     p._lid_para_numero = {}
     p._apelidos = {}
     p.conta = types.SimpleNamespace(id="w1")

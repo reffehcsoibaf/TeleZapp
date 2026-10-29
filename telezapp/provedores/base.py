@@ -221,6 +221,11 @@ class Provedor(ABC):
         chaves que o servico nao informa ficam de fora."""
         return {}
 
+    def completar_nome(self, conversa_id):
+        """Conversa que so mostra o numero: procura o nome na rede e, se
+        achar, ja o poe na lista. Devolve o nome achado ou ""."""
+        return ""
+
     def detalhes_do_grupo(self, conversa_id):
         """Dicionario do grupo (nome, descricao, criado_em, dono, anuncio,
         trancado, comunidade, sou_admin, participantes=[{id, nome, telefone,

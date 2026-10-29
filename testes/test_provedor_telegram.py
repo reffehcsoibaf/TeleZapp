@@ -1515,3 +1515,22 @@ def test_video_do_telegram_repassa_camera_e_destino_as_chamadas(ambiente):
                         ("ligar_camera", 10, "Câmera A")]
     p.definir_destino_video(print)
     assert p._chamadas.destino_video is print
+
+
+def test_localizacao_do_telegram_traz_lugar_coordenadas_e_mapa():
+    geo = types.SimpleNamespace(lat=-23.5505, long=-46.6333)
+    simples = tg.converter(mensagem(1, "", geo=geo, media=object(),
+                                    sender=ANA), "t1", 10)
+    assert simples.texto.split("\n") == [
+        "localização", "coordenadas -23.55050, -46.63330",
+        "https://www.google.com/maps?q=-23.550500,-46.633300"]
+    lugar = types.SimpleNamespace(title="Café", address="Rua A, 10")
+    x = tg.converter(mensagem(2, "", geo=geo, venue=lugar, media=object(),
+                              sender=ANA), "t1", 10)
+    assert x.texto.startswith("localização: Café, Rua A, 10\n")
+
+    class MessageMediaGeoLive:
+        pass
+    viva = tg.converter(mensagem(3, "", geo=geo, media=MessageMediaGeoLive(),
+                                 sender=ANA), "t1", 10)
+    assert viva.texto.startswith("localização em tempo real\n")
