@@ -201,3 +201,58 @@ def test_opcoes_de_midia_no_registro():
     assert [v for v, _ in por_chave["midias_baixar"].escolhas] == [
         "demanda", "automatico"]
     assert [o.chave for o in config.buscar_opcoes("baixar midias")]
+
+
+# ------------------------------------------------------------------ lote
+def esperar_lote(lote, segundos=5):
+    for _ in range(int(segundos / 0.02)):
+        if not lote.pendentes:
+            return
+        threading.Event().wait(0.02)
+    raise AssertionError("o lote nao terminou")
+
+
+def test_faltantes_pula_o_que_ja_esta_no_computador_e_comeca_pelo_mais_novo(g):
+    tem = msg("A")
+    g.g.baixar(tem)
+    fim(g.fila)
+    texto = m.Mensagem("c1", "55@s.whatsapp.net", "T", tipo=m.TEXTO, data=1.0)
+    achadas = g.g.faltantes([msg("B"), tem, texto, msg("C")])
+    assert [x.id for x in achadas] == ["C", "B"]
+
+
+def test_lote_baixa_conta_e_avisa_o_progresso_e_o_fim(g):
+    progresso, fins = [], []
+    lote = g.g.baixar_lote([msg("A"), msg("B")],
+                           lambda f, t: progresso.append((f, t)),
+                           fins.append)
+    esperar_lote(lote)
+    threading.Event().wait(0.1)
+    assert (lote.baixadas, lote.indisponiveis, lote.canceladas) == (2, 0, 0)
+    assert sorted(progresso) == [(1, 2), (2, 2)]
+    assert fins == [lote]
+
+
+def test_lote_conta_as_que_nao_estao_mais_disponiveis(g):
+    g.f.modo = "erro"
+    fins = []
+    lote = g.g.baixar_lote([msg("A"), msg("B"), msg("C")], ao_fim=fins.append)
+    esperar_lote(lote)
+    threading.Event().wait(0.1)
+    assert (lote.baixadas, lote.indisponiveis) == (0, 3) and fins == [lote]
+
+
+def test_lote_vazio_termina_na_hora(g):
+    fins = []
+    lote = g.g.baixar_lote([], ao_fim=fins.append)
+    assert fins == [lote] and lote.total == 0
+
+
+def test_cancelar_o_lote_cancela_o_que_falta(g):
+    g.f.modo = "lento"
+    lote = g.g.baixar_lote([msg("A"), msg("B"), msg("C"), msg("D")])
+    threading.Event().wait(0.2)
+    lote.cancelar()
+    esperar_lote(lote)
+    threading.Event().wait(0.1)
+    assert lote.canceladas == 4 and lote.baixadas == 0

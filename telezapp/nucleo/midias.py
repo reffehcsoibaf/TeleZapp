@@ -30,6 +30,32 @@ class _Andamento:
         self.automatica = automatica
 
 
+class Lote:
+    """Download das midias que faltam numa conversa: conta o que baixou, o que
+    nao estava mais disponivel e o que foi cancelado, e avisa o progresso e o
+    fim. Os avisos vem da thread que publica o evento (a da janela no app)."""
+
+    def __init__(self, chaves, ao_progresso=None, ao_fim=None):
+        self.total = len(chaves)
+        self.pendentes = set(chaves)
+        self.baixadas = 0
+        self.indisponiveis = 0
+        self.canceladas = 0
+        self.cancelado = False
+        self.ao_progresso = ao_progresso
+        self.ao_fim = ao_fim
+        self.cancelar_chaves = None      # preenchido pelo gerente
+
+    @property
+    def feitas(self):
+        return self.total - len(self.pendentes)
+
+    def cancelar(self):
+        self.cancelado = True
+        if self.cancelar_chaves is not None:
+            self.cancelar_chaves(list(self.pendentes))
+
+
 class GerenteMidias:
     def __init__(self, cfg, banco, barramento, provedor_de, trabalhadores=2):
         """provedor_de(conta_id) -> provedor ou None."""
@@ -39,6 +65,7 @@ class GerenteMidias:
         self.provedor_de = provedor_de
         self._fila = queue.Queue()
         self._ativos = {}            # chave da mensagem -> _Andamento
+        self._lotes = []             # downloads em lote (por conversa)
         self._trava = threading.Lock()
         self._parar = threading.Event()
         self._threads = []
@@ -100,6 +127,58 @@ class GerenteMidias:
             return False
         a.cancelar.set()
         return True
+
+    def faltantes(self, mensagens):
+        """As mensagens com midia baixavel que ainda nao estao neste
+        computador, da mais nova para a mais antiga (sem as limpadas)."""
+        achadas = []
+        for x in reversed(list(mensagens)):
+            if x.tipo not in armazem.BAIXAVEIS:
+                continue
+            if self.banco.foi_limpa(x.conta_id, x.conversa_id, x.id):
+                continue
+            if self.caminho(x):
+                continue
+            achadas.append(x)
+        return achadas
+
+    def baixar_lote(self, mensagens, ao_progresso=None, ao_fim=None):
+        """Baixa de uma vez as `mensagens` (ver `faltantes`). `ao_progresso(
+        feitas, total)` a cada midia resolvida; `ao_fim(lote)` no fim, com
+        `baixadas`, `indisponiveis` e `canceladas`. Devolve o `Lote`."""
+        lote = Lote([x.chave for x in mensagens], ao_progresso, ao_fim)
+        lote.cancelar_chaves = lambda chaves: [self.cancelar(c) for c in chaves]
+        if not mensagens:
+            if ao_fim is not None:
+                ao_fim(lote)
+            return lote
+        with self._trava:
+            self._lotes.append(lote)
+        for x in mensagens:
+            self.baixar(x, automatica=True)
+        return lote
+
+    def _contar_no_lote(self, e):
+        chave = (e.conta_id, e.conversa_id, e.mensagem_id)
+        with self._trava:
+            lote = next((l for l in self._lotes if chave in l.pendentes),
+                        None)
+            if lote is None:
+                return
+            lote.pendentes.discard(chave)
+            if e.caminho:
+                lote.baixadas += 1
+            elif e.cancelada:
+                lote.canceladas += 1
+            else:
+                lote.indisponiveis += 1
+            terminou = not lote.pendentes
+            if terminou:
+                self._lotes.remove(lote)
+        if lote.ao_progresso is not None:
+            lote.ao_progresso(lote.feitas, lote.total)
+        if terminou and lote.ao_fim is not None:
+            lote.ao_fim(lote)
 
     def cancelar_todos(self):
         with self._trava:
@@ -168,6 +247,9 @@ class GerenteMidias:
 
     # ------------------------------------------------------ baixar sozinho
     def _ao_evento(self, e):
+        if isinstance(e, ev.MidiaBaixada):
+            self._contar_no_lote(e)
+            return
         if not isinstance(e, ev.MensagemNova) or e.enviada_daqui:
             return
         msg = e.mensagem

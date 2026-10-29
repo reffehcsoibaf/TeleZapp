@@ -98,3 +98,40 @@ def test_mensagens_com_recibo_de_reproduzida_viram_reproduzidas_ao_abrir(
     assert b.mensagem("w1", "c", "V1").estado == m.REPRODUZIDA
     assert b.mensagem("w1", "c", "V2").estado == m.LIDA
     b.fechar()
+
+
+def test_gravar_tenta_de_novo_quando_o_banco_esta_ocupado(monkeypatch):
+    import sqlite3
+    from telezapp.armazenamento import banco as bd
+    esperas = []
+    monkeypatch.setattr(bd.time, "sleep", esperas.append)
+    chamadas = []
+
+    def gravar():
+        chamadas.append(1)
+        if len(chamadas) < 3:
+            raise sqlite3.OperationalError("database is locked")
+        return "ok"
+    assert bd._com_tentativas(gravar) == "ok"
+    assert len(chamadas) == 3 and esperas == [0.5, 2]
+
+
+def test_gravar_desiste_e_nao_esconde_outros_erros(monkeypatch):
+    import sqlite3
+    import pytest
+    from telezapp.armazenamento import banco as bd
+    monkeypatch.setattr(bd.time, "sleep", lambda s: None)
+
+    def travado():
+        raise sqlite3.OperationalError("database is locked")
+    with pytest.raises(sqlite3.OperationalError):
+        bd._com_tentativas(travado)
+
+    chamadas = []
+
+    def outro():
+        chamadas.append(1)
+        raise sqlite3.OperationalError("no such table: x")
+    with pytest.raises(sqlite3.OperationalError):
+        bd._com_tentativas(outro)
+    assert len(chamadas) == 1

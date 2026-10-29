@@ -17,7 +17,7 @@ from telezapp.midia import armazem
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import mencoes as nucleo_mencoes
 from telezapp.nucleo import modelos as m
-from telezapp.nucleo import previa_links
+from telezapp.nucleo import localizacao, previa_links
 from telezapp.provedores.base import (PEDIR_CODIGO, PEDIR_SENHA,
                                       PEDIR_TELEFONE, DownloadCancelado,
                                       ErroBloqueio, ErroMidia, ErroPerfil,
@@ -61,8 +61,14 @@ def _texto_extra(msg):
             return "enquete: " + poll.poll.question.text
         except AttributeError:
             return "enquete"
-    if getattr(msg, "geo", None):
-        return "localização"
+    geo = getattr(msg, "geo", None)
+    if geo:
+        venue = getattr(msg, "venue", None)
+        media = getattr(msg, "media", None)
+        return localizacao.descrever(
+            getattr(geo, "lat", 0.0), getattr(geo, "long", 0.0),
+            getattr(venue, "title", ""), getattr(venue, "address", ""),
+            ao_vivo=type(media).__name__ == "MessageMediaGeoLive")
     contato = getattr(msg, "contact", None)
     if contato is not None:
         nome = " ".join(p for p in (getattr(contato, "first_name", ""),

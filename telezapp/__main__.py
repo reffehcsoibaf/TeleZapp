@@ -277,6 +277,9 @@ def main():
     def sessao_do_windows(evt):
         log.info("o Windows está encerrando a sessão do usuário "
                  "(desligar, reiniciar ou sair)")
+        janela.marcar_windows_encerrando()
+        if evt.GetEventType() == wx.wxEVT_QUERY_END_SESSION:
+            return      # sem Skip: o padrao fecharia a janela e ela vetaria
         evt.Skip()
     app.Bind(wx.EVT_QUERY_END_SESSION, sessao_do_windows)
     app.Bind(wx.EVT_END_SESSION, sessao_do_windows)

@@ -239,6 +239,32 @@ class DialogoAdministrar(wx.Dialog):
 
 
 # ------------------------------------------------------------ controle
+def _plural(n, um, varios):
+    return "%d %s" % (n, um if n == 1 else varios)
+
+
+def resumo_do_lote(lote, servidor="do WhatsApp"):
+    """O que dizer no fim de baixar as midias que faltam."""
+    partes = []
+    if lote.baixadas:
+        partes.append("Baixei %s." % _plural(
+            lote.baixadas, "mídia", "mídias"))
+    else:
+        partes.append("Não baixei nenhuma mídia.")
+    if lote.indisponiveis:
+        um = lote.indisponiveis == 1
+        partes.append("%s não %s mais %s para download nos servidores %s."
+                      % (_plural(lote.indisponiveis, "mídia", "mídias"),
+                         "está" if um else "estão",
+                         "disponível" if um else "disponíveis", servidor))
+    if lote.canceladas:
+        partes.append("%s foi cancelada." % _plural(
+            lote.canceladas, "mídia", "mídias")
+            if lote.canceladas == 1 else "%s foram canceladas." % _plural(
+                lote.canceladas, "mídia", "mídias"))
+    return " ".join(partes)
+
+
 def _quando(ts):
     return time.strftime("%d/%m/%Y", time.localtime(ts)) if ts else ""
 
@@ -252,6 +278,7 @@ class ControleDetalhes:
         self.mensagens = []
         self.est = None
         self.dlg = None
+        self._lote = None              # download das midias que faltam
         self.ver = None                # mensagem a mostrar ao fechar
         self.abrir_conversa = None     # conversa a abrir ao fechar
         self.prov = jan.contas.provedor(conv.conta_id) if jan.contas \
@@ -287,7 +314,12 @@ class ControleDetalhes:
                 self.mensagens, jan.banco.midias(conv.conta_id, conv.id))
         except Exception:
             log.error("detalhes (banco):\n%s", traceback.format_exc())
-        dados = None
+        dados, novo_nome = None, ""
+        try:
+            if self.prov is not None and conv.tipo == "privada":
+                novo_nome = self.prov.completar_nome(conv.id)
+        except Exception:
+            log.error("detalhes (nome):\n%s", traceback.format_exc())
         try:
             if self.prov is not None and conv.tipo == "privada":
                 dados = self.prov.dados_do_contato(conv.id)
@@ -297,14 +329,19 @@ class ControleDetalhes:
                 dados = self.prov.detalhes_do_canal(conv.id)
         except Exception:
             log.error("detalhes (servico):\n%s", traceback.format_exc())
-        wx.CallAfter(self._chegou, dados)
+        wx.CallAfter(self._chegou, dados, novo_nome)
 
-    def _chegou(self, dados):
+    def _chegou(self, dados, novo_nome=""):
         if self.dlg is None:
             return
+        if novo_nome:
+            self.conv.nome = novo_nome
+            self.dlg.SetTitle("Detalhes da conversa: %s" % novo_nome)
         self.dados = dados
         self.dlg.definir(self._linhas(), self._botoes())
-        self.jan.fala.falar("Detalhes carregados.")
+        self.jan.fala.falar(
+            "Nome encontrado: %s. Detalhes carregados." % novo_nome
+            if novo_nome else "Detalhes carregados.")
 
     # ---------------------------------------------------------- textos
     def _linhas_locais(self):
@@ -335,6 +372,9 @@ class ControleDetalhes:
                                   ("recado", "Recado")):
                 if d.get(chave):
                     linhas.append("%s: %s" % (rotulo, d[chave]))
+            if d.get("recado_consultado") and not d.get("recado"):
+                linhas.append("Recado: o WhatsApp não informou (a pessoa não "
+                              "tem recado ou só o mostra a quem ela escolhe).")
             if not d:
                 linhas.append("O serviço não informou mais dados desta "
                               "pessoa agora.")
@@ -439,6 +479,8 @@ class ControleDetalhes:
         if conv.tipo == "privada":
             botoes.append(("&Editar contato", self.editar_contato))
             botoes.append(("&Mídias", self.midias))
+            botoes.append(("&Baixar as mídias que faltam...",
+                           self.baixar_faltantes))
             if getattr(self.prov, "FOTO_DO_CONTATO", False):
                 botoes.append(("Ver a &foto do contato", self.ver_foto))
                 botoes.append(("&Descrever a foto do contato",
@@ -452,6 +494,8 @@ class ControleDetalhes:
             botoes.append(("Ver &membros%s" % (" (%d)" % n if n else ""),
                            self.membros))
             botoes.append(("&Mídias", self.midias))
+            botoes.append(("&Baixar as mídias que faltam...",
+                           self.baixar_faltantes))
             if getattr(self.prov, "FOTO_DO_GRUPO", False):
                 botoes.append(("Ver a &foto do grupo", self.ver_foto))
                 botoes.append(("&Descrever a foto do grupo",
@@ -464,6 +508,8 @@ class ControleDetalhes:
                     botoes.append(("&Pedidos de entrada...", self.pedidos))
         else:
             botoes.append(("&Mídias", self.midias))
+            botoes.append(("&Baixar as mídias que faltam...",
+                           self.baixar_faltantes))
             if d.get("link"):
                 botoes.append(("Copiar o &link", lambda: self.jan._copiar_texto(
                     d["link"])))
@@ -540,6 +586,67 @@ class ControleDetalhes:
         opcoes.append(("Apagar...", lambda: self._apagar(x)))
         opcoes.append(("Ver na conversa", lambda: self._ver(x)))
         return opcoes
+
+    # ---- baixar as midias que faltam
+    def baixar_faltantes(self):
+        """Avisa o que vai acontecer, procura as midias desta conversa que nao
+        estao neste computador e baixa uma a uma, com barra e resumo."""
+        jan, conv = self.jan, self.conv
+        if jan.midias is None:
+            return
+        if self._lote is not None:
+            jan.fala.falar("Já estou baixando as mídias desta conversa.",
+                           interromper=True)
+            return
+        faltam = jan.midias.faltantes(self.mensagens)
+        if not faltam:
+            texto = ("Todas as mídias desta conversa já estão neste "
+                     "computador.")
+            jan.fala.falar(texto, interromper=True)
+            wx.MessageBox(texto, "Baixar as mídias", wx.OK |
+                          wx.ICON_INFORMATION, self.dlg)
+            return
+        servidor = ("do Telegram" if conv.servico == "telegram"
+                    else "do WhatsApp")
+        aviso = "\n\n".join((
+            "O TeleZapp vai procurar as %d mídias desta conversa que ainda "
+            "não estão neste computador e baixá-las, da mais nova para a "
+            "mais antiga." % len(faltam),
+            "Algumas podem não estar mais disponíveis para download nos "
+            "servidores %s; no fim você saberá quantas foram." % servidor,
+            "Os arquivos ocupam espaço no disco e você pode cancelar a "
+            "qualquer momento. Continuar?"))
+        if wx.MessageBox(aviso, "Baixar as mídias", wx.YES_NO |
+                         wx.ICON_QUESTION, self.dlg) != wx.YES:
+            return
+        from telezapp.interface.progresso import JanelaDeProgresso
+        lote = []
+
+        def cancelar():
+            if lote:
+                lote[0].cancelar()
+        barra = JanelaDeProgresso(
+            self.dlg, "Baixando as mídias", "Baixando as mídias da conversa",
+            ao_cancelar=cancelar, falar=jan.fala.falar)
+        barra.mostrar()
+
+        def andou(feitas, total):
+            barra.atualizar(100 * feitas / total if total else 100)
+
+        def acabou(resultado):
+            barra.fechar()
+            self._lote = None
+            texto = resumo_do_lote(resultado, servidor)
+            jan.fala.falar(texto, interromper=True)
+            if self.dlg is not None:
+                wx.MessageBox(texto, "Baixar as mídias", wx.OK |
+                              wx.ICON_INFORMATION, self.dlg)
+                self._atualizar()
+        self._lote = True            # ja comecou, mesmo que acabe de imediato
+        iniciado = jan.midias.baixar_lote(faltam, andou, acabou)
+        lote.append(iniciado)
+        if self._lote is True:
+            self._lote = iniciado
 
     # ---- favoritas
     def favoritas(self):

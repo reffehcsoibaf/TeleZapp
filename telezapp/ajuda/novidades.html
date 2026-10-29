@@ -13,6 +13,23 @@
 </header>
 <main>
 <section>
+<h2>Versão 2026.10.29.0</h2>
+<ul>
+<li>Detalhes da conversa: novo botão "Baixar as mídias que faltam...". Ele avisa o que vai fazer, procura as mídias da conversa que ainda não estão neste computador e as baixa de uma vez, da mais nova para a mais antiga, com barra de progresso e botão Cancelar. No fim fala quantas baixou e quantas não estavam mais disponíveis nos servidores do WhatsApp (ou do Telegram).</li>
+<li>"Buscar mensagens que faltam no celular" agora vai para trás no histórico: pede ao celular as mensagens em rodadas de cerca de 50, a partir da mais nova que o TeleZapp tem, até cobrir o que já havia, o celular não ter mais nada ou chegar a 60 rodadas. No fim sempre diz o resultado: quantas encontrou e quantas conferiu, ou que o celular não respondeu em 45 segundos (ele precisa estar ligado e com internet). Antes, às vezes não dizia nada.</li>
+<li>Ao reconectar depois de ficar fechado, o TeleZapp busca sozinho as mensagens que o WhatsApp não entregou: ele só entrega a parte final do que chegou nesse tempo (por exemplo, de um grupo movimentado ficavam faltando horas de mensagens). Ao terminar a sincronia, o TeleZapp pede ao celular, uma conversa de cada vez, as mensagens que ficaram faltando logo antes das entregues e avisa "Busca automática: encontrei N mensagens que faltavam em ..." quando acha alguma. A caixa "Buscar sozinho as mensagens que faltam ao reconectar" está em Configurações, Mensagens, ligada por padrão.</li>
+<li>Contas do WhatsApp Business costumam entregar a computadores pareados bem menos histórico do que o WhatsApp comum, muitas vezes só a última mensagem de cada conversa, e podem não responder à busca de mensagens que faltam. Isso também acontece no WhatsApp Web oficial; a explicação está no guia, na parte do WhatsApp.</li>
+<li>Localização recebida (WhatsApp e Telegram): em vez de só a palavra "localização", a mensagem mostra o nome e o endereço do lugar, a legenda, as coordenadas e um link para abrir no mapa. A localização em tempo real aparece como tal; só o ponto inicial é mostrado.</li>
+<li>Conversa do WhatsApp que só mostra o telefone: ao abrir os detalhes, o TeleZapp procura o nome na rede (cadastro de contatos, nome de perfil visto nas mensagens, nome de empresa e nome da pessoa nos grupos) e, se achar, já o põe na lista e fala "Nome encontrado".</li>
+<li>Recado do contato nos detalhes: se o WhatsApp não informa o recado (a pessoa não tem ou só o mostra a quem ela escolhe), a janela agora diz isso em vez de deixar a linha vazia. Um recado feito só de espaços ou caracteres invisíveis conta como vazio.</li>
+<li>Parear uma conta do WhatsApp ficou bem mais rápido quando há muito histórico: o TeleZapp não consulta mais a internet para cada menção do histórico (um pacote de 5000 mensagens chegou a levar mais de 6 minutos). Menções sem nome no histórico mostram o telefone até a pessoa aparecer.</li>
+<li>Menos mensagens perdidas em computadores lentos: o banco da sessão do WhatsApp passou a esperar até 30 segundos quando está ocupado e a gravação das mensagens recebidas tenta de novo antes de desistir.</li>
+<li>Corrigido: o TeleZapp podia cair logo ao abrir, sem mensagem, quando uma parte do programa lia a lista de contatos antes de o WhatsApp terminar de iniciar. Agora essa leitura espera, e o log registra quando ela é evitada.</li>
+<li>Corrigido: o TeleZapp às vezes impedia o desligamento do Windows. Com "Continuar em segundo plano" ligado ele se escondia na bandeja em vez de aceitar o desligamento, e com uma chamada em andamento abria uma pergunta. Agora ele aceita o pedido do Windows, sem perguntar, e fecha as contas em até 2 segundos.</li>
+<li>Corrigido: erro na janela Gerenciar contas ao excluir uma conta (posição inexistente na lista).</li>
+</ul>
+</section>
+<section>
 <h2>Versão 2026.10.28.0</h2>
 <ul>
 <li>Você agora escolhe o que cada mensagem mostra na lista de uma conversa, e em que ordem, como já fazia com a lista de conversas: quem enviou, hora, conteúdo, marcas, links, prévia, transcrição ou descrição por IA, reações, "em resposta a" e o estado das suas mensagens. Em Configurações, Mensagens, o botão "Lista de mensagens" ocupa o lugar da caixa "Como cada mensagem é lida", e no menu Exibir há o submenu "Lista de mensagens", com uma opção para mostrar o nome de quem enviou só quando muda. Quem usava um dos três estilos antigos ficou com a lista equivalente. Entra no backup.</li>

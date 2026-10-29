@@ -3278,7 +3278,8 @@ def test_detalhes_de_pessoa_mostra_dados_do_contato_e_botoes(j):
     assert "Nome de usuário: @ana" in texto and "Nome no perfil: Ana S." in texto
     assert "Mensagens guardadas: 2." in texto and "Fotos: 1" in texto
     assert [r for r, _ in c._botoes()] == [
-        "&Editar contato", "&Mídias", "&Grupos em comum",
+        "&Editar contato", "&Mídias", "&Baixar as mídias que faltam...",
+        "&Grupos em comum",
         "Mensagens fa&voritas", "&Limpar a conversa..."]
 
 
@@ -3298,6 +3299,7 @@ def test_detalhes_de_grupo_mostram_membros_e_so_admin_ve_administrar(j):
     assert "Criador: Ana" in texto
     rotulos = [r for r, _ in c._botoes()]
     assert rotulos == ["Ver &membros (2)", "&Mídias",
+                       "&Baixar as mídias que faltam...",
                        "Mensagens fa&voritas", "&Limpar a conversa..."]
     dados["sou_admin"] = True
     assert "&Administrar grupo" in [r for r, _ in c._botoes()]
@@ -6035,3 +6037,161 @@ def test_resultado_escolhido_abre_a_conversa_na_mensagem(j, monkeypatch):
     monkeypatch.setattr(jm, "DialogoBusca", DialogoBuscaFalso)
     j._busca_por_criterios()
     assert DialogoBuscaFalso.vistos[0].anteriores.termo == "oi"
+
+
+def test_windows_encerrando_nao_esconde_nem_pergunta_nem_espera_demais(
+        j, monkeypatch):
+    from telezapp.interface import bandeja
+    monkeypatch.setattr(bandeja, "criar", lambda janela: BandejaFalsa())
+    j._aplicar_opcao("segundo_plano", True)
+    j.Hide = lambda: None
+    j.Destroy = lambda: None
+    parou = []
+    j.contas.parar_todos = lambda: parou.append(True)
+    j.marcar_windows_encerrando()
+    assert j.windows_encerrando()
+    evento = EventoDeFechar()          # o pedido de consulta pode ser vetado
+    j._ao_fechar(evento)
+    assert not evento.vetado and parou == [True]
+
+
+def test_aviso_do_windows_vale_por_pouco_tempo(j, monkeypatch):
+    j.marcar_windows_encerrando()
+    agora = jm.time.monotonic()
+    monkeypatch.setattr(jm.time, "monotonic", lambda: agora + 61)
+    assert not j.windows_encerrando()
+
+
+def test_windows_encerrando_com_chamada_nao_abre_pergunta(chamadas):
+    j, ch = chamadas.j, chamadas.ch
+    estado(j, ch.CHAMANDO)
+    estado(j, ch.EM_CHAMADA)
+    parou = []
+    j.contas.parar_todos = lambda: parou.append(True)
+    j.marcar_windows_encerrando()
+    wx_falso.resposta_messagebox[0] = wx_falso.NO
+    j._ao_fechar(types.SimpleNamespace(Veto=lambda: parou.append("veto")))
+    assert parou == [True]
+
+
+# ------------------------------- baixar as midias que faltam (detalhes)
+class MidiasDeLote:
+    def __init__(self, faltam):
+        self.faltam, self.lotes = faltam, []
+
+    def faltantes(self, mensagens):
+        return self.faltam
+
+    def baixar_lote(self, mensagens, ao_progresso, ao_fim):
+        lote = types.SimpleNamespace(
+            total=len(mensagens), baixadas=0, indisponiveis=0, canceladas=0,
+            cancelar=lambda: None, ao_progresso=ao_progresso, ao_fim=ao_fim)
+        self.lotes.append(lote)
+        return lote
+
+
+def test_baixar_faltantes_explica_antes_e_nao_comeca_se_a_pessoa_recusar(j):
+    c = _controle(j)
+    j.midias = MidiasDeLote([c.mensagens[0]])
+    perguntas = []
+    original = jm.wx.MessageBox
+    jm.wx.MessageBox = lambda texto, *a, **k: perguntas.append(texto) or \
+        wx_falso.NO
+    try:
+        import telezapp.interface.detalhes as dd
+        dd.wx.MessageBox = jm.wx.MessageBox
+        c.baixar_faltantes()
+    finally:
+        jm.wx.MessageBox = original
+        dd.wx.MessageBox = original
+    assert "1 mídias desta conversa" in perguntas[0]
+    assert "não estar mais disponíveis" in perguntas[0]
+    assert "servidores do Telegram" in perguntas[0] or \
+        "servidores do WhatsApp" in perguntas[0]
+    assert j.midias.lotes == []
+
+
+def test_baixar_faltantes_baixa_e_diz_o_resumo(j, monkeypatch):
+    import telezapp.interface.detalhes as dd
+    from telezapp.interface import progresso
+    _BarraFalsa.criadas.clear()
+    monkeypatch.setattr(progresso, "JanelaDeProgresso", _BarraFalsa)
+    c = _controle(j)
+    j.midias = MidiasDeLote([c.mensagens[0]])
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    original = dd.wx.MessageBox
+    dd.wx.MessageBox = lambda *a, **k: wx_falso.YES
+    try:
+        c.baixar_faltantes()
+        lote = j.midias.lotes[0]
+        lote.ao_progresso(1, 2)
+        barra = _BarraFalsa.criadas[0]
+        assert barra.passos == [(50.0, None)]
+        lote.baixadas, lote.indisponiveis = 1, 2
+        lote.ao_fim(lote)
+        assert barra.fechada
+    finally:
+        dd.wx.MessageBox = original
+    assert ditas[-1].startswith("Baixei 1 mídia.")
+    assert "2 mídias não estão mais disponíveis" in ditas[-1]
+    assert c._lote is None
+
+
+def test_baixar_faltantes_sem_nada_a_baixar_avisa(j):
+    import telezapp.interface.detalhes as dd
+    c = _controle(j)
+    j.midias = MidiasDeLote([])
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    original = dd.wx.MessageBox
+    dd.wx.MessageBox = lambda *a, **k: wx_falso.OK
+    try:
+        c.baixar_faltantes()
+    finally:
+        dd.wx.MessageBox = original
+    assert "já estão neste computador" in ditas[-1] and j.midias.lotes == []
+
+
+def test_resumo_do_lote_conta_no_singular_e_no_plural():
+    from telezapp.interface.detalhes import resumo_do_lote
+    l = types.SimpleNamespace(baixadas=0, indisponiveis=1, canceladas=1)
+    assert resumo_do_lote(l) == (
+        "Não baixei nenhuma mídia. 1 mídia não está mais disponível para "
+        "download nos servidores do WhatsApp. 1 mídia foi cancelada.")
+    l = types.SimpleNamespace(baixadas=3, indisponiveis=0, canceladas=2)
+    assert resumo_do_lote(l) == "Baixei 3 mídias. 2 mídias foram canceladas."
+
+
+def test_detalhes_completam_o_nome_da_conversa_so_com_numero(j):
+    c = _controle(j)
+    c.prov = types.SimpleNamespace(completar_nome=lambda cid: "Ana Nova")
+    chamadas = []
+
+    class Dlg:
+        def SetTitle(self, t):
+            chamadas.append(t)
+
+        def definir(self, linhas, botoes):
+            chamadas.append("definido")
+    c.dlg = Dlg()
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    c._chegou({}, "Ana Nova")
+    assert c.conv.nome == "Ana Nova"
+    assert chamadas[0] == "Detalhes da conversa: Ana Nova"
+    assert ditas == ["Nome encontrado: Ana Nova. Detalhes carregados."]
+    c._chegou({})
+    assert ditas[-1] == "Detalhes carregados."
+
+
+def test_detalhes_mostram_o_recado_ou_avisam_que_o_whatsapp_nao_informou(j):
+    c = _controle(j, "privada", {"telefone": "+5551999990000",
+                                 "recado": "Ocupado", "recado_consultado": True})
+    assert "Recado: Ocupado" in "\n".join(c._linhas())
+    c = _controle(j, "privada", {"telefone": "+5551999990000",
+                                 "recado_consultado": True})
+    texto = "\n".join(c._linhas())
+    assert "Recado: o WhatsApp não informou" in texto
+    c = _controle(j, "privada", {"telefone": "+5551999990000"})
+    assert "Recado" not in "\n".join(c._linhas())

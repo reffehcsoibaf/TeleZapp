@@ -161,6 +161,26 @@ def _numero(id_):
         return 0
 
 
+ESPERAS_GRAVACAO = (0.5, 2, 5)
+
+
+def _com_tentativas(gravar, esperas=None):
+    """Roda `gravar`; se o SQLite disser que o banco esta ocupado ou bloqueado
+    (computador lento, antivirus), espera e tenta de novo antes de desistir,
+    para a mensagem nao se perder."""
+    for espera in (ESPERAS_GRAVACAO if esperas is None else esperas):
+        try:
+            return gravar()
+        except sqlite3.OperationalError as erro:
+            texto = str(erro).lower()
+            if "locked" not in texto and "busy" not in texto:
+                raise
+            log.warning("banco ocupado ao gravar (%s); tentando de novo "
+                        "em %s s", erro, espera)
+            time.sleep(espera)
+    return gravar()
+
+
 class Banco:
     def __init__(self, caminho):
         self.caminho = caminho
@@ -169,7 +189,8 @@ class Banco:
         self._agenda = None           # cache de contatos: (conta, id) -> nome
         self._limpas = None           # cache de `limpas`: chave -> alvo
         self._apagadas = None         # cache de `apagadas`: chave -> ate
-        self._con = sqlite3.connect(caminho, check_same_thread=False)
+        self._con = sqlite3.connect(caminho, check_same_thread=False,
+                                    timeout=30)
         self._con.execute("PRAGMA journal_mode=WAL")
         self._con.execute("PRAGMA synchronous=NORMAL")
         with self._con:
@@ -355,9 +376,30 @@ class Banco:
             and x.data > apagadas.get((x.conta_id, x.conversa_id), -1)]
         sql = "INSERT OR REPLACE INTO mensagens (%s) VALUES (%s)" % (
             ", ".join(_CAMPOS_MSG), ", ".join("?" * len(_CAMPOS_MSG)))
-        with self._trava, self._con:
-            self._con.executemany(
-                sql, [_linha_msg(m) for m in mensagens])
+        linhas = [_linha_msg(m) for m in mensagens]
+
+        def gravar():
+            with self._trava, self._con:
+                self._con.executemany(sql, linhas)
+        _com_tentativas(gravar)
+
+    def data_antes_de(self, conta_id, conversa_id, data):
+        """Data da mensagem guardada mais nova que seja anterior a `data`
+        (0 se nao ha nenhuma)."""
+        with self._trava:
+            linha = self._con.execute(
+                "SELECT MAX(data) FROM mensagens WHERE conta_id=? AND "
+                "conversa_id=? AND data < ?",
+                (conta_id, conversa_id, data)).fetchone()
+        return linha[0] or 0
+
+    def data_mais_antiga(self, conta_id, conversa_id):
+        """Data da mensagem mais antiga guardada da conversa (0 se nao ha)."""
+        with self._trava:
+            linha = self._con.execute(
+                "SELECT MIN(data) FROM mensagens WHERE conta_id=? AND "
+                "conversa_id=?", (conta_id, conversa_id)).fetchone()
+        return linha[0] or 0
 
     def mensagens_expiradas(self, agora=None):
         """Chaves (conta, conversa, id) das mensagens temporarias cujo prazo
