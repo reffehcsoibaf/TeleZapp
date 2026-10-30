@@ -22,6 +22,12 @@ for pacote in ("neonize", "magic", "pyzipper", "accessible_output2", "cv2",
     hiddenimports += h
 hiddenimports += collect_submodules(
     "Cryptodome", filter=lambda n: "SelfTest" not in n)
+# os aplicativos de robo: o wx carrega estas DLLs sozinho, em tempo de execucao
+hiddenimports.append("wx.html2")
+import wx
+binaries += [(os.path.join(os.path.dirname(wx.__file__), nome), "wx")
+             for nome in ("WebView2Loader.dll",
+                          "wxmsw333u_webview_vc140_x64.dll")]
 
 a = Analysis(
     [os.path.join(SPECPATH, "iniciar.py")],

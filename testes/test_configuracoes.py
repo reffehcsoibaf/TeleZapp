@@ -243,12 +243,13 @@ def test_interface_e_mensagens_reunem_as_categorias_antigas(mod):
                                                    "Conteúdo falado")}
     assert falado == {"falar_novas", "falar_novas_outras_conversas",
                       "falar_novas_fora_do_telezapp", "confirmar_envio",
-                      "falar_reacoes", "falar_descricoes"}
+                      "falar_reacoes", "falar_descricoes",
+                      "falar_quantas_no_filtro"}
     soltas = {o.chave for o in mod.opcoes("Interface")}
     assert soltas == {"status_no_titulo", "avisar_chamadas_whatsapp",
                       "ocultar_contatos_duplicados",
                       "trazer_contatos_ao_abrir", "digitar_na_lista",
-                      "prioridade_abertura"}
+                      "prioridade_abertura", "como_me_chamar"}
     assert "estilo" not in {o.chave for o in config.OPCOES}   # virou a lista
     assert {"ortografia_idioma", "enter_envia",
             "previa_links"} <= {o.chave for o in mod.opcoes("Mensagens")}

@@ -2163,7 +2163,7 @@ def test_lista_de_conversas_muda_a_ordem_e_os_itens(j):
         "ocultos": ["servico", "previa"]})
     assert j.lista_conv.itens[0] == "2 não lidas, Ana"
     assert j.cfg.get("lista_conversas")["ocultos"] == [
-        "servico", "previa", "reacoes", "quem_reagiu"]
+        "servico", "autor", "previa", "reacoes", "quem_reagiu"]
     assert not j.itens["lista_servico"].marcado
     assert j.itens["lista_nome"].marcado
     j.itens["lista_servico"].Check(True)       # o menu marca antes do evento
@@ -2184,7 +2184,7 @@ def test_item_do_menu_da_lista_nao_deixa_tirar_o_ultimo(j):
     assert ditas[-1] == "Pelo menos um item precisa ficar ativado."
     assert j.itens["lista_nome"].marcado   # voltou marcado
     assert j.cfg.get("lista_conversas")["ocultos"] == [
-        "servico", "nao_lidas", "previa", "reacoes", "quem_reagiu"]
+        "servico", "nao_lidas", "autor", "previa", "reacoes", "quem_reagiu"]
     j._alternar_item_da_lista("previa")
     assert ditas[-1] == "Trecho da última mensagem: ativado."
     assert "previa" not in j.cfg.get("lista_conversas")["ocultos"]
@@ -4859,6 +4859,16 @@ def test_ver_enquete_numa_mensagem_comum_avisa(j):
     assert "não é uma enquete" in ditas[-1]
 
 
+def test_enviar_localizacao_sem_servico_avisa(j):
+    _abrir_com_caixa(j)
+    j.estados["t1"] = ev.CONECTADA
+    j.contas.p.PODE_ENVIAR_LOCALIZACAO = False
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._enviar_minha_localizacao()
+    assert ditas[-1] == "Este serviço não envia localização."
+
+
 def test_criar_enquete_pelo_menu_vai_ao_servico(j, monkeypatch):
     _abrir_com_caixa(j)
     pedidos = []
@@ -6195,3 +6205,288 @@ def test_detalhes_mostram_o_recado_ou_avisam_que_o_whatsapp_nao_informou(j):
     assert "Recado: o WhatsApp não informou" in texto
     c = _controle(j, "privada", {"telefone": "+5551999990000"})
     assert "Recado" not in "\n".join(c._linhas())
+
+
+def test_comandos_do_robo_listam_e_enviam(j):
+    c = j.indice[("t1", "10")]
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    vazio = {"comandos": [], "menu": None, "privacidade": ""}
+    j._mostrar_comandos_do_robo(c, vazio)
+    assert ditas[-1] == "Esta conversa não tem comandos de robô."
+    j._mostrar_comandos_do_robo(c, None)
+    assert ditas[-1] == "O serviço não respondeu. Tente de novo."
+    vistas = []
+
+    def escolher(titulo, mensagem, escolhas, atual):
+        vistas.extend(escolhas)
+        return escolhas[1][0]
+    j._escolher_da_lista = escolher
+    enviados = []
+    j._enviar_comando_do_robo = lambda conv, texto: enviados.append(texto)
+    j._mostrar_comandos_do_robo(c, dict(
+        vazio, comandos=[("/start", "Iniciar"), ("/ajuda", "")],
+        menu={"texto": "Abrir", "url": "https://m"}))
+    assert [r for _, r in vistas] == [
+        "Botão de menu: Abrir (abre no navegador)", "/start: Iniciar",
+        "/ajuda"]
+    assert enviados == ["/start"]
+
+
+def test_botoes_de_robo_no_tocar_acao(j):
+    x = msg("7", "menu")
+    ditas, copiados = [], []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._copiar_texto = lambda t, aviso="": copiados.append(t)
+    j._tocar_acao(x, {"tipo": "robo_copiar", "texto": "123"})
+    assert copiados == ["123"]
+    j._tocar_acao(x, {"tipo": "robo_indisponivel"})
+    assert "aplicativo oficial" in ditas[-1]
+
+
+def test_teclado_do_robo_e_o_da_mensagem_mais_nova(j):
+    c = j.indice[("t1", "10")]
+    velho, novo = msg("1", "a"), msg("2", "b")
+    m.guardar_extras(velho, acoes=[{"tipo": "robo_texto", "rotulo": "Velho"}])
+    m.guardar_extras(novo, acoes=[{"tipo": "robo_texto", "rotulo": "Novo"}])
+    j.cache[c.chave] = [velho, novo, msg("3", "sem teclado")]
+    assert j._teclado_do_robo(c) is novo
+    # o robo escondeu o teclado depois: nao oferece mais
+    oculto = msg("4", "pronto")
+    m.guardar_extras(oculto, acoes=[{"tipo": "robo_ocultar_teclado"}])
+    j.cache[c.chave].append(oculto)
+    assert j._teclado_do_robo(c) is None
+    assert j._acoes_da_mensagem(oculto) == []
+
+
+def test_comando_do_robo_nao_passa_por_cima_do_rascunho(j):
+    c = j.indice[("t1", "10")]
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._abrir_conversa(c)
+    j.caixa.SetValue("rascunho")
+    j._enviar_comando_do_robo(c, "/start")
+    assert j.caixa.GetValue() == "rascunho"
+    assert "antes de usar um comando" in ditas[-1]
+
+
+def _lancamento(versao="2099.1.1.0"):
+    return types.SimpleNamespace(versao=versao, url_zip="", url_hash="",
+                                 pagina="")
+
+
+def test_busca_periodica_so_agenda_com_as_duas_opcoes(j, monkeypatch):
+    prazos = []
+    monkeypatch.setattr(jm.wx, "CallLater",
+                        lambda ms, f, *a: prazos.append(ms))
+    j.cfg.set("verificar_atualizacoes", True)
+    j.cfg.set("atualizacoes_periodicas", True)
+    j.cfg.set("atualizacoes_intervalo", 6)
+    j._agendar_busca_de_versao()
+    assert prazos == [6 * 3600 * 1000]
+    prazos.clear()
+    j.cfg.set("atualizacoes_periodicas", False)
+    j._agendar_busca_de_versao()
+    assert prazos == []
+    j.cfg.set("atualizacoes_periodicas", True)
+    j.cfg.set("verificar_atualizacoes", False)
+    j._agendar_busca_de_versao()
+    assert prazos == []
+
+
+def test_busca_periodica_espera_a_chamada_acabar(j, monkeypatch):
+    prazos, consultas = [], []
+    monkeypatch.setattr(jm.wx, "CallLater",
+                        lambda ms, f, *a: prazos.append(ms))
+    monkeypatch.setattr(j, "_verificar_atualizacoes",
+                        lambda *a, **k: consultas.append(k))
+    j.cfg.set("verificar_atualizacoes", True)
+    j.cfg.set("atualizacoes_periodicas", True)
+    monkeypatch.setattr(j, "_ocupado_para_avisar", lambda: True)
+    j._busca_periodica_de_versao()
+    assert consultas == [] and prazos == [5 * 60 * 1000]
+    monkeypatch.setattr(j, "_ocupado_para_avisar", lambda: False)
+    j._busca_periodica_de_versao()
+    assert consultas == [{"periodica": True}]
+
+
+def test_versao_achada_em_segundo_plano_espera_a_volta(j, monkeypatch):
+    monkeypatch.setattr(jm.atualizacao, "e_mais_nova", lambda l: True)
+    monkeypatch.setattr(jm.atualizacao, "deve_avisar_ao_abrir",
+                        lambda l, i: True)
+    ditas, janelas = [], []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    monkeypatch.setattr(j, "IsIconized", lambda: True, raising=False)
+    lanc = _lancamento()
+    j._resultado_atualizacao(lanc, "", False, True)
+    assert j._versao_pendente is lanc and "versão nova" in ditas[-1]
+    # a mesma versao nao avisa de novo
+    ditas.clear()
+    j._resultado_atualizacao(lanc, "", False, True)
+    assert ditas == []
+    monkeypatch.setattr(j, "_resultado_atualizacao",
+                        lambda *a: janelas.append(a))
+    j._mostrar_versao_pendente()
+    assert janelas == [(lanc, "", True)] and j._versao_pendente is None
+
+
+def test_salvar_logs_pertence_a_janela_de_exportar(j, monkeypatch):
+    donas = []
+
+    class Seletor:
+        def __init__(self, pai, *a, **k):
+            donas.append(pai)
+
+        def ShowModal(self):
+            return jm.wx.ID_CANCEL
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(jm.wx, "FileDialog", Seletor, raising=False)
+    janela_de_exportar = object()
+    j._salvar_logs("logs.zip", janela_de_exportar)
+    assert donas == [janela_de_exportar]
+
+
+def _audio(id_, data):
+    return m.Mensagem("t1", "10", id_, tipo=m.VOZ, autor="Ana", data=data)
+
+
+def test_resumo_leva_a_transcricao_e_aceita_so_o_texto(j, monkeypatch):
+    c = j.indice[("t1", "10")]
+    feito, novo = _audio("1", AGORA), _audio("2", AGORA + 1)
+    m.atualizar_extras(feito, ia={"genero": "audio", "texto": "chego às 15h"})
+    assert "transcrição: chego às 15h" in j._linhas_da_conversa([feito], c)
+    pedidos = []
+    monkeypatch.setattr(j, "_ia_texto",
+                        lambda op, texto, pronto: pedidos.append(texto))
+    monkeypatch.setattr(j, "_ia_tem_provedor", lambda g: True)
+    monkeypatch.setattr(j, "_perguntar_midias_do_resumo", lambda p: False)
+    processou = []
+    monkeypatch.setattr(j, "_processar_midias_do_resumo",
+                        lambda *a: processou.append(a))
+    j._resumir_mensagens([feito, novo], c, "Resumo")
+    assert processou == [] and "chego às 15h" in pedidos[0]
+    # cancelou: nada vai
+    pedidos.clear()
+    monkeypatch.setattr(j, "_perguntar_midias_do_resumo", lambda p: None)
+    j._resumir_mensagens([novo], c, "Resumo")
+    assert pedidos == []
+
+
+def test_resumo_sem_midia_pendente_nao_pergunta(j, monkeypatch):
+    c = j.indice[("t1", "10")]
+    pedidos = []
+    monkeypatch.setattr(j, "_ia_texto",
+                        lambda op, texto, pronto: pedidos.append(texto))
+    monkeypatch.setattr(j, "_perguntar_midias_do_resumo",
+                        lambda p: pytest.fail("não devia perguntar"))
+    j._resumir_mensagens([msg("1", "oi")], c, "Resumo")
+    assert len(pedidos) == 1
+
+
+def test_lote_do_resumo_processa_em_silencio_e_resume_no_fim(j, monkeypatch):
+    c = j.indice[("t1", "10")]
+    a, b = _audio("1", AGORA), _audio("2", AGORA + 1)
+    resumos, ditas = [], []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    monkeypatch.setattr(j, "_consentir_midias_do_resumo", lambda p: True)
+    monkeypatch.setattr(j, "_pedir_resumo",
+                        lambda ms, cv, t, fora=0: resumos.append(fora))
+
+    class Barra:
+        def __init__(self, *a, **k):
+            pass
+
+        def mostrar(self):
+            pass
+
+        def atualizar(self, *a):
+            pass
+
+        def fechar(self):
+            pass
+    from telezapp.interface import progresso
+    monkeypatch.setattr(progresso, "JanelaDeProgresso", Barra)
+
+    def processar(x, auto):
+        j._ia_ocupadas.add(x.chave)
+    monkeypatch.setattr(j, "_ia_processar", processar)
+    plano = jm.resumo_midias.Plano(processar=[a, b])
+    j._processar_midias_do_resumo([a, b], c, "Resumo", plano)
+    resultado = types.SimpleNamespace(texto="oi", provedor="p", modelo="q")
+    j._ia_pronto(a, "audio", resultado, None, True)
+    assert resumos == [] and m.extras_de(a)["ia"]["texto"] == "oi"
+    j._ia_pronto(b, "audio", None, "falhou", True)
+    assert resumos == [1] and j._lote_resumo is None
+    assert not any("oi" in t or "falhou" in t for t in ditas)
+
+
+def test_enviar_contatos_sem_servico_avisa(j):
+    _abrir_com_caixa(j)
+    j.estados["t1"] = ev.CONECTADA
+    j.contas.p.PODE_ENVIAR_CONTATOS = False
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._enviar_contatos()
+    assert ditas[-1] == "Este serviço não envia contatos."
+
+
+def _dialogo_de_contatos(monkeypatch, escolhidos, resposta):
+    from telezapp.interface import contatos as jc
+
+    class Dialogo:
+        def __init__(self, pai, itens, destino):
+            pass
+
+        def ShowModal(self):
+            return resposta
+
+        def escolhidos(self):
+            return escolhidos
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(jc, "DialogoEnviarContatos", Dialogo)
+
+
+def test_enviar_contatos_vai_ao_servico(j, monkeypatch):
+    _abrir_com_caixa(j)
+    j.estados["t1"] = ev.CONECTADA
+    j.contas.p.PODE_ENVIAR_CONTATOS = True
+    pedidos = []
+    j.contas.p.enviar_contatos = lambda c, x: pedidos.append((c, x))
+    _dialogo_de_contatos(monkeypatch, [("Ana", "+5551999998888")], jm.wx.ID_OK)
+    j._enviar_contatos()
+    assert pedidos == [("20", [("Ana", "+5551999998888")])]
+
+
+def test_enviar_contatos_cancelado_nao_envia(j, monkeypatch):
+    _abrir_com_caixa(j)
+    j.estados["t1"] = ev.CONECTADA
+    j.contas.p.PODE_ENVIAR_CONTATOS = True
+    pedidos = []
+    j.contas.p.enviar_contatos = lambda c, x: pedidos.append((c, x))
+    _dialogo_de_contatos(monkeypatch, [], jm.wx.ID_CANCEL)
+    j._enviar_contatos()
+    assert pedidos == []
+
+
+def test_opcao_cala_a_quantidade_ao_trocar_de_filtro(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._ao_filtro_tipo()
+    j._ao_filtro_conta()
+    assert len(ditas) == 2 and "conversa" in ditas[0]
+    del ditas[:]
+    j.cfg.set("falar_quantas_no_filtro", False)
+    j._ao_filtro_tipo()
+    j._ao_filtro_conta()
+    assert ditas == []
+
+
+def test_mudar_como_me_chamar_vale_na_hora(j, monkeypatch):
+    monkeypatch.setattr(m, "_meu_nome", m.VOCE)
+    j._aplicar_opcao("como_me_chamar", "Fabio")
+    assert j.cfg.get("como_me_chamar") == "Fabio"
+    assert m.meu_nome() == "Fabio"

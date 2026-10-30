@@ -103,11 +103,26 @@ def descrever_ambiente(log):
                  "Windows ligado há %s", platform.platform(),
                  platform.python_version(),
                  "empacotado" if getattr(sys, "frozen", False) else "código",
-                 config.pasta_dados(), sys.argv[1:],
+                 config.pasta_dados(), _argumentos_para_o_log(sys.argv[1:]),
                  "%.0f min" % (ligado / 60) if ligado is not None
                  else "? min")
     except Exception:
         log.exception("não consegui descrever o ambiente")
+
+
+def _argumentos_para_o_log(argumentos):
+    """Sem o link recebido: ele pode trazer telefone ou texto."""
+    return [a for i, a in enumerate(argumentos)
+            if i == 0 or argumentos[i - 1] != "--link"]
+
+
+def _link_recebido(argumentos):
+    """O link de `--link endereco`, ou ""."""
+    if "--link" in argumentos:
+        i = argumentos.index("--link") + 1
+        if i < len(argumentos):
+            return argumentos[i]
+    return ""
 
 
 def caixa_de_erro(texto):
@@ -124,6 +139,7 @@ def _vigiar_aviso(sinal, janela, instancia):
     while True:
         if instancia.esperar(sinal, 500):
             wx.CallAfter(janela._mostrar_da_bandeja)
+            wx.CallAfter(janela.abrir_links_recebidos)
         if getattr(janela, "_saindo", False):
             return
 
@@ -233,7 +249,8 @@ def main():
     if unico.IsAnotherRunning():
         # a outra abertura pode estar escondida na bandeja: pede a ela que
         # mostre a janela, em vez de dizer que ja esta aberto
-        from telezapp.nucleo import instancia
+        from telezapp.nucleo import instancia, links_recebidos
+        links_recebidos.guardar(_link_recebido(sys.argv[1:]))
         avisou = instancia.acionar()
         log.info("abertura: já há outro TeleZapp aberto; %s",
                  "pedi a ele que mostre a janela" if avisou
@@ -290,12 +307,20 @@ def main():
     if minimizada:
         janela.Iconize(True)
     janela.Show()
+    if minimizada:
+        janela._tirar_do_alttab()
     etapa(log, "janela mostrada")
     if prioridade is not None:
         temporizador = threading.Timer(prioridade.SEGUNDOS_DE_ABERTURA,
                                        prioridade.abertura, args=(False,))
         temporizador.daemon = True
         temporizador.start()
+    if cfg.get("abrir_links_no_telezapp"):
+        from telezapp.nucleo import protocolos
+        if not protocolos.registrar():
+            log.warning("não consegui registrar o TeleZapp para abrir links")
+    from telezapp.nucleo import links_recebidos
+    links_recebidos.guardar(_link_recebido(sys.argv[1:]))
     if cfg.get("iniciar_com_windows"):
         from telezapp.nucleo import inicializacao
         inicializacao.definir(True)      # mantem o caminho em dia
@@ -304,6 +329,7 @@ def main():
                          args=(sinal, janela, instancia),
                          daemon=True, name="aviso-de-abertura").start()
     wx.CallAfter(janela.comecar)
+    wx.CallAfter(janela.abrir_links_recebidos)
     app.MainLoop()
     janela.midias.parar()
     banco.fechar()

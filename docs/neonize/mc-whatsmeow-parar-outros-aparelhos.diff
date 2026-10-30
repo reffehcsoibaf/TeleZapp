@@ -1,0 +1,79 @@
+--- /c/Users/fabio/AppData/Local/Temp/claude/C--github-TeleZapp/f6ced813-17e5-42fa-96fd-d3ec0543fc7f/scratchpad/engine.go.antes	2026-10-30 07:51:47.304515500 -0300
++++ /c/github/neonize-build/mc-whatsmeow/engine.go	2026-10-30 10:12:34.791001500 -0300
+@@ -77,6 +77,10 @@
+ 
+ 	// The callee <accept> is deferred until the caller's <mute_v2> arrives.
+ 	acceptPending bool
++
++	// TeleZapp: os aparelhos que receberam a nossa oferta; quem liga e que manda
++	// parar de tocar nos que nao atenderam (dismissOtherDevices).
++	ringingDevices []types.JID
+ }
+ 
+ // newEngine creates the engine for a Client.
+@@ -482,6 +486,7 @@
+ 	m.creator = self
+ 	m.from = peerLID
+ 	m.direction = CallDirectionOutgoing
++	m.ringingDevices = devices
+ 	m.localVideo = opts.Video
+ 	m.remoteVideo = opts.Video
+ 	m.inviteSelfDevice = groupCallDevice{
+@@ -936,6 +941,43 @@
+ 		"from": ev.From.String(), "platform": ev.RemotePlatform, "video": m.localVideo || m.remoteVideo,
+ 	})
+ 	e.maybeStartMedia(ev.CallID)
++	e.dismissOtherDevices(ev.CallID, ev.From, "accepted_elsewhere")
++}
++
++// dismissOtherDevices (TeleZapp) manda parar de tocar nos aparelhos do outro lado que nao
++// decidiram: um <terminate reason=...> por aparelho (accepted_elsewhere ou
++// rejected_elsewhere), como o WhatsApp Web e o APK (quem atende ou recusa nao avisa os
++// proprios aparelhos). So uma vez por chamada. Todos os
++// aparelhos sao da mesma pessoa, entao o numero do aparelho basta para achar quem atendeu
++// (o endereco do aceite pode vir como LID ou telefone).
++func (e *engine) dismissOtherDevices(callID string, answerer types.JID, reason string) {
++	if answerer.IsEmpty() {
++		return
++	}
++	e.mu.Lock()
++	m := e.calls[callID]
++	if m == nil {
++		e.mu.Unlock()
++		return
++	}
++	devices, creator := m.ringingDevices, m.creator
++	m.ringingDevices = nil
++	e.mu.Unlock()
++
++	for _, device := range devices {
++		if device.Device == answerer.Device {
++			continue
++		}
++		term := signaling.BuildTerminate(&signaling.TerminateParams{
++			CallID: callID, To: device, CallCreator: creator, Reason: &reason,
++		})
++		term.Attrs["id"] = e.nextCallNodeID()
++		if err := e.transmitCallNode(context.Background(), term); err != nil {
++			e.c.log.Warn().Err(err).Str("call_id", callID).Str("device", device.String()).Msg("dismiss other device failed")
++			continue
++		}
++		e.c.log.Info().Str("call_id", callID).Str("device", device.String()).Msg("told other device to stop ringing")
++	}
+ }
+ 
+ func inviteDeviceCapability(device types.JID, node *waBinary.Node) (groupCallDevice, bool) {
+@@ -989,6 +1031,13 @@
+ 	e.c.diag.Emit("meta", map[string]any{
+ 		"event": "peer_reject", "call_id": ev.CallID, "from": ev.From.String(),
+ 	})
++	// TeleZapp: "busy" e "enc" dizem so desse aparelho, nao decidem pela pessoa
++	if m.direction == CallDirectionOutgoing && ev.Data != nil {
++		motivo := ev.Data.AttrGetter().OptionalString("reason")
++		if motivo != "busy" && motivo != "enc" {
++			e.dismissOtherDevices(ev.CallID, ev.From, "rejected_elsewhere")
++		}
++	}
+ 	e.finishCall(ev.CallID, "rejected")
+ }
+ 

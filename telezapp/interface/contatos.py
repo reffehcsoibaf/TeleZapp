@@ -11,7 +11,9 @@ import threading
 
 import wx
 
+from telezapp.nucleo import enviar_contatos as ec
 from telezapp.nucleo import modelos as m
+from telezapp.nucleo import nova_mensagem as nm
 from telezapp.nucleo import trazer_contatos
 
 TELEFONE_DE_TESTE = "+5500000000000"
@@ -49,7 +51,8 @@ class DialogoContato(wx.Dialog):
     """Conta (so ao adicionar), nome e telefone de um contato."""
 
     def __init__(self, pai, titulo, contas, nome="", telefone="",
-                 travar_conta=False, pedir_telefone=True):
+                 travar_conta=False, pedir_telefone=True,
+                 rotulo_telefone="Telefone com DDD (opcional ao editar)"):
         """contas: [(conta_id, rotulo)]."""
         super().__init__(pai, title=titulo, style=wx.DEFAULT_DIALOG_STYLE)
         self.contas = contas
@@ -73,7 +76,7 @@ class DialogoContato(wx.Dialog):
         self.telefone = None
         if pedir_telefone:
             self.telefone = campo(
-                "Telefone com DDD (opcional ao editar)",
+                rotulo_telefone,
                 lambda: wx.TextCtrl(self, value=telefone,
                                     name="Telefone com DDD",
                                     size=(380, -1)))
@@ -452,3 +455,101 @@ def dialogo_nova_mensagem(pai, contas, buscar, titulo="Nova mensagem",
 
 def dialogo_nova_chamada(pai, contas, buscar):
     return dialogo_nova_mensagem(pai, contas, buscar, "Nova chamada")
+
+
+class DialogoEnviarContatos(wx.Dialog):
+    """Busca e lista da agenda com caixa de marcar, mais Digitar para quem nao
+    esta nela. As marcas sobrevivem a uma nova busca."""
+
+    def __init__(self, pai, itens, destino):
+        """itens: [(nome, telefone)]; destino: o nome da conversa."""
+        super().__init__(pai, title="Enviar contatos",
+                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+        self.itens = list(itens)
+        self.marcados = []
+        self._mostrados = []
+        lay = wx.BoxSizer(wx.VERTICAL)
+        lay.Add(wx.StaticText(self, label=(
+            "Enviar contatos para %s. Digite para buscar e marque com Espaço "
+            "quem vai no envio." % destino)), 0, wx.ALL, 10)
+        lay.Add(wx.StaticText(self, label="&Buscar contato (nome ou telefone)"),
+                0, wx.LEFT | wx.RIGHT, 10)
+        self.busca = wx.TextCtrl(self, name="Buscar contato")
+        lay.Add(self.busca, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        lay.Add(wx.StaticText(self, label="Contatos (Espaço marca)"), 0,
+                wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.lista = wx.CheckListBox(self, name="Contatos", size=(460, 260))
+        lay.Add(self.lista, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        self.contagem = wx.StaticText(self, label="Nenhum marcado")
+        lay.Add(self.contagem, 0, wx.ALL, 10)
+        digitar = wx.Button(self, label="&Digitar um contato...")
+        lay.Add(digitar, 0, wx.LEFT | wx.RIGHT, 10)
+        botoes = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
+        self.FindWindowById(wx.ID_OK).SetLabel("&Enviar")
+        lay.Add(botoes, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+        self.SetSizerAndFit(lay)
+        self.busca.Bind(wx.EVT_TEXT, lambda e: self._preencher())
+        self.lista.Bind(wx.EVT_CHECKLISTBOX, self._ao_marcar)
+        digitar.Bind(wx.EVT_BUTTON, lambda e: self._digitar())
+        self.Bind(wx.EVT_BUTTON, self._ok, id=wx.ID_OK)
+        self._preencher()
+        self.CentreOnParent()
+        self.busca.SetFocus()
+
+    def _preencher(self):
+        self._mostrados = ec.filtrar(self.itens, self.busca.GetValue())
+        self.lista.Set([nm.rotulo(*c) for c in self._mostrados])
+        for i, c in enumerate(self._mostrados):
+            self.lista.Check(i, c in self.marcados)
+        if self._mostrados:
+            self.lista.SetSelection(0)
+
+    def _marcar(self, contato, marcado):
+        if marcado and contato not in self.marcados:
+            self.marcados.append(contato)
+        elif not marcado and contato in self.marcados:
+            self.marcados.remove(contato)
+        n = len(self.marcados)
+        self.contagem.SetLabel("Nenhum marcado" if not n else
+                               "1 marcado" if n == 1 else "%d marcados" % n)
+
+    def _ao_marcar(self, evt):
+        i = evt.GetInt()
+        self._marcar(self._mostrados[i], self.lista.IsChecked(i))
+
+    def _digitar(self):
+        """Nome e telefone de quem nao esta na agenda. Vai so neste envio: nao
+        entra nos contatos."""
+        dlg = DialogoContato(self, "Digitar um contato", [(None, "Este envio")],
+                             travar_conta=True,
+                             rotulo_telefone="Telefone com DDD")
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            _, nome, tel = dlg.escolhido()
+        finally:
+            dlg.Destroy()
+        telefone = m.normalizar_telefone(tel)
+        if not nome or not telefone:
+            wx.MessageBox("Informe o nome e um telefone válido, com DDD.",
+                          "Enviar contatos", wx.OK | wx.ICON_WARNING, self)
+            return
+        contato = (nome, telefone)
+        if contato not in self.itens:
+            self.itens.append(contato)
+        self._marcar(contato, True)
+        self.busca.SetValue("")
+        self._preencher()
+        self.lista.SetSelection(self._mostrados.index(contato))
+        self.lista.SetFocus()
+
+    def _ok(self, evt):
+        if not self.marcados:
+            wx.MessageBox("Marque pelo menos um contato.", "Enviar contatos",
+                          wx.OK | wx.ICON_WARNING, self)
+            return
+        evt.Skip()
+
+    def escolhidos(self):
+        """[(nome, telefone)] marcados, na ordem em que foram marcados."""
+        return list(self.marcados)

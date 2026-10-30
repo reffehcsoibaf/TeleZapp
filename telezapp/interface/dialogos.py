@@ -114,8 +114,17 @@ def pedir_credenciais_telegram(pai, validar):
                       wx.OK | wx.ICON_WARNING, pai)
 
 
+# A janela principal poe aqui quem tenta abrir pelo TeleZapp os links do Telegram
+# e do WhatsApp: f(url) -> True se cuidou do link.
+abrir_por_dentro = None
+PELO_TELEZAPP = "telezapp"       # abrir_link: nao foi para o navegador
+
+
 def abrir_link(url):
-    """Abre no navegador padrao; so enderecos http e https."""
+    """Abre pelo TeleZapp, se for um link que ele sabe abrir; senao, no
+    navegador padrao, so enderecos http e https."""
+    if abrir_por_dentro is not None and abrir_por_dentro(url):
+        return PELO_TELEZAPP
     if not url.lower().startswith(("http://", "https://")):
         return False
     return wx.LaunchDefaultBrowser(url)
@@ -623,6 +632,39 @@ def mostrar_mensagem(pai, titulo, texto, copiar):
     dlg.SetSizer(lay)
     dlg.SetEscapeId(wx.ID_OK)
     caixa.SetFocus()
+    dlg.ShowModal()
+    dlg.Destroy()
+
+
+def mostrar_logs_exportados(pai, nome, tamanho, copiar, salvar):
+    """Os logs ja compactados, com os botoes Fechar, Copiar e Salvar. `copiar`
+    e `salvar(dlg)` fazem o trabalho e avisam a pessoa; `dlg` e a dona de outra
+    janela que se abra daqui. O foco comeca em Copiar."""
+    dlg = wx.Dialog(pai, title="Exportar logs",
+                    style=wx.DEFAULT_DIALOG_STYLE)
+    texto = wx.StaticText(dlg, label=(
+        "Logs compactados: %s, %s. Copiar deixa o arquivo pronto para colar na "
+        "caixa de mensagem de uma conversa, e Salvar grava uma cópia onde você "
+        "escolher. Os logs não têm o texto das mensagens, mas têm nomes de "
+        "grupos e identificadores técnicos: envie só a quem dá suporte."
+        % (nome, tamanho)))
+    texto.Wrap(480)
+    b_fechar = wx.Button(dlg, wx.ID_CLOSE, "&Fechar")
+    b_copiar = wx.Button(dlg, wx.ID_ANY, "&Copiar")
+    b_salvar = wx.Button(dlg, wx.ID_ANY, "&Salvar")
+    b_fechar.Bind(wx.EVT_BUTTON, lambda e: dlg.EndModal(wx.ID_CLOSE))
+    b_copiar.Bind(wx.EVT_BUTTON, lambda e: copiar())
+    b_salvar.Bind(wx.EVT_BUTTON, lambda e: salvar(dlg))
+    linha = wx.BoxSizer(wx.HORIZONTAL)
+    for b in (b_fechar, b_copiar, b_salvar):
+        linha.Add(b, 0, wx.RIGHT, 8)
+    lay = wx.BoxSizer(wx.VERTICAL)
+    lay.Add(texto, 0, wx.ALL, 12)
+    lay.Add(linha, 0, wx.ALL | wx.ALIGN_RIGHT, 8)
+    dlg.SetSizerAndFit(lay)
+    dlg.SetEscapeId(wx.ID_CLOSE)
+    b_copiar.SetDefault()
+    b_copiar.SetFocus()
     dlg.ShowModal()
     dlg.Destroy()
 

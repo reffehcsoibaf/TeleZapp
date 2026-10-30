@@ -33,6 +33,7 @@ from telezapp import config
 from telezapp.midia import armazem, envio
 from telezapp.midia import tipos_de_arquivo
 from telezapp.nucleo import chamadas as ch
+from telezapp.nucleo import enviar_contatos as cartoes
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import grupo as ng
 from telezapp.nucleo import localizacao
@@ -269,7 +270,8 @@ def com_expiracao(mensagem, segundos):
         return mensagem
     for nome in ("extendedTextMessage", "imageMessage", "videoMessage",
                  "audioMessage", "documentMessage", "stickerMessage",
-                 "pollCreationMessage"):
+                 "pollCreationMessage", "locationMessage", "contactMessage",
+                 "contactsArrayMessage"):
         if mensagem.HasField(nome):
             getattr(mensagem, nome).contextInfo.expiration = segundos
             return mensagem
@@ -3962,6 +3964,67 @@ class ProvedorWhatsApp(Provedor):
             m.atualizar_extras(x, enquete=atual)
         self._alterar(cid, alvo, aplicar, "enquete", quem)
 
+    PODE_ENVIAR_LOCALIZACAO = True
+
+    def enviar_localizacao(self, conversa_id, latitude, longitude):
+        self._fila.put(lambda: self._enviar_localizacao(conversa_id, latitude,
+                                                        longitude))
+
+    def _enviar_localizacao(self, cid, latitude, longitude):
+        from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import Message
+        try:
+            if not self._conectada or self.cliente is None:
+                raise ConnectionError("sem conexão")
+            mensagem = Message()
+            mensagem.locationMessage.degreesLatitude = latitude
+            mensagem.locationMessage.degreesLongitude = longitude
+            resp = self.cliente.send_message(self._jid(cid), com_expiracao(
+                mensagem, self._prazo_da_conversa(cid)))
+        except Exception as e:
+            log.warning("enviar localização falhou: %s", type(e).__name__)
+            self._avisar("Não consegui enviar a localização (%s)." % (
+                "sem conexão" if isinstance(e, ConnectionError)
+                else type(e).__name__), False)
+            return
+        self._registrar_enviada(
+            resp, cid, localizacao.descrever(latitude, longitude),
+            tipo=m.OUTRO)
+
+    PODE_ENVIAR_CONTATOS = True
+
+    def enviar_contatos(self, conversa_id, contatos):
+        contatos = list(contatos)
+        self._fila.put(lambda: self._enviar_contatos(conversa_id, contatos))
+
+    def _enviar_contatos(self, cid, contatos):
+        from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import Message
+        mensagem = Message()
+        if len(contatos) == 1:
+            mensagem.contactMessage.displayName = contatos[0][0]
+            mensagem.contactMessage.vcard = cartoes.vcard(*contatos[0])
+        else:
+            mensagem.contactsArrayMessage.displayName = \
+                "%d contatos" % len(contatos)
+            for nome, telefone in contatos:
+                mensagem.contactsArrayMessage.contacts.add(
+                    displayName=nome,
+                    vcard=cartoes.vcard(nome, telefone))
+        try:
+            if not self._conectada or self.cliente is None:
+                raise ConnectionError("sem conexão")
+            resp = self.cliente.send_message(self._jid(cid), com_expiracao(
+                mensagem, self._prazo_da_conversa(cid)))
+        except Exception as e:
+            log.warning("enviar contatos falhou: %s", type(e).__name__)
+            self._avisar("Não consegui enviar %s (%s)." % (
+                "o contato" if len(contatos) == 1 else "os contatos",
+                "sem conexão" if isinstance(e, ConnectionError)
+                else type(e).__name__), False)
+            return
+        self._registrar_enviada(
+            resp, cid, conteudo_de(mensagem)[1], tipo=m.OUTRO,
+            pessoas=contatos_da_mensagem(mensagem))
+
     PODE_CRIAR_ENQUETE = True
 
     def criar_enquete(self, conversa_id, pergunta, opcoes, multipla,
@@ -4519,7 +4582,7 @@ class ProvedorWhatsApp(Provedor):
 
     def _registrar_enviada(self, resp, conversa_id, texto, resposta_a="",
                            arquivo=None, previa=None, enquete=None,
-                           **campos):
+                           pessoas=None, **campos):
         """Guarda e publica a mensagem que o servidor confirmou. `arquivo`
         (origem, mover): copia a midia enviada para o armazem do app."""
         msg = m.Mensagem(self.conta.id, conversa_id, resp.ID, minha=True,
@@ -4532,6 +4595,8 @@ class ProvedorWhatsApp(Provedor):
             m.guardar_extras(msg, previa=previa)
         if enquete:
             m.atualizar_extras(msg, enquete=enquete)
+        if pessoas:
+            m.atualizar_extras(msg, mencoes=pessoas)
         if arquivo is not None:
             try:
                 destino = armazem.guardar_enviada(msg, *arquivo)

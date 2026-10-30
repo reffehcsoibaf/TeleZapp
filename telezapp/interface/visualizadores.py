@@ -53,7 +53,7 @@ def escolher(tipo, caminho):
 
 
 def descricao(msg, nome_conversa=""):
-    autor = "Você" if msg.minha else (msg.autor or "Desconhecido")
+    autor = m.meu_nome() if msg.minha else (msg.autor or "Desconhecido")
     partes = ["%s, %s" % (autor, m.hora_legivel(msg.data)),
               m.conteudo(msg)]
     if nome_conversa:

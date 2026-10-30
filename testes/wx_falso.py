@@ -46,6 +46,14 @@ def CallAfter(f, *a, **k):
     f(*a, **k)
 
 
+def GetActiveWindow():
+    return None
+
+
+def GetTopLevelWindows():
+    return []
+
+
 def CallLater(ms, f, *a, **k):
     return None
 
@@ -99,6 +107,15 @@ class Janela:
 
 
 class Frame(Janela):
+    def IsIconized(self):
+        return False
+
+    def IsActive(self):
+        return False
+
+    def IsShown(self):
+        return True
+
     def SetTitle(self, t):
         self.titulo = t
 

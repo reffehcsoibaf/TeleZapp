@@ -41,7 +41,7 @@ def _guid(texto):
 def _adicionar_botao(hwnd):
     """Pede ao shell o botao da barra de tarefas para a janela. True se o
     shell aceitou."""
-    ole = ctypes.windll.ole32
+    ole = ctypes.WinDLL("ole32")   # so nosso: windll e dividido pelo programa
     ole.CoInitialize(None)
     objeto = ctypes.c_void_p()
     hr = ole.CoCreateInstance(_guid(CLSID_TASKBARLIST), None, 1,

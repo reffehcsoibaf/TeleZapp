@@ -4,6 +4,7 @@
 Roda o provedor de verdade, na thread dele, e confere os eventos que chegam
 a 'interface' e o que fica gravado no banco.
 """
+import asyncio
 import datetime
 import os
 import queue
@@ -298,7 +299,7 @@ def test_sessao_salva_conecta_e_lista_conversas(ambiente):
         assert len(ambiente.banco.conversas("t1")) == 3
         assert [c.arquivada for c in ambiente.banco.conversas("t1")
                 if c.nome == "Velha"] == [True]
-        assert len(cliente.handlers) == 9
+        assert len(cliente.handlers) == 10
 
         p.carregar_mensagens("10")
         msgs = esperar(ambiente.fila, ev.MensagensCarregadas).mensagens
@@ -375,7 +376,7 @@ def test_mensagem_recebida_e_leitura(ambiente):
     p.iniciar()
     try:
         esperar(ambiente.fila, ev.ConversasAtualizadas)
-        receber, ler, _, _, _, _, _, _, _ = cliente.handlers
+        receber, ler, _, _, _, _, _, _, _, _ = cliente.handlers
 
         async def chegar():
             async def get_chat():
@@ -1534,3 +1535,136 @@ def test_localizacao_do_telegram_traz_lugar_coordenadas_e_mapa():
     viva = tg.converter(mensagem(3, "", geo=geo, media=MessageMediaGeoLive(),
                                  sender=ANA), "t1", 10)
     assert viva.texto.startswith("localização em tempo real\n")
+
+
+def test_comandos_de_bot_info():
+    ns = types.SimpleNamespace
+    info = ns(user_id=5, commands=[ns(command="start", description="Iniciar"),
+                                   ns(command="ajuda", description="")])
+    assert tg.comandos_de_bot_info([info]) == [("/start", "Iniciar"),
+                                               ("/ajuda", "")]
+    assert tg.comandos_de_bot_info([info, None], {5: "amelie"}) == [
+        ("/start@amelie", "Iniciar"), ("/ajuda@amelie", "")]
+    assert tg.comandos_de_bot_info([ns(user_id=5, commands=None)]) == []
+    assert tg.dados_do_robo(None) == {"comandos": [], "menu": None,
+                                      "privacidade": ""}
+    menu = ns(user_id=5, commands=[], privacy_policy_url="https://p",
+              menu_button=ns(text="Abrir", url="https://m"))
+    assert tg.dados_do_robo(menu) == {
+        "comandos": [], "menu": {"texto": "Abrir", "url": "https://m"},
+        "privacidade": "https://p"}
+
+
+def _botao(classe, text, **campos):
+    tipo = type(classe, (), campos)()
+    return types.SimpleNamespace(text=text, type=tipo)
+
+
+def test_acoes_do_robo_por_tipo_de_botao():
+    ns = types.SimpleNamespace
+    Inline = type("ReplyInlineMarkup", (), {})
+    marca = Inline()
+    marca.rows = [ns(buttons=[
+        _botao("InlineButtonTypeCallback", "Sim", data=b"ok",
+               requires_password=False),
+        _botao("InlineButtonTypeUrl", "Site", url="https://x"),
+        _botao("InlineButtonTypeCopy", "Código", copy_text="123"),
+        _botao("InlineButtonTypeWebView", "App", url="https://a"),
+        _botao("InlineButtonTypeBuy", "Comprar")])]
+    acoes = tg.acoes_do_robo(ns(reply_markup=marca))
+    assert [a["tipo"] for a in acoes] == [
+        "robo_callback", "robo_copiar", "robo_web", "robo_compra"]
+    assert acoes[0]["dados"] == "b2s="
+    assert acoes[1]["texto"] == "123"
+    teclado = type("ReplyKeyboardMarkup", (), {})()
+    teclado.rows = [ns(buttons=[
+        _botao("ButtonTypeDefault", "Ajuda"),
+        _botao("ButtonTypeRequestPhone", "Telefone")])]
+    assert [a["tipo"] for a in tg.acoes_do_robo(ns(reply_markup=teclado))] == [
+        "robo_texto", "robo_telefone"]
+    assert tg.acoes_do_robo(ns(
+        reply_markup=type("ReplyKeyboardHide", (), {})())) == [
+            {"tipo": "robo_ocultar_teclado"}]
+    outros = type("ReplyInlineMarkup", (), {})()
+    outros.rows = [ns(buttons=[
+        _botao("InlineButtonTypeCallback", "Senha", data=b"x",
+               requires_password=True),
+        _botao("InlineButtonTypeGame", "Jogar"),
+        _botao("InlineButtonTypeSwitchInline", "Buscar", query="q",
+               same_peer=True),
+        _botao("InlineButtonTypeUrlAuth", "Entrar", url="https://l",
+               button_id=3),
+        _botao("InlineButtonTypeUserProfile", "Perfil", user_id=9),
+        _botao("InlineButtonTypeDisabled", "Parado")])]
+    feitos = tg.acoes_do_robo(ns(reply_markup=outros, sender_id=77))
+    assert [a["tipo"] for a in feitos] == [
+        "robo_callback", "robo_jogo", "robo_inline", "robo_login",
+        "robo_perfil", "robo_indisponivel"]
+    assert feitos[0]["pede_senha"] is True
+    assert feitos[2]["robo"] == "77" and feitos[2]["mesma"] is True
+    assert feitos[3]["botao"] == 3
+    assert feitos[4]["usuario_id"] == "9"
+    assert tg.acoes_do_robo(ns(reply_markup=None)) == []
+
+
+def test_robo_editar_a_mensagem_troca_texto_e_botoes(ambiente):
+    p, banco = ambiente.criar(ClienteFalso()), ambiente.banco
+    x = m.Mensagem(p.conta.id, "10", "5", texto="Menu 1", data=1000.0)
+    banco.salvar_mensagens([x])
+    ns = types.SimpleNamespace
+    marca = type("ReplyInlineMarkup", (), {})()
+    marca.rows = [ns(buttons=[_botao("InlineButtonTypeCallback", "Voltar",
+                                     data=b"v", requires_password=False)])]
+    editada = ns(id=5, message="Menu 2", out=False, reply_markup=marca,
+                 action=None, media=None, sender=None, date=None)
+    asyncio.run(p._ao_editada(ns(message=editada, chat_id=10)))
+    y = banco.mensagem(p.conta.id, "10", "5")
+    assert y.texto == "Menu 2"
+    assert m.extras_de(y)["acoes"][0]["rotulo"] == "Voltar"
+    assert m.extras_de(y)["editada"]
+    # o mesmo conteudo de novo (so mudaram as reacoes): nada a atualizar
+    salvar = banco.salvar_mensagens
+    banco.salvar_mensagens = lambda _: pytest.fail("não devia salvar")
+    asyncio.run(p._ao_editada(ns(message=editada, chat_id=10)))
+    banco.salvar_mensagens = salvar
+
+
+def test_enviar_localizacao_no_telegram(ambiente):
+    class Cliente(ClienteFalso):
+        async def send_message(self, ent, texto="", reply_to=None,
+                               link_preview=True, file=None):
+            self.ponto = file.geo_point
+            return mensagem(97, "", out=True)
+
+        async def get_input_entity(self, e):
+            return e
+    cliente = Cliente()
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    asyncio.run(p._enviar_localizacao("10", -30.5, -51.25))
+    assert (cliente.ponto.lat, cliente.ponto.long) == (-30.5, -51.25)
+    assert esperar(ambiente.fila, ev.MensagemNova).enviada_daqui
+
+
+def test_enviar_contatos_no_telegram_um_por_mensagem(ambiente):
+    class Cliente(ClienteFalso):
+        cartoes = []
+
+        async def send_message(self, ent, texto="", reply_to=None,
+                               link_preview=True, file=None):
+            if file.first_name == "Bia":
+                raise RuntimeError("falhou")
+            self.cartoes.append((file.first_name, file.phone_number))
+            return mensagem(98, "", out=True)
+
+        async def get_input_entity(self, e):
+            return e
+    cliente = Cliente()
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    asyncio.run(p._enviar_contatos("10", [
+        ("Ana", "+5551999998888"), ("Bia", "+5551977776666"),
+        ("Cid", "+5551955554444")]))
+    assert cliente.cartoes == [("Ana", "+5551999998888"),
+                               ("Cid", "+5551955554444")]
+    assert "contato Bia" in esperar(ambiente.fila, ev.Aviso).texto
