@@ -12,6 +12,7 @@ ITENS = (
     ("nome", "Nome da conversa"),
     ("servico", "Serviço a que a conversa pertence"),
     ("nao_lidas", "Quantidade de mensagens não lidas"),
+    ("autor", "Autor da última mensagem (em grupos)"),
     ("previa", "Trecho da última mensagem"),
     ("reacoes", "Reações às minhas mensagens"),
     ("quem_reagiu", "Quem reagiu às minhas mensagens"),
@@ -20,7 +21,8 @@ CHAVES = tuple(c for c, _ in ITENS)
 ROTULOS = dict(ITENS)
 # o trecho da ultima mensagem e as reacoes vem desligados: a leitura da lista
 # segue como sempre foi ate a pessoa ligar
-PADRAO = {"ordem": list(CHAVES), "ocultos": ["previa", "reacoes", "quem_reagiu"]}
+PADRAO = {"ordem": list(CHAVES),
+          "ocultos": ["autor", "previa", "reacoes", "quem_reagiu"]}
 TAMANHO_DA_PREVIA = 80
 MENSAGEM_DO_MINIMO = "Pelo menos um item precisa ficar ativado."
 
@@ -38,9 +40,16 @@ def normalizar(valor):
         if c in CHAVES and c not in ordem:
             ordem.append(c)
     novos = [c for c in CHAVES if c not in ordem]
+    escondidos = list(valor.get("ocultos") or [])
+    # quem ja via o trecho em grupos via o autor junto: o item novo entra logo
+    # antes do trecho e segue o estado dele
+    if "autor" in novos and "previa" in ordem:
+        novos.remove("autor")
+        ordem.insert(ordem.index("previa"), "autor")
+        if "previa" in escondidos:
+            escondidos.append("autor")
     ordem += novos
-    escondidos = list(valor.get("ocultos") or []) + [
-        c for c in novos if c in PADRAO["ocultos"]]
+    escondidos += [c for c in novos if c in PADRAO["ocultos"]]
     ocultos = [c for c in ordem if c in escondidos]
     if len(ocultos) >= len(ordem):
         ocultos = []
@@ -94,9 +103,19 @@ def texto_do_item(valor, chave):
                        if chave in lay["ocultos"] else "ativado")
 
 
-def previa_da_mensagem(msg, grupo=False, quem=""):
-    """O trecho da ultima mensagem: "Você: texto", "Ana: texto" (em grupo) ou
-    so o texto, numa linha e sem passar de TAMANHO_DA_PREVIA caracteres."""
+def autor_da_mensagem(msg, grupo=False, quem=""):
+    """Quem escreveu a ultima mensagem de um grupo ("Você" ou o nome). Fora de
+    grupo, ou sem texto para mostrar, fica vazio."""
+    if msg is None or not grupo or \
+            not m.conteudo(msg, com_estado=False).strip():
+        return ""
+    return m.meu_nome() if msg.minha else (msg.autor or quem)
+
+
+def previa_da_mensagem(msg, grupo=False):
+    """O trecho da ultima mensagem: "Você: texto" (fora de grupo) ou so o
+    texto, numa linha e sem passar de TAMANHO_DA_PREVIA caracteres. Em grupo,
+    o autor e um item a parte (autor_da_mensagem)."""
     if msg is None:
         return ""
     corpo = " ".join(m.conteudo(msg, com_estado=False).split())
@@ -104,8 +123,8 @@ def previa_da_mensagem(msg, grupo=False, quem=""):
         return ""
     if len(corpo) > TAMANHO_DA_PREVIA:
         corpo = corpo[:TAMANHO_DA_PREVIA - 1].rstrip() + "…"
-    autor = "Você" if msg.minha else ((msg.autor or quem) if grupo else "")
-    return "%s: %s" % (autor, corpo) if autor else corpo
+    return "%s: %s" % (m.meu_nome(), corpo) if msg.minha and not grupo \
+        else corpo
 
 
 def _nao_lidas(c):
@@ -140,18 +159,20 @@ def texto_de_quem_reagiu(pessoas, maximo=3):
     return "%s e %s reagiram" % (", ".join(nomes[:-1]), nomes[-1])
 
 
-def rotulo(c, valor=None, previa="", reacoes=0, quem_reagiu=()):
+def rotulo(c, valor=None, previa="", reacoes=0, quem_reagiu=(), autor=""):
     """A linha da conversa na lista. Fixada e silenciada aparecem sempre,
     logo depois do servico (ou do nome, se o servico estiver de fora). Se os
     itens ativados nao tiverem nada para mostrar nesta conversa (sem nao
     lidas e sem mensagem, por exemplo), vale o nome. reacoes: quantas
     reacoes as mensagens minhas receberam desde que a conversa foi aberta
-    pela ultima vez; quem_reagiu: [(quem, emoji)] dessas reacoes."""
+    pela ultima vez; quem_reagiu: [(quem, emoji)] dessas reacoes; autor: quem
+    escreveu a ultima mensagem, em grupos."""
     partes = []
     for chave in ativos(valor):
         texto = {"nome": c.nome,
                  "servico": m.SERVICOS.get(c.servico, c.servico),
                  "nao_lidas": _nao_lidas(c),
+                 "autor": autor,
                  "previa": previa,
                  "reacoes": texto_das_reacoes(reacoes),
                  "quem_reagiu": texto_de_quem_reagiu(quem_reagiu)}[chave]

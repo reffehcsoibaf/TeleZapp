@@ -78,7 +78,8 @@ class Corretor:
             self.disponivel = False
 
     def _iniciar(self, idioma):
-        ole = ctypes.windll.ole32
+        # so nosso: em windll, os argtypes abaixo valeriam para o programa todo
+        ole = ctypes.WinDLL("ole32")
         ole.CoInitializeEx(None, 2)       # ja pode estar iniciado: tudo bem
         clsid, iid = _GUID(CLSID_FABRICA), _GUID(IID_FABRICA)
         ole.CoCreateInstance.argtypes = [POINTER(_GUID), c_void_p, c_uint32,

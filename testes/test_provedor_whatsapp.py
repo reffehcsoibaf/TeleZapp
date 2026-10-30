@@ -3084,6 +3084,24 @@ def test_criar_enquete_no_whatsapp_envia_e_guarda_a_mensagem(amb):
     assert amb.c.enquetes_montadas[-1][2] == "SINGLE"
 
 
+def test_enviar_localizacao_no_whatsapp(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    cid = "5551988887777@s.whatsapp.net"
+    amb.p.enviar_localizacao(cid, -30.5, -51.25)
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.enviada_daqui and nova.mensagem.tipo == m.OUTRO
+    assert "coordenadas -30.50000, -51.25000" in nova.mensagem.texto
+    enviada = amb.c.enviadas[-1][1].locationMessage
+    assert (enviada.degreesLatitude, enviada.degreesLongitude) == (-30.5, -51.25)
+
+
+def test_enviar_localizacao_sem_conexao_avisa(amb):
+    amb.p.enviar_localizacao("5551@s.whatsapp.net", 1.0, 2.0)
+    assert "Não consegui enviar a localização" in esperar(
+        amb.fila, ev.Aviso).texto
+
+
 def test_criar_enquete_sem_conexao_avisa(amb):
     amb.p.criar_enquete("5551@s.whatsapp.net", "Q?", ["A", "B"], False)
     aviso = esperar(amb.fila, ev.Aviso)
@@ -3784,3 +3802,48 @@ def test_fila_offline_anunciada_pelo_whatsapp_fica_no_log(amb, caplog):
     assert "fila do WhatsApp para este aparelho: 900 itens (750 mensagens" \
         in texto
     assert "1 mensagens recebidas; o WhatsApp anunciou 750 e contou 1" in texto
+
+
+def test_enviar_um_contato_no_whatsapp(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    cid = "5551988887777@s.whatsapp.net"
+    amb.p.enviar_contatos(cid, [("Ana; Souza", "+5551999998888")])
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.enviada_daqui and nova.mensagem.tipo == m.OUTRO
+    assert nova.mensagem.texto == "contato: Ana; Souza, +5551999998888"
+    enviada = amb.c.enviadas[-1][1].contactMessage
+    assert enviada.displayName == "Ana; Souza"
+    assert "FN:Ana\\; Souza\n" in enviada.vcard
+    assert wa.telefones_do_vcard(enviada.vcard) == [
+        ("+5551999998888", "5551999998888@s.whatsapp.net")]
+    assert m.extras_de(nova.mensagem)["mencoes"][0]["id"] == \
+        "5551999998888@s.whatsapp.net"
+
+
+def test_enviar_varios_contatos_no_whatsapp(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.p.enviar_contatos("5551988887777@s.whatsapp.net", [
+        ("Ana", "+5551999998888"), ("Bia", "+5551977776666")])
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.mensagem.texto.startswith("2 contatos: Ana, +5551999998888")
+    enviada = amb.c.enviadas[-1][1].contactsArrayMessage
+    assert [c.displayName for c in enviada.contacts] == ["Ana", "Bia"]
+
+
+def test_contato_em_conversa_temporaria_leva_o_prazo():
+    from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import Message
+    um = Message()
+    um.contactMessage.displayName = "Ana"
+    assert wa.com_expiracao(um, 60).contactMessage.contextInfo.expiration == 60
+    varios = Message()
+    varios.contactsArrayMessage.displayName = "2 contatos"
+    assert wa.com_expiracao(
+        varios, 60).contactsArrayMessage.contextInfo.expiration == 60
+
+
+def test_enviar_contatos_sem_conexao_avisa(amb):
+    amb.p.enviar_contatos("5551@s.whatsapp.net", [("Ana", "+5551999998888")])
+    assert "Não consegui enviar o contato" in esperar(
+        amb.fila, ev.Aviso).texto

@@ -463,6 +463,14 @@ class DialogoConfiguracoes(wx.Dialog):
                    self.modelo.definir(o.chave, c.GetValue()))
             c.Bind(wx.EVT_TEXT, lambda e, o=o, c=c:
                    self.modelo.definir(o.chave, c.GetValue()))
+        elif o.texto:
+            self.lay_painel.Add(wx.StaticText(p, label=o.rotulo + ":"), 0,
+                                wx.LEFT | wx.RIGHT | wx.TOP, 8)
+            c = wx.TextCtrl(p, value=str(self.modelo.valor(o.chave) or ""),
+                            name=o.rotulo, size=(320, -1))
+            c.SetMaxLength(60)
+            c.Bind(wx.EVT_TEXT, lambda e, o=o, c=c:
+                   self.modelo.definir(o.chave, c.GetValue().strip()))
         elif o.escolhas:
             escolhas = self.modelo.escolhas(o)
             self.lay_painel.Add(wx.StaticText(p, label=o.rotulo + ":"), 0,
@@ -484,6 +492,7 @@ class DialogoConfiguracoes(wx.Dialog):
         self.controles[o.chave] = c
         if o.chave == "trancadas_exigir_codigo":
             self._criar_campos_codigo()
+        self._sincronizar_atualizacoes()
 
     def _criar_botao_grupo(self, categoria, grupo):
         """Um botao que abre, numa janela, as opcoes que ficam juntas."""
@@ -825,6 +834,19 @@ class DialogoConfiguracoes(wx.Dialog):
         self.modelo.definir(opcao.chave, valor)
         if opcao.chave == "trancadas_exigir_codigo":
             self._mostrar_campos_codigo()
+        self._sincronizar_atualizacoes()
+
+    def _sincronizar_atualizacoes(self):
+        """A busca periodica depende do aviso de versao nova, e o intervalo so
+        vale com ela marcada."""
+        avisar = bool(self.modelo.valor("verificar_atualizacoes"))
+        c = self.controles.get("atualizacoes_periodicas")
+        if c is not None:
+            c.Enable(avisar)
+        c = self.controles.get("atualizacoes_intervalo")
+        if c is not None:
+            c.Enable(avisar and
+                     bool(self.modelo.valor("atualizacoes_periodicas")))
 
     def _ao_focar(self, evento, opcao):
         evento.Skip()

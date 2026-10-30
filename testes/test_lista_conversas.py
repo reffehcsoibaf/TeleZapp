@@ -14,7 +14,8 @@ from telezapp.nucleo import lista_conversas as lc             # noqa: E402
 from telezapp.nucleo import modelos as m                      # noqa: E402
 from telezapp.nucleo.configuracoes import ModeloConfiguracoes  # noqa: E402
 
-TODOS = {"ordem": ["nome", "servico", "nao_lidas", "previa", "reacoes", "quem_reagiu"],
+TODOS = {"ordem": ["nome", "servico", "nao_lidas", "autor", "previa", "reacoes",
+                   "quem_reagiu"],
          "ocultos": []}
 
 
@@ -33,30 +34,30 @@ def msg(texto="oi", minha=False, autor="", **k):
 # ---------------------------------------------------------------- regras
 def test_normalizar_corrige_o_que_veio_guardado():
     assert lc.normalizar(None) == {
-        "ordem": ["nome", "servico", "nao_lidas", "previa", "reacoes",
+        "ordem": ["nome", "servico", "nao_lidas", "autor", "previa", "reacoes",
                   "quem_reagiu"],
-        "ocultos": ["previa", "reacoes", "quem_reagiu"]}                # o padrao
+        "ocultos": ["autor", "previa", "reacoes", "quem_reagiu"]}       # o padrao
     assert lc.normalizar({"ordem": ["previa", "x", "nome", "nome"],
                           "ocultos": ["y", "previa"]}) == {
-        "ordem": ["previa", "nome", "servico", "nao_lidas", "reacoes",
-                  "quem_reagiu"],
-        "ocultos": ["previa", "reacoes", "quem_reagiu"]}
+        "ordem": ["autor", "previa", "nome", "servico", "nao_lidas",
+                  "reacoes", "quem_reagiu"],
+        "ocultos": ["autor", "previa", "reacoes", "quem_reagiu"]}
     # item novo que falta no que estava guardado entra desligado
     assert lc.normalizar({"ordem": ["nome", "servico", "nao_lidas",
                                     "previa"], "ocultos": []}) == {
-        "ordem": ["nome", "servico", "nao_lidas", "previa", "reacoes",
-                  "quem_reagiu"],
+        "ordem": ["nome", "servico", "nao_lidas", "autor", "previa",
+                  "reacoes", "quem_reagiu"],
         "ocultos": ["reacoes", "quem_reagiu"]}
     # tudo oculto deixaria a lista vazia: voltam todos
     assert lc.normalizar({"ordem": list(lc.CHAVES),
                           "ocultos": list(lc.CHAVES)})["ocultos"] == []
     assert lc.ativos({"ordem": ["servico", "nome", "previa", "nao_lidas"],
-                      "ocultos": ["nome"]}) == ["servico", "previa",
+                      "ocultos": ["nome"]}) == ["servico", "autor", "previa",
                                                 "nao_lidas"]
 
 
 def test_nunca_deixa_a_lista_sem_item_ativado():
-    lay = {"ordem": list(lc.CHAVES), "ocultos": ["servico", "nao_lidas",
+    lay = {"ordem": list(lc.CHAVES), "ocultos": ["servico", "nao_lidas", "autor",
                                                   "previa", "reacoes", "quem_reagiu"]}
     novo, ativado = lc.alternar(lay, "nome")        # o unico ativado
     assert ativado is None and novo["ocultos"] == lay["ocultos"]
@@ -70,11 +71,11 @@ def test_nunca_deixa_a_lista_sem_item_ativado():
 def test_mover_troca_de_lugar_e_para_nas_pontas():
     lay = lc.normalizar(TODOS)
     novo, pos = lc.mover(lay, "previa", -1)
-    assert pos == 2 and novo["ordem"] == ["nome", "servico", "previa",
-                                          "nao_lidas", "reacoes",
+    assert pos == 3 and novo["ordem"] == ["nome", "servico", "nao_lidas",
+                                          "previa", "autor", "reacoes",
                                           "quem_reagiu"]
     assert lc.mover(lay, "nome", -1) == (lay, 0)
-    assert lc.mover(lay, "quem_reagiu", 1) == (lay, 5)
+    assert lc.mover(lay, "quem_reagiu", 1) == (lay, 6)
     assert lc.eh_padrao(lc.padrao()) and not lc.eh_padrao(novo)
 
 
@@ -151,11 +152,8 @@ def test_texto_de_quem_reagiu():
 def test_trecho_da_ultima_mensagem():
     assert lc.previa_da_mensagem(msg("oi\ntudo bem?")) == "oi tudo bem?"
     assert lc.previa_da_mensagem(msg("oi", minha=True)) == "Você: oi"
-    assert lc.previa_da_mensagem(msg("oi", autor="Bia"), grupo=True) == \
-        "Bia: oi"
+    assert lc.previa_da_mensagem(msg("oi", autor="Bia"), grupo=True) == "oi"
     assert lc.previa_da_mensagem(msg("oi", autor="Bia")) == "oi"
-    assert lc.previa_da_mensagem(msg("oi"), grupo=True, quem="Caio") == \
-        "Caio: oi"
     foto = msg("", tipo=m.FOTO)
     assert lc.previa_da_mensagem(foto) == "foto"
     longa = lc.previa_da_mensagem(msg("a" * 200))
@@ -175,7 +173,8 @@ class Cfg:
 def test_modelo_guarda_a_lista_pendente_ate_aplicar():
     mod = ModeloConfiguracoes(Cfg())
     assert mod.lista_em_uso() == lc.padrao()
-    novo = {"ordem": ["servico", "nome", "nao_lidas", "previa", "reacoes", "quem_reagiu"],
+    novo = {"ordem": ["servico", "nome", "nao_lidas", "autor", "previa",
+                      "reacoes", "quem_reagiu"],
             "ocultos": []}
     mod.lista_definir(novo)
     assert mod.lista_em_uso() == novo
@@ -194,7 +193,7 @@ def test_backup_so_leva_de_volta_uma_lista_valida():
         "ordem": ["previa", "lixo"], "ocultos": ["nome", "servico",
                                                   "nao_lidas", "previa",
                                                   "reacoes"]}})
-    assert boas["lista_conversas"]["ordem"][0] == "previa"
+    assert boas["lista_conversas"]["ordem"][:2] == ["autor", "previa"]
     assert boas["lista_conversas"]["ocultos"] == []   # nao pode ficar vazia
     assert "lista_conversas" not in backup.opcoes_validas(
         {"lista_conversas": "texto"})
@@ -247,17 +246,17 @@ def dialogo(valor=None):
 
 def test_dialogo_ativa_desativa_e_recusa_o_ultimo():
     d, g, fala = dialogo({"ordem": list(lc.CHAVES),
-                          "ocultos": ["servico", "nao_lidas", "previa",
-                                      "reacoes", "quem_reagiu"]})
+                          "ocultos": ["servico", "nao_lidas", "autor",
+                                      "previa", "reacoes", "quem_reagiu"]})
     assert d.lista.itens[0] == "Nome da conversa: ativado"
     d.alternar()                                   # o unico ativado
     assert fala.ditas[-1] == lc.MENSAGEM_DO_MINIMO
     assert "nome" not in g.valor["ocultos"]
-    d.lista.SetSelection(3)
+    d.lista.SetSelection(4)
     d.alternar()                                   # liga o trecho
     assert fala.ditas[-1] == "ativado"
     assert "previa" not in g.valor["ocultos"]
-    assert d.lista.itens[3] == "Trecho da última mensagem: ativado"
+    assert d.lista.itens[4] == "Trecho da última mensagem: ativado"
 
 
 def test_dialogo_muda_a_ordem_e_restaura_o_padrao():
@@ -267,7 +266,7 @@ def test_dialogo_muda_a_ordem_e_restaura_o_padrao():
     assert g.valor["ordem"][:3] == ["nome", "nao_lidas", "servico"]
     assert d.lista.GetSelection() == 1
     assert fala.ditas[-1] == "Quantidade de mensagens não lidas, posição 2 " \
-                             "de 6."
+                             "de 7."
     d.lista.SetSelection(0)
     d.mover(-1)
     assert fala.ditas[-1] == "Já é o primeiro item."
@@ -275,3 +274,27 @@ def test_dialogo_muda_a_ordem_e_restaura_o_padrao():
     assert lc.eh_padrao(g.valor) and d.lista.GetSelection() == 0
     assert not d.botoes["padrao"].habilitado \
         if hasattr(d.botoes["padrao"], "habilitado") else True
+
+
+def test_autor_da_ultima_mensagem_em_grupo():
+    assert lc.autor_da_mensagem(msg("oi", autor="Ana"), True) == "Ana"
+    assert lc.autor_da_mensagem(msg("oi", autor=""), True, "Bia") == "Bia"
+    assert lc.autor_da_mensagem(msg("oi", minha=True), True) == "Você"
+    assert lc.autor_da_mensagem(msg("oi", autor="Ana"), False) == ""
+    assert lc.previa_da_mensagem(msg("oi", autor="Ana"), True) == "oi"
+    assert lc.previa_da_mensagem(msg("oi", minha=True), True) == "oi"
+    lay = {"ordem": ["nome", "autor", "previa"],
+           "ocultos": ["servico", "nao_lidas", "reacoes", "quem_reagiu"]}
+    assert lc.rotulo(conv(), lay, "oi", autor="Bia") == "Ana, Bia, oi"
+    sem_autor = dict(lay, ocultos=lay["ocultos"] + ["autor"])
+    assert lc.rotulo(conv(), sem_autor, "oi", autor="Bia") == "Ana, oi"
+
+
+def test_item_autor_em_configuracao_antiga_segue_o_trecho():
+    ligado = lc.normalizar({"ordem": ["nome", "previa"], "ocultos": []})
+    assert ligado["ordem"][:3] == ["nome", "autor", "previa"]
+    assert "autor" not in ligado["ocultos"]
+    desligado = lc.normalizar({"ordem": ["nome", "previa"],
+                               "ocultos": ["previa"]})
+    assert "autor" in desligado["ocultos"]
+    assert "autor" in lc.padrao()["ocultos"]

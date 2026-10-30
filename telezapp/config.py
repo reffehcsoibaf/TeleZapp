@@ -179,6 +179,7 @@ class Opcao:
     numero: tuple = ()       # (minimo, maximo): numero digitado, sem lista
     som: str = ""            # evento de som (ver EVENTOS_SOM): "" = outra opcao
     grupo: str = ""          # botao da categoria que abre estas opcoes juntas
+    texto: bool = False      # texto digitado
 
 
 OPCOES = (
@@ -219,6 +220,12 @@ OPCOES = (
           "(sem o componente de chamadas): atenda em outro dispositivo. "
           "Desmarcada, a chamada só fica registrada na lista de mensagens "
           "da conversa."),
+    Opcao("como_me_chamar", "Como me chamar nas mensagens", "Interface", "",
+          "O nome que aparece no lugar de Você quando o autor é você: nas "
+          "mensagens, na lista de conversas, nas reações, nos votos, na busca "
+          "e nas conversas salvas. Vale só neste computador; quem recebe não "
+          "vê este nome. Vazio, fica Você.",
+          texto=True),
     Opcao("falar_novas", "Falar mensagens novas na conversa aberta",
           "Interface", False,
           "O leitor de tela fala o autor e o conteúdo de cada mensagem nova "
@@ -245,6 +252,12 @@ OPCOES = (
           False,
           "Fala quem reagiu e com qual emoji quando alguém reage a uma "
           "mensagem sua. Desmarcada, a reação só aparece na mensagem.",
+          grupo="Conteúdo falado"),
+    Opcao("falar_quantas_no_filtro",
+          "Falar quantas conversas há ao trocar de filtro", "Interface", True,
+          "Ao passar pelas caixas de conta e de tipo de conversa, fala o "
+          "filtro e quantas conversas há nele. Desmarcada, só o leitor de "
+          "tela lê a opção escolhida.",
           grupo="Conteúdo falado"),
     Opcao("trancadas_exigir_codigo",
           "Esconder as conversas trancadas atrás de um código secreto",
@@ -286,6 +299,21 @@ OPCOES = (
           "versões; não baixa nada sem você aceitar. O GitHub vê o endereço "
           "de internet do computador, como em qualquer site. Desmarcada, só "
           "consulta quando você pedir, em Ajuda, Verificar atualizações."),
+    Opcao("atualizacoes_periodicas",
+          "Buscar atualizações periodicamente com o TeleZapp aberto",
+          "Atualizações", True,
+          "Além de consultar ao abrir, volta a consultar de tempos em tempos "
+          "enquanto o TeleZapp estiver aberto, mesmo em segundo plano. As "
+          "regras são as mesmas: sem versão nova, não diz nada. Em segundo "
+          "plano, o TeleZapp só avisa em voz alta, e a janela com as novidades "
+          "abre quando você o trouxer de volta. Durante uma chamada, ou com "
+          "outra janela aberta, ele espera."),
+    Opcao("atualizacoes_intervalo", "Intervalo da busca por atualizações",
+          "Atualizações", 24,
+          "De quanto em quanto tempo consultar, enquanto o TeleZapp estiver "
+          "aberto.",
+          escolhas=((1, "1 hora"), (6, "6 horas"), (12, "12 horas"),
+                    (24, "24 horas"))),
     Opcao("depuracao", "Modo de depuração", "Avançado", False,
           "Guarda, no seu computador, a estrutura original das últimas 500 "
           "mensagens do WhatsApp para o menu Depurar mostrar. Contém o texto "
@@ -377,12 +405,24 @@ OPCOES = (
           "ícone ou o atalho de chamar o TeleZapp (Configurações, Atalhos, "
           "\"Chamar o TeleZapp\"). Para encerrar de verdade, use Sair, em "
           "Ferramentas (Control Q), o botão Sair ou o menu do ícone."),
+    Opcao("abrir_links_no_telezapp",
+          "Oferecer o TeleZapp para abrir links do Telegram e do WhatsApp",
+          "Sistema", True,
+          "Faz o TeleZapp aparecer entre as opções do Windows para abrir links "
+          "tg:// e whatsapp://. Quem abre continua sendo o programa que você "
+          "escolheu: troque em Configurações do Windows, Aplicativos padrão."),
     Opcao("iniciar_com_windows", "Abrir o TeleZapp ao entrar no Windows",
           "Sistema", False,
           "Abre o TeleZapp sozinho quando você entra na sua conta do "
           "Windows. Com \"Continuar em segundo plano\" ligado, ele abre "
           "minimizado na barra de tarefas, sem tirar o foco do que você "
           "está fazendo."),
+    Opcao("barra_abre_comandos",
+          "Barra na caixa de digitar abre os comandos do robô",
+          "Mensagens", True,
+          "No Telegram, uma barra digitada na caixa vazia mostra os comandos "
+          "do robô da conversa. Sem robô, a barra fica como um caractere "
+          "qualquer."),
     Opcao("enter_envia", "Enter na caixa de digitar envia a mensagem",
           "Mensagens", True,
           "Marcada (o padrão), Enter envia e Shift Enter quebra a linha; "

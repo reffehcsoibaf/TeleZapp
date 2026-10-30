@@ -221,6 +221,48 @@ class Provedor(ABC):
         chaves que o servico nao informa ficam de fora."""
         return {}
 
+    COMANDOS_DO_ROBO = False
+
+    def comandos_do_robo(self, conversa_id):
+        """O que o robo da conversa, ou os robos do grupo, oferecem:
+        {'comandos': [(texto a enviar, descricao)], 'menu': {'texto', 'url'} ou
+        None, 'privacidade': endereco ou ''}. None se o servico nao respondeu.
+        """
+        return {"comandos": [], "menu": None, "privacidade": ""}
+
+    def link_web_do_robo(self, conversa_id, url, robo="", menu=False):
+        """O endereco para abrir o aplicativo web de um robo, ou "" se nao
+        foi possivel. robo: o id dele, se nao for o da conversa."""
+        return ""
+
+    def link_app_do_robo(self, conversa_id, app="", inicio=""):
+        """O endereco do aplicativo de um robo pelo nome curto (app) ou, sem
+        nome, do principal; "" se nao foi possivel."""
+        return ""
+
+    def resolver_usuario(self, usuario):
+        """{'id', 'nome', 'tipo', 'robo'} do @usuario; None se nao achou."""
+        return None
+
+    def iniciar_robo(self, conversa_id, parametro):
+        """Inicia o robo com o parametro de um link. False se falhou."""
+        return False
+
+    def enviar_dados_do_app(self, conversa_id, rotulo, dados):
+        """Entrega ao robo os dados que o aplicativo dele enviou."""
+
+    def metodo_do_app(self, conversa_id, nome, params):
+        """Chama um metodo do robo em nome do aplicativo: texto JSON."""
+        raise NotImplementedError
+
+    def permitir_escrita_do_robo(self, conversa_id):
+        """Autoriza o robo a enviar mensagens. False se falhou."""
+        return False
+
+    def compartilhar_telefone(self, conversa_id):
+        """Envia o numero da conta como contato. False se falhou."""
+        return False
+
     def completar_nome(self, conversa_id):
         """Conversa que so mostra o numero: procura o nome na rede e, se
         achar, ja o poe na lista. Devolve o nome achado ou ""."""
@@ -318,6 +360,20 @@ class Provedor(ABC):
         "reacao") ou ev.Aviso."""
 
     # True nos servicos em que da para criar uma enquete
+    PODE_ENVIAR_LOCALIZACAO = False
+
+    def enviar_localizacao(self, conversa_id, latitude, longitude):
+        """Envia um ponto no mapa. O resultado chega como MensagemNova ou
+        Aviso."""
+        raise NotImplementedError
+
+    PODE_ENVIAR_CONTATOS = False
+
+    def enviar_contatos(self, conversa_id, contatos):
+        """Envia cartoes de contato: contatos e [(nome, telefone)]. O resultado
+        chega como MensagemNova ou Aviso."""
+        raise NotImplementedError
+
     PODE_CRIAR_ENQUETE = False
 
     def criar_enquete(self, conversa_id, pergunta, opcoes, multipla,

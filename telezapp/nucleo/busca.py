@@ -190,7 +190,7 @@ class Achado:
     def texto_da_lista(self, nome_de_conta=None):
         x = self.mensagem
         quando = time.strftime("%d/%m/%Y %H:%M", time.localtime(x.data))
-        quem = "Você" if x.minha else (x.autor or self.conversa.nome)
+        quem = m.meu_nome() if x.minha else (x.autor or self.conversa.nome)
         onde = self.conversa.nome
         conta = (" (%s)" % nome_de_conta(x.conta_id)) if nome_de_conta else ""
         return "%s, %s%s, %s: %s" % (onde, quando, conta, quem, self.trecho)
@@ -323,8 +323,9 @@ def buscar(banco, c, agora=None):
             continue
         if any(not _caracteristica(n, x, extras) for n in c.caracteristicas):
             continue
-        if autor and autor not in normalizar(
-                "Você" if x.minha else (x.autor or conv.nome)):
+        if autor and not any(autor in normalizar(q) for q in (
+                (m.VOCE, m.meu_nome()) if x.minha
+                else (x.autor or conv.nome,))):
             continue
         if palavras:
             texto = normalizar(texto_pesquisavel(x, extras))

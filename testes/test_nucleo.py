@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Modelos, formatacao, eventos, banco e configuracao."""
 import json
+import sys
 import threading
 import time
+
+import pytest
 
 from telezapp import config
 from telezapp.armazenamento.banco import Banco
@@ -970,3 +973,121 @@ def test_trazer_contatos_so_entram_os_que_faltam():
     assert ("a", "2", "Caio", "+55") in b.salvos
     assert ("a", "1", "Outra Bia", "") not in b.salvos
     assert tc.ler(Quebrado()) == [] and tc.ler(None) == []
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="COM do Windows")
+def test_ortografia_nao_atrapalha_sair_do_alttab():
+    """A ortografia configurava CoCreateInstance para o programa inteiro; depois
+    dela, tirar a janela do Alt+Tab dava erro e ela continuava aparecendo."""
+    from telezapp.interface import segundo_plano
+    from telezapp.nucleo import ortografia
+    ortografia.Corretor()
+    assert segundo_plano._adicionar_botao(0) in (True, False)
+
+
+def test_exportar_logs_compacta_e_guarda_so_o_ultimo(tmp_path):
+    import zipfile
+    from telezapp.nucleo import exportar_logs as el
+    logs, destino = tmp_path / "logs", tmp_path / "saida"
+    logs.mkdir()
+    destino.mkdir()
+    (logs / "telezapp.log").write_text("linha", encoding="utf-8")
+    (logs / "falha-nativa.log").write_text("falha", encoding="utf-8")
+    primeiro = el.compactar(str(logs), str(destino), agora=1000000)
+    with zipfile.ZipFile(primeiro) as z:
+        assert sorted(z.namelist()) == ["falha-nativa.log", "telezapp.log"]
+        assert z.read("telezapp.log") == b"linha"
+    segundo = el.compactar(str(logs), str(destino), agora=2000000)
+    assert primeiro != segundo
+    assert [p.name for p in destino.iterdir()] == [
+        __import__("os").path.basename(segundo)]
+    assert el.tamanho_em_texto(1536) == "2 KB"
+    assert el.tamanho_em_texto(3 * 1024 * 1024) == "3,0 MB"
+
+
+def test_resumo_planeja_as_midias_sem_repetir_e_com_limite():
+    from telezapp.nucleo import resumo_midias as rm
+
+    def genero(x):
+        return x[0]
+
+    def tem(x):
+        return x[1]
+    msgs = [("audio", True), ("texto", False), ("video", False),
+            ("audio", False), ("imagem", False), ("figurinha", False)]
+    p = rm.planejar(msgs, genero, tem, lambda g: True)
+    assert p.prontas == [("audio", True)]
+    assert [x[0] for x in p.processar] == ["audio", "imagem", "figurinha"]
+    assert rm.contagem(p.processar, genero) == "1 áudio, 1 imagem e 1 figurinha"
+    assert "Processar 3" in rm.pergunta(p, genero)
+    # sem provedor de imagem, a imagem nem entra na conta
+    p = rm.planejar(msgs, genero, tem, lambda g: g == "audio")
+    assert [x[0] for x in p.processar] == ["audio"]
+    # o limite fica com as mais novas e diz o que sobrou
+    muitos = [("audio", False, i) for i in range(5)]
+    p = rm.planejar(muitos, genero, tem, lambda g: True, limite=2)
+    assert [x[2] for x in p.processar] == [3, 4]
+    assert [x[2] for x in p.fora] == [0, 1, 2]
+    assert rm.aviso_final(0, 0) == ""
+    assert rm.aviso_final(1, 0) == "1 mídia ficou de fora deste resumo."
+    assert rm.aviso_final(1, 2) == "3 mídias ficaram de fora deste resumo."
+
+
+def test_lote_do_resumo_termina_uma_vez_e_conta_as_falhas():
+    from telezapp.nucleo import resumo_midias as rm
+    andou, fim = [], []
+    lote = rm.LoteDeResumo(["a", "b"], lambda f, t: andou.append((f, t)),
+                           fim.append)
+    lote.acabou("a", True)
+    lote.acabou("a")               # repetida nao conta
+    assert andou == [(1, 2)] and fim == []
+    lote.acabou("b")
+    assert andou[-1] == (2, 2) and fim == [1]
+    cancelado = rm.LoteDeResumo(["c"], lambda f, t: andou.append("nao"),
+                                fim.append)
+    cancelado.cancelar()
+    cancelado.acabou("c")
+    assert "nao" not in andou and fim == [1]
+
+
+def test_opcoes_de_contatos_exigem_telefone_e_nao_repetem():
+    from telezapp.nucleo import enviar_contatos as ec
+    assert ec.opcoes([
+        ("w", "1", "bia", "(51) 97777-6666"),
+        ("t", "2", "Ana", "+5551999998888"),
+        ("w", "3", "Ana de novo", "5551999998888"),
+        ("t", "4", "Sem telefone", ""),
+    ]) == [("Ana", "+5551999998888"), ("bia", "+5551977776666")]
+
+
+def test_filtrar_contatos_por_nome_ou_digitos():
+    from telezapp.nucleo import enviar_contatos as ec
+    itens = [("Ana", "+5551999998888"), ("Bia", "+5551977776666")]
+    assert ec.filtrar(itens, " ") == itens
+    assert ec.filtrar(itens, "bi") == [itens[1]]
+    assert ec.filtrar(itens, "9999") == [itens[0]]
+
+
+def test_vcard_protege_os_separadores_e_tira_quebras():
+    from telezapp.nucleo import enviar_contatos as ec
+    cartao = ec.vcard("Ana, a\nSouza", "+5551999998888")
+    assert "FN:Ana\\, a Souza\n" in cartao
+    assert "waid=5551999998888:+5551999998888" in cartao
+
+
+def test_como_me_chamar_troca_voce_so_na_exibicao(monkeypatch):
+    from telezapp.nucleo import lista_conversas as lc
+    from telezapp.nucleo import modelos as m
+    monkeypatch.setattr(m, "_meu_nome", m.VOCE)
+    x = m.Mensagem("c", "1", "9", minha=True, data=1.0, texto="oi")
+    m.atualizar_extras(x, reacoes=[{"id": "eu", "quem": m.VOCE, "emoji": "👍"}])
+    m.definir_meu_nome("  Fabio   S ")
+    assert m.meu_nome() == "Fabio S"
+    assert m.quem_enviou(x) == "Fabio S"
+    assert lc.previa_da_mensagem(x).startswith("Fabio S: oi")
+    assert lc.autor_da_mensagem(x, grupo=True) == "Fabio S"
+    assert m.resumo_reacoes(x) == "👍 de Fabio S"
+    assert m.minha_reacao(x) == "👍"       # o marcador guardado nao muda
+    assert m.nome_a_mostrar("Ana") == "Ana"
+    m.definir_meu_nome("   ")
+    assert m.quem_enviou(x) == "Você"

@@ -6,6 +6,8 @@ Nada aqui toca na janela: os resultados saem como eventos. O registro nunca
 grava texto de mensagens, telefones completos, codigos ou senhas.
 """
 import asyncio
+import base64
+import json
 import logging
 import os
 import re
@@ -17,7 +19,7 @@ from telezapp.midia import armazem
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import mencoes as nucleo_mencoes
 from telezapp.nucleo import modelos as m
-from telezapp.nucleo import localizacao, previa_links
+from telezapp.nucleo import localizacao, ponte_web_app, previa_links, robos
 from telezapp.provedores.base import (PEDIR_CODIGO, PEDIR_SENHA,
                                       PEDIR_TELEFONE, DownloadCancelado,
                                       ErroBloqueio, ErroMidia, ErroPerfil,
@@ -79,6 +81,148 @@ def _texto_extra(msg):
         return ", ".join(p for p in (
             "contato: " + nome if nome else "contato", telefone) if p)
     return ""
+
+
+# como o aplicativo do Telegram para computador: e a ponte que a janela imita
+PLATAFORMA_WEB = "tdesktop"
+
+
+def comandos_de_bot_info(infos, usuarios=None):
+    """[(texto a enviar, descricao)] a partir dos BotInfo do Telegram. Com
+    `usuarios` ({id: @usuario do robo}, em grupo), o texto leva o endereco do
+    robo: "/start@robo", que e como o grupo sabe para qual robo vai."""
+    comandos = []
+    for info in infos:
+        if info is None:
+            continue
+        robo = (usuarios or {}).get(info.user_id, "")
+        for c in info.commands or []:
+            comandos.append(("/%s%s" % (c.command, "@" + robo if robo else ""),
+                             c.description or ""))
+    return comandos
+
+
+def _dados_salvos(info):
+    """O que o Telegram guardou de um pagamento anterior, para preencher a
+    janela de dados."""
+    if info is None:
+        return {}
+    dados = {"nome": getattr(info, "name", "") or "",
+             "telefone": getattr(info, "phone", "") or "",
+             "email": getattr(info, "email", "") or ""}
+    end = getattr(info, "shipping_address", None)
+    if end is not None:
+        dados.update(rua1=end.street_line1, rua2=end.street_line2,
+                     cidade=end.city, estado=end.state,
+                     pais=end.country_iso2, cep=end.post_code)
+    return dados
+
+
+def _info_de_pagamento(pede, valores):
+    from telethon.tl import types as T
+
+    def v(chave):
+        return (valores.get(chave) or "").strip()
+    endereco = None
+    if pede.get("endereco"):
+        endereco = T.PostAddress(
+            street_line1=v("rua1"), street_line2=v("rua2"), city=v("cidade"),
+            state=v("estado"), country_iso2=v("pais").upper(),
+            post_code=v("cep"))
+    return T.PaymentRequestedInfo(
+        name=v("nome") or None, phone=v("telefone") or None,
+        email=v("email") or None, shipping_address=endereco)
+
+
+def _tema_do_app():
+    from telethon.tl import types as T
+    return T.DataJSON(json.dumps(ponte_web_app.TEMA))
+
+
+def dados_do_robo(info, usuarios=None):
+    """O menu e a politica de privacidade de um BotInfo, junto dos comandos
+    (no formato de ProvedorBase.comandos_do_robo)."""
+    botao = getattr(info, "menu_button", None)
+    url = getattr(botao, "url", "") or ""
+    return {"comandos": comandos_de_bot_info([info], usuarios),
+            "menu": {"texto": getattr(botao, "text", "") or "Menu", "url": url}
+            if url else None,
+            "privacidade": getattr(info, "privacy_policy_url", "") or ""}
+
+
+def acoes_do_robo(msg):
+    """Os botoes de robo como acoes (ver interface.robos). O que o TeleZapp
+    nao sabe tocar fica como robo_indisponivel, para a pessoa saber que existe.
+    Os que so abrem um link continuam em `botoes` (extras_do_telegram). Um robo
+    que esconde o teclado deixa so a marca robo_ocultar_teclado."""
+    markup = getattr(msg, "reply_markup", None)
+    if type(markup).__name__ == "ReplyKeyboardHide":
+        return [{"tipo": "robo_ocultar_teclado"}]
+    teclado = type(markup).__name__ == "ReplyKeyboardMarkup"
+    robo = str(getattr(msg, "sender_id", "") or "")
+    acoes = []
+    for linha in getattr(markup, "rows", None) or []:
+        for b in getattr(linha, "buttons", None) or []:
+            texto = getattr(b, "text", "") or "Botão"
+            tipo = getattr(b, "type", None) or b
+            nome = type(tipo).__name__
+            for prefixo in ("InlineButtonType", "ButtonType",
+                            "KeyboardButton"):
+                nome = nome.replace(prefixo, "")
+            if nome == "Url":
+                continue
+            if teclado and nome in ("", "Default"):
+                acoes.append({"tipo": "robo_texto", "rotulo": texto})
+            elif nome == "Callback" and getattr(tipo, "data", None):
+                acoes.append({
+                    "tipo": "robo_callback", "rotulo": texto,
+                    "dados": base64.b64encode(bytes(tipo.data)).decode(),
+                    "pede_senha": bool(getattr(tipo, "requires_password",
+                                               False))})
+            elif nome == "Copy":
+                acoes.append({"tipo": "robo_copiar", "rotulo": texto,
+                              "texto": getattr(tipo, "copy_text", "") or ""})
+            elif nome in ("WebView", "SimpleWebView"):
+                acoes.append({"tipo": "robo_web", "rotulo": texto + " (abre "
+                              "no navegador)",
+                              "url": getattr(tipo, "url", "") or "",
+                              "robo": robo})
+            elif nome == "Game":
+                acoes.append({"tipo": "robo_jogo", "rotulo": texto})
+            elif nome == "Buy":
+                acoes.append({"tipo": "robo_compra", "rotulo": texto})
+            elif nome == "SwitchInline":
+                acoes.append({"tipo": "robo_inline", "rotulo": texto, "robo": robo,
+                              "consulta": getattr(tipo, "query", "") or "",
+                              "mesma": bool(getattr(tipo, "same_peer", False))})
+            elif nome == "UrlAuth":
+                acoes.append({"tipo": "robo_login", "rotulo": texto,
+                              "url": getattr(tipo, "url", "") or "",
+                              "botao": getattr(tipo, "button_id", 0) or 0})
+            elif nome == "UserProfile":
+                acoes.append({"tipo": "robo_perfil", "rotulo": texto,
+                              "usuario_id": str(getattr(tipo, "user_id", ""))})
+            elif nome == "RequestPhone":
+                acoes.append({"tipo": "robo_telefone", "rotulo": texto})
+            elif nome == "RequestGeoLocation":
+                acoes.append({"tipo": "robo_local", "rotulo": texto})
+            elif nome == "RequestPoll":
+                acoes.append({"tipo": "robo_enquete", "rotulo": texto})
+            elif nome == "RequestPeer":
+                acoes.append({
+                    "tipo": "robo_escolher", "rotulo": texto,
+                    "botao": getattr(tipo, "button_id", 0) or 0,
+                    "peer": {"RequestPeerTypeChat": "grupo",
+                             "RequestPeerTypeBroadcast": "canal"}.get(
+                        type(getattr(tipo, "peer_type", None)).__name__,
+                        "privada")})
+            elif nome == "Disabled":
+                acoes.append({"tipo": "robo_indisponivel",
+                              "rotulo": texto + " (desativado)"})
+            else:
+                acoes.append({"tipo": "robo_indisponivel", "rotulo": texto +
+                              " (só no aplicativo oficial)"})
+    return acoes
 
 
 def somente_leitura_do_telegram(ent):
@@ -426,7 +570,8 @@ def converter(msg, conta_id, conversa_id, lidas_ate=0, nome_padrao=""):
     nova.expira = m.expira_em(nova.data, prazo_da_mensagem(msg))
     links, botoes, mencoes = extras_do_telegram(msg)
     m.guardar_extras(nova, links, botoes, mencoes,
-                     acoes=entradas_do_telegram(links),
+                     acoes=entradas_do_telegram(links) + (
+                         [] if minha else acoes_do_robo(msg)),
                      previa=previa_do_telegram(msg))
     enquete = enquete_do_telegram(msg)
     if enquete:
@@ -890,6 +1035,8 @@ class ProvedorTelegram(Provedor):
             self._ao_enquete, events.Raw(tipos.UpdateMessagePoll))
         self.cliente.add_event_handler(
             self._ao_historia, events.Raw(tipos.UpdateStory))
+        self.cliente.add_event_handler(self._ao_editada,
+                                       events.MessageEdited())
         self._estado(ev.CONECTADA)
         self._pronto.set()
         await self._atualizar_conversas()
@@ -1099,8 +1246,302 @@ class ProvedorTelegram(Provedor):
                 dados["telefone"] = "+" + ent.phone.lstrip("+")
             if getattr(ent, "username", None):
                 dados["usuario"] = "@" + ent.username
+            if getattr(ent, "bot", False):
+                from telethon.tl import functions
+                r = await self.cliente(functions.users.GetFullUserRequest(ent))
+                info = r.full_user.bot_info
+                dados["recado"] = getattr(info, "description", "") or \
+                    r.full_user.about or ""
             return dados
         return self._sincrono(ler()) or {}
+
+    COMANDOS_DO_ROBO = True
+
+    def comandos_do_robo(self, conversa_id):
+        async def ler():
+            from telethon.tl import functions
+            from telethon.tl import types as tl
+            ent = await self.cliente.get_entity(self._chat_id(conversa_id))
+            if isinstance(ent, tl.User):
+                if not ent.bot:
+                    return dados_do_robo(None)
+                r = await self.cliente(functions.users.GetFullUserRequest(ent))
+                return dados_do_robo(r.full_user.bot_info)
+            if isinstance(ent, tl.Channel):
+                r = await self.cliente(
+                    functions.channels.GetFullChannelRequest(ent))
+            else:
+                r = await self.cliente(
+                    functions.messages.GetFullChatRequest(ent.id))
+            usuarios = {u.id: u.username for u in r.users
+                        if getattr(u, "bot", False) and u.username}
+            return {"comandos": comandos_de_bot_info(r.full_chat.bot_info,
+                                                     usuarios),
+                    "menu": None, "privacidade": ""}
+        return self._sincrono(ler())
+
+    def link_web_do_robo(self, conversa_id, url, robo="", menu=False):
+        async def ler():
+            from telethon.tl import functions
+            ent = await self._entidade(conversa_id)
+            bot = await self.cliente.get_input_entity(int(robo)) if robo \
+                else ent
+            r = await self.cliente(functions.messages.RequestWebViewRequest(
+                peer=ent, bot=bot, platform=PLATAFORMA_WEB, url=url,
+                from_bot_menu=menu, theme_params=_tema_do_app()))
+            return r.url
+        return self._sincrono(ler()) or ""
+
+    def link_app_do_robo(self, conversa_id, app="", inicio=""):
+        async def ler():
+            from telethon.tl import functions, types as T
+            ent = await self._entidade(conversa_id)
+            if app:
+                r = await self.cliente(
+                    functions.messages.RequestAppWebViewRequest(
+                        peer=ent, app=T.InputBotAppShortName(ent, app),
+                        platform=PLATAFORMA_WEB, write_allowed=False,
+                        start_param=inicio or None,
+                        theme_params=_tema_do_app()))
+            else:
+                r = await self.cliente(
+                    functions.messages.RequestMainWebViewRequest(
+                        peer=ent, bot=ent, platform=PLATAFORMA_WEB,
+                        start_param=inicio or None,
+                        theme_params=_tema_do_app()))
+            return r.url
+        return self._sincrono(ler()) or ""
+
+    def resolver_usuario(self, usuario):
+        async def ler():
+            from telethon.tl import types as T
+            ent = await self.cliente.get_entity(usuario)
+            self._entidades[str(ent.id)] = await self.cliente.get_input_entity(
+                ent)
+            if isinstance(ent, T.User):
+                return {"id": str(ent.id), "nome": nome_de(ent) or usuario,
+                        "tipo": "privada", "robo": bool(ent.bot)}
+            return {"id": str(ent.id), "nome": nome_de(ent) or usuario,
+                    "tipo": "canal" if getattr(ent, "broadcast", False)
+                    else "grupo", "robo": False}
+        return self._sincrono(ler())
+
+    def iniciar_robo(self, conversa_id, parametro):
+        async def ler():
+            from telethon.tl import functions
+            ent = await self._entidade(conversa_id)
+            await self.cliente(functions.messages.StartBotRequest(
+                bot=ent, peer=ent, start_param=parametro))
+            return True
+        return bool(self._sincrono(ler()))
+
+    def enviar_dados_do_app(self, conversa_id, rotulo, dados):
+        async def ler():
+            from telethon.tl import functions
+            ent = await self._entidade(conversa_id)
+            await self.cliente(functions.messages.SendWebViewDataRequest(
+                bot=ent, button_text=rotulo, data=dados))
+            return True
+        return bool(self._sincrono(ler()))
+
+    def metodo_do_app(self, conversa_id, nome, params):
+        async def ler():
+            from telethon.tl import functions, types as T
+            ent = await self._entidade(conversa_id)
+            r = await self.cliente(functions.bots.InvokeWebViewCustomMethodRequest(
+                bot=ent, custom_method=nome,
+                params=T.DataJSON(json.dumps(params))))
+            return r.data
+        return self._executar(ler(), 30)
+
+    def url_do_jogo(self, msg):
+        async def ler():
+            from telethon.tl import functions
+            ent = await self._entidade(msg.conversa_id)
+            r = await self.cliente(functions.messages.GetBotCallbackAnswerRequest(
+                peer=ent, msg_id=int(msg.id), game=True))
+            return r.url
+        return self._executar(ler(), 30) or ""
+
+    def compartilhar_telefone(self, conversa_id):
+        async def ler():
+            from telethon.tl import functions, types as T
+            eu = await self.cliente.get_me()
+            ent = await self._entidade(conversa_id)
+            await self.cliente(functions.messages.SendMediaRequest(
+                peer=ent, message="", media=T.InputMediaContact(
+                    phone_number="+" + eu.phone.lstrip("+"),
+                    first_name=eu.first_name or "",
+                    last_name=eu.last_name or "", vcard="")))
+            return True
+        return bool(self._sincrono(ler()))
+
+    def enviar_conversa_ao_robo(self, msg, acao, conversa_id):
+        async def ler():
+            from telethon.tl import functions
+            ent = await self._entidade(msg.conversa_id)
+            escolhida = await self._entidade(conversa_id)
+            await self.cliente(functions.messages.SendBotRequestedPeerRequest(
+                peer=ent, msg_id=int(msg.id), button_id=acao.get("botao", 0),
+                requested_peers=[escolhida]))
+            return True
+        return bool(self._sincrono(ler()))
+
+    def resultados_inline(self, conversa_id, robo, consulta):
+        async def ler():
+            from telethon.tl import functions
+            ent = await self._entidade(conversa_id)
+            bot = await self.cliente.get_input_entity(int(robo))
+            r = await self.cliente(functions.messages.GetInlineBotResultsRequest(
+                bot=bot, peer=ent, query=consulta, offset=""))
+            return {"consulta_id": r.query_id, "itens": [
+                (i.id, " - ".join(p for p in (
+                    getattr(i, "title", ""), getattr(i, "description", ""))
+                    if p) or i.type) for i in r.results]}
+        return self._executar(ler(), 30)
+
+    def enviar_inline(self, conversa_id, consulta_id, resultado):
+        async def ler():
+            from telethon.tl import functions
+            ent = await self._entidade(conversa_id)
+            await self.cliente(functions.messages.SendInlineBotResultRequest(
+                peer=ent, query_id=consulta_id, id=resultado))
+            return True
+        return bool(self._sincrono(ler()))
+
+    def pedir_login(self, msg, acao):
+        """{'url'} se ja entrou; {'dominio', 'escrita'} se precisa confirmar."""
+        async def ler():
+            from telethon.tl import functions, types as T
+            ent = await self._entidade(msg.conversa_id)
+            r = await self.cliente(functions.messages.RequestUrlAuthRequest(
+                peer=ent, msg_id=int(msg.id), button_id=acao.get("botao", 0),
+                url=acao.get("url")))
+            if isinstance(r, T.UrlAuthResultRequest):
+                return {"dominio": r.domain,
+                        "escrita": bool(r.request_write_access)}
+            return {"url": getattr(r, "url", "") or acao.get("url", "")}
+        return self._executar(ler(), 30)
+
+    def aceitar_login(self, msg, acao, escrever):
+        async def ler():
+            from telethon.tl import functions
+            ent = await self._entidade(msg.conversa_id)
+            r = await self.cliente(functions.messages.AcceptUrlAuthRequest(
+                write_allowed=escrever, peer=ent, msg_id=int(msg.id),
+                button_id=acao.get("botao", 0), url=acao.get("url")))
+            return getattr(r, "url", "") or acao.get("url", "")
+        return self._executar(ler(), 30)
+
+    def formulario_de_pagamento(self, conversa_id, msg_id="", slug=""):
+        """O que a janela precisa para confirmar e pagar. As chaves com _ voltam
+        em `pagar`."""
+        async def ler():
+            from telethon.tl import functions, types as T
+            if slug:
+                fatura = T.InputInvoiceSlug(slug)
+            else:
+                fatura = T.InputInvoiceMessage(
+                    await self._entidade(conversa_id), int(msg_id))
+            f = await self.cliente(functions.payments.GetPaymentFormRequest(
+                invoice=fatura, theme_params=_tema_do_app()))
+            i = f.invoice
+            estrelas = type(f).__name__ == "PaymentFormStars"
+            return {
+                "estrelas": estrelas, "titulo": f.title,
+                "preco": robos.preco(i.currency, sum(
+                    p.amount for p in i.prices)),
+                "teste": bool(i.test), "url": getattr(f, "url", "") or "",
+                "pede": {"nome": bool(i.name_requested),
+                         "telefone": bool(i.phone_requested),
+                         "email": bool(i.email_requested),
+                         "endereco": bool(i.shipping_address_requested)},
+                "salvos": _dados_salvos(getattr(f, "saved_info", None)),
+                "_moeda": i.currency,
+                "_total": sum(p.amount for p in i.prices),
+                "_id": f.form_id, "_fatura": fatura}
+        return self._executar(ler(), 30)
+
+    def validar_dados(self, formulario, valores, salvar=False):
+        """Entrega os dados ao Telegram, que os confere com o vendedor. Guarda
+        o resultado em `formulario` e devolve as opcoes de entrega:
+        [(id, rotulo, total com a entrega)]. Levanta erro se ele recusar."""
+        async def ler():
+            from telethon.tl import functions
+            r = await self.cliente(functions.payments.ValidateRequestedInfoRequest(
+                invoice=formulario["_fatura"],
+                info=_info_de_pagamento(formulario["pede"], valores),
+                save=salvar))
+            formulario["_info_id"] = r.id
+            return [(o.id, "%s, %s" % (o.title, robos.preco(
+                formulario["_moeda"], sum(p.amount for p in o.prices))),
+                formulario["_total"] + sum(p.amount for p in o.prices))
+                for o in r.shipping_options or []]
+        return self._executar(ler(), 30)
+
+    def pagar(self, formulario, credenciais=None):
+        """{'ok': True} ou {'verificar': endereco}."""
+        async def ler():
+            from telethon.tl import functions, types as T
+            if formulario["estrelas"]:
+                r = await self.cliente(functions.payments.SendStarsFormRequest(
+                    form_id=formulario["_id"], invoice=formulario["_fatura"]))
+            else:
+                r = await self.cliente(functions.payments.SendPaymentFormRequest(
+                    form_id=formulario["_id"], invoice=formulario["_fatura"],
+                    credentials=T.InputPaymentCredentials(
+                        T.DataJSON(json.dumps(credenciais))),
+                    requested_info_id=formulario.get("_info_id"),
+                    shipping_option_id=formulario.get("_envio_id")))
+            url = getattr(r, "url", "")
+            return {"verificar": url} if url else {"ok": True}
+        return self._executar(ler(), 60)
+
+    def permitir_escrita_do_robo(self, conversa_id):
+        async def ler():
+            from telethon.tl import functions
+            ent = await self._entidade(conversa_id)
+            await self.cliente(functions.bots.AllowSendMessageRequest(bot=ent))
+            return True
+        return bool(self._sincrono(ler()))
+
+    def responder_acao(self, msg, acao):
+        """Toca um botao de robo: a resposta do teclado vai como mensagem, e
+        o botao da mensagem avisa o robo (a resposta chega por _tocar_callback
+        e, se ele mudar a mensagem, por _ao_editada)."""
+        tipo = acao.get("tipo")
+        if tipo == "robo_texto":
+            conv = self._conversas.get(msg.conversa_id)
+            em_grupo = conv is not None and conv.tipo == "grupo"
+            self._agendar(self._enviar(msg.conversa_id, acao.get("rotulo", ""),
+                                       msg.id if em_grupo else "", None))
+        elif tipo == "robo_callback":
+            self._agendar(self._tocar_callback(msg, acao))
+        else:
+            raise NotImplementedError
+
+    async def _tocar_callback(self, msg, acao):
+        from telethon import errors
+        from telethon.tl import functions
+        try:
+            ent = await self._entidade(msg.conversa_id)
+            senha = None
+            if acao.get("senha"):
+                from telethon.password import compute_check
+                dados = await self.cliente(functions.account.GetPasswordRequest())
+                senha = compute_check(dados, acao["senha"])
+            r = await self.cliente(functions.messages.GetBotCallbackAnswerRequest(
+                peer=ent, msg_id=int(msg.id),
+                data=base64.b64decode(acao.get("dados", "")), password=senha))
+        except errors.BotResponseTimeoutError:
+            self._avisar("O robô não respondeu ao botão.")
+            return
+        except Exception as e:
+            log.warning("botão de robô: %s", type(e).__name__)
+            self._avisar("Não consegui tocar o botão (%s)." % type(e).__name__)
+            return
+        self._avisar(r.message or r.url or "Botão tocado: %s." %
+                     acao.get("rotulo", ""), bool(r.alert))
 
     FOTO_DO_GRUPO = True
     FOTO_DO_CONTATO = True
@@ -1654,6 +2095,50 @@ class ProvedorTelegram(Provedor):
             self.barramento.publicar(ev.EnvioFalhou(
                 self.conta.id, msg.conversa_id, texto, _motivo(e),
                 devolver_texto=True))
+
+    PODE_ENVIAR_LOCALIZACAO = True
+
+    def enviar_localizacao(self, conversa_id, latitude, longitude):
+        self._agendar(self._enviar_localizacao(conversa_id, latitude,
+                                               longitude))
+
+    async def _enviar_localizacao(self, cid, latitude, longitude):
+        from telethon.tl import types as tipos
+        try:
+            ent = await self._entidade(cid)
+            enviada = await self.cliente.send_message(
+                ent, reply_to=self._resposta_em(cid, ""),
+                file=tipos.InputMediaGeoPoint(
+                    tipos.InputGeoPoint(latitude, longitude)))
+        except Exception as e:
+            log.warning("enviar localização falhou: %s", type(e).__name__)
+            self._avisar("Não consegui enviar a localização (%s)." % _motivo(e),
+                         False)
+            return
+        await self._registrar_enviada(enviada, cid)
+
+    PODE_ENVIAR_CONTATOS = True
+
+    def enviar_contatos(self, conversa_id, contatos):
+        self._agendar(self._enviar_contatos(conversa_id, list(contatos)))
+
+    async def _enviar_contatos(self, cid, contatos):
+        """Um cartao por mensagem: o Telegram nao junta varios numa so."""
+        from telethon.tl import types as tipos
+        for nome, telefone in contatos:
+            try:
+                ent = await self._entidade(cid)
+                enviada = await self.cliente.send_message(
+                    ent, reply_to=self._resposta_em(cid, ""),
+                    file=tipos.InputMediaContact(
+                        phone_number=telefone, first_name=nome[:64],
+                        last_name="", vcard=""))
+            except Exception as e:
+                log.warning("enviar contato falhou: %s", type(e).__name__)
+                self._avisar("Não consegui enviar o contato %s (%s)." % (
+                    nome, _motivo(e)), False)
+                continue
+            await self._registrar_enviada(enviada, cid)
 
     PODE_CRIAR_ENQUETE = True
 
@@ -2356,6 +2841,45 @@ class ProvedorTelegram(Provedor):
         return self._chamadas.dispositivos()
 
     # ----------------------------------------------------- eventos do servico
+    async def _ao_editada(self, evento):
+        """Mensagem que outra pessoa ou um robo editou: robos trocam o texto
+        e os botoes do menu assim. O mesmo aviso vem quando so mudam as reacoes
+        ou as visualizacoes: nesse caso nao ha o que atualizar."""
+        try:
+            msg = evento.message
+            if getattr(msg, "out", False):
+                return
+            cid = str(evento.chat_id)
+            if cid in self._foruns:
+                cid = id_do_topico(cid, topico_da_mensagem(msg))
+            x = self.banco.mensagem(self.conta.id, cid, str(msg.id))
+            nova = converter(msg, self.conta.id, cid) if x is not None \
+                else None
+            if nova is None:
+                return
+            antes, depois = m.extras_de(x), m.extras_de(nova)
+            campos = {c: depois[c] for c in ("links", "botoes", "acoes")}
+            if (x.texto, x.tipo, x.nome_arquivo, x.tamanho) == (
+                    nova.texto, nova.tipo, nova.nome_arquivo, nova.tamanho) and \
+                    all(antes[c] == v for c, v in campos.items()):
+                return
+            if x.texto != nova.texto:
+                campos["editada"] = True
+            x.texto = nova.texto
+            if (x.tipo, x.nome_arquivo, x.tamanho) != (
+                    nova.tipo, nova.nome_arquivo, nova.tamanho):
+                # outra midia: o arquivo baixado da anterior nao vale mais
+                x.tipo, x.nome_arquivo = nova.tipo, nova.nome_arquivo
+                x.tamanho, x.segundos = nova.tamanho, nova.segundos
+                self.banco.esquecer_midia(self.conta.id, cid, x.id)
+                campos["editada"] = True
+            m.atualizar_extras(x, **campos)
+            self.banco.salvar_mensagens([x])
+            self.barramento.publicar(ev.MensagemAtualizada(
+                self.conta.id, cid, x, "editada"))
+        except Exception:
+            log.exception("erro ao tratar mensagem editada")
+
     async def _ao_receber(self, evento):
         try:
             msg = evento.message

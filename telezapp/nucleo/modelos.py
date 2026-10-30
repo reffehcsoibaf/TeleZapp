@@ -328,7 +328,8 @@ def votantes_da_enquete(enq):
 
 def quem_votou_em(enq, posicao):
     """Nomes de quem votou na opcao (vazio nas enquetes anonimas)."""
-    return [v["nome"] or quem for quem, v in enq["votos"].items()
+    return [nome_a_mostrar(v["nome"]) or quem
+            for quem, v in enq["votos"].items()
             if posicao in v["escolhas"]]
 
 
@@ -394,6 +395,25 @@ def pode_marcar_mais(enq, escolhidas):
     return len(escolhidas) < enq["maximo"]
 
 
+VOCE = "Você"            # como as reacoes e os votos guardam a pessoa
+_meu_nome = VOCE
+
+
+def definir_meu_nome(nome):
+    """Como o TeleZapp mostra a propria pessoa como autora (vazio: Você)."""
+    global _meu_nome
+    _meu_nome = " ".join((nome or "").split())[:60] or VOCE
+
+
+def meu_nome():
+    return _meu_nome
+
+
+def nome_a_mostrar(quem):
+    """O nome guardado numa reacao ou num voto, pronto para aparecer."""
+    return _meu_nome if quem == VOCE else quem
+
+
 def minha_reacao(msg):
     """O emoji com que eu reagi a esta mensagem ("" se nao reagi)."""
     for r in extras_de(msg)["reacoes"]:
@@ -409,7 +429,8 @@ def resumo_reacoes(msg, maximo=3):
         return ""
     if len(reacoes) > maximo:
         return "%d reações" % len(reacoes)
-    return ", ".join("%s de %s" % (r.get("emoji", ""), r.get("quem", ""))
+    return ", ".join("%s de %s" % (r.get("emoji", ""),
+                                   nome_a_mostrar(r.get("quem", "")))
                      for r in reacoes)
 
 
@@ -645,7 +666,7 @@ def quem_enviou(msg, conv=None, nome_do_remetente=None):
     mensagens guardadas dao ao remetente, o telefone dele e, so no fim,
     Desconhecido. `nome_do_remetente(msg)` e opcional."""
     if msg.minha:
-        return "Você"
+        return meu_nome()
     if msg.autor:
         return msg.autor
     if conv is not None and conv.tipo == "privada" and conv.nome:
@@ -834,7 +855,7 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None,
                 anterior is None or anterior.minha != m.minha
                 or anterior.autor != m.autor):
             return ""
-        return "Você" if m.minha else (m.autor or quem or "Desconhecido")
+        return meu_nome() if m.minha else (m.autor or quem or "Desconhecido")
 
     blocos.update({
         "autor": bloco_autor,
@@ -1072,7 +1093,7 @@ def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
              midia=None, grupo=False, contagens=True):
     linhas = [
         "Conversa: %s" % nome_conversa,
-        "De: %s" % ("Você" if m.minha else (m.autor or "Desconhecido")),
+        "De: %s" % (meu_nome() if m.minha else (m.autor or "Desconhecido")),
         "Data: %s" % (time.strftime("%d/%m/%Y %H:%M", time.localtime(m.data))
                       if m.data else "-"),
         "Tipo: %s" % NOMES_TIPOS.get(m.tipo, m.tipo),
@@ -1087,7 +1108,7 @@ def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
         linhas.append("Mensagem " + temp)
     for r in extras_m["reacoes"]:
         linhas.append("Reação: %s de %s" % (r.get("emoji", ""),
-                                            r.get("quem", "")))
+                                            nome_a_mostrar(r.get("quem", ""))))
     previa = extras_m["previa"]
     if previa:
         linhas.append("Prévia do link: %s" % " - ".join(

@@ -32,7 +32,7 @@ CHAVE_DESINSTALAR = (r"Software\Microsoft\Windows\CurrentVersion\Uninstall"
                      r"\TeleZapp")
 # O que nao vai quando os dados sao levados de um lugar para outro
 NAO_LEVAR = {"logs", "temp", "restauracao", "antes-da-restauracao",
-             "antes-da-instalacao"}
+             "antes-da-instalacao", "webview", "logs-exportados"}   # o cifrado so vale neste PC
 
 
 class ErroInstalacao(Exception):
@@ -418,6 +418,9 @@ def desinstalar(programa=None, apagar_dados=False, dados=None):
         _desregistrar()
     except Exception:
         log.warning("não consegui tirar a entrada de Aplicativos instalados")
+    from telezapp.nucleo import protocolos
+    if not protocolos.remover():
+        log.warning("não consegui tirar o registro dos links")
     if apagar_dados:
         shutil.rmtree(dados or dados_do_computador(), ignore_errors=True)
     # `timeout` volta na hora sem console; `ping` espera de verdade. Tenta ate
