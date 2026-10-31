@@ -1,0 +1,814 @@
+# Primeiros passos
+O TeleZapp reúne o WhatsApp e o Telegram numa só janela do Windows, pensada para quem usa leitores de tela. Todos os controles são os do próprio Windows, sem telas desenhadas à mão, e por isso os leitores de tela os leem normalmente.
+
+Os avisos que o TeleZapp fala por conta própria, como mensagem nova e resultado da inteligência artificial, são testados com o NVDA. Com outros leitores de tela, boa parte deles aparece na barra de situação.
+
+Para começar, use Menu, Novo, Nova conta. Veja os assuntos Conta do Telegram e Conta do WhatsApp.
+
+Para navegar:
+Alt abre o Menu. Os assuntos ficam em submenus, que abrem com a seta para a direita.
+Tab passa pelos controles da janela.
+F1 abre este guia. Nele, escolha o assunto com as setas e aperte Enter para ir ao texto. Esc fecha o guia.
+Shift+F1 mostra um resumo das teclas.
+
+O TeleZapp é um software experimental, em desenvolvimento: pode ter erros, inclusive em mensagens e conversas. Use por sua conta e risco.
+
+Versão {{versao}}. Software livre, licença GNU GPL versão 3 ou posterior. Desenvolvido por Fábio Scheffer Moraes. Site e downloads: {{site}}
+
+# Instalar, cópia portátil e atualizar
+Ao abrir o arquivo baixado, a primeira tela tem os botões Instalar, Criar cópia portátil, Guia de uso e Fechar. No programa, os mesmos comandos ficam em Menu, Ferramentas: Instalar, Criar cópia portátil e Desinstalar.
+
+Na instalação, os dados ficam na pasta do seu usuário do Windows. Na cópia portátil, ficam na pasta dados, ao lado do programa.
+
+Ajuda, Verificar atualizações consulta as versões publicadas. Se houver uma nova, a janela mostra as novidades. Com Sim, o TeleZapp baixa o arquivo, confere, fecha e abre de novo já atualizado. Seus dados não são afetados.
+
+Uma cópia que não se atualiza sozinha mostra um botão que abre a página de download. Baixe o zip, feche o TeleZapp e troque a pasta do programa pela nova.
+
+Ao abrir, o TeleZapp avisa enquanto houver uma versão nova que você não instalou. Se você responder Não, ele pergunta o que fazer:
+Não me avise mais sobre essa versão: só volta a avisar quando sair outra.
+Talvez mais tarde: é o padrão, e a janela aparece de novo na próxima vez que você abrir o TeleZapp.
+
+Em Configurações, Atualizações, dá para desligar o aviso por completo. Ajuda, Verificar atualizações continua mostrando a janela quando você pedir.
+
+O TeleZapp também consulta de tempos em tempos enquanto está aberto. A caixa "Buscar atualizações periodicamente com o TeleZapp aberto" liga isso e depende de "Avisar quando houver versão nova do TeleZapp". A lista "Intervalo da busca por atualizações" escolhe 1, 6, 12 ou 24 horas. Durante uma chamada ou com outra janela aberta, a consulta espera 5 minutos e tenta de novo.
+
+# O menu
+Aperte Alt para abrir o Menu. Use a seta para baixo para percorrer, a seta para a direita para entrar num submenu, a seta para a esquerda para voltar e Esc para fechar.
+
+Os submenus, nesta ordem:
+Novo: tudo o que se cria. Nova mensagem, Nova chamada, Nova enquete, Novo contato, Novo status ou história, Nova conta, Novo grupo, Novo canal, Nova comunidade e Entrar em um grupo por link, que serve também para links de comunidade e de canal do WhatsApp.
+Ir para: a lista de conversas, a lista de mensagens, o campo editável (onde se escreve a mensagem), os filtros de serviço ou conta e de tipo de conversa, e a mensagem respondida.
+Mensagens, Conversas, Contatos, Chamadas e Mídias: os comandos de cada assunto.
+Exibir: o que as listas mostram e o que é falado.
+Ferramentas: Gerenciar contas, Reconectar as contas, Fazer backup, Restaurar backup, Configurações, Instalar, Criar cópia portátil, Desinstalar e Sair.
+Ajuda: o guia, as teclas de atalho, as novidades, Verificar atualizações, as pastas de logs e de sons, o submenu Depurar e Sobre.
+
+Para sair do programa, há também o botão Sair, logo depois do campo de busca, e Ctrl+Q.
+
+# Atalhos
+Esta é a lista de fábrica. Veja também o assunto Mudar os atalhos.
+
+Alt+1: lista de conversas.
+Alt+2: na lista de conversas, vai para a próxima conversa com mensagens não lidas; dentro da conversa, vai para o marcador de não lidas.
+Alt+3: lista de mensagens.
+Alt+4: filtro de serviço ou conta.
+Alt+5: filtro de tipo de conversa.
+Home e End: início e fim da lista.
+Ctrl+E: ir para a caixa de digitação.
+Ctrl+F: buscar conversa.
+Ctrl+N: nova mensagem.
+Ctrl+R: ouvir a última mensagem da conversa aberta.
+F5: atualizar a lista de conversas.
+Ctrl+I: detalhes da conversa selecionada.
+Delete: apagar a conversa ou a mensagem selecionada, sempre perguntando antes.
+Ctrl+Espaço: modo de seleção, nas duas listas.
+Tecla Aplicativos ou Shift+F10: menu do item selecionado.
+Alt+Enter: dados e texto completo da mensagem.
+F2: editar a mensagem de texto selecionada.
+Ctrl+Shift+R: responder.
+Ctrl+Shift+E: encaminhar.
+Ctrl+Shift+C: copiar o texto.
+Ctrl+Shift+G: reagir.
+Ctrl+Shift+F: favoritar ou desfavoritar.
+Ctrl+ponto: inserir emoji.
+F7: verificar a ortografia.
+Ctrl+V, na caixa de digitar: colar arquivos ou imagens.
+Ctrl+Enter: enviar a mensagem digitada.
+Ctrl+O: abrir a mídia.
+Ctrl+B: baixar a mídia sem abrir.
+Ctrl+Shift+A: anexar e enviar arquivo.
+Ctrl+Shift+M: gravar do microfone.
+Ctrl+Shift+S: gravar o som do computador.
+Ctrl+Shift+B: gravar o som do computador e o microfone.
+Ctrl+Shift+Seta para cima e para baixo: áudio mais rápido e mais lento.
+Ctrl+Shift+0: velocidade normal.
+Ctrl+Shift+Seta para a esquerda e para a direita: voltar e avançar 5 segundos.
+Ctrl+Shift+Page Up e Page Down: voltar e avançar 30 segundos.
+Ctrl+Shift+L: ligar para a conversa.
+Ctrl+Shift+J: mostrar a janela da chamada.
+Ctrl+Shift+K: silenciar ou ativar o microfone.
+Ctrl+Shift+H: desligar.
+Ctrl+Shift+U: novo status ou história.
+Ctrl+Shift+T: esconder as conversas trancadas.
+Ctrl+Shift+D: depurar a mensagem.
+Ctrl+vírgula: configurações.
+F1: este guia.
+Shift+F1: resumo das teclas.
+Ctrl+Q: sair.
+
+# Mudar os atalhos
+Quase toda função do menu tem uma tecla de atalho, e você pode mudar todas em Configurações, categoria Atalhos. Há uma busca por função ou por tecla e uma lista com a tecla de cada função.
+
+Enter na função abre a janela em que você aperta a combinação nova. Se ela já for de outra função, o programa avisa e pergunta se você quer substituir; a outra fica sem atalho.
+
+Também dá para remover o atalho de uma função e voltar ao padrão, de uma função ou de todas.
+
+Funções como pausar ou descartar a gravação por atalho nascem sem tecla: escolha uma nessa tela.
+
+Os atalhos personalizados entram no backup, na parte Configurações, e voltam na restauração.
+
+Em Configurações, "Mostrar as teclas de atalho nos controles" põe a tecla no nome dos botões e dos itens de menu. Desmarcada, os nomes ficam limpos e os atalhos continuam valendo.
+
+# Conta do Telegram
+Em Novo, Nova conta, escolha o Telegram. Informe o telefone, depois o código que o Telegram envia e, se existir, a senha da verificação em duas etapas.
+
+A versão empacotada do TeleZapp já leva as credenciais do programa no Telegram e não pede nada além do telefone e dos códigos.
+
+Se uma cópia vier sem elas, por exemplo rodando do código-fonte, na primeira conta do Telegram o TeleZapp pede o "api id" e o "api hash". Eles identificam o programa perante o Telegram, não a sua conta, e cada pessoa pode criar os seus de graça:
+Entre em my.telegram.org com o seu telefone.
+Abra "API development tools".
+Preencha o nome e um apelido do aplicativo; qualquer um serve, por exemplo TeleZapp.
+Copie o api id, só com números, e o api hash, uma sequência longa de letras e números.
+
+Eles ficam só neste computador, guardados uma vez.
+
+# Conta do WhatsApp
+Em Novo, Nova conta, escolha o WhatsApp. Escolha quanto histórico pedir ao celular e como parear. Os dois métodos estão em Aparelhos conectados, no WhatsApp do celular.
+
+Parear com número de telefone: digite o número em formato internacional, como +55 51 99999 8888, e depois o código de oito caracteres no celular.
+Parear via QR Code: o QR abre em tela cheia. Esc volta.
+
+Contas do aplicativo WhatsApp Business costumam entregar a computadores pareados bem menos histórico do que o WhatsApp comum, muitas vezes só a última mensagem de cada conversa, mesmo escolhendo o período total ao parear. Isso acontece também no WhatsApp Web oficial, então não é falha do TeleZapp nem se resolve repareando.
+
+Nessas contas, o item "Buscar mensagens que faltam no celular" também pode ficar sem resposta: depois de cerca de 45 segundos, o TeleZapp avisa que o celular não respondeu. As mensagens novas, recebidas depois do pareamento, chegam normalmente.
+
+# Mensagens que chegam com o programa fechado
+Ao reconectar, o WhatsApp entrega só a parte final delas, cerca das últimas horas. O resto fica só no celular.
+
+Por isso, ao terminar a sincronia, o TeleZapp pede sozinho ao celular, uma conversa de cada vez, as mensagens que ficaram faltando logo antes das entregues. Quando acha alguma, avisa "Busca automática: encontrei N mensagens que faltavam em ...". O celular precisa estar ligado e com internet.
+
+A caixa "Buscar sozinho as mensagens que faltam ao reconectar" está em Configurações, Mensagens.
+
+Uma conversa que não recebeu nenhuma mensagem atrasada não dispara a busca. Para ela, use "Buscar mensagens que faltam no celular".
+
+# Gerenciar contas
+Em Ferramentas, Gerenciar contas mostra a lista das contas, cada uma com uma caixa. Marcada, a conta fica conectada; desmarcada, ela não conecta e só mostra o que já está guardado. Espaço marca e desmarca.
+
+Com uma conta em foco, Tab leva aos botões Excluir e Renomear.
+
+Excluir: apaga a sessão e as conversas guardadas daquela conta neste computador. Nada é apagado nos serviços.
+Renomear: dá à conta um nome seu, que vale nas listas e nos filtros.
+
+# Editar o meu perfil
+Ferramentas, "Editar o meu perfil" lê o perfil da conta e abre uma janela com o nome, o recado e, no Telegram, o sobrenome. Se houver mais de uma conta conectada, você escolhe qual.
+
+Mude o que quiser e use "Escolher foto nova" para trocar a foto. Qualquer imagem JPG, PNG, BMP ou WebP serve: o TeleZapp recorta o centro em quadrado e ajusta o tamanho.
+
+O TeleZapp envia só o que você mudou. A alteração vale na conta, então aparece também no celular e para os seus contatos. Se o serviço não aceitar uma parte, o TeleZapp diz qual.
+
+Limites:
+WhatsApp: 25 caracteres no nome e 139 no recado.
+Telegram: 64 no nome e no sobrenome e 70 no recado, ou 140 com Premium.
+
+Por enquanto, não dá para remover a foto por aqui.
+
+# A janela principal
+Ao abrir o TeleZapp, o foco vai para o início da lista de Conversas. A lista sempre começa no topo, mas dentro de cada conversa o TeleZapp lembra onde você parou.
+
+Sem conversa aberta, só a lista de Conversas aparece. Enter abre a conversa e leva você à lista de Mensagens. Com a conversa aberta, a caixa para escrever fica logo abaixo das mensagens. Esc fecha a conversa e esconde as duas.
+
+Se a conversa tem mensagens não lidas, ela abre com o foco no marcador, mesmo que seja só uma. Sem não lidas, reabre no ponto em que você parou, ou na última mensagem, se parou no fim. Alt+2 leva ao marcador de não lidas.
+
+Com uma conversa aberta, o título da janela mostra o status da pessoa depois do nome: online, visto por último ou digitando. A opção está em Configurações, Interface: "Mostrar status de presença no título da janela".
+
+Os avanços longos abrem uma janela com uma barra de progresso, que o leitor de tela acompanha: atualizar o TeleZapp, instalar, criar cópia portátil, fazer e restaurar backup, baixar uma mídia que você pediu e enviar um arquivo grande.
+
+O download e o envio só abrem a janela se passarem de um segundo. O download pode ser cancelado ali, também com Esc. Dá para desligar isso para as transferências em Configurações, Mídias.
+
+O TeleZapp não fala a porcentagem. Se a barra fala, bipa, faz os dois ou fica quieta é a configuração de barras de progresso do leitor de tela. A janela só diz a etapa, e a etapa é falada quando muda.
+
+# Selecionar várias conversas ou mensagens
+Ctrl+Espaço, na lista de conversas ou na de mensagens, liga o modo de seleção e já marca o item em foco.
+
+Depois, Espaço marca ou desmarca os outros itens. O leitor de tela diz "Marcada" e quantas há.
+
+A tecla Aplicativos ou Shift+F10 mostra as ações para todos os marcados:
+Nas conversas: arquivar, fixar, silenciar, marcar como lidas e apagar.
+Nas mensagens: favoritar, copiar o texto e apagar.
+
+Esc desfaz as marcas e sai do modo.
+
+# Digitar numa lista
+Por padrão, digitar uma letra na lista de conversas ou na de mensagens leva o foco ao próximo item que começa com ela.
+
+Em Configurações, Interface, "Ao digitar uma letra numa lista" troca isso. Com "Ir direto para o campo de texto", a letra vai para o campo de escrever a mensagem, na lista de mensagens com uma conversa aberta, ou para o campo de busca de conversas, na lista de conversas. O foco vai junto.
+
+Teclas com Ctrl ou Alt, Espaço e as setas não são afetadas.
+
+# O que a lista de conversas mostra
+Cada linha pode mostrar estas informações:
+O nome da conversa.
+O serviço a que ela pertence.
+A quantidade de mensagens não lidas.
+O autor da última mensagem, só nos grupos: "Você" ou o nome de quem enviou.
+O trecho da última mensagem, fora dos grupos, com "Você:" se foi sua.
+As reações novas às suas mensagens, desde que você abriu a conversa pela última vez, enquanto o TeleZapp está aberto.
+Quem reagiu e com qual emoji.
+
+Por padrão, aparecem as três primeiras, nesta ordem, e as outras vêm desligadas. Se a conversa estiver fixada ou silenciada, isso é dito sempre, logo depois do serviço.
+
+Para mudar, abra Configurações, categoria Interface, botão "Lista de conversas". Enter ou Espaço ativa e desativa o item em foco, e o TeleZapp fala "ativado" ou "desativado". Os botões "Mover para cima" e "Mover para baixo" mudam a ordem. "Restaurar o padrão" volta ao começo. Pelo menos um item fica sempre ativado. As mudanças só valem ao apertar OK ou Aplicar.
+
+O mesmo está no menu Exibir, submenu "Lista de conversas": uma caixa de marcar para cada informação e "Ordem das informações". Ali as mudanças valem na hora.
+
+A escolha entra no backup, junto com as configurações.
+
+# O que a lista de mensagens mostra
+Cada linha junta várias informações: quem enviou, a hora, o conteúdo, as marcas (editada, apagada pelo autor, favorita, temporária), o aviso de links, botões e opções, a prévia do link, a transcrição ou descrição feita pela inteligência artificial, as reações, "em resposta a" e o estado das suas mensagens (enviada, entregue, lida). Você escolhe quais aparecem e em que ordem.
+
+Para mudar, abra Configurações, categoria Mensagens, botão "Lista de mensagens", ou o menu Exibir, submenu "Lista de mensagens". Funciona como na lista de conversas: Enter ou Espaço ativa e desativa, "Mover para cima" e "Mover para baixo" mudam a ordem, "Restaurar o padrão" volta ao que era, e pelo menos um item fica ativado.
+
+Quem enviou e a hora, quando estão no começo da linha, vêm juntos antes de dois pontos, como "Ana, 10:00: oi". Em qualquer outro lugar, entram na sequência, separados por vírgula.
+
+A caixa "Mostrar o nome de quem enviou só quando muda" esconde o nome quando a mensagem anterior é da mesma pessoa.
+
+Quem usava um dos três estilos antigos ficou com a lista equivalente. A escolha entra no backup, junto com as configurações. Só a linha da lista muda: a fala de uma mensagem nova e a janela de detalhes continuam completas.
+
+Em Exibir, você também liga ou desliga o som e a fala das mensagens novas.
+
+# Ler mensagens
+Na lista de conversas, Enter abre a conversa e leva você às mensagens: ao item Início das mensagens não lidas, se houver, ou à última mensagem. O leitor de tela fala esse item uma vez só, com a contagem, e a seta para baixo lê a primeira mensagem não lida. Esc fecha a conversa e volta para as conversas.
+
+Enter numa mensagem de texto abre o texto numa caixa somente leitura, com os botões Copiar texto e Fechar. Esc também fecha.
+
+Ctrl+R ouve a última mensagem da conversa aberta.
+
+Uma resposta mostra, depois do texto dela, um trecho da mensagem original: a resposta, em resposta a Ana: "o texto da mensagem". Se a original é muito antiga e não está guardada, a linha diz que é uma resposta a uma mensagem mais antiga.
+
+No menu de contexto de uma resposta, e em Ir para, o item "Ir para a mensagem respondida" leva a seleção até a mensagem original. Esc volta para a resposta de onde você saiu, e um novo Esc fecha a conversa.
+
+Na categoria Mensagens das Configurações, "Ocultar o telefone de remetentes sem nome" faz a mensagem de quem não tem nome começar direto pelo conteúdo, sem o número. Ele continua nos detalhes e nas conversas salvas.
+
+# Dados de uma mensagem
+Alt+Enter mostra, num texto que você lê com as setas, a conversa, o autor, a data, o tipo e o texto completo.
+
+Nas mensagens que você enviou pelo WhatsApp, aparece também quando cada pessoa recebeu e leu. No Telegram, em grupos, só se sabe até que mensagem alguém leu, sem a hora.
+
+Enter numa mensagem com mídia abre a mídia e toca áudio e vídeo, mesmo com link na legenda.
+
+Enter numa pessoa mencionada fecha a janela e abre a conversa com ela, no mesmo serviço e na mesma conta da mensagem. Se não existia conversa, ela abre vazia e só passa a existir quando você enviar a primeira mensagem.
+
+Cada pessoa mencionada aparece com o nome primeiro, depois o @usuario e, por último, o telefone. No WhatsApp, o nome vem da sua agenda; sem ele, do perfil da pessoa; sem ele, do nome verificado da empresa.
+
+# Links e botões
+Quando a mensagem tem links no texto ou na legenda, ou botões que abrem um endereço, como em canais do Telegram, a linha avisa "com N links (Tab)".
+
+Com a mensagem selecionada:
+Tab vai ao primeiro, e Tab de novo ao próximo.
+Espaço ou Enter abre no navegador.
+Shift+Tab volta.
+
+Os botões vêm depois dos botões de resposta. Vale para texto e para foto, vídeo, áudio e documento. São até 12 por mensagem; a lista completa está nos detalhes (Alt+Enter).
+
+Nos detalhes, os links ficam numa lista logo depois do texto: as setas passam de um a outro, e Enter ou Espaço abre no navegador padrão do Windows. Só endereços http e https são abertos. A lista mostra o texto visível e o endereço real, para você saber para onde o link leva, inclusive quando ele está escondido atrás de um texto. Na mesma janela aparecem, quando existirem, as listas Botões de link e Pessoas mencionadas.
+
+Mensagens de empresas do WhatsApp com botões de resposta, como "Sim" e "Não", ou listas de opções avisam na linha da mensagem, por exemplo "com 2 botões (Tab)". Com a mensagem selecionada, Tab vai ao primeiro botão, Tab de novo ao próximo, e Espaço ou Enter toca, sem pedir confirmação. O TeleZapp fala "Enviado" ou "Não foi possível enviar".
+
+Se houver mais de 12 opções, as demais ficam em Enter na mensagem, na lista Botões de resposta e opções dos detalhes. A resposta da empresa chega como uma mensagem nova, com os próximos botões. Botões de pagamento ainda não podem ser tocados.
+
+# Escrever e enviar mensagens
+Na caixa de digitação, Enter envia e Shift+Enter faz uma nova linha. Ctrl+Enter também envia.
+
+Para que só Ctrl+Enter envie e Enter faça uma nova linha, desmarque "Enter na caixa de digitar envia a mensagem", em Configurações, Mensagens. A tecla de enviar também pode ser trocada em Atalhos, na função "Enviar a mensagem digitada".
+
+Esc fecha a conversa, e o que você digitou e não enviou fica guardado como rascunho.
+
+Para responder a uma mensagem, selecione-a e use Ctrl+Shift+R. Esc cancela a resposta.
+
+Em grupos, digitar @ no começo da mensagem ou depois de um espaço abre a lista de membros para mencionar. Digite para filtrar, e Enter escolhe.
+
+Ctrl+V na caixa cola arquivos copiados no Explorer ou imagens. Eles esperam o Enter, e o texto da caixa, escrito antes ou depois da colagem, vira a legenda. Esc remove a mídia colada.
+
+Com uma conversa aberta, o botão "Iniciar chamada", depois de "Anexar e enviar arquivo", pergunta se a chamada é de áudio ou de vídeo. Esc sai sem ligar. Se a conta não fizer vídeo, só a chamada de áudio aparece.
+
+# Ações em uma mensagem
+A tecla Aplicativos ou Shift+F10 abre o menu da mensagem selecionada.
+
+Editar: F2, se a mensagem de texto for sua e estiver dentro do prazo: 15 minutos no WhatsApp, 48 horas no Telegram. Enter salva a edição e Esc cancela.
+Encaminhar: Ctrl+Shift+E, para a mensagem selecionada ou as marcadas no modo de seleção. Escolha as conversas e contatos na janela de busca. A mídia precisa já estar baixada.
+Copiar: Ctrl+Shift+C copia o texto. O menu de contexto tem um item de cópia para cada tipo de conteúdo, como legenda, foto, vídeo e link.
+Copiar a transcrição ou descrição: no menu Mensagens, copia o texto que a IA fez da mídia. Vem sem tecla; escolha uma em Configurações, Atalhos.
+Responder em particular: no menu de contexto de uma mensagem de outra pessoa num grupo, abre a conversa particular com ela e cita a mensagem do grupo na resposta. É do WhatsApp.
+Apagar: Delete, sempre perguntando antes.
+
+# Fixar mensagens e silenciar participantes
+"Fixar ou desafixar a mensagem", no menu Mensagens e no menu de contexto, fixa a mensagem na conversa para todos, no WhatsApp e no Telegram.
+
+No WhatsApp, você escolhe por quanto tempo: 24 horas, 7 dias ou 30 dias. Cada conversa tem no máximo 3 fixadas, e a mais antiga dá lugar à nova. Em grupos e canais, o serviço pode exigir que você seja administrador.
+
+A mensagem fixada aparece com a marca "(fixada)". O botão "Mensagens fixadas", nos detalhes da conversa (Ctrl+I), lista as fixadas daquela conversa.
+
+Em um grupo, "Silenciar participante", no menu de contexto de uma mensagem, esconde as mensagens dessa pessoa na lista daquele grupo e tira os sons e avisos delas. Vale só neste computador: a pessoa e o grupo não ficam sabendo, e as mensagens continuam guardadas.
+
+O botão "Participantes silenciados", nos detalhes do grupo (Ctrl+I), lista quem foi silenciado. Enter na pessoa volta a mostrar as mensagens dela, inclusive as anteriores. As mensagens ainda aparecem na busca, nas mídias dos detalhes e na conversa salva.
+
+# Reações, edições e mensagens apagadas
+Quando alguém reage a uma mensagem, a reação aparece no fim da linha dela, por exemplo "reações: 👍 de Ana". Com mais de três, só a contagem, e os detalhes (Alt+Enter) listam todas.
+
+Se a reação for a uma mensagem sua, o TeleZapp também fala quem reagiu, com qual emoji e o começo da mensagem. Essa fala pode ser desligada em Configurações, categoria Avisos, "Falar reações às minhas mensagens".
+
+Para reagir, use Ctrl+Shift+G com a mensagem selecionada ou "Reagir..." no menu de contexto. Escolha um dos emojis da lista curta, "Outro emoji..." para buscar pelo nome ou "Tirar a minha reação".
+
+Uma mensagem editada mostra o texto novo e termina com "(editada)". Uma mensagem apagada para todos pelo autor passa a ser lida como "mensagem apagada". Isso só vale para mensagens que o TeleZapp já tinha guardado.
+
+# Emojis
+Ctrl+ponto insere um emoji na mensagem. Digite parte do nome, como joinha, coração ou bolo, desça com a seta e aperte Enter.
+
+A busca também acha por sinônimos e termos equivalentes: "kkk" ou "gargalhada" acham 😂 e 🤣, "aniversário" acha 🎂 e "tchau" acha 👋. Não precisa de acento, o plural vale, e várias palavras estreitam o resultado, como rosto chorando. Quem casa com o nome vem antes de quem casa só por um sinônimo.
+
+Nos emojis que têm tons de pele, como joinha, mão e pessoas, as setas para a esquerda e para a direita trocam o item pelo tom anterior ou pelo próximo: primeiro o emoji sem tom, depois do mais claro ao mais escuro, e de volta ao começo. O leitor de tela diz qual tom ficou. Isso vale na lista curta de reações e na busca de emojis, e Enter escolhe o que estiver na tela.
+
+# Corretor ortográfico
+Com texto na caixa de digitar, aperte F7 ou use o menu Mensagens, "Verificar ortografia da mensagem".
+
+A janela fala a palavra com erro e o número de sugestões. Escolha uma na lista, ou digite no campo "Trocar por", e aperte Enter para trocar. Os outros botões trocam todas as iguais, ignoram a palavra, uma vez ou sempre, ou a adicionam ao dicionário do Windows.
+
+O dicionário é o do idioma escolhido em Configurações, categoria Escrita. A opção "Avisar de erros de ortografia ao enviar" pergunta antes de enviar uma mensagem com palavras erradas.
+
+# Enviar localização e contatos
+"Enviar a minha localização...", no menu Mensagens, envia onde o computador está para a conversa aberta, no WhatsApp e no Telegram. O TeleZapp diz a precisão e pede confirmação.
+
+Sem localizador, ou com a localização bloqueada no Windows, ele avisa e deixa digitar a latitude e a longitude. A posição vem do Windows, muitas vezes pelo Wi-Fi, e pode não ser exata. É um ponto fixo, não a localização em tempo real.
+
+"Enviar contatos...", no mesmo menu, envia cartões de contato para a conversa aberta. Digite para buscar na sua agenda e marque com Espaço quem vai no envio; só aparece quem tem telefone.
+
+Para quem não está na agenda, use "Digitar um contato...": o nome e o telefone valem só para aquele envio.
+
+No WhatsApp, os marcados vão juntos em uma mensagem. No Telegram, vai uma mensagem para cada contato.
+
+# Robôs do Telegram
+"Comandos do robô...", no menu Conversas e no menu de contexto da conversa, lista os comandos do robô da conversa, ou dos robôs do grupo, com a descrição de cada um. Ao escolher, o comando é enviado na conversa. Se houver algo escrito na caixa de mensagem, envie ou apague primeiro.
+
+A mesma lista traz o botão de menu do robô, as respostas do teclado dele e a política de privacidade, quando existem. Uma barra digitada na caixa vazia também mostra os comandos do robô.
+
+Os botões das mensagens de robôs aparecem depois da lista de mensagens, com Tab. A resposta do robô é falada, e o botão de copiar copia o texto.
+
+Aplicativos de robô abrem em uma janela própria do TeleZapp, com os botões do aplicativo depois da página, alcançáveis com Tab. Se o Windows não tiver o componente WebView2, abrem no navegador.
+
+Compartilhar telefone, enviar localização, entrar em sites e pagar sempre pedem a sua confirmação antes, e o pagamento mostra o valor. A localização vem do localizador do computador; sem ele, o TeleZapp avisa e deixa digitar a latitude e a longitude.
+
+Aplicativos de robô podem pedir a biometria do Windows e a sua localização, sempre com a sua autorização. A localização não fica guardada.
+
+Se o vendedor pedir nome, telefone, e-mail ou endereço, o TeleZapp abre uma janela com esses campos, já preenchidos com o que o Telegram tiver salvo.
+
+Botões marcados "só no aplicativo oficial" não funcionam no TeleZapp.
+
+# Abrir links do Telegram e do WhatsApp
+Links como t.me e wa.me abrem no TeleZapp quando há uma conta conectada do serviço.
+
+O TeleZapp também aparece entre as opções do Windows para abrir links tg:// e whatsapp://. Para que ele seja o escolhido, use Configurações do Windows, Aplicativos padrão. A opção "Oferecer o TeleZapp para abrir links do Telegram e do WhatsApp" fica em Configurações, Sistema.
+
+Um link com texto só preenche a caixa de mensagem: nada é enviado sem você mandar.
+
+# Busca por critérios
+O botão "Busca por critérios", entre o campo de busca e o botão Sair, e o item de mesmo nome no menu Conversas abrem uma janela para achar mensagens guardadas neste computador.
+
+Cada critério tem uma caixa de marcar. Ao marcar, os campos dele ficam disponíveis, e só os critérios marcados valem. Todos os marcados valem juntos. Dentro de uma lista, basta uma opção, exceto em "Situação da conversa", "Características da mensagem" e "Mensagens enviadas", em que todas as marcadas precisam valer.
+
+Critérios:
+Texto: sem diferença de maiúsculas e acentos, todas as palavras em qualquer ordem, ou só a frase exata. Vale para o texto, a legenda, o nome do arquivo, a transcrição ou descrição feita por IA e as opções de uma enquete.
+Serviço e conta.
+Tipo de conversa: pessoa, grupo, canal.
+Situação da conversa: arquivada, fixada, silenciada, com não lidas, trancada, com mensagens temporárias, somente leitura.
+Parte do nome da conversa.
+Tipo de mensagem: texto, foto, vídeo, voz, áudio, documento, figurinha, enquete, outros.
+Características da mensagem: favorita, com mídia, com link, com menção, é resposta, com reações, cita você, editada, apagada pelo remetente, áudio ouvido ou não ouvido, com botões, temporária, com transcrição ou descrição de IA.
+Quem enviou: você ou outras pessoas, e parte do nome de quem enviou.
+Período: de e até, com dia, mês e ano.
+Duração de áudio, voz ou vídeo.
+Tamanho do arquivo em MB.
+Estado das suas mensagens enviadas: enviada, entregue, lida, ouvida, falhou.
+
+Buscar mostra até 500 resultados na lista de baixo, das mais novas para as mais antigas, ou ao contrário, pela lista Ordem. Cada linha diz a conversa, o dia e a hora, a conta, quem enviou e um trecho.
+
+Enter, ou Ver na conversa, fecha a janela e abre a conversa na mensagem. Limpar critérios desmarca tudo. A janela lembra a última busca ao abrir de novo.
+
+Conversas trancadas só entram na busca depois de você digitar o código secreto na busca de conversas.
+
+# Detalhes da conversa
+Ctrl+I abre os detalhes da conversa selecionada: pessoa, grupo ou canal. Esc volta de cada lista para a janela de detalhes.
+
+Numa conversa do WhatsApp que só mostra o telefone, o TeleZapp procura o nome na rede ao abrir os detalhes e, se achar, já o põe na lista.
+
+A janela traz:
+Dados e uso de espaço.
+Mídias, com filtro por tipo.
+Baixar as mídias que faltam: avisa o que vai fazer e baixa de uma vez as mídias da conversa que ainda não estão neste computador, com barra de progresso, resumo no fim e Cancelar. Algumas podem não estar mais disponíveis nos servidores do WhatsApp.
+Membros e grupos em comum.
+As mensagens favoritas e as fixadas da conversa.
+Limpar a conversa: a janela de limpeza só dessa conversa.
+Para administradores de grupo do WhatsApp, as ferramentas de administração.
+
+Salvar o conteúdo da conversa, no menu de contexto da conversa ou em Conversas, grava um .zip com o texto das mensagens e as mídias já baixadas.
+
+# Abrir fotos, vídeos, áudios e documentos
+Numa mensagem com mídia, Enter ou Ctrl+O abre a mídia dentro do TeleZapp. Se ela ainda não foi baixada, o TeleZapp baixa primeiro e avisa o andamento pelo leitor de tela. Esc cancela. Ctrl+B baixa sem abrir.
+
+Fotos e figurinhas aparecem numa janela com a descrição.
+
+Áudios, mensagens de voz e vídeos em janela têm estes comandos:
+Espaço: toca e pausa.
+Seta para a direita: avança 5 segundos.
+Seta para a esquerda: volta 5 segundos.
+Shift mais seta: 30 segundos.
+Home: volta ao início.
+Esc: fecha.
+
+Textos pequenos são mostrados na própria janela. Outros documentos têm o botão Abrir com o programa do Windows, que é a única forma de sair do TeleZapp; o arquivo continua na pasta do programa.
+
+Quando termina um download de documento que você pediu, abre uma janela com Abrir, Ver na pasta, Salvar e Fechar. Esc fecha.
+
+Em Mensagens, "Salvar a mídia em um arquivo" grava a mídia onde você escolher, sem mexer na área de transferência.
+
+O Enter numa mídia pode ser configurado em Configurações, Mídias: abrir ou reproduzir, só baixar, ou transcrever, descrever ou converter com a inteligência artificial. No menu de contexto da mensagem, essa ação é o primeiro item.
+
+# Ouvir áudios e mensagens de voz
+O padrão é só tocar, sem abrir janela: Enter de novo na mesma mensagem pausa e continua, e Esc para o áudio. Se preferir o player em janela, com avançar, voltar e posição, mude em Mídias, "Ao tocar um áudio". Formatos que o TeleZapp não toca sozinho, como m4a, sempre abrem a janela.
+
+Quando um áudio termina, por padrão o próximo da conversa toca em seguida, baixando antes, se precisar. O leitor de tela fala "Próximo áudio" com o nome de quem enviou. Esc para tudo.
+
+Em Mídias, "Sequência de áudios" oferece três comportamentos:
+Tocar todos os áudios da conversa em sequência: é o padrão e pula as mensagens que não são áudio.
+Tocar só os áudios seguidos: para na primeira mensagem que não for áudio. Com três áudios, um texto e mais dois áudios, toca os três primeiros e para antes do texto.
+Parar quando o áudio terminar.
+
+A sequência só vale para o modo sem janela.
+
+# Velocidade do áudio
+Áudios e mensagens de voz tocam de 0,25x até 3x sem mudar o tom da voz. A mudança vale na hora, até para o áudio que está tocando, e o leitor de tela fala, por exemplo, "Velocidade 1,5x".
+
+Em Mídias:
+Áudio mais rápido: Ctrl+Shift+Seta para cima.
+Áudio mais lento: Ctrl+Shift+Seta para baixo.
+Velocidade normal: Ctrl+Shift+0.
+Escolher a velocidade do áudio: abre uma lista.
+
+No player em janela, os botões Mais rápido e Mais lento e as teclas + e - fazem o mesmo.
+
+Para voltar e avançar no áudio que toca ao fundo:
+Ctrl+Shift+Seta para a esquerda e para a direita: 5 segundos.
+Ctrl+Shift+Page Up e Page Down: 30 segundos.
+
+O leitor de tela fala em que ponto o áudio ficou.
+
+O passo é ajustável em Mídias, "Quanto a velocidade muda a cada vez": de 0,25 em 0,25 (0,25x a 3x), de 0,5 em 0,5 (0,5x a 3x) ou de 1 em 1 (1x, 2x e 3x). Ao trocar o passo, a velocidade vai para o valor mais próximo que ele permite.
+
+A velocidade vale para todos os áudios e fica guardada. Em vídeos, e em áudios que abrem pelo player do Windows, como m4a, o tom pode acompanhar a velocidade.
+
+# Baixar sozinho ou sob demanda
+No menu Mídias, você escolhe: baixar só quando você abrir, ou automaticamente ao receber, até um limite de tamanho que você define: 5, 10, 20, 50 ou 100 MB.
+
+Mídias maiores que o limite de confirmação perguntam antes de baixar.
+
+"Ver quanto espaço as mídias ocupam" fala o total.
+
+# Dispositivos de som
+Em Mídias, "Dispositivos de som (saída e microfone)" abre uma janela com três listas. Cada uma começa por "Padrão do Windows", que segue o que o Windows estiver usando.
+
+Saída de som: alto-falantes ou fone.
+Microfone.
+Saída dos sons de aviso do TeleZapp: mensagem nova, enviada, toque de chamada, bipes e os arquivos de som que você escolheu em Sons. Por exemplo, para ouvi-los num alto-falante e deixar os áudios e a chamada no fone.
+
+Ao dar OK, a escolha vale para tocar áudios e mensagens de voz, para Gravar do microfone, para Gravar som do computador, que captura a saída escolhida, e para as chamadas de voz. Ela fica guardada.
+
+Durante uma chamada, a mesma janela ou as listas da janela da chamada trocam o dispositivo na hora.
+
+Se o dispositivo escolhido for desligado, o TeleZapp volta a usar o padrão do Windows. Esse item nasce sem atalho de teclado; para dar um, use Configurações, Atalhos.
+
+# Enviar arquivos
+Com uma conversa aberta, depois do botão Enviar há três botões: Anexar e enviar arquivo, Gravar do microfone e Gravar som do computador.
+
+Anexar e colar seguem regras diferentes.
+
+Anexar e enviar arquivo (Ctrl+Shift+A) abre a janela de arquivos do Windows e envia na hora. Todo arquivo vai como documento, do jeito que está: foto, vídeo e áudio chegam como arquivo para baixar e abrir.
+
+Colado na caixa com Ctrl+V, o arquivo vai como mídia:
+Foto JPG, PNG e WEBP e vídeo MP4, MOV, M4V e 3GP vão como estão.
+BMP e GIF parado viram PNG.
+WAV e FLAC viram áudio Ogg/Opus, porque o WhatsApp não toca esses formatos.
+Quando não dá para converter, como HEIC, GIF animado ou vídeo MKV, uma janela avisa que o arquivo será enviado como documento.
+
+O limite é 2 GB. Se a caixa de digitação tem texto, ele vai como legenda de foto, vídeo e documento. Vídeos em HEVC (H.265) são enviados, mas o TeleZapp avisa que podem não tocar em todos os celulares.
+
+Enquanto envia, a mensagem aparece como "enviando" na lista. Ao terminar, o TeleZapp toca o som de enviada; se falhar, fala o motivo. A mídia enviada fica guardada no programa e abre sem baixar.
+
+Com uma resposta em andamento (Ctrl+Shift+R), a mídia enviada cita a mensagem respondida.
+
+# Gravar voz e som
+Há dois jeitos de gravar.
+
+Pelo atalho, um aperto começa a gravar, depois de um bipe, e o aperto seguinte para e já envia a nota de voz, sem janela. Esc descarta.
+Ctrl+Shift+M: microfone.
+Ctrl+Shift+S: som do computador.
+Ctrl+Shift+B: som do computador e microfone juntos.
+
+Pelo botão, com Enter ou Espaço em Gravar do microfone ou Gravar som do computador, ou pelos itens "em uma janela" do menu Mídias, abre uma janela para controlar a gravação.
+
+A janela abre pronta, com o foco em Gravar. A gravação só começa quando você aperta Enter nele, depois de um bipe.
+Gravando: o foco fica em Parar de gravar, e o botão Pausar vira Continuar. O trecho da pausa não entra na gravação.
+Depois de parar: Enviar, Ouvir, Gravar de novo, que volta ao início sem começar sozinho, e Descartar.
+Esc descarta em qualquer momento.
+
+Gravar do microfone usa o microfone escolhido em Dispositivos de som. Gravar som do computador captura tudo o que a saída de som está tocando: um vídeo, uma chamada e também a fala do leitor de tela.
+
+Na janela do som do computador, a caixa "Gravar também o microfone" já vem marcada; isso muda em Configurações, Mídias. O que o computador toca e o que você fala entram juntos na mesma mensagem de voz, e dá para ligar e desligar o microfone até durante a gravação. Se o computador não tem microfone, o TeleZapp avisa e grava só o som.
+
+Se a gravação sair quase em silêncio, o TeleZapp avisa antes de você enviar. Ela vai como mensagem de voz, em Ogg/Opus.
+
+# Chamadas de voz
+As chamadas são feitas em conversas com uma pessoa, não em grupos nem canais. Use fones de ouvido, para a voz da outra pessoa não voltar pelo microfone.
+
+Ligar: abra ou selecione uma conversa e use Chamadas, Ligar para esta conversa (Ctrl+Shift+L). O TeleZapp fala "Chamando" e o nome, toca um som grave de espera e abre a janela da chamada, com o foco em Desligar. Quando a pessoa atende, ouve-se um som de conectado e a fala diz "Conectado com" o nome. Se ela não atender, recusar ou estiver ocupada, o TeleZapp diz o que aconteceu e a janela fica com o botão Fechar.
+
+Receber: o TeleZapp fala "Chamada de" e o nome, toca um som repetido e abre uma janela com o foco no botão Atender. Enter atende e Esc recusa; Tab vai para Recusar. Se você estiver em outra chamada, a nova é recusada sozinha.
+
+Durante a chamada, a janela tem os botões Silenciar o microfone, que vira Ativar o microfone, Tempo de chamada, que fala há quanto tempo vocês falam, e Desligar, além das listas Microfone e Saída de som, que valem na hora.
+
+Esc não desliga uma chamada que já começou, para não encerrar sem querer: ele só lembra do botão Desligar.
+
+Com a janela principal em foco, os mesmos comandos estão em Chamadas:
+Mostrar a janela da chamada: Ctrl+Shift+J.
+Silenciar ou ativar o microfone: Ctrl+Shift+K.
+Falar há quanto tempo a chamada dura.
+Desligar: Ctrl+Shift+H.
+
+Fechar o TeleZapp com uma chamada aberta pede confirmação.
+
+O som de chamada pode ser desligado em Configurações, categoria Sons, desativando os eventos "toque de chamada recebida" e "tom de chamada feita". A fala continua avisando.
+
+# Chamadas de vídeo
+No WhatsApp e no Telegram, em conversas com uma pessoa, Chamadas, "Ligar com vídeo" liga com a sua câmera ligada. Ele vem sem tecla de fábrica; dê uma em Configurações, Atalhos.
+
+Quando alguém liga por vídeo, o TeleZapp fala "Chamada de vídeo de" e o nome. Atender começa só com o áudio e o vídeo da outra pessoa: a sua câmera fica desligada, a não ser que a opção "Ligar a câmera ao atender uma chamada de vídeo" (Configurações, Mídias) esteja marcada.
+
+Durante a chamada, a janela tem o botão da câmera (Ligar a câmera, Desligar a câmera ou, numa chamada só de voz, "Passar para vídeo (ligar a câmera)"), a lista Câmera e, quando a outra pessoa manda vídeo, uma imagem dela. O mesmo comando existe em Chamadas, "Ligar ou desligar a câmera".
+
+O leitor de tela diz quando a chamada passa para vídeo e quando a outra pessoa liga ou desliga a câmera. Se ela pedir para passar a chamada para vídeo, o TeleZapp aceita, com a sua câmera como estava.
+
+O vídeo usa até 640 por 360 pontos e de 10 a 15 quadros por segundo. No Telegram, se o outro lado ficar alguns segundos sem mandar imagem, o TeleZapp entende que ele desligou a câmera. Chamadas de vídeo em grupo ainda não existem.
+
+# Enquetes
+Uma enquete aparece na lista de mensagens assim: "enquete: pergunta, 3 opções, 5 votos, seu voto: Sexta (Enter para ver e votar)".
+
+Enter na enquete, ou Mensagens, "Ver e votar na enquete", abre uma janela com a pergunta, a lista de opções com os votos e a porcentagem de cada uma, e os botões Votar, Tirar meu voto, Atualizar, Ver quem votou e Fechar.
+
+Marque a opção com Espaço e aperte Votar. Numa enquete de uma resposta só, marcar uma desmarca a outra. Nas de várias respostas, o limite é o da própria enquete.
+
+No WhatsApp, o resultado é a soma dos votos que o TeleZapp recebe. Votos dados com o TeleZapp fechado chegam quando ele conecta de novo e entram na contagem. Votos de enquetes que chegaram antes do pareamento, ou que o WhatsApp já não guarda, não dá para ler, e a contagem pode ficar menor que a do celular.
+
+No Telegram, o resultado vem do próprio serviço, que só mostra os números depois que você vota. "Ver quem votou" só mostra nomes nas enquetes que não são anônimas.
+
+Para criar, com a conversa aberta, use Novo, "Nova enquete...". Escreva a pergunta, digite cada opção e aperte Enter para acrescentá-la à lista.
+WhatsApp: de 2 a 12 opções.
+Telegram: de 2 a 10 opções.
+Cada opção tem até 100 letras, e a pergunta, até 255.
+
+Remover tira a opção selecionada, e Mover para cima e para baixo mudam a ordem. "Permitir várias respostas" deixa cada pessoa marcar mais de uma opção. No Telegram, "Votos anônimos", ligado de início, esconde quem votou, e em canais as enquetes são sempre anônimas. O botão Criar só liga com a pergunta e as opções válidas.
+
+# Nova mensagem e contatos
+Novo, Nova mensagem pergunta só para quem; a conta aparece se houver mais de uma. Digite um nome para buscar nos contatos e conversas, um telefone ou um @usuário do Telegram, e escolha na lista com Enter.
+
+O telefone vai no formato internacional, como +55 51 99999 8888. No Brasil, só o DDD e o número também serve, e o TeleZapp põe o +55.
+
+O TeleZapp abre a conversa e leva você à caixa de digitar. A mensagem se escreve e se envia como qualquer outra.
+
+A caixa Mostrar, acima do campo Para, escolhe o que a lista traz: contatos, conversas e grupos, que é o padrão, só contatos, só conversas ou só grupos. Os grupos de que a conta participa aparecem mesmo sem conversa guardada. Nova chamada usa a mesma escolha, só com pessoas, e liga na hora.
+
+Em Contatos, Gerenciar contatos há um campo de busca no alto. Digite parte do nome ou do telefone, sem se preocupar com acento ou maiúscula. Seta para baixo leva ao primeiro contato encontrado.
+
+A caixa "Ocultar contatos duplicados" esconde as repetições, inclusive a mesma pessoa em várias contas: o mesmo telefone, ou o mesmo nome quando uma das cópias não tem telefone. Ela vale também em Nova mensagem e Nova chamada e pode ser mudada em Configurações, Interface.
+
+A caixa "Obter os contatos das contas ao abrir o TeleZapp" vem marcada. Ao conectar cada conta, o TeleZapp copia para a agenda os contatos que ela já tem, sem trocar o nome de quem você já nomeou aqui, para as conversas aparecerem com o nome e não com o número. Marcá-la na janela Contatos também traz os contatos na hora. Desmarcada, só entram os que você adicionar.
+
+# Bloquear e desbloquear
+Numa conversa com uma pessoa, use Contatos, "Bloquear ou desbloquear a pessoa desta conversa", ou o item "Bloquear ou desbloquear" no menu de contexto da conversa. O TeleZapp confere se ela já está bloqueada, pergunta e faz o contrário do que está hoje.
+
+O bloqueio vale na própria conta do WhatsApp ou do Telegram, e por isso também no celular e nos outros aparelhos: a pessoa não consegue mais enviar mensagens nem ligar para você.
+
+Contatos, Contatos bloqueados abre a lista de quem você bloqueou, juntando as suas contas.
+Desbloquear ou Enter: desbloqueia a pessoa escolhida.
+Bloquear alguém: bloqueia pelo nome, telefone ou @usuário.
+Atualizar: lê a lista de novo.
+
+Só pessoas podem ser bloqueadas, não grupos nem canais.
+
+# Criar grupos, canais e comunidades
+Em Novo, Novo grupo, Novo canal e Nova comunidade abrem uma janela para a conta, o nome e a descrição. A conta só aparece se mais de uma cria aquilo.
+
+No grupo há também os participantes, opcionais: telefones no formato internacional, como +55 51 99999 8888, ou @usuários, separados por vírgula. No Telegram, há a caixa "Dividir o grupo em tópicos".
+
+Depois de criar, o TeleZapp abre a conversa nova.
+
+O WhatsApp cria grupos, canais e comunidades, com nome de até 25 letras no grupo e na comunidade. O Telegram cria grupos e canais, e não tem comunidades.
+
+O canal começa sem participantes: o link para convidar fica em Detalhes da conversa.
+
+# Grupos do Telegram com tópicos
+Eles aparecem na lista como uma conversa só, com os não lidos de todos os tópicos somados.
+
+Ao abrir o grupo, o TeleZapp pergunta o tópico. O Geral é um deles, e cada um diz quantas mensagens não lidas tem. Abre só as mensagens daquele tópico, e o que você escreve vai para ele.
+
+Esc dentro de um tópico volta para a lista de tópicos do grupo, sem sair dele, e Esc ali fecha o grupo.
+
+Tópico fechado vira conversa só de leitura. Criar ou renomear tópicos ainda não é possível por aqui.
+
+# Ferramentas de grupo
+Nos detalhes de um grupo (Ctrl+I), há para qualquer participante o botão "Ver a foto do grupo", que baixa a foto atual e a abre no programa de imagens do Windows. Se o grupo não tem foto, o WhatsApp responde igual a quando ela está escondida, e o TeleZapp diz isso.
+
+Para administradores, há nos detalhes o botão "Pedidos de entrada", e "Administrar grupo" traz "Trocar a foto do grupo", "Link de convite e QR Code" e "Pedidos de entrada".
+
+Pedidos de entrada: quando o grupo exige aprovação, quem pede para entrar fica numa lista com o nome, o telefone e o dia e a hora do pedido, do mais antigo para o mais novo. Escolha um ou mais, com Ctrl ou Shift, e use Aprovar ou Recusar; Recusar pergunta antes. Atualizar lê a lista de novo.
+
+Trocar a foto: escolha uma imagem JPG, PNG, BMP ou WebP. O TeleZapp a recorta quadrada no centro, no tamanho comum dos serviços, e pergunta antes de trocar. Se o grupo estiver trancado para os administradores, só eles conseguem.
+
+Link de convite e QR Code: a janela mostra o link e o QR Code, com Copiar o link, Salvar o QR Code, um arquivo PNG para mandar a alguém, e Trocar por um link novo, que invalida o antigo, depois de uma pergunta. O link novo já fica copiado.
+
+Entrar em um grupo por link: Novo, Entrar em um grupo por link pede o link de convite (chat.whatsapp.com/...), mostra o nome do grupo, quantos membros tem e a descrição, e pergunta se é para entrar. Se o grupo exigir aprovação, o pedido é enviado e um administrador decide. Não há atalho por padrão; dá para atribuir um em Configurações, Atalhos.
+
+Adicionar uma pessoa a um grupo: nos detalhes de uma conversa com uma pessoa, no WhatsApp, o botão "Adicionar a um grupo" lista os grupos que você administra e adiciona a pessoa no que você escolher.
+
+Por enquanto, não dá para mudar quem pode adicionar membros nem ligar ou desligar a aprovação de entrada do grupo, porque a biblioteca de conexão ainda não envia esses ajustes.
+
+# Fotos de contatos e grupos
+Numa conversa com uma pessoa, os detalhes (Ctrl+I) têm, no WhatsApp e no Telegram, o botão "Ver a foto do contato". Ele baixa a foto de perfil e a abre no programa de imagens do Windows.
+
+Ao lado de cada botão de foto há "Descrever a foto do contato" ou "do grupo". O TeleZapp baixa a foto, a manda para os provedores de inteligência artificial de imagem, na ordem que você escolheu em Configurações, Inteligência artificial, e mostra a descrição numa janela e na fala. A primeira vez pede a sua autorização para enviar a imagem àquele provedor.
+
+O TeleZapp só mostra a foto que a sua conta já consegue ver. Se a pessoa escondeu a foto de quem não está nos contatos dela, o serviço não entrega nada e o TeleZapp avisa que não há foto visível. Nenhuma configuração de privacidade é contornada.
+
+A foto fica só numa pasta temporária do Windows, e o TeleZapp a apaga ao fechar e ao abrir.
+
+Descrever a foto envia a imagem de outra pessoa a um serviço de terceiros. Use com cuidado e respeito a quem aparece nela.
+
+# Conversas lidas, arquivadas e trancadas
+Marcar como lida: em Conversas, "Marcar a conversa como lida", também no menu de contexto da lista e na seleção em massa, zera as não lidas da conversa em foco sem abri-la. A conta é avisada, então o celular também a mostra como lida. O item não tem atalho de fábrica; dê um em Configurações, Atalhos.
+
+Arquivadas: em Conversas, "Arquivar ou desarquivar a conversa", também no menu de contexto da lista e na seleção em massa, tira a conversa da lista principal e a põe no tipo Arquivadas. A mudança vale também na sua conta, no WhatsApp e no Telegram, e o que você arquiva ou desarquiva no celular aparece no TeleZapp.
+
+Trancadas: conversas só se trancam e se destrancam pelo celular; no WhatsApp, em "Trancar conversa". O TeleZapp só mostra o que o celular trancou. Uma conversa trancada sai das listas e fica escondida atrás de um código secreto.
+
+Defina o código em Configurações, Privacidade: marque a caixa e preencha o código novo duas vezes. Depois, digite o código no campo Buscar conversa (Ctrl+F), e o tipo Trancadas no celular aparece no fim da caixa de tipos.
+
+Trocar de filtro, Ctrl+Shift+T, minimizar a janela ou reabrir o TeleZapp escondem de novo. Para vê-las outra vez, digite o código na busca.
+
+Mudar o código ou desligar a exigência pede o código atual. Não há como recuperar um código esquecido: o único jeito de recomeçar é parear o WhatsApp de novo, o que apaga o código. O código só esconde as conversas dentro do programa, não cifra os arquivos.
+
+Conversas arquivadas e trancadas não emitem aviso de mensagem nova, nem som nem fala, nem de reação, edição ou mensagem apagada, a menos que estejam abertas.
+
+# Redigir, resumir e traduzir com IA
+Em Mensagens, Inteligência artificial estão os itens abaixo. Eles não têm atalho de fábrica: dê um em Configurações, Atalhos.
+
+Corrigir o texto digitado: arruma ortografia, acentos e pontuação da caixa de mensagem, sem mudar o sentido.
+Redigir a mensagem a partir do que digitei: transforma uma ideia escrita na caixa, como "diga que sim e pergunte a hora", em uma mensagem pronta, olhando as últimas mensagens para combinar idioma e tom. Ela vai para a caixa como rascunho e nunca é enviada sozinha.
+Redigir com um tom à escolha: pergunta o tom na hora (natural, amigável, formal, direto ou descontraído), sem mudar a opção "Tom ao redigir com a IA" de Configurações.
+Traduzir o texto digitado: pergunta o idioma (português, inglês, espanhol, francês, alemão ou italiano; lembra o último) e troca o texto da caixa.
+Traduzir a mensagem selecionada: mostra a tradução numa janela.
+Resumir a mensagem selecionada e Resumir a conversa: as últimas 50 mensagens, numa janela de leitura.
+Resumir as mensagens não lidas: só as que chegaram depois do marcador, até 300.
+
+Quando o texto novo substitui o da caixa, Ctrl+Z volta ao anterior. Se você mexer na caixa enquanto espera, o texto novo aparece numa janela em vez de trocar o seu.
+
+Nos resumos de conversa e de não lidas, se houver áudio, imagem ou figurinha ainda sem transcrição ou descrição, o TeleZapp diz quantos são e pergunta: Processar e resumir, Resumir só o texto ou Cancelar.
+
+Processar envia essas mídias ao provedor da tarefa, o que pode gastar a sua cota e levar alguns minutos, com barra de progresso e botão Cancelar. Vão no máximo 50 por resumo, as mais novas, e o resultado fica guardado na mensagem. O resumo avisa quantas mídias ficaram de fora. Vídeos e PDFs não entram: use o item de transcrever ou descrever na própria mensagem.
+
+Antes é preciso marcar os provedores da tarefa "Redigir, resumir e corrigir textos" e digitar a chave em Configurações, Inteligência artificial. Na primeira vez de cada provedor, o TeleZapp pergunta se pode enviar o texto. O texto vai a um serviço de terceiros, e todos os resumos só acontecem quando você pede.
+
+# Transcrever e descrever com IA
+Em Configurações, categoria Inteligência artificial, cada tarefa tem uma lista de provedores com caixas de marcar: transcrição de voz e áudio, descrição de imagens e figurinhas, descrição de vídeos e PDF em texto acessível. Marque os que podem receber os arquivos e use Subir e Descer para pôr na ordem de tentativa. Se um falhar, o TeleZapp tenta o próximo.
+
+Depois da lista, cada provedor tem um botão, como "Google Gemini: sem chave, modelo automático. Configurar...", que mostra a situação e abre a janela do provedor. Nela:
+Digite a chave, que fica cifrada neste computador.
+Deixe o Modelo em Automático ou escolha um na caixa.
+Obter modelos pede ao provedor a lista que a sua chave pode usar.
+Testar, Apagar a chave e os botões que abrem a página da chave e a de privacidade.
+
+Depois, OK na janela do provedor e OK ou Aplicar nas Configurações.
+
+Nenhum arquivo sai do computador antes de você usar a ação numa mensagem e confirmar o envio, na primeira vez, para aquele provedor.
+
+No menu de contexto de uma mensagem de voz, áudio, foto, figurinha, vídeo ou PDF aparece a ação, como Transcrever o áudio. A mídia é baixada antes, se preciso.
+
+O texto fica guardado na mensagem. A linha mostra o começo; Ver a transcrição, a descrição ou o texto do PDF abre o texto inteiro, com Copiar e Salvar em arquivo; e Copiar copia só ele. Para refazer, use a ação de novo.
+
+A descrição de PDF mantém a ordem da leitura e põe, no lugar de cada imagem, gráfico ou tabela, uma descrição entre colchetes.
+
+Vídeos: o Gemini recebe o vídeo inteiro, até 14 MB. Os outros provedores recebem uma imagem com quadros espalhados pelo vídeo, cada um com a hora, e a fala é transcrita à parte pelos provedores da transcrição, sob o título "Fala no vídeo".
+
+Transcrição e descrição automáticas: no menu de contexto de uma conversa, "Ligar a transcrição e descrição automáticas". Nas conversas ligadas, voz, áudios, fotos e figurinhas que chegarem são transcritos ou descritos sozinhos; duas opções em Configurações, Inteligência artificial, escolhem o que vale. Antes, use a ação uma vez no menu de uma mensagem para autorizar cada provedor.
+
+# Configurações
+Ferramentas, Configurações (Ctrl+vírgula) abre uma janela com todas as opções do TeleZapp.
+
+O primeiro campo é a busca. Digite uma palavra, como velocidade, e aparece no alto da lista de categorias Resultados da busca, com as opções que combinam. Tab vai da busca para a lista de categorias, depois para as opções da categoria escolhida e, por fim, para os botões OK, Cancelar e Aplicar.
+
+Cada opção é uma caixa de seleção ou uma lista de escolhas. Logo depois que você chega nela, o TeleZapp fala a explicação; F1 repete. Se isso atrapalhar, desmarque "Falar a descrição de cada opção" (categoria Interface, botão Conteúdo falado), e a explicação passa a ser falada só com F1.
+
+As mudanças só valem ao apertar OK ou Aplicar. Cancelar e Esc descartam. As mesmas opções continuam nos menus Exibir, Mídias e Depurar.
+
+Algumas categorias:
+Interface: o status de presença no título da janela, o aviso de chamadas do WhatsApp e o botão Conteúdo falado, que abre uma janela com tudo o que o leitor de tela fala: mensagens novas, mensagem enviada, reações, quantas conversas há ao trocar de filtro e a descrição de cada opção.
+Mensagens: prévia de links, quantas ficam na lista, corretor ortográfico e a tecla Enter da caixa de digitar.
+Mídias, Atalhos, Sons e as demais.
+
+"Como me chamar nas mensagens", na categoria Interface, troca a palavra Você pelo nome que preferir quando o autor é você: nas mensagens, na lista de conversas, nas reações, nos votos, na busca e nas conversas salvas. Vale só neste computador; quem recebe as suas mensagens não vê este nome. Frases como "Você saiu do grupo" continuam iguais. Vazio, fica Você.
+
+Na categoria Mídias, "Pasta dos arquivos salvos" define onde ficam as mídias, documentos, conversas, logs e textos que você salva. Com "Guardar direto na pasta, sem perguntar" marcada, o arquivo vai direto para lá, sem sobrescrever nada, e o TeleZapp diz onde ficou. Desmarcada, a janela de salvar abre em cada salvamento, começando nessa pasta. O backup continua com a pasta dele.
+
+# Sons dos avisos
+Em Configurações, a categoria Sons tem uma caixa para cada aviso do TeleZapp: som padrão, sem som ou Escolher um arquivo de som. Ao lado de cada caixa há o botão Ouvir.
+
+Arquivos WAV, Ogg, MP3 e FLAC servem. Arquivos longos tocam só os primeiros 15 segundos.
+
+O arquivo escolhido é copiado para a pasta sons, ao lado das contas e das mídias; Ajuda, Abrir a pasta de sons abre a pasta. Se um som sumir, o TeleZapp usa o padrão. A pasta vai junto no backup das configurações.
+
+# Segundo plano e abrir com o Windows
+Em Configurações, categoria Sistema, "Continuar em segundo plano ao fechar a janela" faz o botão de fechar e Alt+F4 só minimizarem a janela. O TeleZapp segue conectado, dando os avisos de mensagens, com o botão na barra de tarefas e um ícone na área de notificação do Windows.
+
+Para voltar, use a barra de tarefas ou o ícone, abra o TeleZapp de novo ou aperte a tecla global da função "Chamar o TeleZapp quando ele está em segundo plano", em Configurações, Atalhos. Ela vem sem tecla: escolha uma, por exemplo Ctrl+Alt+Z.
+
+Do mesmo jeito, as funções "Atender a chamada que está tocando" e "Recusar a chamada que está tocando ou desligar a chamada em andamento" aceitam uma tecla que vale em qualquer programa.
+
+Para encerrar de verdade, use Sair: Ctrl+Q, o botão Sair ou o menu do ícone. "Minimizar a janela e continuar em segundo plano", em Ferramentas, minimiza a janela na hora, mesmo com a opção desligada.
+
+"Abrir o TeleZapp ao entrar no Windows" abre o programa sozinho quando você entra na sua conta. Com o segundo plano ligado, ele abre minimizado, sem tirar o foco do que você faz.
+
+# Backup e restauração
+Ferramentas, Fazer backup abre uma janela para marcar o que incluir:
+As configurações.
+Os atalhos personalizados.
+As configurações de sons: o pacote, os sons ligados e desligados e os sons que você importou.
+As contas e sessões, que dão acesso às suas contas.
+As conversas, mensagens e contatos.
+As mídias baixadas.
+
+Há campos de senha, opcionais, para proteger o arquivo. Depois, você escolhe onde salvar o zip. O TeleZapp avisa quando termina.
+
+Ferramentas, Restaurar backup pede o arquivo e a senha, se tiver, e mostra o que o backup contém, para você marcar o que volta.
+
+As configurações valem na hora. As contas, as conversas e as mídias trocam o que existe hoje na próxima vez que o TeleZapp abrir, e ele oferece reiniciar agora. O que havia antes fica guardado na pasta antes-da-restauracao, dentro da pasta de dados.
+
+Se perder a senha, não há como recuperar o backup.
+
+# Quando algo der errado
+Se o leitor de tela disser "janela indisponível", ou se o teclado parar de responder em um programa, o foco pode ter ficado numa janela bloqueada por outra. Isso pode acontecer em qualquer programa, e dá para tentar sair sem fechá-lo. Tente nesta ordem:
+Alt+Tab para ir a outro programa e voltar.
+Alt+Esc, que passa para a próxima janela.
+Windows+T para ir ao botão do programa na barra de tarefas, com as setas e Enter.
+Esc, ou Alt+F4 se a janela que estava bloqueando receber o foco, para fechar só ela.
+Windows+D duas vezes, que mostra a área de trabalho e restaura as janelas.
+
+Se nada disso resolver, será preciso fechar o programa pelo Gerenciador de Tarefas (Ctrl+Shift+Esc).
+
+Para pedir ajuda, abra Ajuda, Exportar logs. O TeleZapp compacta a pasta de logs e abre uma janela com os botões Fechar, Copiar e Salvar. Com Copiar, vá à conversa com quem dá suporte, aperte Ctrl+V na caixa de mensagem e envie. Diga a versão (Ajuda, Sobre) e a hora do problema.
+
+O registro não guarda o texto das mensagens e mostra só o fim dos telefones, mas ainda tem nomes de grupos e identificadores técnicos.
+
+Nunca mande as pastas de sessões, o config.json, o banco de conversas, as chaves de IA nem arquivos de backup, que dão acesso às suas contas.
+
+Na Ajuda ficam também:
+Página do projeto na internet: abre o site do TeleZapp no navegador.
+Feedback: entrar em contato pelo formulário: relate um problema, sugira algo ou tire uma dúvida, sem precisar de conta em lugar nenhum.
+Entrar no grupo de suporte no WhatsApp: leva ao grupo onde se tiram dúvidas e se conversa com quem desenvolve o TeleZapp e com outros usuários. Com uma conta de WhatsApp conectada, o TeleZapp mostra o nome e o número de membros do grupo e pergunta se você quer entrar; com mais de uma conta, pergunta com qual. Sem conta conectada, abre o convite no navegador.
+
+Os dois primeiros itens nascem sem atalho; dê um em Configurações, Atalhos.
+
+# Depurar
+O menu Depurar serve para entender uma mensagem ou conversa que apareceu errada, sem precisar de arquivos de log.
+
+Depurar esta mensagem (Ctrl+Shift+D): abre um texto com tudo que o TeleZapp guardou sobre a mensagem selecionada e, se o Modo de depuração estava ligado quando ela chegou, a estrutura original enviada pelo WhatsApp.
+Depurar esta conversa: mostra como o nome foi escolhido (agenda, perfil, empresa ou telefone) e um resumo das mensagens.
+
+A janela tem os botões Copiar tudo, para colar numa conversa de suporte, e Salvar em arquivo, que grava em C:\logs. O texto contém mensagens e telefones, mas nunca senhas ou chaves de acesso.
+
+O Modo de depuração fica desligado. Ligado, guarda no seu computador a estrutura das últimas 500 mensagens do WhatsApp que chegarem. Ao desligar, tudo é apagado.
+
+# Onde ficam os seus dados
+Tudo fica na pasta TeleZapp dentro de AppData\Roaming do seu usuário: configurações, sessões, conversas guardadas e registros de funcionamento (logs), sem o texto das suas mensagens. Na cópia portátil, fica na pasta dados, ao lado do programa.
+
+As mídias baixadas ficam na subpasta midias e são apagadas junto com a conta quando você a remove.
+
+Arquivos temporários ficam numa subpasta do próprio programa e são apagados ao abrir e ao fechar.
+
+# Segurança e privacidade
+Para onde vão as suas mensagens: o TeleZapp não tem servidor próprio e não envia dados de uso a ninguém. Ele conversa direto com o WhatsApp e com o Telegram, com a criptografia que esses serviços já usam. As suas conversas, sessões e mídias ficam só neste computador. O código do programa é aberto, e qualquer pessoa pode examiná-lo.
+
+Consulta de versão nova: o TeleZapp consulta o GitHub e, uma vez por dia, baixa de lá um arquivo público. O GitHub soma os downloads de cada arquivo, e esse total dá uma ideia de quantas cópias estão em uso. Nada identifica você nem o seu computador. Quem desliga "Avisar quando houver versão nova do TeleZapp" só faz esse download ao usar Ajuda, Verificar atualizações.
+
+Senhas e códigos: o telefone, o código de confirmação e a senha de duas etapas são digitados só nas telas de entrada do WhatsApp e do Telegram. O TeleZapp não guarda a senha. O que fica guardado é a sessão, que mantém a conta conectada.
+
+O que fica cifrado: as chaves dos provedores de inteligência artificial são cifradas pelo Windows, de forma que só o seu usuário, neste computador, consegue lê-las, e não vão para os registros de funcionamento.
+
+O que não fica cifrado: as sessões, as conversas e as mídias não são cifradas pelo TeleZapp. Ficam em arquivos comuns na pasta de dados. Quem tiver acesso ao seu usuário do Windows, ou copiar essa pasta, consegue usar as suas contas sem precisar de senha. O código secreto das conversas trancadas só as esconde dentro do programa.
+
+Como se proteger:
+Use uma conta do Windows com senha.
+Ative a criptografia do disco (BitLocker, em Configurações do Windows, Privacidade e segurança, Criptografia de dispositivo), que protege a pasta de dados inteira.
+Não deixe o computador desbloqueado com outras pessoas por perto.
+Use senha no backup, que assim fica cifrado (AES-256), e guarde-o com cuidado, porque o backup das contas e sessões dá acesso às suas contas.
+
+Inteligência artificial: é opcional e usa a sua chave. Nenhum arquivo sai do computador antes de você pedir a ação numa mensagem e confirmar o envio, na primeira vez, para aquele provedor. Depois disso, o conteúdo vai ao provedor que você escolheu e segue as regras dele. A prévia de links buscada neste computador também é opcional e vem desligada, porque o site visitado veria o seu endereço de rede (IP).
+
+Se perder o computador ou suspeitar que alguém copiou os arquivos: no WhatsApp, abra no celular Aparelhos conectados e remova o aparelho do TeleZapp. No Telegram, abra Configurações, Dispositivos e encerre a sessão. Trocar a senha do Windows sozinha não encerra as sessões.
+
+Risco de restrição da conta: o TeleZapp é um cliente não oficial, e os serviços podem restringir ou bloquear contas que usam clientes assim. Leia os termos de uso do WhatsApp e do Telegram e decida com isso em mente.

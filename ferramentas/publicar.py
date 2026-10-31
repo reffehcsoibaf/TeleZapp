@@ -11,6 +11,8 @@ ainda nao existe, monta a partir da pasta do programa) e deixa la:
                           e fixo: .../releases/latest/download/TeleZapp.zip
                           sempre leva a versao mais nova)
     TeleZapp.zip.sha256   o hash para conferir o download
+    consulta.txt          arquivo publico que cada copia baixa uma vez por
+                          dia; os downloads dele dao a ideia de copias em uso
     notas.md                       o texto da Release (aviso de software
                                    experimental + novidades da versao)
 
@@ -136,7 +138,10 @@ def main():
     arquivo_hash = zip_ + ".sha256"
     with open(arquivo_hash, "w", encoding="utf-8") as f:
         f.write("%s *%s\n" % (hash_zip, nome_zip))
-    notas = os.path.join(args.saida, "notas.md")
+    consulta = os.path.join(args.saida, "consulta.txt")
+    with open(consulta, "w", encoding="utf-8") as f:
+        f.write(versao + "\n")
+    notas =os.path.join(args.saida, "notas.md")
     with open(notas, "w", encoding="utf-8") as f:
         f.write(montar_notas(versao, hash_zip, nome_zip))
     print("Pronto: %.0f MB, SHA-256 %s" % (os.path.getsize(zip_) / 1048576,
@@ -144,7 +149,7 @@ def main():
     print("Confira as notas em %s antes de publicar." % notas)
 
     comando = ["gh", "release", "create", versao, instalador, zip_, arquivo_hash,
-               "--title", "TeleZapp %s" % versao, "--notes-file", notas]
+               consulta, "--title", "TeleZapp %s" % versao, "--notes-file", notas]
     comando.append("--prerelease" if args.prerelease else "--latest")
     if not args.publicar:
         print("Para publicar:\n  " + " ".join(comando))

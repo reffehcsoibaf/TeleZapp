@@ -148,7 +148,7 @@ telezapp/              o aplicativo (pacote Python: python -m telezapp)
   midia/               leitura própria de MP4 e Ogg/Opus, download, gravação
   interface/           janela principal, configurações, detalhes e diálogos
   acessibilidade/      fala direta (NVDA) e sons dos eventos
-  ajuda/               guia de uso e novidades (HTML)
+  ajuda/               guia de uso (texto, por assuntos) e novidades (HTML)
   sons/                pacote de sons "TeleZapp" (gerado por ferramentas/gerar_sons.py)
 testes/                testes automáticos (python -m pytest testes)
 ferramentas/           apoio ao .bat, publicação das Releases e geração dos sons
