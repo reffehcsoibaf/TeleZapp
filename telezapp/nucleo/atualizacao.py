@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Fábio Scheffer Moraes
-"""Consulta as Releases do GitHub para saber se ha versao nova. So le: nao
-baixa nem instala nada. Sem dependencia de wxPython."""
+"""Consulta as Releases do GitHub para saber se ha versao nova. Nao baixa nem
+instala o programa. Sem dependencia de wxPython."""
 import json
 import logging
 import re
@@ -18,6 +18,9 @@ log = logging.getLogger("telezapp.atualizacao")
 REPO = "reffehcsoibaf/TeleZapp"
 URL_LANCAMENTOS = "https://api.github.com/repos/%s/releases?per_page=15" % REPO
 URL_PAGINA = SITE + "/releases"
+# arquivo publico de cada Release: o GitHub soma os downloads, o que da uma
+# ideia de quantas copias estao em uso; nada identifica quem baixou
+URL_DO_DIA = SITE + "/releases/latest/download/consulta.txt"
 
 
 class ErroAtualizacao(Exception):
@@ -119,6 +122,22 @@ def deve_avisar_ao_abrir(lancamento, ignorada):
     a versao marcada). Uma versao mais nova que a ignorada volta a avisar."""
     return bool(lancamento) and e_mais_nova(lancamento) and \
         lancamento.versao != (ignorada or "")
+
+
+def deve_baixar_do_dia(ultimo_dia, hoje, empacotado):
+    """Uma vez por dia em cada copia; rodando do codigo-fonte, nunca."""
+    return bool(empacotado) and ultimo_dia != hoje
+
+
+def baixar_arquivo_do_dia(tempo=10):
+    """Baixa o arquivo publico do dia. Falhar nao importa: nao avisa ninguem."""
+    pedido = urllib.request.Request(URL_DO_DIA, headers={
+        "User-Agent": "TeleZapp/" + VERSAO})
+    try:
+        with urllib.request.urlopen(pedido, timeout=tempo) as r:
+            r.read(1024)
+    except Exception as e:
+        log.debug("arquivo do dia não baixado: %s", type(e).__name__)
 
 
 def _buscar_json(url, tempo=10):

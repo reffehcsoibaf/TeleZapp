@@ -793,6 +793,8 @@ Arquivos temporários ficam numa subpasta do próprio programa e são apagados a
 # Segurança e privacidade
 Para onde vão as suas mensagens: o TeleZapp não tem servidor próprio e não envia dados de uso a ninguém. Ele conversa direto com o WhatsApp e com o Telegram, com a criptografia que esses serviços já usam. As suas conversas, sessões e mídias ficam só neste computador. O código do programa é aberto, e qualquer pessoa pode examiná-lo.
 
+Consulta de versão nova: o TeleZapp consulta o GitHub e, uma vez por dia, baixa de lá um arquivo público. O GitHub soma os downloads de cada arquivo, e esse total dá uma ideia de quantas cópias estão em uso. Nada identifica você nem o seu computador. Quem desliga "Avisar quando houver versão nova do TeleZapp" só faz esse download ao usar Ajuda, Verificar atualizações.
+
 Senhas e códigos: o telefone, o código de confirmação e a senha de duas etapas são digitados só nas telas de entrada do WhatsApp e do Telegram. O TeleZapp não guarda a senha. O que fica guardado é a sessão, que mantém a conta conectada.
 
 O que fica cifrado: as chaves dos provedores de inteligência artificial são cifradas pelo Windows, de forma que só o seu usuário, neste computador, consegue lê-las, e não vão para os registros de funcionamento.

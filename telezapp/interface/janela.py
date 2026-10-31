@@ -8980,8 +8980,16 @@ class Janela(wx.Frame):
         nova que ainda nao foi avisada, e nunca reclama de erro."""
         if manual:
             self.fala.falar("Verificando atualizações...", interromper=True)
+        hoje = time.strftime("%Y-%m-%d")
+        baixar_do_dia = atualizacao.deve_baixar_do_dia(
+            self.cfg.get("atualizacao_dia"), hoje,
+            getattr(sys, "frozen", False))
+        if baixar_do_dia:
+            self.cfg.set("atualizacao_dia", hoje)
 
         def trabalho():
+            if baixar_do_dia:
+                atualizacao.baixar_arquivo_do_dia()
             try:
                 lanc, erro = atualizacao.consultar(), ""
             except atualizacao.ErroAtualizacao as e:

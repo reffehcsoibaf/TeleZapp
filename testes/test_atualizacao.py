@@ -26,6 +26,26 @@ def test_pega_a_versao_mais_alta_ignorando_rascunhos_e_tags_estranhas():
     assert at.mais_nova([]) is None and at.mais_nova({"message": "x"}) is None
 
 
+def test_arquivo_do_dia_uma_vez_por_dia_e_so_empacotado():
+    assert at.deve_baixar_do_dia(None, "2026-10-31", True)
+    assert at.deve_baixar_do_dia("2026-10-30", "2026-10-31", True)
+    assert not at.deve_baixar_do_dia("2026-10-31", "2026-10-31", True)
+    assert not at.deve_baixar_do_dia(None, "2026-10-31", False)
+
+
+def test_arquivo_do_dia_nao_manda_nada_e_falha_em_silencio(monkeypatch):
+    pedidos = []
+
+    def falha(pedido, timeout):
+        pedidos.append(pedido)
+        raise urllib.error.URLError("sem rede")
+    monkeypatch.setattr(at.urllib.request, "urlopen", falha)
+    at.baixar_arquivo_do_dia()
+    assert pedidos[0].full_url == at.URL_DO_DIA and "?" not in at.URL_DO_DIA
+    assert pedidos[0].data is None
+    assert set(pedidos[0].headers) == {"User-agent"}
+
+
 def test_compara_versoes_como_numeros():
     nova = at.Lancamento("2026.10.18.10", "", "")
     assert at.e_mais_nova(nova, "2026.10.18.9")

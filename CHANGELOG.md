@@ -6,6 +6,7 @@ Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 ## 2026.10.31.1
 
 - Guia de uso no formato do outro programa do responsável (pedido dele): `ajuda/guia.txt` com "# Assunto" no lugar de `guia.html`, `paginas.ler_assuntos` e `interface/guia.py` (lista de assuntos, texto somente leitura, Fechar). F1 e o botão da tela de boas-vindas abrem a janela; o instalador não cria mais a pasta temporária do guia. Novidades continuam em HTML, porque o `publicar.py` monta as notas delas. Texto reorganizado em 56 assuntos curtos, com "Ctrl+" no lugar de "Control", atualização descrita como ela é hoje (o programa se atualiza sozinho), sem citar outros programas, e NVDA só como "testado com". Testes conferem assuntos, marcas e se os atalhos da lista existem no menu. **Sem teste ao vivo com leitor de tela.**
+- Estimativa de alcance (pedido do responsável): a consulta de versão baixa, uma vez por dia em cada cópia empacotada, o `consulta.txt` da última Release (`atualizacao.baixar_arquivo_do_dia`, chave `atualizacao_dia`). O `publicar.py` inclui o arquivo. Sem identificador, sem servidor próprio e sem interface; o `download_count` dele, dividido pelos dias desde o lançamento, dá as cópias ativas por dia, como mínimo. Só conta as cópias que já estão nesta versão ou em outra mais nova. Explicado no guia, em "Segurança e privacidade". **Sem teste ao vivo.**
 
 ## 2026.10.31.0
 
