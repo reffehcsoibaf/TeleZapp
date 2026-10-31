@@ -74,6 +74,16 @@ class MensagensCarregadas:
 
 
 @dataclass
+class MaisAntigas:
+    """Resposta ao pedido de mensagens anteriores as guardadas: `novas` ja
+    estao no banco; sem nenhuma, `texto` diz o motivo."""
+    conta_id: str
+    conversa_id: str
+    novas: int = 0
+    texto: str = ""
+
+
+@dataclass
 class MensagemNova:
     mensagem: object
     conversa: object = None        # Conversa ja atualizada (nome, data...)

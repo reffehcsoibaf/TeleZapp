@@ -533,11 +533,48 @@ def enquete_do_telegram(msg):
     return aplicar_resultados(enq, getattr(media, "results", None))
 
 
+def aviso_de_membros(msg):
+    """Frase do aviso de que alguem entrou ou saiu do grupo; "" para os demais
+    avisos de servico."""
+    acao = getattr(msg, "action", None)
+    tipo = type(acao).__name__
+    if tipo not in ("MessageActionChatJoinedByLink",
+                    "MessageActionChatJoinedByRequest",
+                    "MessageActionChatAddUser", "MessageActionChatDeleteUser"):
+        return ""
+    quem = "Você" if getattr(msg, "out", False) else \
+        nome_de(getattr(msg, "sender", None)) or "Alguém"
+    if tipo == "MessageActionChatJoinedByLink":
+        return "%s entrou no grupo por um convite." % quem
+    if tipo == "MessageActionChatJoinedByRequest":
+        return "%s entrou no grupo com o pedido aprovado." % quem
+    remetente = getattr(msg, "sender_id", None)
+    envolvidos = getattr(acao, "users", None) or \
+        [getattr(acao, "user_id", None)]
+    if all(x == remetente for x in envolvidos):
+        return "%s %s do grupo." % (quem, "saiu") \
+            if tipo == "MessageActionChatDeleteUser" else \
+            "%s entrou no grupo." % quem
+    nomes = [nome_de(x) for x in getattr(msg, "action_entities", None) or ()
+             if x is not None and getattr(x, "id", None) != remetente]
+    outros = ", ".join(n for n in nomes if n) or "um participante"
+    if tipo == "MessageActionChatDeleteUser":
+        return "%s removeu %s do grupo." % (quem, outros)
+    return "%s adicionou %s ao grupo." % (quem, outros)
+
+
 def converter(msg, conta_id, conversa_id, lidas_ate=0, nome_padrao=""):
-    """Mensagem do Telethon -> modelos.Mensagem (None para mensagens de
-    servico, como 'fulano entrou no grupo')."""
+    """Mensagem do Telethon -> modelos.Mensagem (None para os avisos de servico
+    que nao sao de entrada ou saida de membros)."""
     if getattr(msg, "action", None) is not None:
-        return None
+        aviso = aviso_de_membros(msg)
+        if not aviso:
+            return None
+        data = getattr(msg, "date", None)
+        return m.Mensagem(
+            conta_id=conta_id, conversa_id=str(conversa_id), id=str(msg.id),
+            autor="", data=data.timestamp() if data is not None else time.time(),
+            tipo=m.AVISO_MEMBROS, texto=aviso)
     tipo = tipo_da_mensagem(msg)
     texto = getattr(msg, "message", "") or ""
     if tipo == m.OUTRO:
@@ -2567,20 +2604,78 @@ class ProvedorTelegram(Provedor):
         else:
             fonte = self.cliente.iter_messages(
                 ent, limit=limite * 5 if topico else limite)
+        vieram = servico_ou_outro = 0
         async for msg in fonte:
+            vieram += 1
             if topico == TOPICO_GERAL and topico_da_mensagem(msg) != topico:
+                servico_ou_outro += 1
                 continue            # de outro topico: nao entra no Geral
             x = converter(msg, self.conta.id, conversa_id, lidas_ate, nome)
-            if x is not None:
+            if x is None:
+                servico_ou_outro += 1
+            else:
                 msgs.append(x)
                 if len(msgs) >= limite:
                     break
         msgs.reverse()
         await self._resolver_mencoes(msgs)
         self.banco.salvar_mensagens(msgs)
-        log.info("mensagens carregadas: %d", len(msgs))
+        log.info("mensagens carregadas: %d (o servidor mandou %d, total dele "
+                 "%s, de serviço ou outro tópico %d, chat %s)", len(msgs),
+                 vieram, getattr(fonte, "total", "?"), servico_ou_outro,
+                 type(ent).__name__)
         self.barramento.publicar(
             ev.MensagensCarregadas(self.conta.id, conversa_id, msgs))
+
+    def buscar_mais_antigas(self, conversa_id, quantas):
+        if conversa_id.startswith(PREFIXO_STATUS):
+            return "Esta conversa não tem mensagens mais antigas para buscar."
+        x = self.banco.mensagem_mais_antiga(self.conta.id, conversa_id)
+        try:
+            ancora = int(x.id) if x is not None else 0
+        except ValueError:
+            ancora = 0
+        self._agendar(self._carregar_antigas(conversa_id, quantas, ancora))
+        return ""
+
+    async def _carregar_antigas(self, conversa_id, limite, ancora):
+        """As `limite` anteriores a mensagem `ancora` (0: as mais novas)."""
+        msgs = []
+        try:
+            ent = await self._entidade(conversa_id)
+            conv = self._conversas.get(conversa_id)
+            lidas_ate = conv.lidas_ate if conv else 0
+            nome = conv.nome if conv else ""
+            topico = separar_topico(conversa_id)[1]
+            if topico > TOPICO_GERAL:
+                fonte = self.cliente.iter_messages(
+                    ent, limit=limite, offset_id=ancora, reply_to=topico)
+            else:
+                fonte = self.cliente.iter_messages(
+                    ent, limit=limite * 5 if topico else limite,
+                    offset_id=ancora)
+            async for msg in fonte:
+                if topico == TOPICO_GERAL and \
+                        topico_da_mensagem(msg) != topico:
+                    continue
+                x = converter(msg, self.conta.id, conversa_id, lidas_ate, nome)
+                if x is not None:
+                    msgs.append(x)
+                    if len(msgs) >= limite:
+                        break
+            msgs.reverse()
+            await self._resolver_mencoes(msgs)
+            self.banco.salvar_mensagens(msgs)
+        except Exception:
+            log.warning("mensagens mais antigas não carregadas", exc_info=True)
+            self.barramento.publicar(ev.MaisAntigas(
+                self.conta.id, conversa_id, 0,
+                "Não consegui buscar as mensagens mais antigas."))
+            return
+        log.info("mensagens mais antigas carregadas: %d", len(msgs))
+        self.barramento.publicar(ev.MaisAntigas(
+            self.conta.id, conversa_id, len(msgs), "" if msgs else
+            "Esta conversa não tem mensagens mais antigas."))
 
     def baixar_arquivo(self, msg, base, progresso, cancelado):
         if self._loop is None or self._loop.is_closed() or \
@@ -3101,8 +3196,13 @@ class ProvedorTelegram(Provedor):
             log.exception("erro ao tratar a presença")
 
     async def _ao_acao_no_chat(self, evento):
-        """Mudanca no grupo ou canal; aqui so a troca de nome interessa."""
+        """Mudanca no grupo ou canal: quem entrou ou saiu (esses avisos nao
+        chegam como mensagem nova) e a troca de nome."""
         try:
+            msg = getattr(evento, "action_message", None)
+            if msg is not None and aviso_de_membros(msg):
+                await self._aviso_de_membros_ao_vivo(evento, msg)
+                return
             novo = getattr(evento, "new_title", None)
             if not novo:
                 return
@@ -3118,6 +3218,23 @@ class ProvedorTelegram(Provedor):
                                       key=lambda c: -c.data)))
         except Exception:
             log.exception("erro ao tratar mudança no chat")
+
+    async def _aviso_de_membros_ao_vivo(self, evento, msg):
+        cid = str(evento.chat_id)
+        conv = self._conversas.get(cid)
+        if conv is None:
+            return
+        if conv.id in self._foruns:
+            conv = await self._conversa_do_topico(cid, conv.nome,
+                                                  topico_da_mensagem(msg))
+        if msg.sender is None:
+            await msg.get_sender()
+        nova = converter(msg, self.conta.id, conv.id)
+        conv.data = nova.data
+        conv.contar_nova(False)
+        self.banco.salvar_conversas([conv])
+        self.banco.salvar_mensagens([nova])
+        self.barramento.publicar(ev.MensagemNova(nova, conv))
 
     async def _ao_mensagens_apagadas(self, evento):
         """Mensagens apagadas em outro aparelho (ou por quem as enviou)."""

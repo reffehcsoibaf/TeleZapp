@@ -41,7 +41,6 @@ def test_so_as_opcoes_seguras_vao_no_backup():
 def test_opcoes_validas_descarta_lixo_e_valores_fora_da_faixa():
     boas = bk.opcoes_validas({"status_no_titulo": "sim",
                               "digitar_na_lista": "campo", "inexistente": 1,
-                              "mensagens_por_conversa": 10 ** 9,
                               "depuracao": True, "audio_velocidade": 1.5})
     assert boas == {"digitar_na_lista": "campo", "audio_velocidade": 1.5}
 

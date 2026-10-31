@@ -229,6 +229,10 @@ Em Exibir, você também liga ou desliga o som e a fala das mensagens novas.
 # Ler mensagens
 Na lista de conversas, Enter abre a conversa e leva você às mensagens: ao item Início das mensagens não lidas, se houver, ou à última mensagem. O leitor de tela fala esse item uma vez só, com a contagem, e a seta para baixo lê a primeira mensagem não lida. Esc fecha a conversa e volta para as conversas.
 
+A lista mostra 100 mensagens de cada vez. Para ver as anteriores, aperte Home: a primeira vez leva à primeira da lista, e a seguinte traz mais mensagens, com a seleção no mesmo lugar, e a seta para cima continua a leitura. Quando as guardadas no computador acabam, o TeleZapp pede mais ao serviço. No WhatsApp, ele avisa para abrir o aplicativo no celular, de onde vêm até 50 mensagens por vez. Para mudar o número de uma conversa, use o botão Mensagens por vez nos detalhes dela (Ctrl+I).
+
+Nos grupos do Telegram, a lista também mostra quem entrou, saiu, foi adicionado ou removido, sem som nem fala ao chegar. Para esconder esses avisos, desmarque "Mostrar os avisos de entrada e saída de membros" em Configurações, Mensagens.
+
 Enter numa mensagem de texto abre o texto numa caixa somente leitura, com os botões Copiar texto e Fechar. Esc também fecha.
 
 Ctrl+R ouve a última mensagem da conversa aberta.
@@ -312,7 +316,7 @@ Para reagir, use Ctrl+Shift+G com a mensagem selecionada ou "Reagir..." no menu 
 Uma mensagem editada mostra o texto novo e termina com "(editada)". Uma mensagem apagada para todos pelo autor passa a ser lida como "mensagem apagada". Isso só vale para mensagens que o TeleZapp já tinha guardado.
 
 # Emojis
-Ctrl+ponto insere um emoji na mensagem. Digite parte do nome, como joinha, coração ou bolo, desça com a seta e aperte Enter.
+Ctrl+ponto insere um emoji na mensagem e também no texto da janela Novo status, que tem ainda o botão Inserir emoji. Digite parte do nome, como joinha, coração ou bolo, desça com a seta e aperte Enter.
 
 A busca também acha por sinônimos e termos equivalentes: "kkk" ou "gargalhada" acham 😂 e 🤣, "aniversário" acha 🎂 e "tchau" acha 👋. Não precisa de acento, o plural vale, e várias palavras estreitam o resultado, como rosto chorando. Quem casa com o nome vem antes de quem casa só por um sinônimo.
 

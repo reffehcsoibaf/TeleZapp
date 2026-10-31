@@ -167,6 +167,15 @@ class Provedor(ABC):
         de chamadas enxerga; listas vazias se nao houver."""
         return [], []
 
+    # o que dizer enquanto o pedido de mensagens mais antigas anda
+    AVISO_MAIS_ANTIGAS = "Buscando mensagens mais antigas."
+
+    def buscar_mais_antigas(self, conversa_id, quantas):
+        """Pede as mensagens anteriores a mais antiga guardada. Devolve "" se
+        o pedido foi feito (a resposta chega como ev.MaisAntigas) ou o motivo
+        de nao ter sido."""
+        return "Não há mensagens mais antigas para buscar neste serviço."
+
     def buscar_mensagens_que_faltam(self, conversa_id):
         """Pede ao celular as mensagens recentes da conversa que o TeleZapp
         pode nao ter recebido. Devolve "" se o pedido foi enviado (a resposta

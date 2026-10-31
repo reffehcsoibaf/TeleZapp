@@ -3895,3 +3895,45 @@ def test_fixacao_recebida_nao_vira_mensagem(amb):
     assert a.motivo == "fixada" and a.mensagem.id == alvo.id
     assert m.fixada_agora(a.mensagem)
     assert m.extras_de(a.mensagem)["fixada_ate"] > time.time()
+
+
+
+def _antigas_preparadas(amb, monkeypatch):
+    cid, pedidos = _preparar_varredura(amb, monkeypatch, ("L4", "L5"))
+    assert amb.p.buscar_mais_antigas(cid, 100) == ""
+    assert "Já estou" in amb.p.buscar_mais_antigas(cid, 100)
+    _esperar_pedidos(pedidos, 1)
+    assert pedidos == ["L4"]          # a partir da mais antiga guardada
+    return cid, pedidos
+
+
+def test_mais_antigas_faz_uma_rodada_e_responde(amb, monkeypatch):
+    cid, pedidos = _antigas_preparadas(amb, monkeypatch)
+    amb.f["HistorySync"](amb.c, _resposta_de_historico(
+        cid, [("V2", TS - 500), ("V1", TS - 510)]))
+    fim = esperar(amb.fila, ev.MaisAntigas)
+    assert (fim.conversa_id, fim.novas, fim.texto) == (cid, 2, "")
+    assert len(pedidos) == 1 and cid not in amb.p._varreduras
+    assert amb.banco.mensagem_mais_antiga("w1", cid).id == "V1"
+
+
+def test_mais_antigas_sem_nada_no_celular_diz_o_motivo(amb, monkeypatch):
+    cid, _ = _antigas_preparadas(amb, monkeypatch)
+    amb.f["HistorySync"](amb.c, _resposta_de_historico(cid, []))
+    fim = esperar(amb.fila, ev.MaisAntigas)
+    assert fim.novas == 0 and "não tem mensagens mais antigas" in fim.texto
+
+
+def test_mais_antigas_sem_resposta_do_celular_avisa(amb, monkeypatch):
+    monkeypatch.setattr(wa, "ESPERA_DO_HISTORICO", 0.05)
+    cid, _ = _antigas_preparadas(amb, monkeypatch)
+    fim = esperar(amb.fila, ev.MaisAntigas)
+    assert fim.novas == 0 and "não respondeu" in fim.texto
+    assert cid not in amb.p._varreduras
+
+
+def test_mais_antigas_com_a_conta_desconectada_nao_pede(amb, monkeypatch):
+    cid, pedidos = _preparar_varredura(amb, monkeypatch, ("L5",))
+    amb.p._conectada = False
+    assert "não está conectada" in amb.p.buscar_mais_antigas(cid, 100)
+    assert pedidos == []

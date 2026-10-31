@@ -14,6 +14,7 @@ import wx
 
 from telezapp.nucleo import detalhes as det
 from telezapp.nucleo import modelos as m
+from telezapp.armazenamento.banco import POR_VEZ_MAXIMO, POR_VEZ_MINIMO
 from telezapp.nucleo import silenciados
 
 log = logging.getLogger("telezapp.detalhes")
@@ -521,6 +522,8 @@ class ControleDetalhes:
                 botoes.append(("&Deixar de seguir", self.deixar_de_seguir))
         botoes.append(("Mensagens fa&voritas", self.favoritas))
         botoes.append(("Mensagens fi&xadas", self.fixadas))
+        botoes.append(("Mensagens por ve&z: %d..." % self.jan._mensagens_por_vez(
+            self.conv.chave), self.mensagens_por_vez))
         if self.conv.tipo == "grupo":
             botoes.append(("Participantes si&lenciados", self.silenciados))
         botoes.append(("&Limpar a conversa...", self.limpar))
@@ -534,6 +537,28 @@ class ControleDetalhes:
                          self._botoes())
         threading.Thread(target=self._carregar, daemon=True,
                          name="detalhes").start()
+
+    def mensagens_por_vez(self):
+        """Quantas mensagens a lista desta conversa mostra de cada vez."""
+        dlg = wx.TextEntryDialog(
+            self.dlg, "Quantas mensagens mostrar de cada vez nesta conversa, "
+            "de %d a %d. Para ver as anteriores, aperte Home na primeira da "
+            "lista." % (POR_VEZ_MINIMO, POR_VEZ_MAXIMO), "Mensagens por vez",
+            str(self.jan._mensagens_por_vez(self.conv.chave)))
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            valor = dlg.GetValue().strip()
+        finally:
+            dlg.Destroy()
+        if not valor.isdigit() or \
+                not POR_VEZ_MINIMO <= int(valor) <= POR_VEZ_MAXIMO:
+            wx.MessageBox("Escreva um número de %d a %d." % (
+                POR_VEZ_MINIMO, POR_VEZ_MAXIMO), "Mensagens por vez",
+                wx.OK | wx.ICON_WARNING, self.dlg)
+            return
+        self.jan._definir_mensagens_por_vez(self.conv, int(valor))
+        self._atualizar()
 
     def limpar(self):
         """Abre a limpeza de mídias e mensagens so desta conversa; se algo

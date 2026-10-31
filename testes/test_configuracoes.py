@@ -84,14 +84,20 @@ def test_opcao_numerica_e_limitada_ao_intervalo(tmp_path, monkeypatch):
     monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path))
     from telezapp import config
     from telezapp.nucleo.configuracoes import ModeloConfiguracoes
-    mod = ModeloConfiguracoes(config.Config())
-    mod.definir("mensagens_por_conversa", 10)
-    assert mod.valor("mensagens_por_conversa") == 50
-    mod.definir("mensagens_por_conversa", 99999)
-    assert mod.valor("mensagens_por_conversa") == 5000
-    mod.definir("mensagens_por_conversa", "abc")
-    assert mod.valor("mensagens_por_conversa") == 1200   # padrao: nada pendente
-    assert "mensagens_por_conversa" not in mod.pendentes
+    # nenhuma opcao usa o campo numerico hoje; o recurso fica para as proximas
+    numerica = config.Opcao("numerica", "Numérica", "Mensagens", 1200, "",
+                            numero=(50, 5000))
+    monkeypatch.setattr(config, "OPCOES", list(config.OPCOES) + [numerica])
+    cfg = config.Config()
+    cfg.set("numerica", 1200)
+    mod = ModeloConfiguracoes(cfg)
+    mod.definir("numerica", 10)
+    assert mod.valor("numerica") == 50
+    mod.definir("numerica", 99999)
+    assert mod.valor("numerica") == 5000
+    mod.definir("numerica", "abc")
+    assert mod.valor("numerica") == 1200   # padrao: nada pendente
+    assert "numerica" not in mod.pendentes
 
 
 # ------------------------------------------ codigo secreto das trancadas
