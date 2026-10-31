@@ -3,6 +3,10 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.10.31.1
+
+- Guia de uso no formato do outro programa do responsável (pedido dele): `ajuda/guia.txt` com "# Assunto" no lugar de `guia.html`, `paginas.ler_assuntos` e `interface/guia.py` (lista de assuntos, texto somente leitura, Fechar). F1 e o botão da tela de boas-vindas abrem a janela; o instalador não cria mais a pasta temporária do guia. Novidades continuam em HTML, porque o `publicar.py` monta as notas delas. Texto reorganizado em 56 assuntos curtos, com "Ctrl+" no lugar de "Control", atualização descrita como ela é hoje (o programa se atualiza sozinho), sem citar outros programas, e NVDA só como "testado com". Testes conferem assuntos, marcas e se os atalhos da lista existem no menu. **Sem teste ao vivo com leitor de tela.**
+
 ## 2026.10.31.0
 
 - Corrigido (relato do Nuno, causa dele não confirmada): `CREATE_NO_WINDOW` com `DETACHED_PROCESS` não esconde nada, e a espera por `ping 127.0.0.1` do atualizador, de `_reiniciar` e de `_abrir_depois` abria janela visível, anunciada pelo leitor de tela. Reproduzido com as mesmas bandeiras (janela "ping -n 2 127.0.0.1"); só `CREATE_NO_WINDOW` não abre nenhuma. Quem atualiza para esta versão ainda usa o script antigo; vale da seguinte em diante. Não resolve o que prenderia a pasta na troca, se for o caso.

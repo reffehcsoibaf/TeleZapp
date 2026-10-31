@@ -246,13 +246,12 @@ TEXTO_DE_BOAS_VINDAS = (
 class DialogoBoasVindas(wx.Dialog):
     """Primeira tela de uma copia que ainda nao foi instalada."""
 
-    def __init__(self, fonte=None, pasta_guia=None):
+    def __init__(self, fonte=None):
         """`fonte`: so no instalador de um arquivo (ver fluxo_instalar); nele
         nao ha "usar sem instalar"."""
         super().__init__(None, title="Bem-vindo ao %s" % NOME,
                          style=wx.DEFAULT_DIALOG_STYLE)
         self.fonte = fonte
-        self.pasta_guia = pasta_guia
         self.escolha = "fechar"
         self.exe_instalado = None
         self.abrir = False
@@ -298,17 +297,14 @@ class DialogoBoasVindas(wx.Dialog):
         elif chave == "portatil":
             fluxo_criar_portatil(self, os.path.expanduser("~"), self.fonte)
         elif chave == "guia":
-            from telezapp.nucleo import paginas
-            caminho = paginas.gerar(
-                "guia.html", self.pasta_guia or config.pasta_temporaria())
-            if caminho and os.name == "nt":
-                os.startfile(caminho)
+            from telezapp.interface.guia import mostrar_guia
+            mostrar_guia(self)
         else:
             self.escolha = chave
             self.EndModal(wx.ID_OK)
 
 
-def mostrar_boas_vindas(fonte=None, pasta_guia=None):
+def mostrar_boas_vindas(fonte=None):
     """Quando mostrar: executavel que nao e instalado, sem pasta `dados` ao
     lado e sem a marca `sem-boas-vindas.txt`; ou sempre, no instalador de um
     arquivo (`fonte`). Devolve "continuar" (abrir o programa), "sair" ou
@@ -319,7 +315,7 @@ def mostrar_boas_vindas(fonte=None, pasta_guia=None):
             ins.dados_portateis(programa) or os.path.isfile(
                 os.path.join(programa, "sem-boas-vindas.txt"))):
         return "continuar"
-    dlg = DialogoBoasVindas(fonte, pasta_guia)
+    dlg = DialogoBoasVindas(fonte)
     try:
         dlg.ShowModal()
         escolha = dlg.escolha

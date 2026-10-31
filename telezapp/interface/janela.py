@@ -30,6 +30,7 @@ from telezapp.interface import enquete as ui_enquete
 from telezapp.interface import nova_enquete as ui_nova_enquete
 from telezapp.interface import ortografia as ui_ortografia
 from telezapp.interface import teclas as ui_teclas
+from telezapp.interface.guia import mostrar_guia
 from telezapp.interface.progresso import JanelaDeProgresso
 from telezapp.interface.publicar_status import DialogoPublicarStatus
 from telezapp.interface.detalhes import ControleDetalhes, ControleRecibos
@@ -977,7 +978,7 @@ class Janela(wx.Frame):
                 "midias_confirmar_mb"),
             "midias_espaco": lambda e: self._espaco_midias(),
             "midias_limpar": lambda e: self._limpar_midias(),
-            "guia": lambda e: self._abrir_pagina("guia.html"),
+            "guia": lambda e: mostrar_guia(self),
             "novidades": lambda e: self._abrir_pagina("novidades.html"),
             "pagina_projeto": lambda e: self._abrir_na_internet(
                 PAGINA_DO_PROJETO),
@@ -8570,7 +8571,7 @@ class Janela(wx.Frame):
         controle.SetFocus()
 
     def _abrir_pagina(self, nome):
-        """Guia de uso ou novidades, no navegador padrao."""
+        """Pagina de novidades, no navegador padrao."""
         caminho = paginas.gerar(nome, config.pasta_temporaria())
         if caminho is None:
             wx.MessageBox("O arquivo %s não foi encontrado." % nome, NOME,
