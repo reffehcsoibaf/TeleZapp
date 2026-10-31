@@ -18,8 +18,8 @@ import webbrowser
 
 import wx
 
-from telezapp import (GRUPO_DE_SUPORTE, NOME, PAGINA_DE_RELATOS,
-                      PAGINA_DO_PROJETO, VERSAO, config)
+from telezapp import (GRUPO_DE_SUPORTE, NOME, PAGINA_DO_PROJETO, VERSAO,
+                      config)
 from telezapp.acessibilidade.fala import Fala, bipe, definir_sons
 from telezapp.interface import colagem, dialogos, robos, visualizadores
 from telezapp.interface import salvar as ui_salvar
@@ -30,6 +30,7 @@ from telezapp.interface import enquete as ui_enquete
 from telezapp.interface import nova_enquete as ui_nova_enquete
 from telezapp.interface import ortografia as ui_ortografia
 from telezapp.interface import teclas as ui_teclas
+from telezapp.interface.guia import mostrar_guia
 from telezapp.interface.progresso import JanelaDeProgresso
 from telezapp.interface.publicar_status import DialogoPublicarStatus
 from telezapp.interface.detalhes import ControleDetalhes, ControleRecibos
@@ -779,8 +780,8 @@ class Janela(wx.Frame):
         item(m_aj, "ajuda", "&Teclas de atalho\tShift+F1")
         item(m_aj, "novidades", "&Novidades desta versão")
         item(m_aj, "pagina_projeto", "&Página do projeto na internet")
-        item(m_aj, "feedback", "&Feedback: entrar em contato pelo "
-                               "formulário...")
+        item(m_aj, "feedback", "&Feedback: relatar um problema ou sugerir "
+                               "algo...")
         item(m_aj, "grupo_suporte", "Entrar no gr&upo de suporte no "
                                     "WhatsApp...")
         item(m_aj, "atualizacoes", "&Verificar atualizações...")
@@ -977,11 +978,11 @@ class Janela(wx.Frame):
                 "midias_confirmar_mb"),
             "midias_espaco": lambda e: self._espaco_midias(),
             "midias_limpar": lambda e: self._limpar_midias(),
-            "guia": lambda e: self._abrir_pagina("guia.html"),
+            "guia": lambda e: mostrar_guia(self),
             "novidades": lambda e: self._abrir_pagina("novidades.html"),
             "pagina_projeto": lambda e: self._abrir_na_internet(
                 PAGINA_DO_PROJETO),
-            "feedback": lambda e: self._abrir_na_internet(PAGINA_DE_RELATOS),
+            "feedback": lambda e: self._feedback(),
             "grupo_suporte": lambda e: self._entrar_no_grupo_de_suporte(),
             "atualizacoes": lambda e: self._verificar_atualizacoes(),
             "instalar": lambda e: self._instalar(),
@@ -8570,7 +8571,7 @@ class Janela(wx.Frame):
         controle.SetFocus()
 
     def _abrir_pagina(self, nome):
-        """Guia de uso ou novidades, no navegador padrao."""
+        """Pagina de novidades, no navegador padrao."""
         caminho = paginas.gerar(nome, config.pasta_temporaria())
         if caminho is None:
             wx.MessageBox("O arquivo %s não foi encontrado." % nome, NOME,
@@ -8594,6 +8595,12 @@ class Janela(wx.Frame):
 
     def _abrir_logs(self):
         self._abrir_pasta("logs")
+
+    @seguro
+    def _feedback(self):
+        from telezapp.interface.relato import mostrar_relato
+        mostrar_relato(self, self.cfg, lambda texto: self.fala.falar(
+            texto, interromper=True))
 
     @seguro
     def _exportar_logs(self):
@@ -8979,8 +8986,16 @@ class Janela(wx.Frame):
         nova que ainda nao foi avisada, e nunca reclama de erro."""
         if manual:
             self.fala.falar("Verificando atualizações...", interromper=True)
+        hoje = time.strftime("%Y-%m-%d")
+        baixar_do_dia = atualizacao.deve_baixar_do_dia(
+            self.cfg.get("atualizacao_dia"), hoje,
+            getattr(sys, "frozen", False))
+        if baixar_do_dia:
+            self.cfg.set("atualizacao_dia", hoje)
 
         def trabalho():
+            if baixar_do_dia:
+                atualizacao.baixar_arquivo_do_dia()
             try:
                 lanc, erro = atualizacao.consultar(), ""
             except atualizacao.ErroAtualizacao as e:
@@ -8997,9 +9012,7 @@ class Janela(wx.Frame):
     def _resultado_atualizacao(self, lanc, erro, manual, periodica=False):
         if erro:
             if manual:
-                bipe("erro")
-                self.fala.falar(erro, interromper=True)
-                wx.MessageBox(erro, NOME, wx.OK | wx.ICON_WARNING, self)
+                self._erro_de_atualizacao(erro)
             return
         if lanc is None or not atualizacao.e_mais_nova(lanc):
             if manual:
@@ -9055,6 +9068,13 @@ class Janela(wx.Frame):
             wx.CallAfter(self._atualizar, lanc)
         elif escolha == "pagina":
             dialogos.abrir_link(lanc.pagina)
+
+    def _erro_de_atualizacao(self, erro):
+        bipe("erro")
+        self.fala.falar(erro, interromper=True)
+        from telezapp.interface import atualizacao as janela_versao
+        if janela_versao.erro_quer_a_pagina(self, erro):
+            dialogos.abrir_link(atualizacao.URL_ULTIMA)
 
     @seguro
     def _atualizar(self, lanc):
@@ -9114,9 +9134,7 @@ class Janela(wx.Frame):
             if erro.startswith("Atualização cancelada"):
                 self.fala.falar("Atualização cancelada.", interromper=True)
                 return
-            bipe("erro")
-            self.fala.falar(erro, interromper=True)
-            wx.MessageBox(erro, NOME, wx.OK | wx.ICON_WARNING, self)
+            self._erro_de_atualizacao(erro)
             return
         bipe("tarefa_pronta")
         # Com "Continuar em segundo plano" ligado, Close() so esconderia a

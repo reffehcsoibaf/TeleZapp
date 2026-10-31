@@ -15,7 +15,7 @@ hiddenimports += collect_submodules("telethon")
 hiddenimports += collect_submodules("hachoir")
 hiddenimports += collect_submodules("telezapp")
 for pacote in ("neonize", "magic", "pyzipper", "accessible_output2", "cv2",
-               "emoji", "av", "livekit"):
+               "emoji", "av", "livekit", "truststore"):
     d, b, h = collect_all(pacote)
     datas += d
     binaries += b

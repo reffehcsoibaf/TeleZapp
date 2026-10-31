@@ -26,6 +26,55 @@ def test_pega_a_versao_mais_alta_ignorando_rascunhos_e_tags_estranhas():
     assert at.mais_nova([]) is None and at.mais_nova({"message": "x"}) is None
 
 
+def test_arquivo_do_dia_uma_vez_por_dia_e_so_empacotado():
+    assert at.deve_baixar_do_dia(None, "2026-10-31", True)
+    assert at.deve_baixar_do_dia("2026-10-30", "2026-10-31", True)
+    assert not at.deve_baixar_do_dia("2026-10-31", "2026-10-31", True)
+    assert not at.deve_baixar_do_dia(None, "2026-10-31", False)
+
+
+def test_arquivo_do_dia_nao_manda_nada_e_falha_em_silencio(monkeypatch):
+    pedidos = []
+
+    def falha(pedido, timeout, context):
+        pedidos.append(pedido)
+        raise urllib.error.URLError("sem rede")
+    monkeypatch.setattr(at.urllib.request, "urlopen", falha)
+    at.baixar_arquivo_do_dia()
+    assert pedidos[0].full_url == at.URL_DO_DIA and "?" not in at.URL_DO_DIA
+    assert pedidos[0].data is None
+    assert set(pedidos[0].headers) == {"User-agent"}
+
+
+def test_consulta_valida_o_certificado_pelo_windows(monkeypatch):
+    monkeypatch.setattr(at, "_contexto", None)
+    contexto = at.contexto_ssl()
+    assert type(contexto).__module__.startswith("truststore")
+    assert at.contexto_ssl() is contexto
+    usado = []
+
+    def abre(pedido, timeout, context):
+        usado.append(context)
+        raise urllib.error.URLError("sem rede")
+    monkeypatch.setattr(at.urllib.request, "urlopen", abre)
+    with pytest.raises(urllib.error.URLError):
+        at._buscar_json("https://x")
+    assert usado == [contexto]
+
+
+def test_sem_a_biblioteca_fica_a_validacao_do_python(monkeypatch):
+    import builtins
+    monkeypatch.setattr(at, "_contexto", None)
+    importar = builtins.__import__
+
+    def sem_truststore(nome, *a, **k):
+        if nome == "truststore":
+            raise ImportError(nome)
+        return importar(nome, *a, **k)
+    monkeypatch.setattr(builtins, "__import__", sem_truststore)
+    assert at.contexto_ssl() is None
+
+
 def test_compara_versoes_como_numeros():
     nova = at.Lancamento("2026.10.18.10", "", "")
     assert at.e_mais_nova(nova, "2026.10.18.9")
@@ -149,6 +198,39 @@ def test_pergunta_depois_do_nao_diz_a_versao_e_as_duas_respostas():
     assert janela.BOTAO_MAIS_TARDE == "&Talvez mais tarde"
 
 
+def test_janela_de_erro_oferece_a_pagina_de_download(monkeypatch):
+    import types
+
+    from telezapp.interface import atualizacao as janela
+    rotulos = []
+
+    class Dialogo:
+        resposta = None
+
+        def __init__(self, pai, texto, titulo, estilo):
+            assert texto == "falhou"
+            # sem o Cancelar, o Esc nao fecha a janela
+            assert estilo & janela.wx.CANCEL
+
+        def SetOKCancelLabels(self, sim, nao):
+            rotulos.append((sim, nao))
+
+        def ShowModal(self):
+            return Dialogo.resposta
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(janela, "wx", types.SimpleNamespace(
+        MessageDialog=Dialogo, OK=1, CANCEL=2, ICON_WARNING=4,
+        ID_OK=10, ID_CANCEL=20))
+    Dialogo.resposta = janela.wx.ID_OK
+    assert janela.erro_quer_a_pagina(None, "falhou")
+    Dialogo.resposta = janela.wx.ID_CANCEL
+    assert not janela.erro_quer_a_pagina(None, "falhou")
+    assert rotulos[0] == ("&Abrir a página de download", "&Fechar")
+    assert at.URL_ULTIMA.endswith("/releases/latest")
+
+
 def test_motivos_da_falha_da_consulta_em_palavras():
     import socket
     import ssl
@@ -156,8 +238,9 @@ def test_motivos_da_falha_da_consulta_em_palavras():
     assert "limitou as consultas" in at.motivo_da_falha(http)
     assert "erro 500" in at.motivo_da_falha(
         urllib.error.HTTPError("u", 500, "x", {}, None))
-    assert "certificado" in at.motivo_da_falha(
+    certificado = at.motivo_da_falha(
         urllib.error.URLError(ssl.SSLCertVerificationError("falhou")))
+    assert "certificado" in certificado and "instalador" in certificado
     assert "demorou" in at.motivo_da_falha(
         urllib.error.URLError(socket.timeout()))
     assert "endereço do GitHub" in at.motivo_da_falha(
@@ -199,7 +282,8 @@ def test_plano_b_le_a_versao_do_endereco_da_ultima_release(monkeypatch):
         def __exit__(self, *a):
             return False
     visto = []
-    monkeypatch.setattr(at.urllib.request, "urlopen", lambda p, timeout=0: (
+    monkeypatch.setattr(at.urllib.request, "urlopen", lambda p, timeout=0,
+                        context=None: (
         visto.append(p.full_url) or Resposta(
             at.SITE + "/releases/tag/2026.10.24.0")))
     lanc = at._pelo_site()
@@ -208,7 +292,8 @@ def test_plano_b_le_a_versao_do_endereco_da_ultima_release(monkeypatch):
     assert lanc.url_zip == at.SITE + \
         "/releases/download/2026.10.24.0/TeleZapp.zip"
     assert lanc.url_hash == lanc.url_zip + ".sha256"
-    monkeypatch.setattr(at.urllib.request, "urlopen", lambda p, timeout=0:
+    monkeypatch.setattr(at.urllib.request, "urlopen",
+                        lambda p, timeout=0, context=None:
                         Resposta(at.SITE + "/releases"))   # sem tag
     with pytest.raises(ValueError):
         at._pelo_site()

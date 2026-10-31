@@ -16,6 +16,8 @@ import urllib.request
 import zipfile
 
 from telezapp import NOME, VERSAO
+from telezapp.nucleo.atualizacao import (abrir_url, falha_de_certificado,
+                                         motivo_da_falha)
 
 log = logging.getLogger("telezapp.atualizador")
 
@@ -48,8 +50,8 @@ def _url_ok(url):
 
 
 def _abrir(url, tempo=30):
-    return urllib.request.urlopen(urllib.request.Request(
-        url, headers={"User-Agent": "TeleZapp/" + VERSAO}), timeout=tempo)
+    return abrir_url(urllib.request.Request(
+        url, headers={"User-Agent": "TeleZapp/" + VERSAO}), tempo)
 
 
 def _hash_esperado(lanc, abrir):
@@ -94,6 +96,9 @@ def baixar(lanc, pasta, progresso=None, abrir=_abrir, cancelado=None):
             pass
         raise
     except OSError as e:
+        if falha_de_certificado(e):
+            raise ErroAtualizacao("Não consegui baixar a atualização: %s." %
+                                  motivo_da_falha(e))
         raise ErroAtualizacao("Não consegui baixar a atualização (%s). "
                               "Tente de novo." % e)
     if h.hexdigest() != esperado:

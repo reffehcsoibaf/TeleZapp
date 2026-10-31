@@ -9,9 +9,7 @@ instalador nao deixa nada para tras.
 Gerado por ferramentas/empacotar.py. Pela linha de comando, `--pacote
 <zip>` usa outro zip (testes)."""
 import os
-import shutil
 import sys
-import tempfile
 import traceback
 
 ARQUIVO = "TeleZapp.zip"
@@ -42,13 +40,8 @@ def main():
                           "programa não foi encontrado. Baixe de novo.",
                           "TeleZapp", wx.OK | wx.ICON_ERROR)
             return 1
-        guia = tempfile.mkdtemp(prefix="telezapp-guia-")
-        try:
-            mostrar_boas_vindas(
-                lambda progresso=None: ins.extrair_pacote(pacote, progresso),
-                guia)
-        finally:
-            shutil.rmtree(guia, ignore_errors=True)
+        mostrar_boas_vindas(
+            lambda progresso=None: ins.extrair_pacote(pacote, progresso))
         del app
         return 0
     except Exception:

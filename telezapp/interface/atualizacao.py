@@ -82,6 +82,22 @@ class DialogoAtualizacao(wx.Dialog):
         self.EndModal(wx.ID_OK)
 
 
+BOTAO_ABRIR_PAGINA = "&Abrir a página de download"
+BOTAO_FECHAR = "&Fechar"
+
+
+def erro_quer_a_pagina(pai, erro):
+    """A janela de erro da atualizacao: True se a pessoa pediu a pagina de
+    download, False em Fechar ou Esc."""
+    dlg = wx.MessageDialog(pai, erro, NOME,
+                           wx.OK | wx.CANCEL | wx.ICON_WARNING)
+    dlg.SetOKCancelLabels(BOTAO_ABRIR_PAGINA, BOTAO_FECHAR)
+    try:
+        return dlg.ShowModal() == wx.ID_OK
+    finally:
+        dlg.Destroy()
+
+
 BOTAO_NAO_AVISAR = "&Não me avise mais sobre essa versão"
 BOTAO_MAIS_TARDE = "&Talvez mais tarde"
 

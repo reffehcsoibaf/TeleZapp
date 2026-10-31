@@ -1,4 +1,4 @@
-name = "telezapp-relatos"
+name = "telezapp"
 main = "worker.js"
 compatibility_date = "2026-10-01"
 preview_urls = false
@@ -10,4 +10,4 @@ id = "fa213f960cc446d3ad355d8941e88e8d"
 
 [vars]
 # Endereço do próprio Worker, usado no aviso opcional pelo Telegram.
-ENDERECO_ADMIN = "https://telezapp-relatos.fabioscheffer.workers.dev"
+ENDERECO_ADMIN = "https://telezapp.fabioscheffer.workers.dev"

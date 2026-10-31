@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Fábio Scheffer Moraes
-"""Consulta as Releases do GitHub para saber se ha versao nova. So le: nao
-baixa nem instala nada. Sem dependencia de wxPython."""
+"""Consulta as Releases do GitHub para saber se ha versao nova. Nao baixa nem
+instala o programa. Sem dependencia de wxPython."""
 import json
 import logging
 import re
@@ -18,10 +18,38 @@ log = logging.getLogger("telezapp.atualizacao")
 REPO = "reffehcsoibaf/TeleZapp"
 URL_LANCAMENTOS = "https://api.github.com/repos/%s/releases?per_page=15" % REPO
 URL_PAGINA = SITE + "/releases"
+URL_ULTIMA = SITE + "/releases/latest"
+# arquivo publico de cada Release: o GitHub soma os downloads, o que da uma
+# ideia de quantas copias estao em uso; nada identifica quem baixou
+URL_DO_DIA = SITE + "/releases/latest/download/consulta.txt"
+
+
+_contexto = None
 
 
 class ErroAtualizacao(Exception):
     """A consulta nao deu certo; o texto e dito a pessoa."""
+
+
+def contexto_ssl():
+    """Valida o certificado pelo proprio Windows, como o navegador: a
+    validacao do Python so ve as raizes ja guardadas no sistema, e o Windows
+    pode buscar uma raiz so quando ela e pedida. Sem a biblioteca, None (a
+    validacao padrao do Python)."""
+    global _contexto
+    if _contexto is None:
+        try:
+            import truststore
+            _contexto = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        except Exception as e:
+            log.warning("truststore indisponível: %s", type(e).__name__)
+            return None
+    return _contexto
+
+
+def abrir_url(pedido, tempo):
+    return urllib.request.urlopen(pedido, timeout=tempo,
+                                  context=contexto_ssl())
 
 
 @dataclass
@@ -121,12 +149,34 @@ def deve_avisar_ao_abrir(lancamento, ignorada):
         lancamento.versao != (ignorada or "")
 
 
+def deve_baixar_do_dia(ultimo_dia, hoje, empacotado):
+    """Uma vez por dia em cada copia; rodando do codigo-fonte, nunca."""
+    return bool(empacotado) and ultimo_dia != hoje
+
+
+def baixar_arquivo_do_dia(tempo=10):
+    """Baixa o arquivo publico do dia. Falhar nao importa: nao avisa ninguem."""
+    pedido = urllib.request.Request(URL_DO_DIA, headers={
+        "User-Agent": "TeleZapp/" + VERSAO})
+    try:
+        with abrir_url(pedido, tempo) as r:
+            r.read(1024)
+    except Exception as e:
+        log.debug("arquivo do dia não baixado: %s", type(e).__name__)
+
+
 def _buscar_json(url, tempo=10):
     pedido = urllib.request.Request(url, headers={
         "Accept": "application/vnd.github+json",
         "User-Agent": "TeleZapp/" + VERSAO})
-    with urllib.request.urlopen(pedido, timeout=tempo) as r:
+    with abrir_url(pedido, tempo) as r:
         return json.loads(r.read().decode("utf-8"))
+
+
+def falha_de_certificado(erro):
+    causa = getattr(erro, "reason", erro)
+    return isinstance(causa, ssl.SSLError) or \
+        "CERTIFICATE" in str(causa).upper()
 
 
 def motivo_da_falha(erro):
@@ -137,9 +187,10 @@ def motivo_da_falha(erro):
                     "endereço de internet; tente de novo daqui a uma hora")
         return "o GitHub respondeu com o erro %d" % erro.code
     causa = getattr(erro, "reason", erro)
-    if isinstance(causa, ssl.SSLError) or "CERTIFICATE" in str(causa).upper():
+    if falha_de_certificado(erro):
         return ("o Windows não confiou no certificado do GitHub; confira a "
-                "data e a hora do computador e o antivírus")
+                "data e a hora do computador e o antivírus, ou baixe o "
+                "instalador pelo navegador, na página de download")
     if isinstance(causa, (socket.timeout, TimeoutError)):
         return "o GitHub demorou demais para responder"
     if isinstance(causa, socket.gaierror):
@@ -156,9 +207,8 @@ def _pelo_site(tempo=10):
     ultima Release comum para a pagina da versao, e dai saem os enderecos do
     zip e do hash. Sem as notas (a pessoa as ve na pagina)."""
     pedido = urllib.request.Request(
-        SITE + "/releases/latest", headers={
-            "User-Agent": "TeleZapp/" + VERSAO})
-    with urllib.request.urlopen(pedido, timeout=tempo) as r:
+        URL_ULTIMA, headers={"User-Agent": "TeleZapp/" + VERSAO})
+    with abrir_url(pedido, tempo) as r:
         final = r.geturl()
     achou = re.search(r"/releases/tag/([^/?#]+)$", final)
     versao = achou.group(1).lstrip("vV") if achou else ""

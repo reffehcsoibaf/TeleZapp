@@ -25,10 +25,8 @@ npx wrangler kv namespace create RELATOS
 ```bash
 npx wrangler secret put ADMIN_TOKEN     # senha para abrir /admin (longa e aleatória)
 npx wrangler secret put SAL             # texto aleatório, usado no limite por pessoa
-# opcional, notificação no celular pelo ntfy.sh (assine o mesmo nome no app ntfy;
-# o aviso leva só o tipo e o nome, sem a descrição):
-npx wrangler secret put NTFY_TOPIC      # um nome longo e aleatório, como telezapp-relatos-<letras e números>
-# opcional, aviso no Telegram a cada relato novo:
+# opcional, aviso no Telegram a cada relato novo (o ntfy.sh grátis recusava os
+# Workers por cota diária):
 npx wrangler secret put TG_TOKEN        # token do bot
 npx wrangler secret put TG_CHAT         # seu chat id
 ```

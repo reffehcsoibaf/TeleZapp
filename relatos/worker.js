@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Fábio Scheffer Moraes
 //
-// Recebe os relatos do formulario da pagina do TeleZapp (site/relatar.html),
-// guarda cada um no KV por 90 dias e deixa o responsavel le-los em /admin.
+// Recebe os relatos do formulario da pagina do TeleZapp (site/relatar.html) e
+// da janela de Feedback do programa (telezapp/nucleo/relatos.py), guarda cada um no KV por 90 dias e deixa o responsavel le-los em /admin.
 // Veja relatos/LEIAME.md para publicar.
 
 const ORIGEM = "https://reffehcsoibaf.github.io";
@@ -59,6 +59,11 @@ function igual(a, b) {
   return r === 0;
 }
 
+// o que abre um relato pelo link do aviso, sem revelar a senha do /admin
+function assinatura(env, id) {
+  return env.ADMIN_TOKEN ? resumo("relato:" + id + ":" + env.ADMIN_TOKEN) : "";
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
@@ -71,7 +76,12 @@ export default {
 async function relato(req, env) {
   if (req.method === "OPTIONS") return new Response(null, { headers: cors() });
   if (req.method !== "POST") return json({ erro: "Use POST." }, 405);
-  if (req.headers.get("Origin") !== ORIGEM) {
+  // o programa (Ajuda, Feedback) nao e um navegador: vem sem Origin. Isso nao
+  // e uma senha; quem barra abuso e o limite por dia
+  const origem = req.headers.get("Origin");
+  const doPrograma = !origem &&
+    (req.headers.get("User-Agent") || "").startsWith("TeleZapp/");
+  if (origem !== ORIGEM && !doPrograma) {
     return json({ erro: "Origem não permitida." }, 403);
   }
   let f;
@@ -135,40 +145,46 @@ async function relato(req, env) {
   return json({ ok: true, id });
 }
 
-// avisos opcionais: notificacao do ntfy.sh (segredo NTFY_TOPIC) e mensagem no
-// Telegram (segredos TG_TOKEN e TG_CHAT). O ntfy leva so o tipo e o nome, sem
-// a descricao nem o endereco do /admin.
+// aviso opcional por um bot do Telegram (segredos TG_TOKEN e TG_CHAT). O ntfy.sh
+// gratis foi abandonado: recusava os Workers por cota diaria (HTTP 429).
 async function avisar(env, id, r) {
-  if (env.NTFY_TOPIC) {
-    try {
-      await fetch("https://ntfy.sh/" + encodeURIComponent(env.NTFY_TOPIC), {
-        method: "POST",
-        headers: { "Title": "Novo relato no TeleZapp", "Tags": "speech_balloon" },
-        body: TIPOS[r.tipo] + " de " + (r.nome || "alguém sem nome") +
-          (r.logs.length ? ", com log" : ""),
-      });
-    } catch { /* o aviso e um extra */ }
-  }
   if (!env.TG_TOKEN || !env.TG_CHAT) return;
   try {
     const texto = "Novo relato no TeleZapp (" + TIPOS[r.tipo] + ")\n" +
       "De: " + (r.nome || "sem nome") + "\n" + r.descricao.slice(0, 300) +
       (r.logs.length ? "\n(com " + r.logs.length + " log)" : "") +
-      "\n" + env.ENDERECO_ADMIN + "/admin/ver?id=" + id;
-    await fetch("https://api.telegram.org/bot" + env.TG_TOKEN + "/sendMessage", {
+      "\n" + env.ENDERECO_ADMIN + "/admin/ver?id=" + id +
+      "&a=" + await assinatura(env, id);
+    const resposta = await fetch("https://api.telegram.org/bot" + env.TG_TOKEN + "/sendMessage", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: env.TG_CHAT, text: texto }),
+      // sem previa: o Telegram nao precisa visitar o link
+      body: JSON.stringify({
+        chat_id: env.TG_CHAT, text: texto,
+        link_preview_options: { is_disabled: true },
+      }),
     });
-  } catch { /* o aviso e um extra: o relato ja esta guardado */ }
+    if (!resposta.ok) console.log("Telegram recusou: HTTP " + resposta.status);
+  } catch (e) {
+    // o aviso e um extra: o relato ja esta guardado
+    console.log("Telegram falhou: " + e.name);
+  }
 }
 
 async function admin(req, env, url) {
   const dado = url.searchParams.get("t") || "";
-  if (!igual(dado, env.ADMIN_TOKEN || "")) {
+  const comSenha = igual(dado, env.ADMIN_TOKEN || "");
+  // o link do aviso abre so aquele relato e os logs dele, nunca a lista
+  const dadoA = url.searchParams.get("a") || "";
+  const idPedido = url.searchParams.get("id") || "";
+  const assinado = !comSenha && idPedido &&
+    (url.pathname === "/admin/ver" || url.pathname === "/admin/log") &&
+    igual(dadoA, await assinatura(env, idPedido));
+  if (!comSenha && !assinado) {
     return html("<p>Acesso negado.</p>", 403);
   }
   const t = encodeURIComponent(dado);
+  const acesso = comSenha ? "t=" + t : "a=" + encodeURIComponent(dadoA);
   if (url.pathname === "/admin" || url.pathname === "/admin/") {
     const lista = await env.RELATOS.list({ prefix: "r:" });
     const itens = lista.keys.sort((a, b) => (b.name > a.name ? 1 : -1)).map((k) => {
@@ -197,10 +213,10 @@ async function admin(req, env, url) {
     });
   }
   const logs = r.logs.map((l, i) =>
-    `<li><a href="/admin/log?id=${esc(id)}&n=${i}&t=${t}">${esc(l.nome)}</a> ` +
+    `<li><a href="/admin/log?id=${esc(id)}&n=${i}&${acesso}">${esc(l.nome)}</a> ` +
     `(${Math.round(l.texto.length / 1024)} KB)</li>`).join("");
   return html(`<!doctype html><meta charset="utf-8"><title>Relato</title>` +
-    `<p><a href="/admin?t=${t}">Voltar à lista</a></p>` +
+    (comSenha ? `<p><a href="/admin?t=${t}">Voltar à lista</a></p>` : "") +
     `<h1>${esc(TIPOS[r.tipo])}</h1><dl>` +
     `<dt>Recebido</dt><dd>${esc(r.recebido)}</dd>` +
     `<dt>Nome</dt><dd>${esc(r.nome)}</dd>` +
