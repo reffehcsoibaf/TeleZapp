@@ -5702,18 +5702,16 @@ def test_selecao_em_massa_marca_como_lidas(j):
 
 
 def test_menu_ajuda_abre_a_pagina_do_projeto_e_o_feedback(j, monkeypatch):
-    from telezapp import PAGINA_DE_RELATOS, PAGINA_DO_PROJETO
+    from telezapp import PAGINA_DO_PROJETO
     abertos = []
     monkeypatch.setattr(jm.webbrowser, "open", lambda url: abertos.append(url) or True)
     assert "pagina_projeto" in j.itens and "feedback" in j.itens
     assert j.atalhos.efetivo("pagina_projeto") == ""        # slots sem atalho
     assert j.atalhos.efetivo("feedback") == ""
     j._abrir_na_internet(PAGINA_DO_PROJETO)
-    j._abrir_na_internet(PAGINA_DE_RELATOS)
-    assert abertos == [PAGINA_DO_PROJETO, PAGINA_DE_RELATOS]
+    assert abertos == [PAGINA_DO_PROJETO]
     assert "Página do projeto" in j.itens["pagina_projeto"].rotulo
     assert "Feedback" in j.itens["feedback"].rotulo
-    assert PAGINA_DE_RELATOS.startswith(PAGINA_DO_PROJETO)
 
 
 def test_grupo_de_suporte_entra_pela_conta_ou_abre_o_navegador(j, monkeypatch):

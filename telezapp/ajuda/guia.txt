@@ -768,7 +768,7 @@ Nunca mande as pastas de sessões, o config.json, o banco de conversas, as chave
 
 Na Ajuda ficam também:
 Página do projeto na internet: abre o site do TeleZapp no navegador.
-Feedback: entrar em contato pelo formulário: relate um problema, sugira algo ou tire uma dúvida, sem precisar de conta em lugar nenhum.
+Feedback: abre uma janela do próprio TeleZapp, sem navegador, para relatar um problema, sugerir algo ou tirar uma dúvida, sem precisar de conta em lugar nenhum. Escreva como falar com você e aperte Enviar com os logs: os registros vão juntos, sem precisar procurar arquivos, e a descrição é opcional. Enviar sem os logs manda só o que você escreveu, e aí a descrição é obrigatória.
 Entrar no grupo de suporte no WhatsApp: leva ao grupo onde se tiram dúvidas e se conversa com quem desenvolve o TeleZapp e com outros usuários. Com uma conta de WhatsApp conectada, o TeleZapp mostra o nome e o número de membros do grupo e pergunta se você quer entrar; com mais de uma conta, pergunta com qual. Sem conta conectada, abre o convite no navegador.
 
 Os dois primeiros itens nascem sem atalho; dê um em Configurações, Atalhos.
@@ -791,7 +791,7 @@ As mídias baixadas ficam na subpasta midias e são apagadas junto com a conta q
 Arquivos temporários ficam numa subpasta do próprio programa e são apagados ao abrir e ao fechar.
 
 # Segurança e privacidade
-Para onde vão as suas mensagens: o TeleZapp não tem servidor próprio e não envia dados de uso a ninguém. Ele conversa direto com o WhatsApp e com o Telegram, com a criptografia que esses serviços já usam. As suas conversas, sessões e mídias ficam só neste computador. O código do programa é aberto, e qualquer pessoa pode examiná-lo.
+Para onde vão as suas mensagens: o TeleZapp não tem servidor próprio e não envia dados de uso a ninguém. Ele conversa direto com o WhatsApp e com o Telegram, com a criptografia que esses serviços já usam. As suas conversas, sessões e mídias ficam só neste computador. O que vai para quem mantém o TeleZapp é só o que você mandar em Ajuda, Feedback. O código do programa é aberto, e qualquer pessoa pode examiná-lo.
 
 Consulta de versão nova: o TeleZapp consulta o GitHub e, uma vez por dia, baixa de lá um arquivo público. O GitHub soma os downloads de cada arquivo, e esse total dá uma ideia de quantas cópias estão em uso. Nada identifica você nem o seu computador. Quem desliga "Avisar quando houver versão nova do TeleZapp" só faz esse download ao usar Ajuda, Verificar atualizações.
 

@@ -18,8 +18,8 @@ import webbrowser
 
 import wx
 
-from telezapp import (GRUPO_DE_SUPORTE, NOME, PAGINA_DE_RELATOS,
-                      PAGINA_DO_PROJETO, VERSAO, config)
+from telezapp import (GRUPO_DE_SUPORTE, NOME, PAGINA_DO_PROJETO, VERSAO,
+                      config)
 from telezapp.acessibilidade.fala import Fala, bipe, definir_sons
 from telezapp.interface import colagem, dialogos, robos, visualizadores
 from telezapp.interface import salvar as ui_salvar
@@ -780,8 +780,8 @@ class Janela(wx.Frame):
         item(m_aj, "ajuda", "&Teclas de atalho\tShift+F1")
         item(m_aj, "novidades", "&Novidades desta versão")
         item(m_aj, "pagina_projeto", "&Página do projeto na internet")
-        item(m_aj, "feedback", "&Feedback: entrar em contato pelo "
-                               "formulário...")
+        item(m_aj, "feedback", "&Feedback: relatar um problema ou sugerir "
+                               "algo...")
         item(m_aj, "grupo_suporte", "Entrar no gr&upo de suporte no "
                                     "WhatsApp...")
         item(m_aj, "atualizacoes", "&Verificar atualizações...")
@@ -982,7 +982,7 @@ class Janela(wx.Frame):
             "novidades": lambda e: self._abrir_pagina("novidades.html"),
             "pagina_projeto": lambda e: self._abrir_na_internet(
                 PAGINA_DO_PROJETO),
-            "feedback": lambda e: self._abrir_na_internet(PAGINA_DE_RELATOS),
+            "feedback": lambda e: self._feedback(),
             "grupo_suporte": lambda e: self._entrar_no_grupo_de_suporte(),
             "atualizacoes": lambda e: self._verificar_atualizacoes(),
             "instalar": lambda e: self._instalar(),
@@ -8595,6 +8595,12 @@ class Janela(wx.Frame):
 
     def _abrir_logs(self):
         self._abrir_pasta("logs")
+
+    @seguro
+    def _feedback(self):
+        from telezapp.interface.relato import mostrar_relato
+        mostrar_relato(self, self.cfg, lambda texto: self.fala.falar(
+            texto, interromper=True))
 
     @seguro
     def _exportar_logs(self):
