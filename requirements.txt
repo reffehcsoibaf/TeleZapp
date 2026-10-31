@@ -13,3 +13,4 @@ numpy>=2.1
 livekit>=1.1,<2
 emoji>=2.14
 opencv-python-headless>=5.0
+truststore>=0.10

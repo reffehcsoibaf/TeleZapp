@@ -9006,9 +9006,7 @@ class Janela(wx.Frame):
     def _resultado_atualizacao(self, lanc, erro, manual, periodica=False):
         if erro:
             if manual:
-                bipe("erro")
-                self.fala.falar(erro, interromper=True)
-                wx.MessageBox(erro, NOME, wx.OK | wx.ICON_WARNING, self)
+                self._erro_de_atualizacao(erro)
             return
         if lanc is None or not atualizacao.e_mais_nova(lanc):
             if manual:
@@ -9064,6 +9062,13 @@ class Janela(wx.Frame):
             wx.CallAfter(self._atualizar, lanc)
         elif escolha == "pagina":
             dialogos.abrir_link(lanc.pagina)
+
+    def _erro_de_atualizacao(self, erro):
+        bipe("erro")
+        self.fala.falar(erro, interromper=True)
+        from telezapp.interface import atualizacao as janela_versao
+        if janela_versao.erro_quer_a_pagina(self, erro):
+            dialogos.abrir_link(atualizacao.URL_ULTIMA)
 
     @seguro
     def _atualizar(self, lanc):
@@ -9123,9 +9128,7 @@ class Janela(wx.Frame):
             if erro.startswith("Atualização cancelada"):
                 self.fala.falar("Atualização cancelada.", interromper=True)
                 return
-            bipe("erro")
-            self.fala.falar(erro, interromper=True)
-            wx.MessageBox(erro, NOME, wx.OK | wx.ICON_WARNING, self)
+            self._erro_de_atualizacao(erro)
             return
         bipe("tarefa_pronta")
         # Com "Continuar em segundo plano" ligado, Close() so esconderia a
