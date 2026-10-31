@@ -128,7 +128,8 @@ def test_extras_na_mensagem_e_migracao_do_banco(tmp_path):
     assert m.extras_de(x) == {"links": [], "botoes": [], "mencoes": [],
                               "acoes": [], "original": "", "editada": False,
                               "apagada": False, "apagada_pelo_autor": False,
-                              "ouvida": False,
+                              "ouvida": False, "fixada": False, "fixada_ate": 0,
+                              "fixada_em": 0,
                               "favorita": False, "reacoes": [], "enquete": {},
                               "citou_voce": False, "previa": {}, "ia": {}}
     m.guardar_extras(x, links=[("https://a.com", "clique aqui")],

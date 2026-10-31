@@ -468,9 +468,9 @@ class DialogoConfiguracoes(wx.Dialog):
                                 wx.LEFT | wx.RIGHT | wx.TOP, 8)
             c = wx.TextCtrl(p, value=str(self.modelo.valor(o.chave) or ""),
                             name=o.rotulo, size=(320, -1))
-            c.SetMaxLength(60)
-            c.Bind(wx.EVT_TEXT, lambda e, o=o, c=c:
-                   self.modelo.definir(o.chave, c.GetValue().strip()))
+            if not o.pasta:
+                c.SetMaxLength(60)
+            c.Bind(wx.EVT_TEXT, lambda e, o=o, c=c: self._ao_digitar(o, c))
         elif o.escolhas:
             escolhas = self.modelo.escolhas(o)
             self.lay_painel.Add(wx.StaticText(p, label=o.rotulo + ":"), 0,
@@ -490,9 +490,14 @@ class DialogoConfiguracoes(wx.Dialog):
         c.Bind(wx.EVT_SET_FOCUS, lambda e, o=o: self._ao_focar(e, o))
         self.lay_painel.Add(c, 0, wx.ALL, 8)
         self.controles[o.chave] = c
+        if o.pasta:
+            b = wx.Button(p, label="Escolher a pasta...")
+            b.Bind(wx.EVT_BUTTON, lambda e, o=o, c=c: self._escolher_pasta(o, c))
+            self.lay_painel.Add(b, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
         if o.chave == "trancadas_exigir_codigo":
             self._criar_campos_codigo()
         self._sincronizar_atualizacoes()
+        self._sincronizar_pasta()
 
     def _criar_botao_grupo(self, categoria, grupo):
         """Um botao que abre, numa janela, as opcoes que ficam juntas."""
@@ -829,6 +834,26 @@ class DialogoConfiguracoes(wx.Dialog):
             ctrl.Show(visivel)
         self.painel.Layout()
         self.painel.FitInside()
+
+    def _ao_digitar(self, opcao, c):
+        self.modelo.definir(opcao.chave, c.GetValue().strip())
+        self._sincronizar_pasta()
+
+    def _escolher_pasta(self, opcao, c):
+        dlg = wx.DirDialog(self, "Escolha a pasta dos arquivos salvos",
+                           defaultPath=c.GetValue().strip())
+        try:
+            if dlg.ShowModal() == wx.ID_OK:
+                c.SetValue(dlg.GetPath())
+        finally:
+            dlg.Destroy()
+        c.SetFocus()
+
+    def _sincronizar_pasta(self):
+        """Guardar direto so faz sentido com uma pasta definida."""
+        c = self.controles.get("salvar_direto")
+        if c is not None:
+            c.Enable(bool(self.modelo.valor("pasta_salvar")))
 
     def _ao_marcar(self, opcao, valor):
         self.modelo.definir(opcao.chave, valor)

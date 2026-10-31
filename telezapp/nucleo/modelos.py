@@ -214,6 +214,9 @@ def extras_de(msg):
             "apagada_pelo_autor": bool(dados.get("apagada_pelo_autor")),
             "ouvida": bool(dados.get("ouvida")),
             "favorita": bool(dados.get("favorita")),
+            "fixada": bool(dados.get("fixada")),
+            "fixada_ate": dados.get("fixada_ate") or 0,
+            "fixada_em": dados.get("fixada_em") or 0,
             "reacoes": list(dados.get("reacoes") or []),
             "enquete": dados.get("enquete")
             if isinstance(dados.get("enquete"), dict) else {},
@@ -409,9 +412,36 @@ def meu_nome():
     return _meu_nome
 
 
+_ocultar_telefone = False
+
+
+def definir_ocultar_telefone(ligado):
+    """Remetente que so tem o telefone: a mensagem comeca pelo conteudo."""
+    global _ocultar_telefone
+    _ocultar_telefone = bool(ligado)
+
+
+def e_telefone(nome):
+    return bool(re.fullmatch(r"\+?\d[\d\s().-]{6,}", (nome or "").strip()))
+
+
+def nome_visivel(nome):
+    """O autor pronto para aparecer ("" se for um telefone a ocultar)."""
+    return "" if _ocultar_telefone and e_telefone(nome) else nome
+
+
 def nome_a_mostrar(quem):
     """O nome guardado numa reacao ou num voto, pronto para aparecer."""
     return _meu_nome if quem == VOCE else quem
+
+
+def fixada_agora(msg, agora=None):
+    """Fixada e ainda no prazo (no WhatsApp a fixacao vence sozinha)."""
+    extras = extras_de(msg)
+    if not extras["fixada"]:
+        return False
+    ate = extras["fixada_ate"]
+    return not ate or ate > (time.time() if agora is None else agora)
 
 
 def minha_reacao(msg):
@@ -809,6 +839,8 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None,
             texto = _juntar(texto, "(apagada pelo autor)")
         if extras_de(m)["favorita"]:
             texto = _juntar(texto, "(favorita)")
+        if fixada_agora(m):
+            texto = _juntar(texto, "(fixada)")
         if getattr(m, "expira", 0):
             texto = _juntar(texto, "(temporária)")
         return texto
@@ -855,7 +887,8 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None,
                 anterior is None or anterior.minha != m.minha
                 or anterior.autor != m.autor):
             return ""
-        return meu_nome() if m.minha else (m.autor or quem or "Desconhecido")
+        return meu_nome() if m.minha else nome_visivel(
+            m.autor or quem or "Desconhecido")
 
     blocos.update({
         "autor": bloco_autor,

@@ -22,6 +22,8 @@ from telezapp import (GRUPO_DE_SUPORTE, NOME, PAGINA_DE_RELATOS,
                       PAGINA_DO_PROJETO, VERSAO, config)
 from telezapp.acessibilidade.fala import Fala, bipe, definir_sons
 from telezapp.interface import colagem, dialogos, robos, visualizadores
+from telezapp.interface import salvar as ui_salvar
+from telezapp.nucleo import silenciados
 from telezapp.nucleo import links_externos, links_recebidos, resumo_midias
 from telezapp.interface import emojis as ui_emojis
 from telezapp.interface import enquete as ui_enquete
@@ -420,6 +422,8 @@ class Janela(wx.Frame):
         ng.limpar_fotos_temporarias()      # sobras de uma vez que nao fechou
         self.cfg = cfg
         m.definir_meu_nome(cfg.get("como_me_chamar"))
+        m.definir_ocultar_telefone(cfg.get("ocultar_telefone_sem_nome"))
+        ui_salvar.definir_cfg(cfg)
         self.banco = banco
         self.contas = None            # definido por quem cria a janela
         self.midias = None            # gerente de downloads (idem)
@@ -454,6 +458,7 @@ class Janela(wx.Frame):
         self.atual = None             # chave da conversa aberta
         self.marcador_n = 0           # nao lidas ao abrir a conversa
         self.marcador_id = None       # id da 1a nao lida (quando conhecido)
+        self._formas_cache = {}       # (conta, remetente) -> enderecos dele
         self.esperando_servidor = False
         self.selecao_automatica = True
         self._itens_msgs = []         # texto de cada item da lista
@@ -650,6 +655,7 @@ class Janela(wx.Frame):
         item(m_msg, "encaminhar", "&Encaminhar...	Ctrl+Shift+E")
         item(m_msg, "favoritar_msg",
              "&Favoritar ou desfavoritar a mensagem\tCtrl+Shift+F")
+        item(m_msg, "fixar_msg", "Fi&xar ou desafixar a mensagem")
         m_ia = wx.Menu()
         item(m_ia, "ia_corrigir", "&Corrigir o texto digitado")
         item(m_ia, "ia_redigir",
@@ -920,6 +926,7 @@ class Janela(wx.Frame):
             "detalhes": lambda e: self._detalhes(),
             "apagar_msg": lambda e: self._apagar_mensagem(),
             "favoritar_msg": lambda e: self._favoritar_mensagem(),
+            "fixar_msg": lambda e: self._fixar_mensagem(),
             "dep_msg": lambda e: self._depurar_mensagem(),
             "dep_conv": lambda e: self._depurar_conversa(),
             "ajuda": lambda e: dialogos.mostrar_texto(
@@ -1247,10 +1254,12 @@ class Janela(wx.Frame):
         self.botao_enviar = wx.Button(painel, label="Enviar")
         # sem tecla de acesso: Alt abre o Menu e as letras ja estao em uso
         self.botao_anexar = wx.Button(painel, label="Anexar e enviar arquivo")
+        self.botao_chamada = wx.Button(painel, label="Iniciar chamada")
         self.botao_mic = wx.Button(painel, label="Gravar do microfone")
         self.botao_som = wx.Button(painel, label="Gravar som do computador")
         self.botoes_envio = (self.botao_enviar, self.botao_anexar,
-                             self.botao_mic, self.botao_som)
+                             self.botao_chamada, self.botao_mic,
+                             self.botao_som)
         # (controle, nome sem atalho, funcao, atalho fixo)
         self._controles_atalho = [
             (rot_cx_conta, "Serviço ou conta", "ir_filtro_conta", ""),
@@ -1261,6 +1270,7 @@ class Janela(wx.Frame):
             (rot_conv, "Conversas", "ir_conv", ""),
             (self.botao_enviar, "Enviar", "enviar_msg", ""),
             (self.botao_anexar, "Anexar e enviar arquivo", "anexar", ""),
+            (self.botao_chamada, "Iniciar chamada", "ligar", ""),
             (self.botao_mic, "Gravar do microfone", "gravar_mic", ""),
             (self.botao_som, "Gravar som do computador", "gravar_som", ""),
         ]
@@ -1320,6 +1330,8 @@ class Janela(wx.Frame):
                                seguro(lambda e: self._enviar_texto()))
         self.botao_anexar.Bind(wx.EVT_BUTTON,
                                seguro(lambda e: self._anexar_arquivo()))
+        self.botao_chamada.Bind(wx.EVT_BUTTON,
+                                seguro(lambda e: self._iniciar_chamada()))
         self.botao_mic.Bind(wx.EVT_BUTTON,
                             seguro(lambda e: self._gravar(MICROFONE)))
         self.botao_som.Bind(wx.EVT_BUTTON,
@@ -2091,7 +2103,10 @@ class Janela(wx.Frame):
     @seguro
     def _previas_prontas(self, ultimas):
         for chave, msg in ultimas.items():
-            self._atualizar_previa(chave, msg)
+            if self._silenciado(msg):
+                self._silenciados_mudaram(chave)
+            else:
+                self._atualizar_previa(chave, msg)
         self._preencher_conversas()
 
     def _sincronizar_menu_da_lista(self):
@@ -2930,6 +2945,32 @@ class Janela(wx.Frame):
         self.fala.falar("Mensagem favoritada." if favorita
                         else "Mensagem desfavoritada.", interromper=True)
 
+    def _fixar_mensagem(self, x=None):
+        """Fixa a mensagem na conversa, para todos, ou desafixa. O servico
+        confirma depois (ver _ev_atualizada)."""
+        if x is None:
+            x = self._mensagem_selecionada()
+        if x is None:
+            return
+        if x.id.startswith("local-"):
+            self.fala.falar("Esta mensagem ainda está sendo enviada.")
+            return
+        prov = self.contas.provedor(x.conta_id) if self.contas else None
+        if prov is None or not getattr(prov, "PODE_FIXAR", False):
+            self.fala.falar("Este serviço não fixa mensagens.",
+                            interromper=True)
+            return
+        fixar = not m.fixada_agora(x)
+        segundos = 0
+        duracoes = getattr(prov, "DURACOES_FIXAR", ())
+        if fixar and duracoes:
+            # a dona e a janela aberta, se houver: ver _salvar_logs
+            segundos = dialogos.escolher_duracao_fixar(
+                wx.GetActiveWindow() or self, duracoes)
+            if segundos is None:
+                return
+        prov.fixar_mensagem(x, fixar, segundos)
+
     # ======================================================= encaminhar
     def _encaminhar(self, msgs=None):
         """Reenvia a mensagem selecionada (ou as marcadas) para as conversas
@@ -3339,7 +3380,12 @@ class Janela(wx.Frame):
             conv.nao_lidas = 0
         self.indice[chave] = conv
         m.alinhar_autores(conv, [msg])
-        self._atualizar_previa(chave, msg)
+        calada = self._silenciado(msg)
+        if calada and not aberta and not e.silenciosa and conv.nao_lidas:
+            conv.nao_lidas -= 1
+            self.banco.salvar_conversas([conv])
+        if not calada:
+            self._atualizar_previa(chave, msg)
         self._ordenar()
         self._preencher_conversas()
         if e.enviada_daqui:
@@ -3356,8 +3402,8 @@ class Janela(wx.Frame):
                 p = self.contas.provedor(msg.conta_id)
                 if p is not None:
                     p.marcar_como_lida(msg.conversa_id)
-        if msg.minha or e.silenciosa:
-            return  # minha, ou chegou na sincronia inicial: sem aviso
+        if msg.minha or e.silenciosa or calada:
+            return  # minha, da sincronia inicial ou silenciada: sem aviso
         self._ia_automatica(msg)
         self._previa_da_recebida(msg)
         log.info("mensagem nova (tipo %s, conversa aberta=%s)", msg.tipo,
@@ -3488,6 +3534,8 @@ class Janela(wx.Frame):
             if x.id == e.mensagem.id:
                 self.cache[chave][i] = e.mensagem
                 break
+        if self._silenciado(e.mensagem):
+            return                # editada ou apagada: nada a dizer nem mostrar
         aberta = chave == self.atual
         nova_reacao = e.motivo == "reacao" and e.mensagem.minha and \
             bool(e.emoji) and e.quem != "Você" and not aberta
@@ -3518,6 +3566,14 @@ class Janela(wx.Frame):
                 self.fala.falar("%s reagiu com %s à sua mensagem: %s" % (
                     e.quem, e.emoji, m.citacao(e.mensagem)))
                 self.SetStatusText("%s reagiu com %s" % (e.quem, e.emoji))
+        elif e.motivo == "fixada":
+            fixada = m.fixada_agora(e.mensagem)
+            if e.quem == "Você":
+                self.fala.falar("Mensagem fixada." if fixada
+                                else "Mensagem desafixada.", interromper=True)
+            else:
+                self.SetStatusText("Mensagem %s em %s" % (
+                    "fixada" if fixada else "desafixada", onde))
         elif e.motivo == "enquete":
             if e.quem == "Você":
                 bipe("voto_enviado")
@@ -3559,6 +3615,20 @@ class Janela(wx.Frame):
                             interromper=True)
             return
         self._ligar_para(conv, video)
+
+    def _iniciar_chamada(self):
+        """O botao da conversa: pergunta se e audio ou video. O que nao da
+        para ligar nao chega a perguntar: _ligar explica o motivo."""
+        conv = self.indice.get(self.atual) if self.atual is not None else None
+        p = self._provedor_de_chamada(conv.conta_id) if conv else None
+        if p is None or conv.tipo != "privada" or \
+                (self.chamada is not None and self.chamada.ativa):
+            self._ligar()
+            return
+        tipo = dialogos.escolher_tipo_chamada(
+            self, conv.nome, bool(getattr(p, "suporta_video", False)))
+        if tipo:
+            self._ligar_para(conv, tipo == "video")
 
     def _ligar_para(self, conv, video=False):
         """Liga para a conversa com uma pessoa, se a conta puder."""
@@ -4307,7 +4377,67 @@ class Janela(wx.Frame):
 
     # ============================================================ mensagens
     def _mensagens_atuais(self):
-        return self.cache.get(self.atual, []) if self.atual else []
+        """As mensagens que a lista mostra: sem as de quem foi silenciado."""
+        msgs = self.cache.get(self.atual, []) if self.atual else []
+        if not msgs or not silenciados.do_grupo(
+                self.cfg.get("participantes_silenciados"), *self.atual):
+            return msgs
+        return [x for x in msgs if not self._silenciado(x)]
+
+    def _silenciado(self, x):
+        """A mensagem e de um participante silenciado neste grupo? A pessoa
+        pode aparecer por outro endereco do que quando foi silenciada."""
+        if x.minha or not x.remetente:
+            return False
+        formas = silenciados.formas_do_grupo(
+            self.cfg.get("participantes_silenciados"), x.conta_id,
+            x.conversa_id)
+        if not formas:
+            return False
+        if x.remetente in formas:
+            return True
+        chave = (x.conta_id, x.remetente)
+        if chave not in self._formas_cache:
+            self._formas_cache[chave] = self._formas_do_remetente(
+                x.conta_id, x.remetente)
+        return bool(self._formas_cache[chave] & formas)
+
+    def _formas_do_remetente(self, conta_id, remetente):
+        prov = self.contas.provedor(conta_id) if self.contas else None
+        ler = getattr(prov, "formas_do_endereco", None)
+        return set(ler(remetente)) if ler else {remetente}
+
+    def _pode_silenciar(self, x):
+        conv = self.indice.get((x.conta_id, x.conversa_id))
+        return bool(conv and conv.tipo == "grupo" and not x.minha
+                    and x.remetente and not x.id.startswith("local-"))
+
+    def _silenciar_participante(self, x=None):
+        """Esconde as mensagens de quem enviou esta, so neste grupo e so neste
+        computador. Os detalhes do grupo trazem a pessoa de volta."""
+        x = x or self._mensagem_selecionada()
+        if x is None or not self._pode_silenciar(x):
+            return
+        nome = x.autor or self._quem_enviou(x) or x.remetente
+        self.cfg.set("participantes_silenciados", silenciados.com_participante(
+            self.cfg.get("participantes_silenciados"), x.conta_id,
+            x.conversa_id, x.remetente, nome,
+            self._formas_do_remetente(x.conta_id, x.remetente)))
+        self._silenciados_mudaram((x.conta_id, x.conversa_id))
+        self.fala.falar("%s silenciado neste grupo. Para voltar a ver as "
+                        "mensagens, use Participantes silenciados nos "
+                        "detalhes do grupo." % nome, interromper=True)
+
+    def _silenciados_mudaram(self, chave):
+        self._formas_cache.clear()
+        self.previas.pop(chave, None)
+        for x in reversed(self.banco.mensagens(chave[0], chave[1], 50)):
+            if not self._silenciado(x):
+                self._atualizar_previa(chave, x)
+                break
+        self._preencher_conversas()
+        if chave == self.atual:
+            self._preencher_mensagens()
 
     def _preencher_mensagens(self, destino=None):
         """Refaz a lista. destino: MARCADOR, "ultima" ou None (mantem)."""
@@ -4315,14 +4445,17 @@ class Janela(wx.Frame):
             return
         msgs = self._mensagens_atuais()
         antes = self._chave_selecionada()
-        porid = {x.id: x for x in msgs}
+        # com todas: resposta a quem foi silenciado continua dizendo a quem
+        todas = self.cache.get(self.atual, [])
+        porid = {x.id: x for x in todas}
+        marcador = self._marcador_visivel(msgs, todas)
         itens, mapa = [], []
         anterior = None
         lista = self.cfg.get("lista_mensagens")
         itens_linha = lista_msg_nucleo.ativos(lista)
         so_quando_muda = lista_msg_nucleo.so_quando_muda(lista)
         for x in msgs:
-            if self.marcador_id is not None and x.id == self.marcador_id:
+            if marcador is not None and x.id == marcador:
                 itens.append(m.texto_marcador(self.marcador_n))
                 mapa.append(MARCADOR)
             itens.append(self._com_marca(
@@ -4373,6 +4506,18 @@ class Janela(wx.Frame):
                 sel = min(i_antes, len(itens) - 1)   # perto de onde estava
         self.lista_msgs.SetSelection(sel)
         self._atualizar_botoes()
+
+    def _marcador_visivel(self, msgs, todas):
+        """A 1a nao lida pode ser de quem foi silenciado: vale a seguinte."""
+        if self.marcador_id is None or len(msgs) == len(todas):
+            return self.marcador_id
+        visiveis = {x.id for x in msgs}
+        achou = False
+        for x in todas:
+            achou = achou or x.id == self.marcador_id
+            if achou and x.id in visiveis:
+                return x.id
+        return None
 
     def _destino_inicial(self):
         """Onde a selecao cai ao abrir a conversa: no marcador, se ha nao
@@ -5461,15 +5606,10 @@ class Janela(wx.Frame):
     def _salvar_texto_ia(self, texto):
         nome = time.strftime("telezapp_texto_%Y%m%d_%H%M%S.txt")
         # a dona e a janela do texto, aberta: ver _salvar_logs
-        dlg = wx.FileDialog(wx.GetActiveWindow() or self, "Salvar o texto", defaultFile=nome,
-                            wildcard="Texto|*.txt",
-                            style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT)
-        try:
-            if dlg.ShowModal() != wx.ID_OK:
-                return
-            caminho = dlg.GetPath()
-        finally:
-            dlg.Destroy()
+        caminho = ui_salvar.escolher(wx.GetActiveWindow() or self,
+                                     "Salvar o texto", nome, "Texto|*.txt")
+        if not caminho:
+            return
         try:
             with open(caminho, "w", encoding="utf-8-sig") as f:
                 f.write(texto)
@@ -7228,9 +7368,16 @@ class Janela(wx.Frame):
                    ("Apagar mensagem...", self._apagar_mensagem)]
         opcoes.insert(0, ("Desfavoritar" if m.extras_de(sel)["favorita"]
                           else "Favoritar", self._favoritar_mensagem))
+        prov_fixar = self.contas.provedor(sel.conta_id) if self.contas else None
+        if getattr(prov_fixar, "PODE_FIXAR", False):
+            opcoes.insert(1, ("Desafixar" if m.fixada_agora(sel) else "Fixar",
+                              self._fixar_mensagem))
         if not sel.minha and sel.remetente:
             opcoes.append(("Salvar quem enviou como contato...",
                            self._salvar_autor))
+        if self._pode_silenciar(sel):
+            opcoes.append(("Silenciar participante",
+                           self._silenciar_participante))
         if self._mensagem_selecionada().resposta_a:
             opcoes.insert(1, ("Ir para a mensagem respondida",
                               self._ir_para_respondida))
@@ -8162,16 +8309,28 @@ class Janela(wx.Frame):
             bipe("download_pronto")
         if not pedida:
             return
-        if not self.abrindo_abrir:
-            self.fala.falar("Mídia baixada.", interromper=True)
-            return
         lista = self.cache.get((e.conta_id, e.conversa_id)) or \
             self.banco.mensagens(e.conta_id, e.conversa_id,
                                  self._limite_memoria())
-        for x in lista:
-            if x.id == e.mensagem_id:
-                self._mostrar_midia(x, e.caminho)
-                return
+        x = next((y for y in lista if y.id == e.mensagem_id), None)
+        if x is not None and x.tipo == m.DOCUMENTO:
+            wx.CallAfter(self._documento_baixado, x, e.caminho)
+            return
+        if not self.abrindo_abrir:
+            self.fala.falar("Mídia baixada.", interromper=True)
+            return
+        if x is not None:
+            self._mostrar_midia(x, e.caminho)
+
+    def _documento_baixado(self, x, caminho):
+        # a dona e a janela aberta, se houver: ver _salvar_logs
+        abrir = dialogos.documento_baixado(
+            wx.GetActiveWindow() or self,
+            visualizadores.nome_para_salvar(x, caminho),
+            lambda: visualizadores.ver_na_pasta(caminho),
+            lambda dlg: visualizadores.salvar_copia(dlg, x, caminho, self.fala))
+        if abrir:
+            self._mostrar_midia(x, caminho)
 
     # ============================================================== opcoes
     def _opcao(self, chave, valor):
@@ -8229,9 +8388,12 @@ class Janela(wx.Frame):
             self.cfg.set(chave, lista_msg_nucleo.normalizar(valor))
             self._sincronizar_menu_da_lista_msgs()
             self._preencher_mensagens()
-        elif chave == "como_me_chamar":
+        elif chave in ("como_me_chamar", "ocultar_telefone_sem_nome"):
             self.cfg.set(chave, valor)
-            m.definir_meu_nome(valor)
+            m.definir_meu_nome(self.cfg.get("como_me_chamar"))
+            m.definir_ocultar_telefone(
+                self.cfg.get("ocultar_telefone_sem_nome"))
+            self._carregar_previas()      # guardam o autor ja escrito
             self._preencher_conversas()
             self._preencher_mensagens()
         elif chave == "segundo_plano":
@@ -8472,16 +8634,11 @@ class Janela(wx.Frame):
         """`pai` e a janela de exportar, que esta aberta: com a principal como
         dona, ao fechar o Windows ativaria a principal, desabilitada, e o leitor
         de tela diria "janela indisponível"."""
-        sel = wx.FileDialog(
-            pai, "Salvar os logs", defaultFile=os.path.basename(caminho),
-            wildcard="Arquivo zip (*.zip)|*.zip",
-            style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT)
-        try:
-            if sel.ShowModal() != wx.ID_OK:
-                return
-            destino = sel.GetPath()
-        finally:
-            sel.Destroy()
+        destino = ui_salvar.escolher(pai, "Salvar os logs",
+                                     os.path.basename(caminho),
+                                     "Arquivo zip (*.zip)|*.zip")
+        if not destino:
+            return
         try:
             shutil.copy2(caminho, destino)
         except OSError:
@@ -8724,9 +8881,8 @@ class Janela(wx.Frame):
             return
         try:
             subprocess.Popen(
-                linha, shell=True, cwd=os.path.dirname(exe), creationflags=(
-                    subprocess.CREATE_NO_WINDOW |
-                    subprocess.DETACHED_PROCESS))
+                linha, shell=True, cwd=os.path.dirname(exe),
+                creationflags=subprocess.CREATE_NO_WINDOW)
         except OSError:
             log.exception("não consegui abrir a versão instalada")
 
@@ -8777,9 +8933,8 @@ class Janela(wx.Frame):
             return              # a pessoa desistiu de fechar
         try:
             subprocess.Popen(
-                linha, shell=True, cwd=os.getcwd(), creationflags=(
-                    subprocess.CREATE_NO_WINDOW |
-                    subprocess.DETACHED_PROCESS))
+                linha, shell=True, cwd=os.getcwd(),
+                creationflags=subprocess.CREATE_NO_WINDOW)
         except OSError:
             log.exception("não consegui reiniciar")
 

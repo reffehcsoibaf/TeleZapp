@@ -299,7 +299,7 @@ def test_sessao_salva_conecta_e_lista_conversas(ambiente):
         assert len(ambiente.banco.conversas("t1")) == 3
         assert [c.arquivada for c in ambiente.banco.conversas("t1")
                 if c.nome == "Velha"] == [True]
-        assert len(cliente.handlers) == 10
+        assert len(cliente.handlers) == 11
 
         p.carregar_mensagens("10")
         msgs = esperar(ambiente.fila, ev.MensagensCarregadas).mensagens
@@ -376,7 +376,7 @@ def test_mensagem_recebida_e_leitura(ambiente):
     p.iniciar()
     try:
         esperar(ambiente.fila, ev.ConversasAtualizadas)
-        receber, ler, _, _, _, _, _, _, _, _ = cliente.handlers
+        receber, ler, *_ = cliente.handlers
 
         async def chegar():
             async def get_chat():
@@ -1668,3 +1668,49 @@ def test_enviar_contatos_no_telegram_um_por_mensagem(ambiente):
     assert cliente.cartoes == [("Ana", "+5551999998888"),
                                ("Cid", "+5551955554444")]
     assert "contato Bia" in esperar(ambiente.fila, ev.Aviso).texto
+
+
+def test_fixar_e_ler_fixadas_no_telegram(ambiente):
+    from telethon.tl import types as tipos
+
+    class Cliente(ClienteFalso):
+        pinos = []
+
+        async def pin_message(self, ent, id_, notify=False):
+            self.pinos.append(("fixa", id_, notify))
+
+        async def unpin_message(self, ent, id_):
+            self.pinos.append(("tira", id_))
+
+        async def get_input_entity(self, e):
+            return e
+
+        async def get_messages(self, ent, limit=0, filter=None):
+            assert filter is tipos.InputMessagesFilterPinned
+            return [mensagem(6, "guardada"), mensagem(7, "antiga")]
+    cliente = Cliente()
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    def guardar(id_):
+        p.banco.salvar_mensagens([m.Mensagem(p.conta.id, "10", id_, data=1.0,
+                                             texto=id_)])
+    for i in ("5", "6", "8"):
+        guardar(i)
+    x = p.banco.mensagem(p.conta.id, "10", "5")
+    asyncio.run(p._fixar_mensagem(x, True))
+    a = esperar(ambiente.fila, ev.MensagemAtualizada)
+    assert (a.motivo, a.quem) == ("fixada", "Você")
+    assert m.fixada_agora(a.mensagem) and cliente.pinos == [("fixa", 5, False)]
+    # o aviso do proprio pedido nao fala de novo
+    aviso = types.SimpleNamespace(peer=tipos.PeerUser(10), messages=[5],
+                                  pinned=True)
+    asyncio.run(p._ao_fixar(aviso))
+    assert ambiente.fila.empty()
+    aviso.messages, aviso.pinned = [8], True
+    asyncio.run(p._ao_fixar(aviso))
+    assert esperar(ambiente.fila, ev.MensagemAtualizada).quem == ""
+    # o servico manda: 5 e 8 nao estao la, 6 esta, 7 nem esta guardada
+    fora = asyncio.run(p._ler_fixadas("10"))
+    assert [y.id for y in fora] == ["7"] and m.fixada_agora(fora[0])
+    assert p.banco.mensagem(p.conta.id, "10", "7") is None
+    assert {y.id for y in p.banco.mensagens_fixadas(p.conta.id, "10")} == {"6"}

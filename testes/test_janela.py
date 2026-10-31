@@ -3280,7 +3280,8 @@ def test_detalhes_de_pessoa_mostra_dados_do_contato_e_botoes(j):
     assert [r for r, _ in c._botoes()] == [
         "&Editar contato", "&Mídias", "&Baixar as mídias que faltam...",
         "&Grupos em comum",
-        "Mensagens fa&voritas", "&Limpar a conversa..."]
+        "Mensagens fa&voritas", "Mensagens fi&xadas",
+        "&Limpar a conversa..."]
 
 
 def test_detalhes_de_grupo_mostram_membros_e_so_admin_ve_administrar(j):
@@ -3300,7 +3301,8 @@ def test_detalhes_de_grupo_mostram_membros_e_so_admin_ve_administrar(j):
     rotulos = [r for r, _ in c._botoes()]
     assert rotulos == ["Ver &membros (2)", "&Mídias",
                        "&Baixar as mídias que faltam...",
-                       "Mensagens fa&voritas", "&Limpar a conversa..."]
+                       "Mensagens fa&voritas", "Mensagens fi&xadas", "Participantes si&lenciados",
+        "&Limpar a conversa..."]
     dados["sou_admin"] = True
     assert "&Administrar grupo" in [r for r, _ in c._botoes()]
     dados["comunidade"] = True
@@ -6490,3 +6492,211 @@ def test_mudar_como_me_chamar_vale_na_hora(j, monkeypatch):
     j._aplicar_opcao("como_me_chamar", "Fabio")
     assert j.cfg.get("como_me_chamar") == "Fabio"
     assert m.meu_nome() == "Fabio"
+
+
+def test_botao_de_chamada_pergunta_e_liga(j, monkeypatch):
+    conv = j.indice[("t1", "10")]
+    j.atual = ("t1", "10")
+    ligadas, oferecido = [], []
+    p = object()
+    monkeypatch.setattr(j, "_provedor_de_chamada", lambda c: p)
+    monkeypatch.setattr(j, "_ligar_para", lambda c, v=False: ligadas.append(v))
+    tipo = ["video"]
+
+    def perguntar(pai, nome, com_video):
+        oferecido.append(com_video)
+        return tipo[0]
+    monkeypatch.setattr(jm.dialogos, "escolher_tipo_chamada", perguntar)
+    assert conv.tipo == "privada"
+    j._iniciar_chamada()
+    tipo[0] = None                     # Esc
+    j._iniciar_chamada()
+    assert ligadas == [True] and oferecido == [False, False]
+
+
+def test_botao_de_chamada_em_grupo_nao_pergunta(j, monkeypatch):
+    j.atual = ("t1", "20")
+    j.indice[("t1", "20")].tipo = "grupo"
+    monkeypatch.setattr(j, "_provedor_de_chamada", lambda c: object())
+    monkeypatch.setattr(jm.dialogos, "escolher_tipo_chamada", lambda *a: 1 / 0)
+    ligou = []
+    monkeypatch.setattr(j, "_ligar", lambda: ligou.append(1))
+    j._iniciar_chamada()
+    assert ligou == [1]
+
+
+def _baixou(j, tipo, monkeypatch, abrir=True):
+    chave = ("t1", "20", "5")
+    x = msg("5", "doc", conversa="20")
+    x.tipo = tipo
+    j.cache[("t1", "20")] = [x]
+    j.abrindo, j.abrindo_abrir = chave, abrir
+    janelas, mostradas = [], []
+    monkeypatch.setattr(jm.dialogos, "documento_baixado",
+                        lambda *a: janelas.append(a[1]) or False)
+    monkeypatch.setattr(j, "_mostrar_midia",
+                        lambda y, c: mostradas.append(y.id))
+    monkeypatch.setattr(jm.wx, "CallAfter", lambda f, *a: f(*a))
+    j._ev_midia_baixada(ev.MidiaBaixada(*chave, caminho="x.pdf"))
+    return janelas, mostradas
+
+
+def test_documento_baixado_abre_a_janela(j, monkeypatch):
+    janelas, mostradas = _baixou(j, m.DOCUMENTO, monkeypatch, abrir=False)
+    assert len(janelas) == 1 and mostradas == []
+
+
+def test_foto_baixada_segue_abrindo_direto(j, monkeypatch):
+    janelas, mostradas = _baixou(j, m.FOTO, monkeypatch)
+    assert janelas == [] and mostradas == ["5"]
+
+
+def test_salvar_direto_na_pasta_nao_abre_a_janela(j, monkeypatch, tmp_path):
+    from telezapp.interface import salvar
+    monkeypatch.setattr(jm.wx, "FileDialog", lambda *a, **k: 1 / 0,
+                        raising=False)
+    j.cfg.set("pasta_salvar", str(tmp_path))
+    j.cfg.set("salvar_direto", True)
+    salvar.definir_cfg(j.cfg)
+    origem = tmp_path / "orig.bin"
+    origem.write_bytes(b"x")
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    x = msg("5", "", conversa="20")
+    x.nome_arquivo = "nota.pdf"
+    assert jm.visualizadores.salvar_copia(None, x, str(origem), j.fala)
+    assert (tmp_path / "nota.pdf").read_bytes() == b"x"
+    assert "nota.pdf" in ditas[-1]
+
+
+def test_fixar_pede_o_prazo_quando_o_servico_exige(j, monkeypatch):
+    _abrir_com_caixa(j)
+    x = j.cache[("t1", "20")][0]
+    pedidos = []
+    p = j.contas.p
+    p.PODE_FIXAR = True
+    p.DURACOES_FIXAR = ((86400, "24 horas"),)
+    p.fixar_mensagem = lambda y, f, s=0: pedidos.append((y.id, f, s))
+    resposta = [None]
+    monkeypatch.setattr(jm.dialogos, "escolher_duracao_fixar",
+                        lambda *a: resposta[0])
+    j._fixar_mensagem(x)               # Esc na escolha
+    assert pedidos == []
+    resposta[0] = 86400
+    j._fixar_mensagem(x)
+    assert pedidos == [("5", True, 86400)]
+    m.atualizar_extras(x, fixada=True)
+    j._fixar_mensagem(x)               # desafixar nao pergunta
+    assert pedidos[-1] == ("5", False, 0)
+
+
+def test_fixar_sem_servico_avisa(j):
+    _abrir_com_caixa(j)
+    j.contas.p.PODE_FIXAR = False
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._fixar_mensagem(j.cache[("t1", "20")][0])
+    assert ditas[-1] == "Este serviço não fixa mensagens."
+
+
+def test_confirmacao_de_fixar_e_falada_so_quando_e_minha(j):
+    _abrir_com_caixa(j)
+    x = j.cache[("t1", "20")][0]
+    m.atualizar_extras(x, fixada=True)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._ev_atualizada(ev.MensagemAtualizada("t1", "20", x, "fixada", "Ana"))
+    assert ditas == []
+    j._ev_atualizada(ev.MensagemAtualizada("t1", "20", x, "fixada", "Você"))
+    assert ditas == ["Mensagem fixada."]
+
+
+def _grupo_com_silenciado(j):
+    j.indice[("t1", "20")].tipo = "grupo"
+    _abrir_com_caixa(j)
+    ana = msg("6", "da Ana", conversa="20")
+    bia = msg("7", "da Bia", conversa="20")
+    ana.remetente, ana.autor = "ana@lid", "Ana"
+    bia.remetente, bia.autor = "bia@lid", "Bia"
+    j.banco.salvar_mensagens([ana, bia])
+    j.cache[("t1", "20")] = j.cache[("t1", "20")] + [ana, bia]
+    return ana, bia
+
+
+def test_silenciar_esconde_e_voltar_mostra(j):
+    ana, bia = _grupo_com_silenciado(j)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._silenciar_participante(ana)
+    assert "Ana silenciado" in ditas[-1]
+    assert [x.id for x in j._mensagens_atuais()] == ["5", "7"]
+    assert not any("da Ana" in t for t in j._itens_msgs)
+    from telezapp.nucleo import silenciados as s
+    j.cfg.set("participantes_silenciados", s.sem_participante(
+        j.cfg.get("participantes_silenciados"), "t1", "20", "ana@lid"))
+    j._silenciados_mudaram(("t1", "20"))
+    assert "6" in [x.id for x in j._mensagens_atuais()]
+
+
+def test_silenciado_reconhece_outro_endereco_da_pessoa(j):
+    ana, _ = _grupo_com_silenciado(j)
+    j.contas.p.formas_do_endereco = lambda i: {i, "55@s.whatsapp.net"}
+    j._silenciar_participante(ana)
+    outra = msg("8", "de novo", conversa="20")
+    outra.remetente = "55@s.whatsapp.net"
+    assert j._silenciado(outra)
+
+
+def test_nova_de_silenciado_nao_avisa_nem_conta(j, monkeypatch):
+    ana, _ = _grupo_com_silenciado(j)
+    j._silenciar_participante(ana)
+    j._fechar_conversa()
+    conv = j.indice[("t1", "20")]
+    conv.nao_lidas = 1
+    sons, ditas = [], []
+    monkeypatch.setattr(jm, "bipe", lambda n: sons.append(n))
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    previa = j.previas.get(("t1", "20"))
+    nova = msg("9", "calada", conversa="20")
+    nova.remetente, nova.minha = "ana@lid", False
+    j._ev_nova(ev.MensagemNova(nova, conv))
+    assert sons == [] and ditas == [] and conv.nao_lidas == 0
+    assert j.previas.get(("t1", "20")) == previa
+
+
+def test_so_mensagem_de_outro_em_grupo_pode_silenciar(j):
+    ana, _ = _grupo_com_silenciado(j)
+    assert j._pode_silenciar(ana)
+    ana.minha = True
+    assert not j._pode_silenciar(ana)
+    ana.minha = False
+    j.indice[("t1", "20")].tipo = "privada"
+    assert not j._pode_silenciar(ana)
+
+
+def test_detalhes_listam_e_tiram_o_silencio(j, monkeypatch):
+    from telezapp.interface import detalhes as jd
+    ana, _ = _grupo_com_silenciado(j)
+    j._silenciar_participante(ana)
+    c = jd.ControleDetalhes(j, j.indice[("t1", "20")])
+    assert ("Participantes si&lenciados", c.silenciados) in c._botoes()
+    guardado = {}
+
+    class Lista:
+        def __init__(self, pai, titulo, rotulo, filtros, itens, menu):
+            guardado.update(itens=itens, menu=menu)
+
+        def ShowModal(self):
+            return 0
+
+        def Destroy(self):
+            pass
+
+        def recarregar(self):
+            guardado["recarregou"] = True
+    monkeypatch.setattr(jd, "DialogoLista", Lista)
+    c.silenciados()
+    assert guardado["itens"](None) == [("Ana", "ana@lid")]
+    guardado["menu"]("ana@lid")[0][1]()
+    assert guardado["recarregou"] and guardado["itens"](None) == []
+    assert "6" in [x.id for x in j._mensagens_atuais()]
