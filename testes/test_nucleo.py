@@ -1091,3 +1091,74 @@ def test_como_me_chamar_troca_voce_so_na_exibicao(monkeypatch):
     assert m.nome_a_mostrar("Ana") == "Ana"
     m.definir_meu_nome("   ")
     assert m.quem_enviou(x) == "Você"
+
+
+def test_ocultar_telefone_de_remetente_sem_nome(monkeypatch):
+    from telezapp.nucleo import lista_conversas as lc
+    from telezapp.nucleo import modelos as m
+    monkeypatch.setattr(m, "_ocultar_telefone", False)
+    tel = m.Mensagem("c", "1", "9", data=1.0, texto="oi", autor="+55 51 99999-8888")
+    ana = m.Mensagem("c", "1", "8", data=1.0, texto="oi", autor="Ana")
+    assert "+55 51 99999-8888" in m.formatar(tel, m.ESTILO_AUTOR_PRIMEIRO)
+    m.definir_ocultar_telefone(True)
+    assert "99999" not in m.formatar(tel, m.ESTILO_AUTOR_PRIMEIRO)
+    assert "oi" in m.formatar(tel, m.ESTILO_AUTOR_PRIMEIRO)
+    assert not m.formatar(tel, m.ESTILO_AUTOR_PRIMEIRO).startswith((",", ":", " "))
+    assert "Ana" in m.formatar(ana, m.ESTILO_AUTOR_PRIMEIRO)
+    assert lc.autor_da_mensagem(tel, grupo=True) == ""
+    # numero que so veio do endereco
+    sem = m.Mensagem("c", "1", "7", data=1.0, texto="oi")
+    assert "8888" not in m.formatar(sem, m.ESTILO_AUTOR_PRIMEIRO,
+                                    quem="+5551999998888")
+    assert m.nome_visivel("Participante final 1234") == "Participante final 1234"
+    assert m.nome_visivel("Desconhecido") == "Desconhecido"
+
+
+def test_pasta_salvar_nao_sobrescreve_e_limpa_o_nome(tmp_path):
+    from telezapp.nucleo import pasta_salvar as ps
+    pasta = str(tmp_path / "nova")
+    assert ps.direto(pasta, False, "a.pdf") == ""
+    assert ps.direto("", True, "a.pdf") == ""
+    primeiro = ps.direto(pasta, True, "a.pdf")
+    assert primeiro.endswith("a.pdf")
+    open(primeiro, "w").close()
+    assert ps.caminho_livre(pasta, "a.pdf").endswith("a (2).pdf")
+    assert ps.nome_seguro("..\\..\\mau.exe") == "_.._mau.exe"
+    assert "/" not in ps.nome_seguro("a/b:c")
+    assert ps.nome_seguro("con.txt") == "_con.txt"
+    assert ps.nome_seguro("...") == "arquivo"
+
+
+def test_fixada_agora_respeita_o_prazo():
+    from telezapp.nucleo import detalhes as det
+    from telezapp.nucleo import modelos as m
+    x = m.Mensagem("c", "1", "9", data=1.0, texto="oi")
+    assert not m.fixada_agora(x)
+    m.atualizar_extras(x, fixada=True)
+    assert m.fixada_agora(x)
+    m.atualizar_extras(x, fixada_ate=100)
+    assert m.fixada_agora(x, 99) and not m.fixada_agora(x, 100)
+    m.atualizar_extras(x, fixada_ate=0)
+    assert "(fixada)" in m.formatar(x, m.ESTILO_AUTOR_PRIMEIRO)
+    assert det.fixadas([x]) == [x]
+
+
+def test_silenciados_por_grupo():
+    from telezapp.nucleo import silenciados as s
+    d = s.com_participante({}, "c", "g", "a@lid", "Ana", {"55@s.whatsapp.net"})
+    assert s.do_grupo(d, "c", "g")["a@lid"]["nome"] == "Ana"
+    assert s.formas_do_grupo(d, "c", "g") == {"a@lid", "55@s.whatsapp.net"}
+    assert s.formas_do_grupo(d, "c", "outro") == set()
+    assert s.sem_participante(d, "c", "g", "a@lid") == {}
+    assert d != {}     # o original nao muda
+
+
+def test_esperas_com_ping_nao_abrem_janela():
+    """DETACHED_PROCESS anula CREATE_NO_WINDOW: o leitor de tela le a janela."""
+    import pathlib
+    raiz = pathlib.Path(__file__).parent.parent / "telezapp"
+    for arquivo in raiz.rglob("*.py"):
+        linhas = arquivo.read_text(encoding="utf-8").splitlines()
+        usos = [x for x in linhas if "DETACHED_PROCESS" in x
+                and not x.strip().startswith("#")]
+        assert not usos, arquivo

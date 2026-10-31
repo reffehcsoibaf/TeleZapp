@@ -671,6 +671,16 @@ class Banco:
         """'mensagem', 'midia' ou None."""
         return self._mapa_limpas().get((conta_id, conversa_id, mensagem_id))
 
+    def mensagens_fixadas(self, conta_id, conversa_id):
+        """As mensagens da conversa marcadas como fixadas."""
+        with self._trava:
+            ids = [l[0] for l in self._con.execute(
+                "SELECT id FROM mensagens WHERE conta_id=? AND conversa_id=? "
+                "AND extras LIKE '%\"fixada\": true%'",
+                (conta_id, conversa_id)).fetchall()]
+        achadas = [self.mensagem(conta_id, conversa_id, i) for i in ids]
+        return [x for x in achadas if x is not None]
+
     def favoritas(self):
         """{(conta_id, conversa_id, id)} das mensagens marcadas favoritas."""
         with self._trava:

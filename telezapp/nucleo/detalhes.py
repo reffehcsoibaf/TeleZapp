@@ -59,6 +59,12 @@ def favoritas(mensagens):
                   key=lambda x: (x.data, x.id), reverse=True)
 
 
+def fixadas(mensagens):
+    """As mensagens fixadas e no prazo, da mais nova para a mais antiga."""
+    return sorted((x for x in mensagens if m.fixada_agora(x)),
+                  key=lambda x: (x.data, x.id), reverse=True)
+
+
 def _tamanho(caminho):
     """Tamanho do arquivo no disco, ou None se ele nao esta mais la."""
     try:

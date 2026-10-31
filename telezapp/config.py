@@ -180,6 +180,7 @@ class Opcao:
     som: str = ""            # evento de som (ver EVENTOS_SOM): "" = outra opcao
     grupo: str = ""          # botao da categoria que abre estas opcoes juntas
     texto: bool = False      # texto digitado
+    pasta: bool = False      # o texto e uma pasta: ganha o botao de escolher
 
 
 OPCOES = (
@@ -438,12 +439,30 @@ OPCOES = (
           "lista. Se houver mais mensagens não lidas que este número, o "
           "marcador de não lidas pode ficar de fora. De 50 a 5000.",
           numero=(50, 5000)),
+    Opcao("ocultar_telefone_sem_nome",
+          "Ocultar o telefone de remetentes sem nome", "Mensagens", False,
+          "Quando o TeleZapp não acha o nome de quem enviou, a mensagem começa "
+          "direto pelo conteúdo, sem o número de telefone, na lista de "
+          "mensagens, na fala e na lista de conversas. O telefone continua "
+          "nos detalhes e nas conversas salvas.",),
     Opcao("falar_descricoes", "Falar a descrição de cada opção",
           "Interface", True,
           "Na janela de configurações, o TeleZapp fala a explicação de cada "
           "opção logo depois que você chega nela. Desmarcada, a explicação "
           "só é falada com F1.",
           grupo="Conteúdo falado"),
+    Opcao("pasta_salvar", "Pasta dos arquivos salvos", "Mídias", "",
+          "A pasta onde ficam os arquivos que você salva: mídias, documentos, "
+          "conversas, logs e textos. Vazia, a janela de salvar decide. Não "
+          "vale para o backup, que tem a pasta dele.",
+          texto=True, pasta=True),
+    Opcao("salvar_direto", "Guardar direto na pasta, sem perguntar", "Mídias",
+          False,
+          "Marcada, o arquivo vai direto para a pasta definida e o TeleZapp "
+          "diz onde ficou; se já houver um com o mesmo nome, nada é "
+          "sobrescrito e o novo ganha um número. Desmarcada, a janela de "
+          "salvar abre em cada salvamento, começando nessa pasta. Só vale com "
+          "uma pasta definida.",),
     Opcao("gravar_som_com_microfone",
           "Gravar também o microfone ao gravar o som do computador",
           "Mídias", True,
@@ -779,6 +798,7 @@ PADROES = {o.chave: o.padrao for o in OPCOES}
 PADROES.update({
     "estilo": 1,             # antigo "Como cada mensagem e lida"; so migra
     "atalhos": {},           # funcao -> combinacao escolhida ("" = sem atalho)
+    "participantes_silenciados": {},  # ver nucleo/silenciados.py
     "ia_ordem": {},          # tarefa -> provedores ligados, na ordem de tentativa
     "ia_lista_modelos": {},  # provedor -> modelos que ele ofereceu
     "ia_modelos": {},        # provedor -> modelo escolhido ("" = o padrao)

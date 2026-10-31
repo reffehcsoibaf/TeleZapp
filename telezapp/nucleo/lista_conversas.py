@@ -109,7 +109,7 @@ def autor_da_mensagem(msg, grupo=False, quem=""):
     if msg is None or not grupo or \
             not m.conteudo(msg, com_estado=False).strip():
         return ""
-    return m.meu_nome() if msg.minha else (msg.autor or quem)
+    return m.meu_nome() if msg.minha else m.nome_visivel(msg.autor or quem)
 
 
 def previa_da_mensagem(msg, grupo=False):

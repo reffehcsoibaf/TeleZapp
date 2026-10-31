@@ -930,6 +930,10 @@ eonize-0.5.2-chamadas-antes-do-log`). Quem rodar o TeleZapp pelo código precisa
 - **Feito (pedido do responsável):** ao ligar, o TeleZapp agora envia esse aviso aos aparelhos que não atenderam. Só o aceite: a recusa (`rejected_elsewhere`) ficou de fora.
 - **Limites:** sem teste ao vivo. Na issue 39, o mesmo aviso não fez o aparelho parar de tocar, com a suspeita de faltar `joinable="1"` e outros campos na oferta. Se quem liga usa o WhatsApp oficial, esta mudança não altera nada, e um celular que siga tocando nesse caso continua sem explicação.
 
+## Verificado ao vivo pelo responsável: versão 2026.10.30.0 (30/10/2026)
+
+O responsável testou muitas das melhorias do dia, sem dar retorno item a item e sem dizer quais. Por isso, nenhum item fica confirmado individualmente além dos já citados, e os "sem teste ao vivo" desta versão querem dizer "sem retorno específico". Decisão dele: problemas que restarem serão tratados quando usuários relatarem.
+
 ## Robôs do Telegram e links externos (30/10/2026)
 
 - **Comandos do robô, confirmado pelo responsável em robô real (@AmelieTelegramBot):** o item aparece no menu de contexto, e escolher "ajuda" enviou o comando e trouxe a resposta. Comandos de ponto do robô, como `.resumo`, são só texto: o Telegram não os conhece e eles não entram na lista.
@@ -945,3 +949,9 @@ eonize-0.5.2-chamadas-antes-do-log`). Quem rodar o TeleZapp pelo código precisa
 - **Relato (30/10/2026): salvar os logs deixou "janela indisponível".** Reproduzido com janelas reais: seletor de arquivo com a principal como dona, aberto de dentro de uma janela modal, ao fechar ativa a principal desabilitada e o foco some. Com a modal como dona, o foco volta certo. Regra: janela aberta de dentro de outra janela modal tem essa outra como dona. Corrigido em Exportar logs e no texto da IA. Falta o responsável confirmar no app.
 
 - **Resumo com as mídias (pedido do responsável, 30/10/2026).** Proposta aceita: perguntar antes, com três botões, em vez de processar sozinho, por causa de custo, tempo e privacidade (em grupo, a mídia é de outras pessoas). Limite de 50 por resumo, as mais novas. Vídeo e PDF ficam de fora por custo. **Sem teste com provedor real.**
+
+## Verificado ao vivo pelo responsável: versão 2026.10.31.0
+
+- **Mensagens fixadas (data do relato não registrada com hora; durante o preparo da 2026.10.31.0):** "funcionou fixar mensagens". Não detalhou o serviço, se foi em grupo, nem se viu o caminho do celular para o TeleZapp, os prazos, o limite de 3 ou o botão nos detalhes; esses pontos seguem sem retorno específico.
+- **Silenciar participante (durante o preparo da 2026.10.31.0):** o responsável usou no app real e aprovou ("sensacional! pessoas chatas foram silenciadas"). Não detalhou o serviço, a reversão pelos detalhes nem o reconhecimento por telefone e @lid; esses pontos seguem sem retorno específico.
+- **Tirar o silêncio (durante o preparo da 2026.10.31.0):** o responsável removeu pessoas da lista de silenciados no app real e as mensagens reapareceram.

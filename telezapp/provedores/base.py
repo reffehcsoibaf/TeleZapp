@@ -367,6 +367,20 @@ class Provedor(ABC):
         Aviso."""
         raise NotImplementedError
 
+    PODE_FIXAR = False
+    DURACOES_FIXAR = ()      # ((segundos, rotulo), ...) se o servico pedir prazo
+
+    def fixar_mensagem(self, mensagem, fixar, segundos=0):
+        """Fixa ou desafixa a mensagem na conversa. O resultado chega como
+        MensagemAtualizada (motivo "fixada") ou Aviso."""
+        raise NotImplementedError
+
+    def fixadas_no_servico(self, conversa_id):
+        """Pergunta ao servico o que esta fixado, atualiza as guardadas e
+        devolve as fixadas que nao estao guardadas. None: o servico nao sabe
+        dizer, valem as guardadas."""
+        return None
+
     PODE_ENVIAR_CONTATOS = False
 
     def enviar_contatos(self, conversa_id, contatos):
@@ -484,6 +498,10 @@ class Provedor(ABC):
         """[(id, nome, telefone)] da agenda que o servico mantem na conta;
         vazio por padrao. Leitura local e rapida."""
         return []
+
+    def formas_do_endereco(self, id_):
+        """Os enderecos conhecidos da mesma pessoa de um grupo."""
+        return {id_}
 
     def id_do_telefone(self, telefone):
         """Id de conversa de quem tem esse telefone ('+5551...'), ou ''

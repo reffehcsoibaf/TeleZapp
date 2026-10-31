@@ -14,6 +14,7 @@ import wx
 
 from telezapp.nucleo import detalhes as det
 from telezapp.nucleo import modelos as m
+from telezapp.nucleo import silenciados
 
 log = logging.getLogger("telezapp.detalhes")
 
@@ -519,6 +520,9 @@ class ControleDetalhes:
                                self.silenciar_canal))
                 botoes.append(("&Deixar de seguir", self.deixar_de_seguir))
         botoes.append(("Mensagens fa&voritas", self.favoritas))
+        botoes.append(("Mensagens fi&xadas", self.fixadas))
+        if self.conv.tipo == "grupo":
+            botoes.append(("Participantes si&lenciados", self.silenciados))
         botoes.append(("&Limpar a conversa...", self.limpar))
         return botoes
 
@@ -693,6 +697,115 @@ class ControleDetalhes:
                 lista.recarregar()
             except RuntimeError:
                 pass
+
+    # ---- participantes silenciados
+    def _pessoas_silenciadas(self):
+        return silenciados.do_grupo(
+            self.jan.cfg.get("participantes_silenciados"),
+            self.conv.conta_id, self.conv.id)
+
+    def silenciados(self):
+        if not self._pessoas_silenciadas():
+            texto = "Nenhum participante silenciado neste grupo."
+            self.jan.fala.falar(texto, interromper=True)
+            wx.MessageBox(texto, "Participantes silenciados",
+                          wx.OK | wx.ICON_INFORMATION, self.dlg)
+            return
+
+        def itens(_):
+            return sorted(((p.get("nome") or id_, id_) for id_, p in
+                           self._pessoas_silenciadas().items()),
+                          key=lambda c: c[0].casefold())
+        dlg = DialogoLista(
+            self.dlg, "Participantes silenciados de %s" % self.conv.nome,
+            "Participantes silenciados (Enter volta a mostrar as mensagens)",
+            (), itens, lambda id_: [
+                ("Voltar a ver as mensagens",
+                 lambda: self._tirar_silencio(id_))])
+        self._lista_silenciados = dlg
+        self._sub(dlg)
+
+    def _tirar_silencio(self, id_):
+        nome = self._pessoas_silenciadas().get(id_, {}).get("nome") or id_
+        self.jan.cfg.set("participantes_silenciados",
+                         silenciados.sem_participante(
+                             self.jan.cfg.get("participantes_silenciados"),
+                             self.conv.conta_id, self.conv.id, id_))
+        self.jan._silenciados_mudaram(self.conv.chave)
+        self.jan.fala.falar("As mensagens de %s voltam a aparecer." % nome,
+                            interromper=True)
+        try:
+            self._lista_silenciados.recarregar()
+        except RuntimeError:
+            pass
+
+    # ---- fixadas
+    def fixadas(self):
+        """Lista as fixadas. O servico que sabe dizer e consultado antes: no
+        Telegram, a fixada pode ser antiga e nem estar guardada."""
+        ler = getattr(self.prov, "fixadas_no_servico", None)
+        if ler is None:
+            self._mostrar_fixadas(None)
+            return
+        self.jan.fala.falar("Buscando as mensagens fixadas.", interromper=True)
+
+        def trabalhar():
+            try:
+                fora = ler(self.conv.id)
+            except Exception:
+                log.error("fixadas:\n%s", traceback.format_exc())
+                fora = None
+            wx.CallAfter(self._mostrar_fixadas, fora)
+        threading.Thread(target=trabalhar, daemon=True,
+                         name="ler-fixadas").start()
+
+    def _mostrar_fixadas(self, fora):
+        if not self.dlg:
+            return
+        # o servico pode ter mudado as marcas das guardadas
+        self.mensagens = self.jan.banco.mensagens(self.conv.conta_id,
+                                                  self.conv.id, 10 ** 9)
+        self._fixadas_fora = {x.id: x for x in fora or ()}
+        if not self._lista_de_fixadas():
+            texto = "Nenhuma mensagem fixada nesta conversa."
+            self.jan.fala.falar(texto, interromper=True)
+            wx.MessageBox(texto, "Mensagens fixadas",
+                          wx.OK | wx.ICON_INFORMATION, self.dlg)
+            return
+
+        def filtrar(_):
+            return [(det.rotulo_do_item(x), x)
+                    for x in self._lista_de_fixadas()]
+        dlg = DialogoLista(
+            self.dlg, "Mensagens fixadas de %s" % self.conv.nome,
+            "Mensagens fixadas (Menu abre as ações)", (), filtrar,
+            self._menu_fixada)
+        self._lista_fixadas = dlg
+        self._sub(dlg)
+
+    def _lista_de_fixadas(self):
+        return det.fixadas(list(self.mensagens) +
+                           list(self._fixadas_fora.values()))
+
+    def _menu_fixada(self, x):
+        opcoes = [("Desafixar", lambda: self._desafixar(x))]
+        if x.id not in self._fixadas_fora:   # antiga demais: nao esta na lista
+            opcoes.insert(0, ("Ver na conversa", lambda: self._ver(x)))
+        for tipo, rotulo, valor in m.conteudos_copiaveis(x):
+            opcoes.append((rotulo, lambda t=tipo, v=valor:
+                           self.jan._copiar_conteudo(x, t, v)))
+        return opcoes
+
+    def _desafixar(self, x):
+        """Pede ao servico e tira da lista; se ele recusar, o aviso e falado
+        e a mensagem volta na proxima vez que a lista abrir."""
+        self.jan._fixar_mensagem(x)
+        self._fixadas_fora.pop(x.id, None)
+        m.atualizar_extras(x, fixada=False)
+        try:
+            self._lista_fixadas.recarregar()
+        except RuntimeError:
+            pass
 
     def _apagar(self, x):
         self.jan._apagar_mensagem(x)

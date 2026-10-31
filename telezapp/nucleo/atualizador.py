@@ -177,9 +177,10 @@ def aplicar(programa, nova, executavel=EXE):
     script = os.path.join(os.path.dirname(nova), "atualizar.bat")
     with open(script, "w", encoding="utf-8", newline="") as f:
         f.write(montar_script(programa, nova, executavel))
+    # sem DETACHED_PROCESS: com ele o CREATE_NO_WINDOW nao vale, e cada ping da
+    # espera abre uma janela, que o leitor de tela le ("ping 127.0.0.1")
     subprocess.Popen(
         ["cmd", "/c", script], cwd=os.path.dirname(programa),
-        creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) |
-                       getattr(subprocess, "DETACHED_PROCESS", 0)))
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     log.info("atualização preparada: %s", nova)
     return script

@@ -576,6 +576,8 @@ def converter(msg, conta_id, conversa_id, lidas_ate=0, nome_padrao=""):
     enquete = enquete_do_telegram(msg)
     if enquete:
         m.atualizar_extras(nova, enquete=enquete)
+    if getattr(msg, "pinned", False) is True:
+        m.atualizar_extras(nova, fixada=True)
     # o Telegram marca as mensagens que citam esta conta (@ ou nome)
     if not minha and getattr(msg, "mentioned", False) is True:
         m.atualizar_extras(nova, citou_voce=True)
@@ -1037,6 +1039,9 @@ class ProvedorTelegram(Provedor):
             self._ao_historia, events.Raw(tipos.UpdateStory))
         self.cliente.add_event_handler(self._ao_editada,
                                        events.MessageEdited())
+        self.cliente.add_event_handler(
+            self._ao_fixar, events.Raw((tipos.UpdatePinnedMessages,
+                                        tipos.UpdatePinnedChannelMessages)))
         self._estado(ev.CONECTADA)
         self._pronto.set()
         await self._atualizar_conversas()
@@ -2116,6 +2121,79 @@ class ProvedorTelegram(Provedor):
                          False)
             return
         await self._registrar_enviada(enviada, cid)
+
+    PODE_FIXAR = True
+
+    def fixar_mensagem(self, mensagem, fixar, segundos=0):
+        self._agendar(self._fixar_mensagem(mensagem, fixar))
+
+    async def _fixar_mensagem(self, msg, fixar):
+        try:
+            ent = await self._entidade(msg.conversa_id)
+            if fixar:
+                await self.cliente.pin_message(ent, int(msg.id), notify=False)
+            else:
+                await self.cliente.unpin_message(ent, int(msg.id))
+        except Exception as e:
+            log.warning("fixar mensagem falhou: %s", type(e).__name__)
+            self._avisar("Não consegui %s a mensagem (%s)." % (
+                "fixar" if fixar else "desafixar", _motivo(e)), False)
+            return
+        x = self.banco.mensagem(self.conta.id, msg.conversa_id, msg.id)
+        if x is not None:
+            m.atualizar_extras(x, fixada=bool(fixar))
+            self.banco.salvar_mensagens([x])
+            self.barramento.publicar(ev.MensagemAtualizada(
+                self.conta.id, msg.conversa_id, x, "fixada", "Você"))
+
+    async def _ao_fixar(self, evento):
+        """Fixada ou desafixada em outro aparelho ou por outra pessoa. O mesmo
+        aviso vem do que se fez aqui: sem mudanca, nada a dizer."""
+        from telethon import utils
+        from telethon.tl import types as tipos
+        try:
+            peer = getattr(evento, "peer", None) or \
+                tipos.PeerChannel(evento.channel_id)
+            cid = str(utils.get_peer_id(peer))
+            for id_ in evento.messages:
+                x = self.banco.mensagem(self.conta.id, cid, str(id_))
+                if x is None or m.extras_de(x)["fixada"] == bool(evento.pinned):
+                    continue
+                m.atualizar_extras(x, fixada=bool(evento.pinned))
+                self.banco.salvar_mensagens([x])
+                self.barramento.publicar(ev.MensagemAtualizada(
+                    self.conta.id, cid, x, "fixada"))
+        except Exception:
+            log.exception("fixação de mensagem no Telegram")
+
+    def fixadas_no_servico(self, conversa_id):
+        try:
+            return self._executar(self._ler_fixadas(conversa_id))
+        except Exception:
+            log.info("não consegui ler as mensagens fixadas do Telegram")
+            return None
+
+    async def _ler_fixadas(self, cid):
+        from telethon.tl import types as tipos
+        ent = await self._entidade(cid)
+        achadas = await self.cliente.get_messages(
+            ent, limit=100, filter=tipos.InputMessagesFilterPinned)
+        ids, fora = set(), []
+        for msg in achadas:
+            ids.add(str(msg.id))
+            x = self.banco.mensagem(self.conta.id, cid, str(msg.id))
+            if x is None:
+                nova = converter(msg, self.conta.id, cid)
+                if nova is not None:
+                    fora.append(m.atualizar_extras(nova, fixada=True))
+            elif not m.extras_de(x)["fixada"]:
+                m.atualizar_extras(x, fixada=True)
+                self.banco.salvar_mensagens([x])
+        for x in self.banco.mensagens_fixadas(self.conta.id, cid):
+            if x.id not in ids:
+                m.atualizar_extras(x, fixada=False)
+                self.banco.salvar_mensagens([x])
+        return fora
 
     PODE_ENVIAR_CONTATOS = True
 

@@ -175,16 +175,12 @@ class DialogoConvite(wx.Dialog):
         self._copiar(self.link)
 
     def salvar_qr(self):
-        dlg = wx.FileDialog(self, "Salvar o QR Code do convite",
-                            defaultFile="convite-do-grupo.png",
-                            wildcard="Imagem PNG (*.png)|*.png",
-                            style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT)
-        try:
-            if dlg.ShowModal() != wx.ID_OK:
-                return
-            caminho = dlg.GetPath()
-        finally:
-            dlg.Destroy()
+        from telezapp.interface import salvar
+        caminho = salvar.escolher(self, "Salvar o QR Code do convite",
+                                  "convite-do-grupo.png",
+                                  "Imagem PNG (*.png)|*.png")
+        if not caminho:
+            return
         try:
             with open(caminho, "wb") as f:
                 f.write(ng.png_do_qr(self.link))

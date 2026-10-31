@@ -9,10 +9,12 @@ explicito para abrir com o programa do Windows.
 import logging
 import os
 import shutil
+import subprocess
 
 import wx
 
 from telezapp import NOME
+from telezapp.interface import salvar
 from telezapp.midia.reprodutor import (FormatoNaoSuportado, Reprodutor,
                                        formatar_tempo)
 from telezapp.midia import velocidade as vel
@@ -91,7 +93,7 @@ def abrir(pai, msg, caminho, fala, nome_conversa="", cfg=None):
         elif kind == TEXTO:
             _texto(pai, msg, caminho, texto)
         else:
-            _documento(pai, msg, caminho, texto)
+            _documento(pai, msg, caminho, texto, fala)
     except Exception:
         log.exception("erro ao abrir a mídia")
         wx.MessageBox("Não foi possível abrir esta mídia. Os detalhes estão "
@@ -99,18 +101,27 @@ def abrir(pai, msg, caminho, fala, nome_conversa="", cfg=None):
 
 
 def salvar_copia(pai, msg, caminho, fala=None):
-    dlg = wx.FileDialog(pai, "Salvar a mídia em um arquivo",
-                        defaultFile=nome_para_salvar(msg, caminho),
-                        style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT)
+    direto = salvar.guarda_direto()
+    destino = salvar.escolher(pai, "Salvar a mídia em um arquivo",
+                              nome_para_salvar(msg, caminho))
+    if not destino:
+        return False
     try:
-        if dlg.ShowModal() != wx.ID_OK:
-            return False
-        shutil.copy2(caminho, dlg.GetPath())
-    finally:
-        dlg.Destroy()
+        shutil.copy2(caminho, destino)
+    except OSError:
+        log.exception("salvar a cópia da mídia")
+        if fala is not None:
+            fala.falar("Não consegui salvar o arquivo.", interromper=True)
+        return False
     if fala is not None:
-        fala.falar("Cópia salva.")
+        fala.falar("Salvo em %s." % destino if direto else "Cópia salva.")
     return True
+
+
+def ver_na_pasta(caminho):
+    """Abre a pasta do arquivo no Explorador, com ele selecionado."""
+    if os.name == "nt":
+        subprocess.Popen(["explorer", "/select,", os.path.normpath(caminho)])
 
 
 def _janela(pai, titulo, descricao_, botoes_extra=(), corpo=None,
@@ -195,7 +206,7 @@ def _abrir_no_windows(caminho):
         os.startfile(caminho)
 
 
-def _documento(pai, msg, caminho, texto):
+def _documento(pai, msg, caminho, texto, fala=None):
     aviso = ("\n\nO TeleZapp não mostra este tipo de arquivo dentro do app. "
              "O botão Abrir com o programa do Windows usa o programa que o "
              "Windows tem para ele; o arquivo continua guardado na pasta do "
@@ -206,7 +217,7 @@ def _documento(pai, msg, caminho, texto):
             ("&Abrir com o programa do Windows",
              lambda d: _abrir_no_windows(caminho)),
             ("&Salvar em um arquivo...",
-             lambda d: salvar_copia(d, msg, caminho))))
+             lambda d: salvar_copia(d, msg, caminho, fala))))
     dlg.ShowModal()
     dlg.Destroy()
 

@@ -3847,3 +3847,51 @@ def test_enviar_contatos_sem_conexao_avisa(amb):
     amb.p.enviar_contatos("5551@s.whatsapp.net", [("Ana", "+5551999998888")])
     assert "Não consegui enviar o contato" in esperar(
         amb.fila, ev.Aviso).texto
+
+
+def test_fixar_no_whatsapp_e_o_limite_de_tres(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    cid = "5551999990000@s.whatsapp.net"
+    msgs = [m.Mensagem(amb.p.conta.id, cid, "F%d" % i, data=float(i + 1),
+                       texto="t") for i in range(4)]
+    amb.p.banco.salvar_mensagens(msgs)
+    amb.p.fixar_mensagem(msgs[0], True, 604800)
+    a = esperar(amb.fila, ev.MensagemAtualizada)
+    assert (a.motivo, a.quem) == ("fixada", "Você") and m.fixada_agora(a.mensagem)
+    enviada = amb.c.enviadas[-1][1]
+    assert enviada.pinInChatMessage.key.ID == "F0"
+    assert enviada.pinInChatMessage.type == enviada.pinInChatMessage.PIN_FOR_ALL
+    assert enviada.messageContextInfo.messageAddOnDurationInSecs == 604800
+    for i in (1, 2, 3):
+        amb.p._marcar_fixada(cid, "F%d" % i, True, 604800, 1000.0 * i + 2e9, "Ana")
+    guardadas = {x.id for x in amb.p.banco.mensagens_fixadas(amb.p.conta.id, cid)}
+    assert guardadas == {"F1", "F2", "F3"}
+    amb.p.fixar_mensagem(msgs[1], False)
+    while True:
+        b = esperar(amb.fila, ev.MensagemAtualizada)
+        if b.quem == "Você":
+            break
+    assert not m.fixada_agora(b.mensagem)
+    assert amb.c.enviadas[-1][1].pinInChatMessage.type == \
+        E.PinInChatMessage.UNPIN_FOR_ALL
+
+
+def test_fixacao_recebida_nao_vira_mensagem(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    alvo = _recebida(amb, "P1", "fixe-me") if "_recebida" in globals() else None
+    if alvo is None:
+        amb.f["Message"](amb.c, evento("P1", E.Message(conversation="fixe-me")))
+        alvo = esperar(amb.fila, ev.MensagemNova).mensagem
+    pino = E.Message(
+        pinInChatMessage=E.PinInChatMessage(
+            key=_chave("P1"), type=E.PinInChatMessage.PIN_FOR_ALL,
+            senderTimestampMS=int(time.time() * 1000)),
+        messageContextInfo=E.MessageContextInfo(
+            messageAddOnDurationInSecs=86400))
+    amb.f["Message"](amb.c, evento("P2", pino))
+    a = esperar(amb.fila, ev.MensagemAtualizada)
+    assert a.motivo == "fixada" and a.mensagem.id == alvo.id
+    assert m.fixada_agora(a.mensagem)
+    assert m.extras_de(a.mensagem)["fixada_ate"] > time.time()

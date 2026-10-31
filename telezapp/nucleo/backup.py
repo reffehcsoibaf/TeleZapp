@@ -91,7 +91,8 @@ class Manifesto:
 # Preferencias fora de config.OPCOES que tambem vao (a ordem dos provedores
 # de IA e os modelos; as chaves so em backup com senha, ver CHAVES_IA)
 EXTRAS = ("ia_ordem", "ia_modelos", "pacote_de_sons", "sons_desativados",
-          "atalhos", "lista_conversas", "lista_mensagens")
+          "atalhos", "lista_conversas", "lista_mensagens",
+          "participantes_silenciados")
 
 
 def opcoes_do_backup(dados, partes=None):

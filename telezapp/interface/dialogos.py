@@ -598,14 +598,90 @@ def escolher_membro(pai, membros):
 
 def escolher_destino_zip(pai, nome, pasta=""):
     """Janela do Windows para escolher onde gravar o .zip; None se cancelar."""
-    dlg = wx.FileDialog(pai, "Salvar o conteúdo da conversa", defaultDir=pasta,
-                        defaultFile=nome, wildcard="Arquivo zip|*.zip",
-                        style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT)
+    from telezapp.interface import salvar
+    caminho = salvar.escolher(pai, "Salvar o conteúdo da conversa", nome,
+                              "Arquivo zip|*.zip", pasta)
+    if not caminho:
+        return None
+    return caminho if caminho.lower().endswith(".zip") else caminho + ".zip"
+
+
+def escolher_tipo_chamada(pai, nome, com_video):
+    """Audio ou video para ligar para `nome`: "audio", "video" ou None. Esc sai.
+    Sem video na conta, esse botao nem aparece."""
+    dlg = wx.Dialog(pai, title="Iniciar chamada")
+    lay = wx.BoxSizer(wx.VERTICAL)
+    lay.Add(wx.StaticText(dlg, label="Ligar para %s." % nome), 0, wx.ALL, 10)
+    linha = wx.BoxSizer(wx.HORIZONTAL)
+    escolha = {}
+
+    def botao(rotulo, valor):
+        b = wx.Button(dlg, wx.ID_ANY, rotulo)
+
+        def apertou(_evt):
+            escolha["tipo"] = valor
+            dlg.EndModal(wx.ID_OK)
+        b.Bind(wx.EVT_BUTTON, apertou)
+        linha.Add(b, 0, wx.RIGHT, 6)
+        return b
+    audio = botao("Chamada de &áudio", "audio")
+    if com_video:
+        botao("Chamada de &vídeo", "video")
+    linha.Add(wx.Button(dlg, wx.ID_CANCEL, "&Cancelar"), 0)
+    lay.Add(linha, 0, wx.ALL, 10)
+    dlg.SetSizerAndFit(lay)
+    dlg.SetEscapeId(wx.ID_CANCEL)
+    dlg.CentreOnParent()
+    audio.SetFocus()
+    try:
+        return escolha.get("tipo") if dlg.ShowModal() == wx.ID_OK else None
+    finally:
+        dlg.Destroy()
+
+
+def escolher_duracao_fixar(pai, duracoes, padrao=1):
+    """Por quanto tempo fixar: os segundos escolhidos, ou None se cancelar."""
+    dlg = wx.SingleChoiceDialog(pai, "Fixar a mensagem por quanto tempo?",
+                                "Fixar a mensagem", [r for _, r in duracoes])
+    dlg.SetSelection(min(padrao, len(duracoes) - 1))
     try:
         if dlg.ShowModal() != wx.ID_OK:
             return None
-        caminho = dlg.GetPath()
-        return caminho if caminho.lower().endswith(".zip")             else caminho + ".zip"
+        return duracoes[dlg.GetSelection()][0]
+    finally:
+        dlg.Destroy()
+
+
+def documento_baixado(pai, nome, ver_na_pasta, salvar):
+    """Fim do download de um documento. Devolve True se a pessoa quer abrir.
+    Ver na pasta fecha a janela, para o Explorador nao ficar na frente de uma
+    janela que espera resposta; `salvar(dlg)` a deixa aberta, como dona do
+    seletor. Esc fecha."""
+    dlg = wx.Dialog(pai, title="Documento baixado")
+    lay = wx.BoxSizer(wx.VERTICAL)
+    lay.Add(wx.StaticText(dlg, label="Baixado: %s." % nome), 0, wx.ALL, 10)
+    b_abrir = wx.Button(dlg, wx.ID_OPEN, "&Abrir")
+    b_pasta = wx.Button(dlg, wx.ID_ANY, "&Ver na pasta")
+    b_salvar = wx.Button(dlg, wx.ID_ANY, "&Salvar")
+    b_fechar = wx.Button(dlg, wx.ID_CLOSE, "&Fechar")
+    b_abrir.Bind(wx.EVT_BUTTON, lambda e: dlg.EndModal(wx.ID_OPEN))
+
+    def ver(_evt):
+        dlg.EndModal(wx.ID_CLOSE)
+        ver_na_pasta()
+    b_pasta.Bind(wx.EVT_BUTTON, ver)
+    b_salvar.Bind(wx.EVT_BUTTON, lambda e: salvar(dlg))
+    b_fechar.Bind(wx.EVT_BUTTON, lambda e: dlg.EndModal(wx.ID_CLOSE))
+    linha = wx.BoxSizer(wx.HORIZONTAL)
+    for b in (b_abrir, b_pasta, b_salvar, b_fechar):
+        linha.Add(b, 0, wx.RIGHT, 6)
+    lay.Add(linha, 0, wx.ALL, 10)
+    dlg.SetSizerAndFit(lay)
+    dlg.SetEscapeId(wx.ID_CLOSE)
+    dlg.CentreOnParent()
+    b_abrir.SetFocus()
+    try:
+        return dlg.ShowModal() == wx.ID_OPEN
     finally:
         dlg.Destroy()
 

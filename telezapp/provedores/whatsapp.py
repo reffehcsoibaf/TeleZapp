@@ -3064,6 +3064,13 @@ class ProvedorWhatsApp(Provedor):
         if lid is not None and pn is not None and lid.User and pn.User:
             self._lid_para_numero.setdefault(jid_texto(lid), jid_texto(pn))
 
+    def formas_do_endereco(self, id_):
+        try:
+            return self._formas_do_endereco(id_)
+        except Exception:
+            log.info("não consegui ler os endereços de um participante")
+            return {id_}
+
     def _formas_do_endereco(self, jid_txt):
         """Todos os enderecos conhecidos da mesma pessoa: o dado, o telefone
         e os LIDs. As mensagens de grupo guardam quem enviou por um deles e a
@@ -3838,6 +3845,17 @@ class ProvedorWhatsApp(Provedor):
                 m.atualizar_extras(x, reacoes=reacoes)
             self._alterar(cid, alvo, aplicar, "reacao", quem, emoji)
             return True
+        if "pinInChatMessage" in presentes:
+            p = interna.pinInChatMessage
+            contexto = interna if interna.HasField("messageContextInfo") \
+                else evento.Message
+            quem = "Você" if origem.IsFromMe else self._nome_contato(
+                origem.Sender, info.Pushname or nome_verificado(info))
+            self._marcar_fixada(
+                cid, p.key.ID, p.type == p.PIN_FOR_ALL,
+                contexto.messageContextInfo.messageAddOnDurationInSecs,
+                p.senderTimestampMS / 1000 or time.time(), quem)
+            return True
         if "pollUpdateMessage" in presentes:
             self._tratar_voto(evento, cid, info, origem, interna)
             return True
@@ -3989,6 +4007,74 @@ class ProvedorWhatsApp(Provedor):
         self._registrar_enviada(
             resp, cid, localizacao.descrever(latitude, longitude),
             tipo=m.OUTRO)
+
+    PODE_FIXAR = True
+    # os prazos do aplicativo oficial: no WhatsApp a fixacao sempre vence
+    DURACOES_FIXAR = ((86400, "24 horas"), (604800, "7 dias"),
+                      (2592000, "30 dias"))
+    MAX_FIXADAS = 3
+
+    def fixar_mensagem(self, mensagem, fixar, segundos=0):
+        self._fila.put(lambda: self._fixar_mensagem(mensagem, fixar, segundos))
+
+    def _fixar_mensagem(self, msg, fixar, segundos):
+        from neonize.proto.waCommon import WACommon_pb2 as C
+        from neonize.proto.waE2E import WAWebProtobufsE2E_pb2 as E
+        cid = msg.conversa_id
+        agora = time.time()
+        try:
+            if not self._conectada or self.cliente is None:
+                raise ConnectionError("sem conexão")
+            if cid.startswith(PREFIXO_STATUS) or cid.endswith("@newsletter"):
+                raise ValueError("não dá para fixar aqui")
+            chat = self._jid(cid)
+            chave = C.MessageKey(remoteJID=jid_texto(chat),
+                                 fromMe=bool(msg.minha), ID=msg.id)
+            if cid.endswith("@g.us"):
+                eu = self.cliente.get_me().JID
+                rem = msg.remetente
+                if msg.minha:
+                    rem = "%s@%s" % (eu.User, eu.Server)
+                if not rem:
+                    raise ValueError("sem o remetente da mensagem")
+                chave.participant = rem
+            tipo = E.PinInChatMessage.PIN_FOR_ALL if fixar \
+                else E.PinInChatMessage.UNPIN_FOR_ALL
+            self.cliente.send_message(chat, E.Message(
+                pinInChatMessage=E.PinInChatMessage(
+                    key=chave, type=tipo,
+                    senderTimestampMS=int(agora * 1000)),
+                messageContextInfo=E.MessageContextInfo(
+                    messageAddOnDurationInSecs=int(segundos)
+                    if fixar else 0)))
+        except Exception as e:
+            log.warning("fixar mensagem falhou: %s", type(e).__name__)
+            self._avisar("Não consegui %s a mensagem (%s)." % (
+                "fixar" if fixar else "desafixar",
+                "sem conexão" if isinstance(e, ConnectionError)
+                else type(e).__name__), False)
+            return
+        self._marcar_fixada(cid, msg.id, fixar, segundos, agora, "Você")
+
+    def _marcar_fixada(self, cid, alvo, fixar, segundos, quando, quem):
+        """Guarda a fixacao. O WhatsApp deixa so MAX_FIXADAS por conversa: a
+        mais antiga da lugar a nova, como no celular."""
+        def aplicar(x):
+            m.atualizar_extras(
+                x, fixada=bool(fixar),
+                fixada_em=quando if fixar else 0,
+                fixada_ate=quando + segundos if fixar and segundos else 0)
+        self._alterar(cid, alvo, aplicar, "fixada", quem)
+        if not fixar:
+            return
+        ativas = [x for x in self.banco.mensagens_fixadas(self.conta.id, cid)
+                  if m.fixada_agora(x)]
+        ativas.sort(key=lambda x: m.extras_de(x)["fixada_em"], reverse=True)
+        for x in ativas[self.MAX_FIXADAS:]:
+            m.atualizar_extras(x, fixada=False, fixada_em=0, fixada_ate=0)
+            self.banco.salvar_mensagens([x])
+            self.barramento.publicar(ev.MensagemAtualizada(
+                self.conta.id, cid, x, "fixada"))
 
     PODE_ENVIAR_CONTATOS = True
 
