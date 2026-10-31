@@ -92,6 +92,7 @@ SYNC_SOB_DEMANDA = 6
 QUANTAS_SOB_DEMANDA = 50
 # quanto esperar a resposta do celular antes de dizer que ele nao respondeu
 ESPERA_DO_HISTORICO = 45
+NAO_PEDI_AS_ANTIGAS = "Não consegui pedir as mensagens ao celular."
 # a varredura para tras pede ate este numero de rodadas de ~50 mensagens, com
 # uma pausa entre elas para nao saturar o celular
 RODADAS_MAXIMAS = 60
@@ -5344,7 +5345,34 @@ class ProvedorWhatsApp(Provedor):
             return "Já estou buscando as mensagens desta conversa."
         return ""
 
-    def _iniciar_varredura(self, conversa_id, ancora, auto=False):
+    AVISO_MAIS_ANTIGAS = ("Abra o WhatsApp no celular para buscar mensagens "
+                          "mais antigas.")
+
+    def buscar_mais_antigas(self, conversa_id, quantas):
+        """Uma rodada da varredura, a partir da mensagem mais antiga guardada:
+        cada pedido traz ate QUANTAS_SOB_DEMANDA do celular."""
+        if self.cliente is None or not self._conectada:
+            return "A conta não está conectada."
+        if getattr(self.cliente, "request_history_sync", None) is None:
+            return "Esta versão do componente do WhatsApp não faz essa busca."
+        if "@" not in (conversa_id or "") or \
+                conversa_id.startswith("status:"):
+            return "Esta conversa não tem mensagens mais antigas para buscar."
+        x = self.banco.mensagem_mais_antiga(self.conta.id, conversa_id)
+        if x is None:
+            return "Não há mensagem na conversa para servir de referência."
+        if not self._iniciar_varredura(
+                conversa_id, (x.id, x.minha, x.remetente, x.data),
+                antigas=True):
+            return "Já estou buscando as mensagens desta conversa."
+        return ""
+
+    def _fim_das_antigas(self, conversa_id, novas=0, texto=""):
+        self.barramento.publicar(ev.MaisAntigas(
+            self.conta.id, conversa_id, novas, texto))
+
+    def _iniciar_varredura(self, conversa_id, ancora, auto=False,
+                           antigas=False):
         """Abre a varredura da conversa e pede a primeira rodada. False se
         ja ha uma em andamento nela."""
         with self._trava:
@@ -5352,7 +5380,8 @@ class ProvedorWhatsApp(Provedor):
                 return False
             self._varreduras[conversa_id] = dict(
                 rodadas=0, novas=0, consultadas=0, ancora_anterior="",
-                auto=auto, mais_antiga_local=self.banco.data_mais_antiga(
+                auto=auto, antigas=antigas,
+                mais_antiga_local=self.banco.data_mais_antiga(
                     self.conta.id, conversa_id))
         self._pedir_rodada(conversa_id, ancora)
         return True
@@ -5433,7 +5462,9 @@ class ProvedorWhatsApp(Provedor):
             with self._trava:
                 self._pedidos_de_historico = max(
                     0, self._pedidos_de_historico - 1)
-            self._terminar_varredura(conversa_id)
+            varredura = self._terminar_varredura(conversa_id)
+            if varredura and varredura.get("antigas"):
+                self._fim_das_antigas(conversa_id, texto=NAO_PEDI_AS_ANTIGAS)
             return
         self._pedir_historico(conversa_id, info, ancora[0])
 
@@ -5457,6 +5488,9 @@ class ProvedorWhatsApp(Provedor):
             log.warning("não consegui pedir o histórico", exc_info=True)
             varredura = self._terminar_varredura(conversa_id)
             if varredura and varredura.get("auto"):
+                return
+            if varredura and varredura.get("antigas"):
+                self._fim_das_antigas(conversa_id, texto=NAO_PEDI_AS_ANTIGAS)
                 return
             self.barramento.publicar(ev.Aviso(
                 self.conta.id, "Não consegui pedir as mensagens ao celular."))
@@ -5484,6 +5518,11 @@ class ProvedorWhatsApp(Provedor):
                     varredura["rodadas"] if varredura else 0)
         if varredura and varredura.get("auto"):
             return                       # busca sozinha: fica so no log
+        if varredura and varredura.get("antigas"):
+            self._fim_das_antigas(
+                conversa_id, texto="O celular não respondeu. Abra o WhatsApp "
+                "no celular, com internet, e aperte Home de novo.")
+            return
         if varredura and varredura["rodadas"]:
             texto = ("O celular parou de responder à busca de mensagens que "
                      "faltam. Até aqui encontrei %s." % _achadas(
@@ -5506,9 +5545,13 @@ class ProvedorWhatsApp(Provedor):
             novas, resumo = self._guardar_sob_demanda(dados)
         except Exception:
             log.exception("erro ao guardar a resposta do pedido de histórico")
-            autos = all(v.get("auto") for v in self._varreduras.values())
+            autos = all(v.get("auto") or v.get("antigas")
+                        for v in self._varreduras.values())
             for cid in list(self._varreduras):
-                self._terminar_varredura(cid)
+                if self._terminar_varredura(cid).get("antigas"):
+                    self._fim_das_antigas(
+                        cid, texto="O celular respondeu, mas não consegui "
+                        "ler as mensagens.")
             if esperando and not autos:
                 self.barramento.publicar(ev.Aviso(
                     self.conta.id, "O celular respondeu, mas não consegui "
@@ -5542,6 +5585,11 @@ class ProvedorWhatsApp(Provedor):
                  " [sozinha]" if varredura.get("auto") else "",
                  varredura["rodadas"], varredura["consultadas"],
                  varredura["novas"])
+        if varredura.get("antigas"):
+            self._fim_das_antigas(
+                cid, varredura["novas"], "" if varredura["novas"] else
+                "O celular não tem mensagens mais antigas desta conversa.")
+            return
         if varredura.get("auto"):
             if varredura["novas"]:
                 conv = self._conversas.get(cid)
@@ -5565,6 +5613,8 @@ class ProvedorWhatsApp(Provedor):
     @staticmethod
     def _motivo_de_parar(varredura, resumo, novas):
         """"" se a varredura deve pedir mais uma rodada; senao por que parou."""
+        if varredura.get("antigas"):
+            return "uma rodada a cada Home"
         ancora = resumo["ancora"]
         if ancora is None or not resumo["total"]:
             return "fim do histórico"

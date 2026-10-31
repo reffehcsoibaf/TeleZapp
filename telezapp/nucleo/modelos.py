@@ -20,11 +20,14 @@ TEXTO, FOTO, VIDEO, VOZ, AUDIO, DOCUMENTO, FIGURINHA, OUTRO = (
 # Marca de lugar de uma mensagem que o WhatsApp avisou mas nao conseguiu
 # entregar (nao decifrada); a mensagem de verdade, com o mesmo id, a substitui
 AGUARDANDO = "aguardando"
+# Aviso do grupo de que alguem entrou ou saiu: vem pronto em `texto`
+AVISO_MEMBROS = "aviso_membros"
 NOMES_TIPOS = {
     TEXTO: "texto", FOTO: "foto", VIDEO: "vídeo", VOZ: "mensagem de voz",
     AUDIO: "áudio", DOCUMENTO: "documento", FIGURINHA: "figurinha",
     OUTRO: "mensagem sem suporte ainda",
     AGUARDANDO: "mensagem ainda não recebida",
+    AVISO_MEMBROS: "aviso de entrada ou saída",
 }
 
 # Estados de uma mensagem enviada
@@ -555,7 +558,7 @@ def conteudo(m, com_estado=True):
     legenda = ("legenda: " + m.texto) if m.texto else ""
     dur = duracao_legivel(m.segundos) if m.segundos else ""
     tam = tamanho_legivel(m.tamanho) if m.tamanho else ""
-    if m.tipo == TEXTO:
+    if m.tipo in (TEXTO, AVISO_MEMBROS):
         return m.texto
     if m.tipo == FOTO:
         return _partes("foto", legenda)
@@ -883,6 +886,8 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None,
               "ia": lambda: trecho_da_ia(m), "reacoes": bloco_reacoes,
               "resposta": bloco_resposta}
     def bloco_autor():
+        if m.tipo == AVISO_MEMBROS:
+            return ""             # a frase ja diz quem foi
         if autor_so_quando_muda and not (
                 anterior is None or anterior.minha != m.minha
                 or anterior.autor != m.autor):

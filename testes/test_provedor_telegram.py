@@ -1714,3 +1714,87 @@ def test_fixar_e_ler_fixadas_no_telegram(ambiente):
     assert [y.id for y in fora] == ["7"] and m.fixada_agora(fora[0])
     assert p.banco.mensagem(p.conta.id, "10", "7") is None
     assert {y.id for y in p.banco.mensagens_fixadas(p.conta.id, "10")} == {"6"}
+
+
+
+def test_mais_antigas_pede_as_anteriores_a_mais_antiga_guardada(ambiente):
+    cliente = ClienteFalso()
+    pedidos = []
+
+    async def iter_messages(ent, limit=None, offset_id=0):
+        pedidos.append((limit, offset_id))
+        if offset_id == 3:
+            yield mensagem(2, "m2", sender=ANA)
+            yield mensagem(1, "m1", sender=ANA)
+    cliente.iter_messages = iter_messages
+    p = ambiente.criar(cliente)
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ConversasAtualizadas)
+        ambiente.banco.salvar_mensagens([
+            m.Mensagem("t1", "10", "3", autor="Ana", data=10 ** 10, texto="m3")])
+        assert p.buscar_mais_antigas("10", 100) == ""
+        fim = esperar(ambiente.fila, ev.MaisAntigas)
+        assert (fim.novas, fim.texto) == (2, "")
+        assert pedidos == [(100, 3)]
+        assert ambiente.banco.mensagem_mais_antiga("t1", "10").id == "1"
+        # agora o servidor nao tem nada antes de 1
+        assert p.buscar_mais_antigas("10", 100) == ""
+        fim = esperar(ambiente.fila, ev.MaisAntigas)
+        assert fim.novas == 0 and "não tem mensagens mais antigas" in fim.texto
+    finally:
+        p.parar()
+
+
+def test_mais_antigas_com_falha_do_servidor_avisa(ambiente):
+    cliente = ClienteFalso()
+
+    def iter_messages(ent, limit=None, offset_id=0):
+        raise RuntimeError("sem rede")
+    cliente.iter_messages = iter_messages
+    p = ambiente.criar(cliente)
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ConversasAtualizadas)
+        assert p.buscar_mais_antigas("10", 100) == ""
+        assert "Não consegui" in esperar(ambiente.fila, ev.MaisAntigas).texto
+    finally:
+        p.parar()
+
+
+
+def _acao(nome, **campos):
+    return type(nome, (), campos)()
+
+
+def test_avisos_de_entrada_e_saida_viram_frases():
+    bia = types.SimpleNamespace(id=2, first_name="Bia", last_name=None,
+                                username=None, title=None)
+    def aviso(acao, **extra):
+        return tg.aviso_de_membros(mensagem(
+            5, sender=ANA, sender_id=1, action=acao, **extra))
+    assert aviso(_acao("MessageActionChatJoinedByLink", inviter_id=9)) == \
+        "Ana Silva entrou no grupo por um convite."
+    assert "pedido aprovado" in aviso(_acao("MessageActionChatJoinedByRequest"))
+    assert aviso(_acao("MessageActionChatAddUser", users=[1])) == \
+        "Ana Silva entrou no grupo."
+    assert aviso(_acao("MessageActionChatAddUser", users=[2]),
+                 action_entities=[bia]) == "Ana Silva adicionou Bia ao grupo."
+    assert aviso(_acao("MessageActionChatDeleteUser", user_id=1)) == \
+        "Ana Silva saiu do grupo."
+    assert aviso(_acao("MessageActionChatDeleteUser", user_id=2),
+                 action_entities=[bia]) == "Ana Silva removeu Bia do grupo."
+    assert aviso(_acao("MessageActionChatDeleteUser", user_id=2)) == \
+        "Ana Silva removeu um participante do grupo."
+    assert aviso(_acao("MessageActionPinMessage")) == ""
+
+
+def test_converter_guarda_o_aviso_de_entrada_e_descarta_os_outros():
+    x = tg.converter(mensagem(5, sender=ANA, action=_acao(
+        "MessageActionChatJoinedByLink")), "t1", -77)
+    assert x.tipo == m.AVISO_MEMBROS and x.conversa_id == "-77"
+    assert x.texto == "Ana Silva entrou no grupo por um convite."
+    linha = m.formatar(x, m.ESTILO_AUTOR_PRIMEIRO)
+    assert "Ana Silva entrou" in linha and "Desconhecido" not in linha
+    assert tg.converter(mensagem(6, sender=ANA, action=_acao(
+        "MessageActionPinMessage")), "t1", -77) is None

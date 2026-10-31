@@ -21,6 +21,7 @@ import wx
 from telezapp import (GRUPO_DE_SUPORTE, NOME, PAGINA_DO_PROJETO, VERSAO,
                       config)
 from telezapp.acessibilidade.fala import Fala, bipe, definir_sons
+from telezapp.armazenamento.banco import POR_VEZ_MAXIMO
 from telezapp.interface import colagem, dialogos, robos, visualizadores
 from telezapp.interface import salvar as ui_salvar
 from telezapp.nucleo import silenciados
@@ -100,8 +101,6 @@ MENSAGENS_DE_CONTEXTO = 12   # final da conversa que vai junto ao redigir com a 
 MAXIMO_RESUMO = 300      # mensagens da conversa que o resumo com IA le
 MAX_BOTOES_LINK = 12     # links e botoes de endereco, tambem na ordem de Tab
 LIMITE_ROTULO_LINK = 80  # caracteres do rotulo de um botao de link
-LIMITE_CACHE = 100        # mensagens lidas do banco ao abrir a conversa
-LIMITE_MEMORIA = 1200     # padrao de mensagens na memoria por conversa
 
 AJUDA = """\
 ESTRUTURA DA JANELA
@@ -456,6 +455,10 @@ class Janela(wx.Frame):
         self.reacoes_novas = {}       # chave -> reacoes novas as minhas msgs
         self.quem_reagiu = {}         # chave -> [(quem, emoji)] dessas reacoes
         self.cache = {}             # chave da conversa -> [Mensagem]
+        self._por_vez = {}            # chave -> mensagens mostradas por vez
+        self._janelas = {}            # chave -> mensagens mantidas, se a pessoa
+                                      # subiu alem do "por vez" com Home
+        self._buscando_antigas = set()  # chaves com pedido em andamento
         self.atual = None             # chave da conversa aberta
         self.marcador_n = 0           # nao lidas ao abrir a conversa
         self.marcador_id = None       # id da 1a nao lida (quando conhecido)
@@ -1844,6 +1847,7 @@ class Janela(wx.Frame):
             ev.AutoresAtualizados: self._ev_autores_atualizados,
             ev.MensagemApagadaNoCelular: self._ev_mensagem_apagada,
             ev.MensagensCarregadas: self._ev_mensagens,
+            ev.MaisAntigas: self._ev_mais_antigas,
             ev.MensagemNova: self._ev_nova,
             ev.EnvioFalhou: self._ev_falha,
             ev.LeituraConfirmada: self._ev_leitura,
@@ -2104,7 +2108,7 @@ class Janela(wx.Frame):
     @seguro
     def _previas_prontas(self, ultimas):
         for chave, msg in ultimas.items():
-            if self._silenciado(msg):
+            if self._escondida(msg):
                 self._silenciados_mudaram(chave)
             else:
                 self._atualizar_previa(chave, msg)
@@ -3341,13 +3345,87 @@ class Janela(wx.Frame):
                         "apagado. Defina um novo em Configurações, "
                         "Privacidade.")
 
-    def _limite_memoria(self):
-        """Mensagens mantidas por conversa (opcao da pessoa)."""
-        try:
-            return max(1, int(self.cfg.get("mensagens_por_conversa")
-                              or LIMITE_MEMORIA))
-        except (TypeError, ValueError):
-            return LIMITE_MEMORIA
+    def _mensagens_por_vez(self, chave):
+        """O que a pessoa definiu nos detalhes da conversa."""
+        if chave not in self._por_vez:
+            self._por_vez[chave] = self.banco.por_vez(chave[0], chave[1])
+        return self._por_vez[chave]
+
+    def _limite_memoria(self, chave):
+        """Mensagens mantidas na lista da conversa: o "por vez", ou mais, se a
+        pessoa ja subiu com Home ou ha muitas nao lidas."""
+        return max(self._janelas.get(chave, 0), self._mensagens_por_vez(chave))
+
+    def _definir_mensagens_por_vez(self, conv, quantas):
+        """Vale ja: a lista da conversa volta a ter esse tanto."""
+        chave = conv.chave
+        self.banco.salvar_por_vez(conv.conta_id, conv.id, quantas)
+        self._por_vez[chave] = quantas
+        self._janelas.pop(chave, None)
+        self.cache[chave] = self.cache.get(chave, [])[-quantas:]
+        self._mesclar(chave, self.banco.mensagens(conv.conta_id, conv.id,
+                                                  quantas))
+        if chave == self.atual:
+            self._preencher_mensagens()
+
+    @seguro
+    def _mais_antigas(self):
+        """Home na primeira da lista: traz as anteriores do banco; se la nao
+        ha mais, pede ao servico. A selecao fica onde estava, e a seta para
+        cima continua a leitura."""
+        chave = self.atual
+        if chave in self._buscando_antigas:
+            self.fala.falar("Ainda estou buscando as mensagens mais antigas.",
+                            interromper=True)
+            return
+        antes = len(self.cache.get(chave, []))
+        por_vez = self._mensagens_por_vez(chave)
+        janela = max(self._limite_memoria(chave), antes)
+        while True:
+            janela += por_vez
+            lidas = self.banco.mensagens(chave[0], chave[1], janela)
+            self._janelas[chave] = janela
+            novas = len(self._mesclar(chave, lidas)) - antes
+            # as apagadas daqui continuam no banco, mas nao voltam a lista
+            if novas > 0 or len(lidas) < janela:
+                break
+        if novas > 0:
+            self._mostrar_mais_antigas(novas)
+            return
+        self._janelas[chave] = max(antes, por_vez)
+        prov = self.contas.provedor(chave[0])
+        if prov is None:
+            self.fala.falar("A conta não está disponível.", interromper=True)
+            return
+        erro = prov.buscar_mais_antigas(chave[1], por_vez)
+        if erro:
+            self.fala.falar(erro, interromper=True)
+            return
+        self._buscando_antigas.add(chave)
+        self.SetStatusText(prov.AVISO_MAIS_ANTIGAS)
+        self.fala.falar(prov.AVISO_MAIS_ANTIGAS, interromper=True)
+
+    def _mostrar_mais_antigas(self, novas):
+        self._preencher_mensagens()
+        self.fala.falar("%s." % (
+            "1 mensagem anterior carregada" if novas == 1 else
+            "%d mensagens anteriores carregadas" % novas), interromper=True)
+
+    def _ev_mais_antigas(self, e):
+        chave = (e.conta_id, e.conversa_id)
+        self._buscando_antigas.discard(chave)
+        if not e.novas:
+            if chave == self.atual:
+                self.SetStatusText(e.texto)
+                self.fala.falar(e.texto, interromper=True)
+            return
+        antes = len(self.cache.get(chave, []))
+        self._janelas[chave] = antes + e.novas
+        lidas = self.banco.mensagens(chave[0], chave[1], antes + e.novas)
+        trazidas = len(self._mesclar(chave, lidas)) - antes
+        if chave == self.atual:
+            self.SetStatusText("")
+            self._mostrar_mais_antigas(trazidas)
 
     def _mesclar(self, chave, novas):
         """Junta mensagens ao cache da conversa, sem repetir, em ordem."""
@@ -3361,7 +3439,7 @@ class Janela(wx.Frame):
                               # mensagem nova ou novo pareamento
             atuais[x.id] = x
         lista = sorted(atuais.values(), key=_ordem)
-        self.cache[chave] = lista[-self._limite_memoria():]
+        self.cache[chave] = lista[-self._limite_memoria(chave):]
         return self.cache[chave]
 
     def _ev_nova(self, e):
@@ -3381,7 +3459,7 @@ class Janela(wx.Frame):
             conv.nao_lidas = 0
         self.indice[chave] = conv
         m.alinhar_autores(conv, [msg])
-        calada = self._silenciado(msg)
+        calada = self._escondida(msg)
         if calada and not aberta and not e.silenciosa and conv.nao_lidas:
             conv.nao_lidas -= 1
             self.banco.salvar_conversas([conv])
@@ -3403,7 +3481,7 @@ class Janela(wx.Frame):
                 p = self.contas.provedor(msg.conta_id)
                 if p is not None:
                     p.marcar_como_lida(msg.conversa_id)
-        if msg.minha or e.silenciosa or calada:
+        if msg.minha or e.silenciosa or calada or msg.tipo == m.AVISO_MEMBROS:
             return  # minha, da sincronia inicial ou silenciada: sem aviso
         self._ia_automatica(msg)
         self._previa_da_recebida(msg)
@@ -4159,6 +4237,12 @@ class Janela(wx.Frame):
         return None
 
     def _tecla_mensagens(self, evt):
+        if evt.GetKeyCode() == wx.WXK_HOME and self.atual is not None and \
+                self.mapa != [None] and self.lista_msgs.GetSelection() == 0 \
+                and not (evt.ShiftDown() or evt.ControlDown()):
+            self.selecao_automatica = False
+            self._mais_antigas()
+            return
         # a pessoa mexeu na lista: nao mover a selecao sozinho
         if evt.GetKeyCode() in (wx.WXK_UP, wx.WXK_DOWN, wx.WXK_HOME,
                                 wx.WXK_END, wx.WXK_PAGEUP, wx.WXK_PAGEDOWN):
@@ -4208,8 +4292,17 @@ class Janela(wx.Frame):
         self.selecao_automatica = True
         self.alvo_inicial = self.banco.posicao(conv.conta_id, conv.id)
         self.carga_inicial = True     # a 1a resposta do servico ainda e a abertura
+        # no WhatsApp o historico e local e rapido; no Telegram cada 100
+        # mensagens sao uma consulta ao servidor
+        teto = POR_VEZ_MAXIMO if self.contas.servico(conv.conta_id) == \
+            "whatsapp" else 1000
+        if conv.nao_lidas:
+            # todas as nao lidas, para o marcador ficar no lugar certo
+            self._janelas[conv.chave] = max(
+                self._limite_memoria(conv.chave),
+                min(teto, conv.nao_lidas + 10))
         guardadas = self.banco.mensagens(
-            conv.conta_id, conv.id, min(LIMITE_CACHE, self._limite_memoria()))
+            conv.conta_id, conv.id, self._limite_memoria(conv.chave))
         lista = self._mesclar(conv.chave, guardadas)
         self._alinhar_autores(conv, lista)
         if self.marcador_n > 0 or not lista:
@@ -4232,12 +4325,8 @@ class Janela(wx.Frame):
             if conv.somente_leitura:
                 self.fala.falar("Conversa somente leitura: você não pode "
                                 "escrever nela.")
-            # no WhatsApp o historico e local e rapido: carrega todas as nao
-            # lidas para o marcador ficar no lugar certo
-            teto = 1000 if self.contas.servico(conv.conta_id) == \
-                "whatsapp" else 200
             p.carregar_mensagens(conv.id, min(
-                teto, self._limite_memoria(), max(50, conv.nao_lidas + 10)))
+                teto, self._limite_memoria(conv.chave)))
             if conv.nao_lidas:
                 p.marcar_como_lida(conv.id)
         conv.nao_lidas = 0
@@ -4380,10 +4469,19 @@ class Janela(wx.Frame):
     def _mensagens_atuais(self):
         """As mensagens que a lista mostra: sem as de quem foi silenciado."""
         msgs = self.cache.get(self.atual, []) if self.atual else []
-        if not msgs or not silenciados.do_grupo(
-                self.cfg.get("participantes_silenciados"), *self.atual):
+        if not msgs or (self.cfg.get("mostrar_avisos_de_membros") and
+                        not silenciados.do_grupo(
+                            self.cfg.get("participantes_silenciados"),
+                            *self.atual)):
             return msgs
-        return [x for x in msgs if not self._silenciado(x)]
+        return [x for x in msgs if not self._escondida(x)]
+
+    def _escondida(self, x):
+        """De participante silenciado, ou aviso de membros que a pessoa nao
+        quer ver."""
+        if x.tipo == m.AVISO_MEMBROS:
+            return not self.cfg.get("mostrar_avisos_de_membros")
+        return self._silenciado(x)
 
     def _silenciado(self, x):
         """A mensagem e de um participante silenciado neste grupo? A pessoa
@@ -4433,7 +4531,7 @@ class Janela(wx.Frame):
         self._formas_cache.clear()
         self.previas.pop(chave, None)
         for x in reversed(self.banco.mensagens(chave[0], chave[1], 50)):
-            if not self._silenciado(x):
+            if not self._escondida(x):
                 self._atualizar_previa(chave, x)
                 break
         self._preencher_conversas()
@@ -7414,7 +7512,9 @@ class Janela(wx.Frame):
             self.fala.falar("Nenhuma conta conectada publica status.",
                             interromper=True)
             return
-        dlg = DialogoPublicarStatus(self, contas, self._escolher_midia_status)
+        dlg = DialogoPublicarStatus(self, contas, self._escolher_midia_status,
+                                    self.atalhos.efetivo("inserir_emoji"),
+                                    self.fala)
         try:
             if dlg.ShowModal() != wx.ID_OK or dlg.resultado is None:
                 return
@@ -8312,7 +8412,8 @@ class Janela(wx.Frame):
             return
         lista = self.cache.get((e.conta_id, e.conversa_id)) or \
             self.banco.mensagens(e.conta_id, e.conversa_id,
-                                 self._limite_memoria())
+                                 self._limite_memoria(
+                                     (e.conta_id, e.conversa_id)))
         x = next((y for y in lista if y.id == e.mensagem_id), None)
         if x is not None and x.tipo == m.DOCUMENTO:
             wx.CallAfter(self._documento_baixado, x, e.caminho)
@@ -8397,6 +8498,11 @@ class Janela(wx.Frame):
             self._carregar_previas()      # guardam o autor ja escrito
             self._preencher_conversas()
             self._preencher_mensagens()
+        elif chave == "mostrar_avisos_de_membros":
+            self.cfg.set(chave, valor)
+            self._previas_lidas = False
+            self._carregar_previas()
+            self._preencher_mensagens()
         elif chave == "segundo_plano":
             self.cfg.set(chave, valor)
             self._atualizar_bandeja()
@@ -8443,12 +8549,6 @@ class Janela(wx.Frame):
                          else None)
             self.fala.falar("Código secreto salvo." if valor else
                             "Código secreto removido.")
-        elif chave == "mensagens_por_conversa":
-            self.cfg.set(chave, valor)
-            limite = self._limite_memoria()
-            for k in self.cache:
-                self.cache[k] = self.cache[k][-limite:]
-            self._preencher_mensagens()
         elif chave in ("falar_novas", "falar_novas_outras_conversas",
                       "falar_novas_fora_do_telezapp", "confirmar_envio",
                       "falar_reacoes"):

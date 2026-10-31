@@ -13,11 +13,16 @@ import threading
 import time
 from dataclasses import astuple, fields
 
-from telezapp.nucleo.modelos import ORDEM_ESTADOS, Conversa, Mensagem
+from telezapp.nucleo.modelos import (AGUARDANDO, ORDEM_ESTADOS, Conversa,
+                                     Mensagem)
 
 log = logging.getLogger("telezapp.banco")
 
 VERSAO_ESQUEMA = 12
+
+# quantas mensagens a lista mostra de cada vez, por conversa
+POR_VEZ_PADRAO = 100
+POR_VEZ_MINIMO, POR_VEZ_MAXIMO = 50, 5000
 
 ESQUEMA = """
 CREATE TABLE IF NOT EXISTS conversas (
@@ -97,6 +102,13 @@ CREATE TABLE IF NOT EXISTS posicoes (
     conta_id TEXT NOT NULL,
     conversa_id TEXT NOT NULL,
     mensagem_id TEXT NOT NULL,
+    PRIMARY KEY (conta_id, conversa_id)
+);
+-- Quantas mensagens mostrar de cada vez (so nas conversas que mudaram o padrao).
+CREATE TABLE IF NOT EXISTS mensagens_por_vez (
+    conta_id TEXT NOT NULL,
+    conversa_id TEXT NOT NULL,
+    quantas INTEGER NOT NULL,
     PRIMARY KEY (conta_id, conversa_id)
 );
 -- Arquivos de midia baixados (base da limpeza de conversas).
@@ -320,7 +332,8 @@ class Banco:
             self._con.execute("DELETE FROM conversas WHERE conta_id=?",
                               (conta_id,))
             for tabela in ("mensagens", "recibos", "status", "midias",
-                           "fichas", "posicoes", "contatos", "limpas", "apagadas"):
+                           "fichas", "posicoes", "contatos", "limpas", "apagadas",
+                           "mensagens_por_vez"):
                 self._con.execute(
                     "DELETE FROM %s WHERE conta_id=?" % tabela, (conta_id,))
             self._agenda = None
@@ -400,6 +413,30 @@ class Banco:
                 "SELECT MIN(data) FROM mensagens WHERE conta_id=? AND "
                 "conversa_id=?", (conta_id, conversa_id)).fetchone()
         return linha[0] or 0
+
+    def mensagem_mais_antiga(self, conta_id, conversa_id):
+        """A mensagem mais antiga guardada que serve de referencia para pedir
+        as anteriores a ela (as marcas "aguardando" nao servem), ou None."""
+        with self._trava:
+            linha = self._con.execute(
+                "SELECT %s FROM mensagens WHERE conta_id=? AND conversa_id=? "
+                "AND tipo != ? ORDER BY data, CAST(id AS INTEGER) LIMIT 1"
+                % ", ".join(_CAMPOS_MSG),
+                (conta_id, conversa_id, AGUARDANDO)).fetchone()
+        return _msg(linha) if linha else None
+
+    def por_vez(self, conta_id, conversa_id):
+        with self._trava:
+            linha = self._con.execute(
+                "SELECT quantas FROM mensagens_por_vez WHERE conta_id=? AND "
+                "conversa_id=?", (conta_id, conversa_id)).fetchone()
+        return linha[0] if linha else POR_VEZ_PADRAO
+
+    def salvar_por_vez(self, conta_id, conversa_id, quantas):
+        with self._trava, self._con:
+            self._con.execute(
+                "INSERT OR REPLACE INTO mensagens_por_vez VALUES (?, ?, ?)",
+                (conta_id, conversa_id, quantas))
 
     def mensagens_expiradas(self, agora=None):
         """Chaves (conta, conversa, id) das mensagens temporarias cujo prazo
@@ -860,6 +897,7 @@ class Banco:
                                 ("midias", "conversa_id"),
                                 ("depuracao", "conversa_id"),
                                 ("posicoes", "conversa_id"),
+                                ("mensagens_por_vez", "conversa_id"),
                                 ("limpas", "conversa_id")):
                 self._con.execute(
                     "DELETE FROM %s WHERE conta_id=? AND %s=?" % (tabela, col),

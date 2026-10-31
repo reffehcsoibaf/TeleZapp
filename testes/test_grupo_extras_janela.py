@@ -126,7 +126,7 @@ def test_convite_que_nao_troca_mantem_o_link():
 def _controle(prov, tipo, dados):
     jan = types.SimpleNamespace(
         contas=types.SimpleNamespace(provedor=lambda conta: prov),
-        indice={}, fala=Fala())
+        indice={}, fala=Fala(), _mensagens_por_vez=lambda chave: 100)
     conv = m.Conversa("w1", "9@g.us" if tipo == "grupo" else "5@s.whatsapp.net",
                       "Alvo", "whatsapp", tipo)
     ctl = det.ControleDetalhes(jan, conv)

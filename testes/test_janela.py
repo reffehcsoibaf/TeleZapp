@@ -21,9 +21,16 @@ AGORA = time.time()
 
 
 class ProvedorFalso:
+    AVISO_MAIS_ANTIGAS = "Abra o celular."
+
     def __init__(self):
         self.pedidos = []
         self.grupos = []
+        self.erro_antigas = ""
+
+    def buscar_mais_antigas(self, cid, quantas):
+        self.pedidos.append(("antigas", cid, quantas))
+        return self.erro_antigas
 
     def grupos_da_conta(self):
         return list(self.grupos)
@@ -205,7 +212,7 @@ def test_abrir_conversa_com_nao_lidas_foca_o_marcador(j):
     j.lista_conv.SetSelection(0)
     j._char_hook(Tecla(wx_falso.WXK_RETURN))
     assert ditas == []                              # nada falado a parte
-    assert ("carregar", "10", 50) in j.contas.p.pedidos
+    assert ("carregar", "10", 100) in j.contas.p.pedidos
     assert ("lida", "10") in j.contas.p.pedidos
     assert j.lista_conv.itens[0] == "Ana, Telegram"
     assert wx_falso._foco[0] is j.lista_conv        # espera o servico
@@ -1092,7 +1099,7 @@ def test_enter_na_mencao_abre_conversa_nova_no_mesmo_servico(j, monkeypatch):
     j._detalhes()
     assert j.atual == ("t1", "77")
     assert j.indice[("t1", "77")].nome == "Bia"
-    assert ("carregar", "77", 50) in j.contas.p.pedidos
+    assert ("carregar", "77", 100) in j.contas.p.pedidos
     # a mencao de uma conversa que ja existe so abre essa conversa
     j._fechar_conversa()
     j._abrir_conversa_da_mencao(x, {"nome": "Ana", "id": "20"})
@@ -2281,17 +2288,99 @@ def test_trechos_do_banco_entram_ao_ligar_o_item(j):
     assert j.lista_conv.itens[0] == "Ana, do banco"
 
 
-def test_limite_de_mensagens_por_conversa(j):
-    j.cfg.set("mensagens_por_conversa", 50)
-    assert j._limite_memoria() == 50
-    msgs = [m.Mensagem("t1", "10", str(i), autor="Ana", data=AGORA + i,
-                       texto="m%d" % i) for i in range(1, 121)]
-    assert len(j._mesclar(("t1", "10"), msgs)) == 50
-    j._aplicar_opcao("mensagens_por_conversa", 60)
-    assert len(j.cache[("t1", "10")]) == 50    # nada a cortar: ja tinha 50
-    j._aplicar_opcao("mensagens_por_conversa", 50)
-    j.cfg.set("mensagens_por_conversa", "lixo")
-    assert j._limite_memoria() == 1200
+def _conversa_longa(j, n=350, nao_lidas=0):
+    """Conversa com `n` mensagens no banco, aberta e selecionada na primeira."""
+    j.banco.salvar_mensagens([
+        m.Mensagem("t1", "90", str(i), autor="Ana", data=AGORA - n + i,
+                   texto="m%d" % i) for i in range(1, n + 1)])
+    conv = m.Conversa("t1", "90", "Longa", nao_lidas=nao_lidas)
+    j.indice[conv.chave] = conv
+    j._abrir_conversa(conv)
+    j.lista_msgs.SetSelection(0)
+    return conv
+
+
+def test_mensagens_por_vez_e_de_cada_conversa_e_vale_ao_abrir(j):
+    conv = _conversa_longa(j)
+    assert len(j.cache[conv.chave]) == 100         # o padrao
+    assert j.banco.por_vez("t1", "outra") == 100
+    j._definir_mensagens_por_vez(conv, 300)
+    assert len(j.cache[conv.chave]) == 300 and len(j.mapa) == 300
+    j._definir_mensagens_por_vez(conv, 50)
+    assert len(j.cache[conv.chave]) == 50 and len(j.mapa) == 50
+    assert j.banco.por_vez("t1", "90") == 50       # fica guardado
+    assert j.banco.por_vez("t1", "outra") == 100   # e so desta conversa
+    j.cache.pop(conv.chave)
+    j._por_vez.clear()
+    j._abrir_conversa(conv)
+    assert len(j.cache[conv.chave]) == 50
+
+
+def test_abrir_traz_todas_as_nao_lidas_mesmo_acima_do_por_vez(j):
+    conv = _conversa_longa(j, nao_lidas=300)
+    assert len(j.cache[conv.chave]) == 310
+
+
+def test_home_no_inicio_traz_as_anteriores_e_mantem_a_selecao(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    conv = _conversa_longa(j)
+    primeira = j.mapa[0]
+    j.lista_msgs.SetSelection(1)
+    j._tecla_mensagens(Tecla(wx_falso.WXK_HOME))   # fora do topo: Home comum
+    assert len(j.cache[conv.chave]) == 100
+    j.lista_msgs.SetSelection(0)
+    j._tecla_mensagens(Tecla(wx_falso.WXK_HOME))
+    assert len(j.cache[conv.chave]) == 200
+    assert j.mapa[j.lista_msgs.GetSelection()] == primeira
+    assert ditas[-1] == "100 mensagens anteriores carregadas."
+    assert not [p for p in j.contas.p.pedidos if p[0] == "antigas"]
+    # com Control ou Shift, nao carrega
+    j.lista_msgs.SetSelection(0)
+    j._tecla_mensagens(Tecla(wx_falso.WXK_HOME, shift=True))
+    assert len(j.cache[conv.chave]) == 200
+
+
+def test_home_quando_o_banco_acaba_pede_ao_servico_e_avisa(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    conv = _conversa_longa(j, n=120)
+    j._tecla_mensagens(Tecla(wx_falso.WXK_HOME))
+    assert len(j.cache[conv.chave]) == 120
+    assert ditas[-1] == "20 mensagens anteriores carregadas."
+    j.lista_msgs.SetSelection(0)
+    j._tecla_mensagens(Tecla(wx_falso.WXK_HOME))
+    assert ("antigas", "90", 100) in j.contas.p.pedidos
+    assert ditas[-1] == "Abra o celular."
+    j.lista_msgs.SetSelection(0)
+    j._tecla_mensagens(Tecla(wx_falso.WXK_HOME))
+    assert "Ainda estou" in ditas[-1]
+    assert len([p for p in j.contas.p.pedidos if p[0] == "antigas"]) == 1
+    # a resposta: duas mais antigas, ja guardadas pelo provedor
+    selecionada = j.mapa[j.lista_msgs.GetSelection()]
+    j.banco.salvar_mensagens([
+        m.Mensagem("t1", "90", "a%d" % i, autor="Ana", data=AGORA - 500 - i,
+                   texto="velha") for i in (1, 2)])
+    j.b.publicar(ev.MaisAntigas("t1", "90", 2))
+    assert len(j.cache[conv.chave]) == 122
+    assert j.mapa[j.lista_msgs.GetSelection()] == selecionada
+    assert ditas[-1] == "2 mensagens anteriores carregadas."
+    # sem nada novo: diz o motivo, e pode pedir de novo
+    j.b.publicar(ev.MaisAntigas("t1", "90", 0, "Nada mais."))
+    assert ditas[-1] == "Nada mais."
+    j.lista_msgs.SetSelection(0)
+    j._tecla_mensagens(Tecla(wx_falso.WXK_HOME))
+    assert len([p for p in j.contas.p.pedidos if p[0] == "antigas"]) == 2
+
+
+def test_home_com_recusa_do_servico_fala_o_motivo_e_nao_fica_esperando(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.contas.p.erro_antigas = "A conta não está conectada."
+    conv = _conversa_longa(j, n=20)
+    j._tecla_mensagens(Tecla(wx_falso.WXK_HOME))
+    assert ditas[-1] == "A conta não está conectada."
+    assert conv.chave not in j._buscando_antigas
 
 
 # -------------------------------------------------------------- filtros
@@ -3281,7 +3370,7 @@ def test_detalhes_de_pessoa_mostra_dados_do_contato_e_botoes(j):
         "&Editar contato", "&Mídias", "&Baixar as mídias que faltam...",
         "&Grupos em comum",
         "Mensagens fa&voritas", "Mensagens fi&xadas",
-        "&Limpar a conversa..."]
+        "Mensagens por ve&z: 100...", "&Limpar a conversa..."]
 
 
 def test_detalhes_de_grupo_mostram_membros_e_so_admin_ve_administrar(j):
@@ -3301,8 +3390,9 @@ def test_detalhes_de_grupo_mostram_membros_e_so_admin_ve_administrar(j):
     rotulos = [r for r, _ in c._botoes()]
     assert rotulos == ["Ver &membros (2)", "&Mídias",
                        "&Baixar as mídias que faltam...",
-                       "Mensagens fa&voritas", "Mensagens fi&xadas", "Participantes si&lenciados",
-        "&Limpar a conversa..."]
+                       "Mensagens fa&voritas", "Mensagens fi&xadas",
+                       "Mensagens por ve&z: 100...",
+                       "Participantes si&lenciados", "&Limpar a conversa..."]
     dados["sou_admin"] = True
     assert "&Administrar grupo" in [r for r, _ in c._botoes()]
     dados["comunidade"] = True
@@ -4057,8 +4147,9 @@ def test_postar_status_escolhe_conta_e_chama_o_provedor(j, monkeypatch):
         resultado = {"conta_id": "t1", "texto": "bom dia", "anexo": None,
                      "publico": "todos"}
 
-        def __init__(self, pai, contas, escolher):
+        def __init__(self, pai, contas, escolher, atalho_emoji, fala):
             Dialogo.contas = contas
+            Dialogo.atalho = atalho_emoji
 
         def ShowModal(self):
             return jm.wx.ID_OK
@@ -4068,6 +4159,7 @@ def test_postar_status_escolhe_conta_e_chama_o_provedor(j, monkeypatch):
     monkeypatch.setattr(jm, "DialogoPublicarStatus", Dialogo)
     j._postar_status()
     assert publicados == [("bom dia", None, "todos")]
+    assert Dialogo.atalho == j.atalhos.efetivo("inserir_emoji")
     assert Dialogo.contas[0][0] == "t1" and "Publicando" in ditas[-1]
     # sem conta conectada que publique: avisa
     j.estados["t1"] = ev.DESCONECTADA
@@ -6698,3 +6790,40 @@ def test_detalhes_listam_e_tiram_o_silencio(j, monkeypatch):
     guardado["menu"]("ana@lid")[0][1]()
     assert guardado["recarregou"] and guardado["itens"](None) == []
     assert "6" in [x.id for x in j._mensagens_atuais()]
+
+
+
+def _aviso_de_entrada(id_="500", conversa="10"):
+    return m.Mensagem("t1", conversa, id_, data=AGORA + 500,
+                      tipo=m.AVISO_MEMBROS, texto="Bia entrou no grupo.")
+
+
+def test_aviso_de_membros_aparece_sem_som_nem_fala(j, monkeypatch):
+    sons, ditas = [], []
+    monkeypatch.setattr(jm, "bipe", sons.append)
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    conv = j.indice[("t1", "10")]
+    j._abrir_conversa(conv)
+    sons.clear(), ditas.clear()
+    j.b.publicar(ev.MensagemNova(_aviso_de_entrada(), conv))
+    assert "500" in j.mapa
+    assert any("Bia entrou no grupo." in t for t in j.lista_msgs.itens)
+    assert sons == [] and ditas == []
+
+
+def test_opcao_esconde_e_volta_a_mostrar_os_avisos_de_membros(j):
+    conv = j.indice[("t1", "10")]
+    j._abrir_conversa(conv)
+    j.b.publicar(ev.MensagemNova(_aviso_de_entrada(), conv))
+    j._aplicar_opcao("mostrar_avisos_de_membros", False)
+    assert "500" not in j.mapa
+    assert j.cfg.get("mostrar_avisos_de_membros") is False
+    j._aplicar_opcao("mostrar_avisos_de_membros", True)
+    assert "500" in j.mapa
+
+
+def test_aviso_oculto_em_outra_conversa_nao_conta_como_nao_lida(j):
+    j._aplicar_opcao("mostrar_avisos_de_membros", False)
+    conv = m.Conversa("t1", "60", "Grupo", tipo="grupo", nao_lidas=3)
+    j.b.publicar(ev.MensagemNova(_aviso_de_entrada(conversa="60"), conv))
+    assert j.indice[("t1", "60")].nao_lidas == 2

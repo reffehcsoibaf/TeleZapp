@@ -431,20 +431,18 @@ OPCOES = (
           "Enter quebra a linha, como no Telegram Web e no Gmail. A tecla "
           "de enviar também pode ser mudada em Atalhos, na função \"Enviar "
           "a mensagem digitada\"."),
-    Opcao("mensagens_por_conversa", "Mensagens carregadas por conversa",
-          "Mensagens", 1200,
-          "Quantas mensagens, no máximo, o TeleZapp mantém na lista ao abrir "
-          "uma conversa. Valores menores abrem a conversa mais depressa; as "
-          "mensagens mais antigas continuam guardadas, mas não aparecem na "
-          "lista. Se houver mais mensagens não lidas que este número, o "
-          "marcador de não lidas pode ficar de fora. De 50 a 5000.",
-          numero=(50, 5000)),
     Opcao("ocultar_telefone_sem_nome",
           "Ocultar o telefone de remetentes sem nome", "Mensagens", False,
           "Quando o TeleZapp não acha o nome de quem enviou, a mensagem começa "
           "direto pelo conteúdo, sem o número de telefone, na lista de "
           "mensagens, na fala e na lista de conversas. O telefone continua "
           "nos detalhes e nas conversas salvas.",),
+    Opcao("mostrar_avisos_de_membros",
+          "Mostrar os avisos de entrada e saída de membros", "Mensagens", True,
+          "Nos grupos do Telegram, mostra na lista de mensagens quem entrou, "
+          "saiu, foi adicionado ou removido. Esses avisos não tocam som nem são "
+          "falados ao chegar. Desmarcada, ficam escondidos, mas o Telegram "
+          "ainda pode contá-los como não lidas ao abrir o programa."),
     Opcao("falar_descricoes", "Falar a descrição de cada opção",
           "Interface", True,
           "Na janela de configurações, o TeleZapp fala a explicação de cada "
