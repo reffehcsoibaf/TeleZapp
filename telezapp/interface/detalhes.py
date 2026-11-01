@@ -14,7 +14,6 @@ import wx
 
 from telezapp.nucleo import detalhes as det
 from telezapp.nucleo import modelos as m
-from telezapp.armazenamento.banco import POR_VEZ_MAXIMO, POR_VEZ_MINIMO
 from telezapp.nucleo import silenciados
 
 log = logging.getLogger("telezapp.detalhes")
@@ -245,6 +244,23 @@ def _plural(n, um, varios):
     return "%d %s" % (n, um if n == 1 else varios)
 
 
+def _onde_buscar_midias(conv):
+    """O trecho do aviso que diz de onde vem o que falta."""
+    if conv.servico == "whatsapp" and conv.tipo != "canal":
+        return ("O TeleZapp busca nos servidores do WhatsApp e, o que não "
+                "estiver mais lá, também no celular. Para isso, deixe o "
+                "WhatsApp aberto e online no celular. Algumas podem não "
+                "estar mais disponíveis em nenhum dos dois; no fim você "
+                "saberá quantas foram.")
+    return ("Algumas podem não estar mais disponíveis para download nos "
+            "servidores %s; no fim você saberá quantas foram."
+            % _servidor(conv))
+
+
+def _servidor(conv):
+    return "do Telegram" if conv.servico == "telegram" else "do WhatsApp"
+
+
 def resumo_do_lote(lote, servidor="do WhatsApp"):
     """O que dizer no fim de baixar as midias que faltam."""
     partes = []
@@ -259,6 +275,19 @@ def resumo_do_lote(lote, servidor="do WhatsApp"):
                       % (_plural(lote.indisponiveis, "mídia", "mídias"),
                          "está" if um else "estão",
                          "disponível" if um else "disponíveis", servidor))
+    fora = getattr(lote, "fora_do_celular", 0)
+    if fora:
+        partes.append("%s não %s mais nem no servidor nem no celular." % (
+            _plural(fora, "mídia", "mídias"),
+            "está" if fora == 1 else "estão"))
+    sem_resposta = getattr(lote, "sem_resposta", 0)
+    if sem_resposta:
+        partes.append("%s %s, porque o celular parou de responder. Elas podem "
+                      "voltar: deixe o WhatsApp aberto no celular e use este "
+                      "botão de novo." % (
+                          _plural(sem_resposta, "mídia", "mídias"),
+                          "ficou de fora" if sem_resposta == 1
+                          else "ficaram de fora"))
     if lote.canceladas:
         partes.append("%s foi cancelada." % _plural(
             lote.canceladas, "mídia", "mídias")
@@ -522,8 +551,6 @@ class ControleDetalhes:
                 botoes.append(("&Deixar de seguir", self.deixar_de_seguir))
         botoes.append(("Mensagens fa&voritas", self.favoritas))
         botoes.append(("Mensagens fi&xadas", self.fixadas))
-        botoes.append(("Mensagens por ve&z: %d..." % self.jan._mensagens_por_vez(
-            self.conv.chave), self.mensagens_por_vez))
         if self.conv.tipo == "grupo":
             botoes.append(("Participantes si&lenciados", self.silenciados))
         botoes.append(("&Limpar a conversa...", self.limpar))
@@ -537,28 +564,6 @@ class ControleDetalhes:
                          self._botoes())
         threading.Thread(target=self._carregar, daemon=True,
                          name="detalhes").start()
-
-    def mensagens_por_vez(self):
-        """Quantas mensagens a lista desta conversa mostra de cada vez."""
-        dlg = wx.TextEntryDialog(
-            self.dlg, "Quantas mensagens mostrar de cada vez nesta conversa, "
-            "de %d a %d. Para ver as anteriores, aperte Home na primeira da "
-            "lista." % (POR_VEZ_MINIMO, POR_VEZ_MAXIMO), "Mensagens por vez",
-            str(self.jan._mensagens_por_vez(self.conv.chave)))
-        try:
-            if dlg.ShowModal() != wx.ID_OK:
-                return
-            valor = dlg.GetValue().strip()
-        finally:
-            dlg.Destroy()
-        if not valor.isdigit() or \
-                not POR_VEZ_MINIMO <= int(valor) <= POR_VEZ_MAXIMO:
-            wx.MessageBox("Escreva um número de %d a %d." % (
-                POR_VEZ_MINIMO, POR_VEZ_MAXIMO), "Mensagens por vez",
-                wx.OK | wx.ICON_WARNING, self.dlg)
-            return
-        self.jan._definir_mensagens_por_vez(self.conv, int(valor))
-        self._atualizar()
 
     def limpar(self):
         """Abre a limpeza de mídias e mensagens so desta conversa; se algo
@@ -635,14 +640,11 @@ class ControleDetalhes:
             wx.MessageBox(texto, "Baixar as mídias", wx.OK |
                           wx.ICON_INFORMATION, self.dlg)
             return
-        servidor = ("do Telegram" if conv.servico == "telegram"
-                    else "do WhatsApp")
         aviso = "\n\n".join((
             "O TeleZapp vai procurar as %d mídias desta conversa que ainda "
             "não estão neste computador e baixá-las, da mais nova para a "
             "mais antiga." % len(faltam),
-            "Algumas podem não estar mais disponíveis para download nos "
-            "servidores %s; no fim você saberá quantas foram." % servidor,
+            _onde_buscar_midias(conv),
             "Os arquivos ocupam espaço no disco e você pode cancelar a "
             "qualquer momento. Continuar?"))
         if wx.MessageBox(aviso, "Baixar as mídias", wx.YES_NO |
@@ -665,7 +667,7 @@ class ControleDetalhes:
         def acabou(resultado):
             barra.fechar()
             self._lote = None
-            texto = resumo_do_lote(resultado, servidor)
+            texto = resumo_do_lote(resultado, _servidor(conv))
             jan.fala.falar(texto, interromper=True)
             if self.dlg is not None:
                 wx.MessageBox(texto, "Baixar as mídias", wx.OK |

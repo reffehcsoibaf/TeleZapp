@@ -41,7 +41,7 @@ def test_paginas_trazem_a_versao_e_o_rodape(tmp_path):
 def test_guia_em_assuntos_com_versao_e_sem_marcas():
     assuntos = paginas.ler_assuntos()
     titulos = [t for t, _ in assuntos]
-    for esperado in ("Primeiros passos", "Atalhos", "Conta do WhatsApp",
+    for esperado in ("Primeiros passos", "Mudar os atalhos", "Conta do WhatsApp",
                      "Quando algo der errado", "Segurança e privacidade"):
         assert esperado in titulos
     assert len(titulos) == len(set(titulos))
@@ -52,21 +52,6 @@ def test_guia_em_assuntos_com_versao_e_sem_marcas():
     assert "Unigram" not in tudo and "WinZapp" not in tudo
     # NVDA so para dizer com o que foi testado
     assert tudo.count("NVDA") == 1 and "testados com o NVDA" in tudo
-
-
-def test_atalhos_do_guia_existem_no_menu():
-    texto = dict(paginas.ler_assuntos())["Atalhos"]
-    with open(os.path.join(RAIZ, "telezapp", "interface", "janela.py"),
-              encoding="utf-8") as f:
-        janela = f.read()
-    fora_do_menu = {"Ctrl+Espaço", "Shift+F10", "Ctrl+V", "Ctrl+vírgula",
-                    "Ctrl+ponto", "Ctrl+Shift+Seta", "Ctrl+Shift+Page"}
-    atalhos = re.findall(r"^((?:(?:Ctrl|Alt|Shift)\+)*(?:\w+)):?", texto, re.M)
-    conferidos = [a for a in atalhos if "+" in a or re.fullmatch(r"F\d+", a)]
-    assert len(conferidos) > 30
-    for atalho in conferidos:
-        if atalho not in fora_do_menu:
-            assert atalho in janela, atalho
 
 
 def test_opcoes_e_busca_sem_acento():

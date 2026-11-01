@@ -148,6 +148,21 @@ def test_historico_junta_as_novidades_desde_a_versao_em_uso():
     assert at.novidades_do_corpo("", "2026.1.1.0").startswith("(sem")
 
 
+def test_notas_trazem_os_hashes_que_a_pagina_confere(tmp_path):
+    pub = _publicar()
+    lista = tmp_path / "lista.txt"
+    lista.write_text("%s *TeleZapp.exe\n%s *_internal/a.dll\n"
+                     "%s *instalador/TeleZapp.exe\n" % ("a" * 64, "b" * 64,
+                                                        "c" * 64))
+    assert pub.hashes_da_conferencia(str(lista)) == ("c" * 64, "a" * 64)
+    notas = pub.montar_notas("2026.1.1.0", "d" * 64, "TeleZapp.zip",
+                             *pub.hashes_da_conferencia(str(lista)))
+    assert "SHA-256 do zip: `%s`" % ("d" * 64) in notas
+    assert "SHA-256 do instalador: `%s`" % ("c" * 64) in notas
+    assert "pasta): `%s`" % ("a" * 64) in notas
+    assert "b" * 64 not in notas
+
+
 def test_notas_do_publicar_voltam_inteiras_pelo_novidades_do_corpo():
     pub = _publicar()
     versao = pub.versao_atual()
@@ -172,15 +187,15 @@ def test_texto_da_janela_de_atualizacao():
 
 
 def test_aviso_ao_abrir_repete_ate_atualizar_ou_marcar_nao_avisar():
-    nova = at.Lancamento("2026.11.1.0", "", "p", False)
+    nova = at.Lancamento("2099.11.1.0", "", "p", False)
     assert at.deve_avisar_ao_abrir(nova, "")             # nunca marcou
     assert at.deve_avisar_ao_abrir(nova, None)
     assert at.deve_avisar_ao_abrir(nova, "")             # abriu de novo: avisa
     # marcou "nao avisar mais nesta versao": nao avisa dessa
-    assert not at.deve_avisar_ao_abrir(nova, "2026.11.1.0")
+    assert not at.deve_avisar_ao_abrir(nova, "2099.11.1.0")
     # saiu outra versao: avisa de novo
-    mais_nova = at.Lancamento("2026.11.2.0", "", "p", False)
-    assert at.deve_avisar_ao_abrir(mais_nova, "2026.11.1.0")
+    mais_nova = at.Lancamento("2099.11.2.0", "", "p", False)
+    assert at.deve_avisar_ao_abrir(mais_nova, "2099.11.1.0")
     # nada novo (ja atualizado, ou a consulta nao trouxe versao): nao avisa
     velha = at.Lancamento("2020.1.1.0", "", "p", False)
     assert not at.deve_avisar_ao_abrir(velha, "")

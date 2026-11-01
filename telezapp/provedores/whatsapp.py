@@ -14,6 +14,7 @@
 O registro nunca grava texto de mensagens, telefones completos ou codigos.
 """
 import contextlib
+import ctypes
 import functools
 import hashlib
 import json
@@ -40,7 +41,8 @@ from telezapp.nucleo import localizacao
 from telezapp.nucleo import mencoes as nucleo_mencoes
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import previa_links
-from telezapp.provedores.base import (DownloadCancelado, ErroBloqueio,
+from telezapp.provedores.base import (CelularSemResposta, DownloadCancelado,
+                                       ErroBloqueio, MidiaForaDoCelular,
                                       ErroMidia, ErroPerfil, Provedor)
 
 log = logging.getLogger("telezapp.whatsapp")
@@ -74,6 +76,12 @@ SO_CONTROLE = {"senderKeyDistributionMessage", "messageContextInfo",
 # Tipos de recibo do neonize (Receipt.Type)
 RECIBO_ENTREGUE, RECIBO_LIDO, RECIBO_LIDO_POR_MIM, RECIBO_OUVIDO = 1, 4, 5, 6
 RECIBO_OUVIDO_POR_MIM = 7     # toquei a voz ou audio no celular
+RECIBO_REENVIO = 3            # o aparelho nao decifrou e pede de novo
+TEXTO_SESSAO_COM_DEFEITO = (
+    "O celular não conseguiu ler o pedido, porque a conexão segura entre ele e "
+    "o TeleZapp está com defeito. No celular, em Aparelhos conectados, "
+    "desconecte o TeleZapp. Depois, conecte esta conta de novo em Ferramentas, "
+    "Gerenciar contas.")
 MAX_GUARDADAS = 2000
 # Sem o aviso de fim da sincronia, os avisos voltam depois deste tempo
 TEMPO_MAX_SINCRONIA = 45
@@ -90,6 +98,14 @@ TENTATIVAS_NOME_GRUPO = 4
 # HistorySync.HistorySyncType.ON_DEMAND e quantas mensagens pedir de cada vez
 SYNC_SOB_DEMANDA = 6
 QUANTAS_SOB_DEMANDA = 50
+
+TEXTO_CELULAR_MUDO = ("A mídia expirou no WhatsApp e o celular não respondeu. "
+                      "Confira se ele está ligado e com internet, abra o "
+                      "WhatsApp nele e tente de novo em alguns minutos.")
+# midia que expirou no servidor: quanto esperar o celular reenviar e, se ele nao
+# responder, por quanto tempo nao perguntar de novo (um lote nao fica parado)
+ESPERA_DO_CELULAR = 45
+PAUSA_SEM_CELULAR = 60
 # quanto esperar a resposta do celular antes de dizer que ele nao respondeu
 ESPERA_DO_HISTORICO = 45
 NAO_PEDI_AS_ANTIGAS = "Não consegui pedir as mensagens ao celular."
@@ -861,6 +877,11 @@ CAMPOS_MIDIA = ("imageMessage", "videoMessage", "audioMessage",
                 "documentMessage", "stickerMessage")
 
 
+def midia_expirou(erro):
+    """O servidor disse que nao tem mais a midia (e o celular pode reenviar)?"""
+    return re.search(r"status code (403|404|410)\b", str(erro)) is not None
+
+
 def ficha_de(interna):
     """O minimo que o WhatsApp exige para baixar a midia depois (chaves e
     caminho), sem miniatura nem resposta citada. None se nao ha midia."""
@@ -1092,6 +1113,8 @@ class ProvedorWhatsApp(Provedor):
         self._grupos_lidos = {}    # grupo -> quando os participantes foram lidos
         self._arquivada_vista = {}  # conversa -> arquivada, como o celular disse
         self._ajustes_vistos = {}   # (conversa, campo) -> fixada/silenciada
+        self._celular_mudo_ate = 0.0    # nao pedir midia ao celular ate entao
+        self._midia_avisada_em = 0.0    # ultimo aviso de pedido ao celular
         self._recuperando = set()   # colecoes do estado em recuperacao
         self._busca_ativa = False   # laco da busca periodica do estado
         self._em_nova_tentativa = set()   # colecoes que o laco de novas tentativas cuida
@@ -1100,6 +1123,7 @@ class ProvedorWhatsApp(Provedor):
         self._progresso_historico = 0   # 0 = nada em andamento
         self._pedidos_de_historico = 0  # pedidos de mensagens que faltam
         self._relogios_de_historico = []  # um por pedido sem resposta
+        self._celular_pediu_reenvio_em = 0.0  # nao decifrou um pedido meu
         self._varreduras = {}   # conversa -> andamento da busca para tras
         self._ancoras_da_sincronia = {}   # conversa -> mais antiga entregue
         self._auto_fila = []    # buscas sozinhas esperando a vez
@@ -2556,6 +2580,9 @@ class ProvedorWhatsApp(Provedor):
         try:
             if evento.FromFullSync:
                 return      # exclusao antiga, de antes: nao apaga daqui
+            if m.MANTER["do_celular"]:
+                log.info("mensagem apagada no celular: mantida aqui")
+                return
             cid = self._id_da_conversa(evento.ChatJID)
             log.info("mensagem apagada no celular")
             self.barramento.publicar(ev.MensagemApagadaNoCelular(
@@ -2675,6 +2702,9 @@ class ProvedorWhatsApp(Provedor):
         try:
             if evento.FromFullSync:
                 return      # exclusao antiga, de antes: nao apaga daqui
+            if m.MANTER["do_celular"]:
+                log.info("conversa apagada no celular: mantida aqui")
+                return
             cid = self._id_da_conversa(evento.JID)
             with self._trava:
                 self._conversas.pop(cid, None)
@@ -3204,15 +3234,21 @@ class ProvedorWhatsApp(Provedor):
                          extras["mencoes"], extras["acoes"],
                          extras["original"])
 
+    def meus_ids(self):
+        """Telefone e LID desta conta; vazio sem conexao."""
+        if self.cliente is None:
+            return ()
+        try:
+            eu = self.cliente.get_me()
+            return tuple({eu.JID.User, eu.LID.User} - {""})
+        except Exception:
+            return ()
+
     def _cita_voce(self, msg):
         """A mensagem menciona (@) esta conta, pelo telefone ou pelo LID?"""
         mencoes = m.extras_de(msg)["mencoes"]
-        if not mencoes or self.cliente is None:
-            return False
-        try:
-            eu = self.cliente.get_me()
-            meus = {eu.JID.User, eu.LID.User} - {""}
-        except Exception:
+        meus = self.meus_ids() if mencoes else ()
+        if not meus:
             return False
         return any(jid_de_texto(men.get("jid") or "")[0] in meus
                    for men in mencoes)
@@ -3871,9 +3907,9 @@ class ProvedorWhatsApp(Provedor):
             alvo = p.key.ID
             if p.type == p.REVOKE:
                 def apagar(x):
-                    if m.MANTER["apagadas"] and not x.minha:
-                        # opcao "manter as apagadas": o conteudo fica, so
-                        # marcado como apagado pelo autor
+                    if m.MANTER["do_celular" if x.minha else "apagadas"]:
+                        # opcoes de manter: o conteudo fica, so marcado como
+                        # apagado pelo autor
                         m.atualizar_extras(x, apagada_pelo_autor=True)
                         return
                     x.texto = ""
@@ -4225,11 +4261,14 @@ class ProvedorWhatsApp(Provedor):
         progresso(0)
         try:
             mensagem = Message.FromString(dados)
-            if self._tem_transferencias():
-                self._baixar_por_arquivo(mensagem, parcial, msg, progresso,
-                                         cancelado)
-            else:
-                self.cliente.download_any(mensagem, parcial)
+            try:
+                self._baixar_para(mensagem, parcial, msg, progresso, cancelado)
+            except Exception as e:
+                if cancelado() or not midia_expirou(e):
+                    raise
+                log.info("mídia expirou no servidor (%s)", msg.tipo)
+                self._pedir_midia_ao_celular(msg, mensagem, cancelado)
+                self._baixar_para(mensagem, parcial, msg, progresso, cancelado)
             if cancelado():
                 raise DownloadCancelado()
             os.replace(parcial, caminho)
@@ -4246,6 +4285,88 @@ class ProvedorWhatsApp(Provedor):
                 os.remove(parcial)
         progresso(100)
         return caminho
+
+    def _baixar_para(self, mensagem, parcial, msg, progresso, cancelado):
+        if self._tem_transferencias():
+            self._baixar_por_arquivo(mensagem, parcial, msg, progresso,
+                                     cancelado)
+        else:
+            self.cliente.download_any(mensagem, parcial)
+
+    def _funcoes_de_pedir_midia(self):
+        """As funcoes da DLL que pedem a midia ao celular, com os tipos que o
+        ctypes precisa; None numa DLL sem elas."""
+        dll = self.cliente._NewClient__client
+        try:
+            inicio, espera, cancela = (dll.MediaRetryStart, dll.MediaRetryWait,
+                                       dll.MediaRetryCancel)
+        except AttributeError:
+            return None
+        texto = ctypes.c_char_p
+        inicio.argtypes = [texto, texto, texto, texto, ctypes.c_int, texto,
+                           ctypes.c_int]
+        inicio.restype = texto
+        espera.argtypes = [texto, texto, ctypes.c_int]
+        espera.restype = texto
+        cancela.argtypes = [texto, texto]
+        cancela.restype = None
+        return inicio, espera, cancela
+
+    def _pedir_midia_ao_celular(self, msg, mensagem, cancelado):
+        """A midia expirou no servidor: pede ao celular que a envie de novo e
+        poe em `mensagem` (e na ficha guardada) o caminho novo."""
+        cid = msg.conversa_id
+        sub = next((getattr(mensagem, c) for c in CAMPOS_MIDIA
+                    if mensagem.HasField(c)), None)
+        funcoes = self._funcoes_de_pedir_midia()
+        servidor = jid_de_texto(cid)[1]
+        if sub is None or not sub.mediaKey or funcoes is None or                 servidor not in ("s.whatsapp.net", "lid", "g.us"):
+            raise ErroMidia("A mídia expirou no WhatsApp.")
+        if time.time() < self._celular_mudo_ate:
+            raise CelularSemResposta(TEXTO_CELULAR_MUDO)
+        agora = time.time()
+        if agora - self._midia_avisada_em >= 60:
+            self._midia_avisada_em = agora
+            self._avisar("A mídia expirou no WhatsApp. Pedindo ao celular, "
+                         "pode levar alguns segundos.")
+        if msg.minha:
+            eu = self.cliente.get_me().JID
+            remetente = "%s@%s" % (eu.User, eu.Server)
+        else:
+            remetente = _sem_aparelho(msg.remetente or cid)
+        inicio, espera, cancela = funcoes
+        uuid_, idm = self.cliente.uuid, msg.id.encode()
+        erro = inicio(uuid_, cid.encode(), remetente.encode(), idm,
+                      1 if msg.minha else 0, sub.mediaKey, len(sub.mediaKey))
+        if erro:
+            log.warning("pedido de mídia ao celular falhou: %s",
+                        erro.decode(errors="replace")[:200])
+            raise ErroMidia("Não consegui pedir a mídia ao celular.")
+        limite = time.monotonic() + ESPERA_DO_CELULAR
+        while True:
+            if cancelado():
+                cancela(uuid_, idm)
+                raise DownloadCancelado()
+            resposta = (espera(uuid_, idm, 500) or b"").decode(errors="replace")
+            if resposta:
+                break
+            if time.monotonic() >= limite:
+                cancela(uuid_, idm)
+                self._celular_mudo_ate = time.time() + PAUSA_SEM_CELULAR
+                log.info("o celular não respondeu ao pedido de mídia")
+                raise CelularSemResposta(TEXTO_CELULAR_MUDO)
+        if resposta == "sem_midia":
+            log.info("o celular não tem mais a mídia")
+            raise MidiaForaDoCelular("A mídia expirou no WhatsApp e o celular "
+                                     "também não a tem mais.")
+        if not resposta.startswith("ok:"):
+            log.warning("pedido de mídia ao celular: %s", resposta[:200])
+            raise ErroMidia("O celular não conseguiu enviar a mídia de novo.")
+        log.info("o celular enviou a mídia de novo")
+        sub.directPath = resposta[3:]
+        sub.ClearField("URL")          # senao o download insiste no endereco velho
+        self.banco.salvar_fichas([(self.conta.id, cid, msg.id,
+                                   mensagem.SerializeToString())])
 
     def _tem_transferencias(self):
         """A DLL baixa e envia por arquivo, com progresso e cancelamento?"""
@@ -5144,11 +5265,22 @@ class ProvedorWhatsApp(Provedor):
         except Exception:
             log.exception("erro ao tratar o fim da chamada")
 
+    def _anotar_reenvio(self, origem):
+        """Pedido de reenvio do meu proprio numero: e um aparelho meu que nao
+        decifrou o que mandei so para ele (como o pedido de historico)."""
+        eu = self.cliente.get_me()
+        if origem.IsFromMe and origem.Chat.User in {eu.JID.User, eu.LID.User}:
+            log.warning("o celular não decifrou um pedido deste aparelho")
+            self._celular_pediu_reenvio_em = time.time()
+
     def _ao_recibo(self, cliente, e):
         try:
             origem = e.MessageSource
             cid = self._id_da_conversa(origem.Chat)
             tipo = int(e.Type)
+            if tipo == RECIBO_REENVIO:
+                self._anotar_reenvio(origem)
+                return
             # com a confirmacao de leitura ligada, o celular avisa os outros
             # aparelhos com um recibo de leitura comum cujo remetente sou eu
             # (nao com o tipo "lida por mim"): ler no celular vem assim
@@ -5518,10 +5650,17 @@ class ProvedorWhatsApp(Provedor):
                     varredura["rodadas"] if varredura else 0)
         if varredura and varredura.get("auto"):
             return                       # busca sozinha: fica so no log
+        sessao_com_defeito = time.time() - self._celular_pediu_reenvio_em <= \
+            ESPERA_DO_HISTORICO + 5
         if varredura and varredura.get("antigas"):
             self._fim_das_antigas(
-                conversa_id, texto="O celular não respondeu. Abra o WhatsApp "
-                "no celular, com internet, e aperte Home de novo.")
+                conversa_id, texto=TEXTO_SESSAO_COM_DEFEITO
+                if sessao_com_defeito else "O celular não respondeu. Abra o "
+                "WhatsApp no celular, com internet, e aperte Home de novo.")
+            return
+        if sessao_com_defeito:
+            self.barramento.publicar(ev.Aviso(self.conta.id,
+                                              TEXTO_SESSAO_COM_DEFEITO))
             return
         if varredura and varredura["rodadas"]:
             texto = ("O celular parou de responder à busca de mensagens que "

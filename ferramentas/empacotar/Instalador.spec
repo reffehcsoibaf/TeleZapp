@@ -17,6 +17,7 @@ a = Analysis(
                    "telezapp.interface.backup", "telezapp.interface.guia",
                    "telezapp.nucleo.instalacao",
                    "telezapp.nucleo.atualizador", "telezapp.nucleo.paginas",
+                   "telezapp.nucleo.copia_oficial",
                    "telezapp.nucleo.backup", "pyzipper"],
     hookspath=[], hooksconfig={}, runtime_hooks=[],
     excludes=["telethon", "neonize", "cv2", "numpy", "soundfile", "sounddevice",

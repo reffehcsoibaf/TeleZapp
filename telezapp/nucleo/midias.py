@@ -14,7 +14,8 @@ import time
 
 from telezapp.midia import armazem
 from telezapp.nucleo import eventos as ev
-from telezapp.provedores.base import DownloadCancelado, ErroMidia
+from telezapp.provedores.base import (CelularSemResposta, DownloadCancelado,
+                                       ErroMidia)
 
 log = logging.getLogger("telezapp.midias")
 
@@ -22,6 +23,15 @@ PRONTA, INICIADO, EM_ANDAMENTO = "pronta", "iniciado", "em andamento"
 LIMPA = "limpa"
 TEXTO_LIMPA = ("Esta mídia foi limpada e só volta com um novo pareamento "
                "da conta.")
+
+
+# Num lote, o celular que parou de responder faz esperar, nao falhar: de quanto
+# em quanto tempo tenta de novo e depois de quanto tempo desiste (segundos)
+ESPERA_PELO_CELULAR = 20
+DESISTIR_DO_CELULAR = 1800
+TEXTO_CELULAR_PAROU = ("O celular parou de responder. Desbloqueie o celular e "
+                       "deixe o WhatsApp aberto: os downloads continuam "
+                       "sozinhos quando ele voltar.")
 
 
 class _Andamento:
@@ -40,7 +50,10 @@ class Lote:
         self.pendentes = set(chaves)
         self.baixadas = 0
         self.indisponiveis = 0
+        self.fora_do_celular = 0
+        self.sem_resposta = 0
         self.canceladas = 0
+        self.celular_parado_desde = 0.0
         self.cancelado = False
         self.ao_progresso = ao_progresso
         self.ao_fim = ao_fim
@@ -170,6 +183,10 @@ class GerenteMidias:
                 lote.baixadas += 1
             elif e.cancelada:
                 lote.canceladas += 1
+            elif e.motivo == "sem_resposta":
+                lote.sem_resposta += 1
+            elif e.motivo == "fora_do_celular":
+                lote.fora_do_celular += 1
             else:
                 lote.indisponiveis += 1
             terminou = not lote.pendentes
@@ -221,9 +238,8 @@ class GerenteMidias:
                 raise ErroMidia("A conta não está ativa.")
             if a.cancelar.is_set():
                 raise DownloadCancelado()
-            resultado["caminho"] = provedor.baixar_arquivo(
-                msg, armazem.caminho_base(msg), progresso,
-                a.cancelar.is_set)
+            resultado["caminho"] = self._baixar_esperando_o_celular(
+                provedor, msg, progresso, a)
             self.banco.registrar_midia(
                 msg.conta_id, msg.conversa_id, msg.id, msg.tipo,
                 resultado["caminho"],
@@ -234,6 +250,7 @@ class GerenteMidias:
             resultado["cancelada"] = True
         except ErroMidia as e:
             resultado["erro"] = str(e)
+            resultado["motivo"] = e.motivo
         except Exception:
             log.exception("erro ao baixar mídia")
             resultado["erro"] = ("Não foi possível baixar a mídia. Os "
@@ -244,6 +261,57 @@ class GerenteMidias:
         self.barramento.publicar(ev.MidiaBaixada(
             msg.conta_id, msg.conversa_id, msg.id,
             automatica=a.automatica, **resultado))
+
+    def _baixar_esperando_o_celular(self, provedor, msg, progresso, a):
+        """Baixa. Num lote, se a midia depende do celular e ele nao responde,
+        espera e tenta de novo, em vez de dar a midia por perdida; fora de um
+        lote, a pessoa fica sabendo na hora."""
+        esperou = False
+        while True:
+            try:
+                caminho = provedor.baixar_arquivo(
+                    msg, armazem.caminho_base(msg), progresso,
+                    a.cancelar.is_set)
+            except CelularSemResposta:
+                self._esperar_o_celular(msg, a)
+                esperou = True
+                continue
+            if esperou:
+                self._celular_voltou(msg)
+            return caminho
+
+    def _lote_da(self, msg):
+        return next((l for l in self._lotes if msg.chave in l.pendentes), None)
+
+    def _esperar_o_celular(self, msg, a):
+        agora = time.time()
+        with self._trava:
+            lote = self._lote_da(msg)
+            if lote is None:
+                primeira = False
+            else:
+                primeira = not lote.celular_parado_desde
+                if primeira:
+                    lote.celular_parado_desde = agora
+        if lote is None or \
+                agora - lote.celular_parado_desde > DESISTIR_DO_CELULAR:
+            raise
+        if primeira:
+            log.info("lote de mídias esperando o celular")
+            self.barramento.publicar(ev.Aviso(msg.conta_id,
+                                              TEXTO_CELULAR_PAROU))
+        if a.cancelar.wait(ESPERA_PELO_CELULAR) or self._parar.is_set():
+            raise DownloadCancelado()
+
+    def _celular_voltou(self, msg):
+        with self._trava:
+            lote = self._lote_da(msg)
+            if lote is None or not lote.celular_parado_desde:
+                return
+            lote.celular_parado_desde = 0.0
+        log.info("o celular voltou a responder: lote de mídias continua")
+        self.barramento.publicar(ev.Aviso(
+            msg.conta_id, "O celular voltou a responder."))
 
     # ------------------------------------------------------ baixar sozinho
     def _ao_evento(self, e):

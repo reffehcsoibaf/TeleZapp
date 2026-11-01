@@ -120,6 +120,11 @@ def _montar():
                  "TELEZAPP_VERSAO": arquivo_de_versao(
                      TRABALHO, "Instalador do TeleZapp", "TeleZapp.exe")})
     exe = os.path.join(SAIDA, "TeleZapp.exe")
+    from telezapp.nucleo import copia_oficial
+    with open(os.path.join(SAIDA, copia_oficial.ARQUIVO_DA_LISTA), "w",
+              encoding="utf-8") as f:
+        f.write(copia_oficial.gerar_lista(os.path.join(programa, "TeleZapp"),
+                                          exe))
     h = hashlib.sha256(open(exe, "rb").read()).hexdigest()
     print("Pronto em %s:\n  TeleZapp.zip  %.0f MB\n  TeleZapp.exe  %.0f MB "
           "(SHA-256 %s)" % (SAIDA, os.path.getsize(zip_) / 1048576,

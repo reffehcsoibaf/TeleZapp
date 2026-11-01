@@ -183,7 +183,16 @@ class Opcao:
     pasta: bool = False      # o texto e uma pasta: ganha o botao de escolher
 
 
+MENSAGENS_POR_VEZ = (50, 5000)
+
 OPCOES = (
+    Opcao("mensagens_por_vez", "Quantas mensagens buscar por vez", "Mensagens",
+          100,
+          "Quantas mensagens a lista mostra ao abrir uma conversa e quantas "
+          "traz a mais a cada Home na primeira da lista. Vale para todas as "
+          "conversas. Conversas com mais não lidas que isso mostram todas "
+          "elas. No WhatsApp, o que vem do celular chega em até 50 de cada "
+          "vez.", numero=MENSAGENS_POR_VEZ),
     Opcao("digitar_na_lista", "Ao digitar uma letra numa lista", "Interface",
           "pular",
           "O que acontece quando você digita um caractere com o foco na lista "
@@ -196,14 +205,6 @@ OPCOES = (
           "aberta, a lista de mensagens não tem campo e continua pulando.",
           (("pular", "Pular para o item que começa com a letra"),
            ("campo", "Ir direto para o campo de texto"))),
-    Opcao("prioridade_abertura", "Dar prioridade ao TeleZapp ao abrir",
-          "Interface", True,
-          "Ao abrir, o TeleZapp pede ao Windows prioridade acima do normal "
-          "(e sai do modo de economia de energia) por cerca de meio minuto, "
-          "para não esperar atrás dos outros programas que abrem junto, "
-          "como ao ligar o computador. Se o TeleZapp demora a responder "
-          "quando é aberto depois de outros aplicativos, deixe marcada. "
-          "Vale na próxima abertura."),
     Opcao("status_no_titulo",
           "Mostrar status de presença no título da janela",
           "Interface", True,
@@ -288,6 +289,16 @@ OPCOES = (
           "apagada e a mídia baixada é descartada. Só vale para o que "
           "chegar depois de marcar; o que já foi apagado não volta. As "
           "mensagens que você mesmo apaga continuam sendo apagadas."),
+    Opcao("manter_apagadas_no_celular",
+          "Manter no computador o que eu apagar no WhatsApp do celular",
+          "Privacidade", False,
+          "Marcada, as mensagens e conversas que você apagar no WhatsApp do "
+          "celular, ou em outro aparelho, continuam neste computador, com as "
+          "mídias já baixadas. Uma mensagem sua apagada para todos fica "
+          "marcada como apagada pelo autor. Desmarcada, o que você apaga lá "
+          "também é apagado aqui. O que você apaga pelo próprio TeleZapp "
+          "continua sendo apagado neste computador. Só vale para o que for "
+          "apagado depois de marcar; o que já saiu não volta."),
     Opcao("verificar_atualizacoes",
           "Avisar quando houver versão nova do TeleZapp", "Atualizações",
           True,
@@ -418,6 +429,14 @@ OPCOES = (
           "Windows. Com \"Continuar em segundo plano\" ligado, ele abre "
           "minimizado na barra de tarefas, sem tirar o foco do que você "
           "está fazendo."),
+    Opcao("prioridade_abertura", "Dar prioridade ao TeleZapp ao abrir",
+          "Sistema", True,
+          "Ao abrir, o TeleZapp pede ao Windows prioridade acima do normal "
+          "(e sai do modo de economia de energia) por cerca de meio minuto, "
+          "para não esperar atrás dos outros programas que abrem junto, "
+          "como ao ligar o computador. Se o TeleZapp demora a responder "
+          "quando é aberto depois de outros aplicativos, deixe marcada. "
+          "Vale na próxima abertura."),
     Opcao("barra_abre_comandos",
           "Barra na caixa de digitar abre os comandos do robô",
           "Mensagens", True,

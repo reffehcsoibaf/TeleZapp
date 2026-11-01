@@ -12,6 +12,7 @@ from telezapp import config
 from telezapp.armazenamento.banco import Banco
 from telezapp.midia import armazem
 from telezapp.nucleo import eventos as ev
+from telezapp.nucleo import midias
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo.midias import (EM_ANDAMENTO, INICIADO, PRONTA,
                                     GerenteMidias)
@@ -240,6 +241,72 @@ def test_lote_conta_as_que_nao_estao_mais_disponiveis(g):
     esperar_lote(lote)
     threading.Event().wait(0.1)
     assert (lote.baixadas, lote.indisponiveis) == (0, 3) and fins == [lote]
+
+
+class CelularQueVolta(Falso):
+    """Nao responde ate `parado` ser limpo; `sem_midia` nao esta no celular."""
+    def __init__(self):
+        super().__init__()
+        self.parado = threading.Event()
+        self.parado.set()
+        self.sem_midia = set()
+
+    def baixar_arquivo(self, msg_, base_, progresso, cancelado):
+        if msg_.id in self.sem_midia:
+            raise base.MidiaForaDoCelular("não tem")
+        if self.parado.is_set():
+            self.chamadas.append(msg_.id)
+            raise base.CelularSemResposta("não respondeu")
+        return super().baixar_arquivo(msg_, base_, progresso, cancelado)
+
+
+def _avisos(g):
+    return [e.texto for e in list(g.fila.queue) if isinstance(e, ev.Aviso)]
+
+
+def test_lote_espera_o_celular_em_vez_de_dar_por_perdido(g, monkeypatch):
+    monkeypatch.setattr(midias, "ESPERA_PELO_CELULAR", 0.02)
+    cel = CelularQueVolta()
+    g.g.provedor_de = lambda c: cel
+    lote = g.g.baixar_lote([msg(str(i)) for i in range(6)])
+    threading.Event().wait(0.3)
+    assert lote.feitas == 0 and len(cel.chamadas) > 6    # nada perdido
+    assert _avisos(g).count(midias.TEXTO_CELULAR_PAROU) == 1
+    cel.parado.clear()
+    esperar_lote(lote)
+    assert (lote.baixadas, lote.sem_resposta, lote.indisponiveis) == (6, 0, 0)
+    assert "O celular voltou a responder." in _avisos(g)
+
+
+def test_lote_esperando_o_celular_pode_ser_cancelado(g, monkeypatch):
+    monkeypatch.setattr(midias, "ESPERA_PELO_CELULAR", 5)
+    cel = CelularQueVolta()
+    g.g.provedor_de = lambda c: cel
+    lote = g.g.baixar_lote([msg("A"), msg("B")])
+    threading.Event().wait(0.1)
+    lote.cancelar()
+    esperar_lote(lote)
+    assert lote.canceladas == 2
+
+
+def test_lote_desiste_do_celular_e_separa_os_motivos(g, monkeypatch):
+    monkeypatch.setattr(midias, "ESPERA_PELO_CELULAR", 0.01)
+    monkeypatch.setattr(midias, "DESISTIR_DO_CELULAR", 0.05)
+    cel = CelularQueVolta()
+    cel.sem_midia = {"B"}
+    g.g.provedor_de = lambda c: cel
+    lote = g.g.baixar_lote([msg("A"), msg("B"), msg("C")])
+    esperar_lote(lote)
+    assert (lote.sem_resposta, lote.fora_do_celular, lote.indisponiveis) == \
+        (2, 1, 0)
+
+
+def test_fora_de_um_lote_o_celular_parado_avisa_na_hora(g):
+    cel = CelularQueVolta()
+    g.g.provedor_de = lambda c: cel
+    g.g.baixar(msg("A"))
+    e = fim(g.fila)
+    assert e.erro == "não respondeu" and e.motivo == "sem_resposta"
 
 
 def test_lote_vazio_termina_na_hora(g):

@@ -20,6 +20,13 @@ inclusive em mensagens e conversas. Use por sua conta e risco. Não é um
 produto oficial do WhatsApp nem do Telegram, e a licença (GPL 3) não dá
 garantia.
 
+Os canais oficiais são a [página do projeto](https://reffehcsoibaf.github.io/TeleZapp/),
+as [Releases](https://github.com/reffehcsoibaf/TeleZapp/releases) deste
+repositório e as atualizações feitas pelo próprio programa. Cópias obtidas
+fora deles não são de responsabilidade de Fábio Scheffer Moraes. A GPL permite
+modificar e redistribuir, mas quem faz isso responde pela própria versão, que
+deve dizer que foi modificada.
+
 ## Baixar
 
 As versões ficam em [Releases](https://github.com/reffehcsoibaf/TeleZapp/releases).

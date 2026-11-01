@@ -19,6 +19,17 @@ PEDIR_SENHA = "senha"
 
 class ErroMidia(Exception):
     """Falha esperada ao baixar uma midia; o texto e dito a pessoa."""
+    motivo = ""
+
+
+class CelularSemResposta(ErroMidia):
+    """A midia depende do celular, e ele nao esta respondendo agora."""
+    motivo = "sem_resposta"
+
+
+class MidiaForaDoCelular(ErroMidia):
+    """Nem o servidor nem o celular tem mais a midia."""
+    motivo = "fora_do_celular"
 
 
 class ErroPrivacidade(Exception):
@@ -181,6 +192,10 @@ class Provedor(ABC):
         pode nao ter recebido. Devolve "" se o pedido foi enviado (a resposta
         chega depois, com um ev.Aviso) ou o motivo de nao ter sido."""
         return "Este serviço não faz essa busca."
+
+    def meus_ids(self):
+        """Os usuarios desta conta nos enderecos das mencoes guardadas."""
+        return ()
 
     def arquivar_conversa(self, conversa_id, arquivar):
         """Arquiva (ou desarquiva) a conversa na conta do servico. Devolve

@@ -1679,6 +1679,28 @@ def test_mensagem_apagada_no_celular_vira_evento(amb):
     assert (e.conversa_id, e.mensagem_id) == ("123@g.us", "G7")
 
 
+def test_manter_o_que_foi_apagado_no_celular(amb, monkeypatch):
+    monkeypatch.setitem(m.MANTER, "do_celular", True)
+    cid = "5551@s.whatsapp.net"
+    amb.p._conversas[cid] = m.Conversa("w1", cid, "Ana", "whatsapp")
+    amb.p._ao_apagar_mensagem(None, N.MessageDeleteForMe(
+        ChatJID=jid("5551"), IsFromMe=False, MessageID="G7", Timestamp=TS,
+        FromFullSync=False))
+    amb.p._ao_apagar_conversa(None, types.SimpleNamespace(
+        JID=jid("5551"), Timestamp=TS, FromFullSync=False))
+    assert cid in amb.p._conversas
+    assert amb.fila.empty() or not any(
+        isinstance(e, (ev.MensagemApagadaNoCelular,
+                       ev.ConversaApagadaNoCelular))
+        for e in list(amb.fila.queue))
+    # desmarcada, a conversa sai
+    monkeypatch.setitem(m.MANTER, "do_celular", False)
+    amb.p._ao_apagar_conversa(None, types.SimpleNamespace(
+        JID=jid("5551"), Timestamp=TS, FromFullSync=False))
+    assert cid not in amb.p._conversas
+    assert esperar(amb.fila, ev.ConversaApagadaNoCelular).conversa_id == cid
+
+
 def test_arquivar_e_desarquivar_aqui_avisa_o_celular(amb):
     amb.f["Connected"](amb.c, N.Connected())
     assert amb.p.arquivar_conversa("5551@s.whatsapp.net", True)
@@ -3932,8 +3954,150 @@ def test_mais_antigas_sem_resposta_do_celular_avisa(amb, monkeypatch):
     assert cid not in amb.p._varreduras
 
 
+def test_mais_antigas_com_o_celular_sem_decifrar_explica_o_defeito(
+        amb, monkeypatch):
+    monkeypatch.setattr(wa, "ESPERA_DO_HISTORICO", 0.2)
+    amb.c.get_me = lambda: types.SimpleNamespace(
+        JID=types.SimpleNamespace(User="5500"),
+        LID=types.SimpleNamespace(User="77"))
+    cid, _ = _antigas_preparadas(amb, monkeypatch)
+    # reenvio pedido por outra conversa nao conta; o do meu numero, sim
+    alheio = types.SimpleNamespace(IsFromMe=True,
+                                   Chat=types.SimpleNamespace(User="5599"))
+    amb.p._anotar_reenvio(alheio)
+    assert amb.p._celular_pediu_reenvio_em == 0.0
+    meu = types.SimpleNamespace(IsFromMe=True,
+                                Chat=types.SimpleNamespace(User="77"))
+    amb.p._anotar_reenvio(meu)
+    fim = esperar(amb.fila, ev.MaisAntigas)
+    assert fim.novas == 0 and fim.texto == wa.TEXTO_SESSAO_COM_DEFEITO
+
+
 def test_mais_antigas_com_a_conta_desconectada_nao_pede(amb, monkeypatch):
     cid, pedidos = _preparar_varredura(amb, monkeypatch, ("L5",))
     amb.p._conectada = False
     assert "não está conectada" in amb.p.buscar_mais_antigas(cid, 100)
     assert pedidos == []
+
+
+class _CelularFalso:
+    """A DLL com o pedido de midia: responde o que o teste mandar."""
+
+    def __init__(self, respostas, expirada=True):
+        self.respostas = list(respostas)
+        self.pedidos, self.cancelados, self.baixados = [], [], []
+        self.expirada = expirada
+        self.tem = types.SimpleNamespace(
+            MediaRetryStart=lambda *a: self._inicio(*a),
+            MediaRetryWait=lambda *a: self._espera(*a),
+            MediaRetryCancel=lambda u, i: self.cancelados.append(i))
+        self.uuid = b"u1"
+
+    def _inicio(self, uuid, chat, remetente, idm, minha, chave, tamanho):
+        self.pedidos.append((uuid, chat, remetente, idm, minha, chave))
+        return b""
+
+    def _espera(self, uuid, idm, ms):
+        return self.respostas.pop(0) if self.respostas else b""
+
+    def tem_transferencias(self):
+        return False
+
+    def get_me(self):
+        return types.SimpleNamespace(
+            JID=types.SimpleNamespace(User="5500", Server="s.whatsapp.net"))
+
+    def download_any(self, mensagem, caminho):
+        self.baixados.append(mensagem.imageMessage)
+        if mensagem.imageMessage.URL and self.expirada:
+            raise RuntimeError("download failed with status code 410")
+        with open(caminho, "wb") as f:
+            f.write(b"foto")
+
+
+def _com_midia_expirada(tmp_path, cel, cid="5551@s.whatsapp.net", **extras):
+    banco = Banco(str(tmp_path / "s.db"))
+    avisos = []
+    b = ev.Barramento()
+    b.ouvir(lambda e: avisos.append(e) if isinstance(e, ev.Aviso) else None)
+    p = wa.ProvedorWhatsApp(m.Conta("w1", "whatsapp"), b, banco,
+                            pasta_sessoes=str(tmp_path),
+                            fabrica_cliente=ClienteFalso)
+    cel._NewClient__client = cel.tem
+    p.cliente, p._conectada = cel, True
+    ficha = E.Message(imageMessage=E.ImageMessage(
+        URL="https://velho", directPath="/velho", mediaKey=b"chave",
+        mimetype="image/jpeg")).SerializeToString()
+    banco.salvar_fichas([("w1", cid, "M1", ficha)])
+    msg = m.Mensagem("w1", cid, "M1", tipo=m.FOTO, **extras)
+    return p, msg, banco, avisos
+
+
+def test_midia_expirada_e_pedida_ao_celular(tmp_path):
+    cel = _CelularFalso([b"", b"ok:/novo"])
+    p, msg, banco, avisos = _com_midia_expirada(tmp_path, cel)
+    caminho = p.baixar_arquivo(msg, str(tmp_path / "foto"), lambda v: None,
+                               lambda: False)
+    assert open(caminho, "rb").read() == b"foto"
+    assert cel.pedidos == [(b"u1", b"5551@s.whatsapp.net",
+                            b"5551@s.whatsapp.net", b"M1", 0, b"chave")]
+    assert len(avisos) == 1 and "Pedindo ao celular" in avisos[0].texto
+    # a ficha guarda o caminho novo, sem o endereco velho
+    guardada = E.Message.FromString(banco.ficha("w1", msg.conversa_id, "M1"))
+    assert guardada.imageMessage.directPath == "/novo"
+    assert not guardada.imageMessage.URL
+    assert guardada.imageMessage.mediaKey == b"chave"
+
+
+def test_pedido_em_grupo_diz_quem_enviou(tmp_path):
+    cel = _CelularFalso([b"ok:/novo"])
+    p, msg, _, _ = _com_midia_expirada(
+        tmp_path, cel, "9@g.us", remetente="5552:7@s.whatsapp.net")
+    p.baixar_arquivo(msg, str(tmp_path / "f"), lambda v: None, lambda: False)
+    assert cel.pedidos[0][1:3] == (b"9@g.us", b"5552@s.whatsapp.net")
+
+
+def test_midia_que_nao_expirou_nao_incomoda_o_celular(tmp_path):
+    cel = _CelularFalso([], expirada=False)
+    p, msg, _, _ = _com_midia_expirada(tmp_path, cel)
+    p.baixar_arquivo(msg, str(tmp_path / "f"), lambda v: None, lambda: False)
+    assert cel.pedidos == []
+    assert wa.midia_expirou("download failed with status code 404")
+    assert not wa.midia_expirou("download failed with status code 500")
+    assert not wa.midia_expirou("connection reset")
+
+
+def test_celular_sem_a_midia_ou_cancelado(tmp_path):
+    cel = _CelularFalso([b"sem_midia"])
+    p, msg, _, _ = _com_midia_expirada(tmp_path, cel)
+    with pytest.raises(wa.MidiaForaDoCelular, match="não a tem mais"):
+        p.baixar_arquivo(msg, str(tmp_path / "f"), lambda v: None,
+                         lambda: False)
+    assert p._celular_mudo_ate == 0.0       # ele respondeu
+    # cancelado durante a espera: sem esperar a resposta
+    cel = _CelularFalso([])
+    p.cliente = cel
+    cel._NewClient__client = cel.tem
+    vezes = []
+
+    def cancelado():
+        vezes.append(1)
+        return len(vezes) > 2
+    with pytest.raises(wa.DownloadCancelado):
+        p.baixar_arquivo(msg, str(tmp_path / "f"), lambda v: None, cancelado)
+    assert cel.cancelados == [b"M1"]
+
+
+def test_celular_que_nao_responde_pausa_os_pedidos(tmp_path, monkeypatch):
+    monkeypatch.setattr(wa, "ESPERA_DO_CELULAR", 0)
+    cel = _CelularFalso([])
+    p, msg, _, _ = _com_midia_expirada(tmp_path, cel)
+    with pytest.raises(wa.CelularSemResposta, match="não respondeu"):
+        p.baixar_arquivo(msg, str(tmp_path / "f"), lambda v: None,
+                         lambda: False)
+    assert cel.cancelados == [b"M1"] and p._celular_mudo_ate > time.time()
+    # o proximo do lote nem pergunta
+    with pytest.raises(wa.CelularSemResposta, match="não respondeu"):
+        p.baixar_arquivo(msg, str(tmp_path / "f"), lambda v: None,
+                         lambda: False)
+    assert len(cel.pedidos) == 1

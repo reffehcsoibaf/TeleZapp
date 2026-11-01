@@ -41,7 +41,11 @@ RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AVISO = (
     "> **Software experimental.** O TeleZapp está em desenvolvimento e pode "
     "ter erros, inclusive em mensagens e conversas. Use por sua conta e "
-    "risco. Não é um produto oficial do WhatsApp nem do Telegram.")
+    "risco. Não é um produto oficial do WhatsApp nem do Telegram. Os canais "
+    "oficiais são a página do projeto "
+    "(https://reffehcsoibaf.github.io/TeleZapp/), estas Releases e as "
+    "atualizações feitas pelo próprio programa; cópias obtidas fora deles não "
+    "são de responsabilidade de Fábio Scheffer Moraes.")
 
 
 def versao_atual():
@@ -65,7 +69,17 @@ def novidades(versao):
     return [html.unescape(re.sub(r"<[^>]+>", "", i)).strip() for i in itens]
 
 
-def montar_notas(versao, hash_zip, nome_zip):
+def hashes_da_conferencia(caminho):
+    """(instalador, programa) do arquivo que o empacotar.py gerou: a pagina do
+    projeto confere um arquivo escolhido pela pessoa com estes valores."""
+    achados = dict(reversed(l.strip().split(" *", 1)) for l in open(
+        caminho, encoding="utf-8") if " *" in l)
+    return (achados.get("instalador/TeleZapp.exe", ""),
+            achados.get("TeleZapp.exe", ""))
+
+
+def montar_notas(versao, hash_zip, nome_zip, hash_instalador="",
+                 hash_programa=""):
     itens = novidades(versao)
     linhas = [AVISO, "", "## Novidades da versão %s" % versao, ""]
     linhas += ["- " + i for i in itens] or [
@@ -79,7 +93,14 @@ def montar_notas(versao, hash_zip, nome_zip):
         "SHA-256 e troca a pasta. Os seus dados não são afetados." % nome_zip,
         "3. O zip também serve para extrair a pasta `TeleZapp` à mão e "
         "usar sem instalar.",
-        "", "SHA-256 do zip: `%s`" % hash_zip, ""]
+        "", "SHA-256 do zip: `%s`" % hash_zip]
+    if hash_instalador:
+        linhas += ["", "SHA-256 do instalador: `%s`" % hash_instalador]
+    if hash_programa:
+        linhas += ["", "SHA-256 do programa instalado (`TeleZapp.exe` da "
+                       "pasta): `%s`" % hash_programa]
+    linhas += ["", "Para conferir um arquivo, use a seção Verificar um arquivo "
+                   "da página do projeto.", ""]
     return "\n".join(linhas)
 
 
@@ -135,6 +156,10 @@ def main():
     if not os.path.isfile(instalador):
         sys.exit("Não achei %s. Rode ferramentas/empacotar.py antes." %
                  instalador)
+    conferencia = os.path.join(args.saida, "TeleZapp.conferencia.txt")
+    if not os.path.isfile(conferencia):
+        sys.exit("Não achei %s. Rode ferramentas/empacotar.py antes." %
+                 conferencia)
     arquivo_hash = zip_ + ".sha256"
     with open(arquivo_hash, "w", encoding="utf-8") as f:
         f.write("%s *%s\n" % (hash_zip, nome_zip))
@@ -143,13 +168,14 @@ def main():
         f.write(versao + "\n")
     notas =os.path.join(args.saida, "notas.md")
     with open(notas, "w", encoding="utf-8") as f:
-        f.write(montar_notas(versao, hash_zip, nome_zip))
+        f.write(montar_notas(versao, hash_zip, nome_zip,
+                             *hashes_da_conferencia(conferencia)))
     print("Pronto: %.0f MB, SHA-256 %s" % (os.path.getsize(zip_) / 1048576,
                                             hash_zip))
     print("Confira as notas em %s antes de publicar." % notas)
 
     comando = ["gh", "release", "create", versao, instalador, zip_, arquivo_hash,
-               consulta, "--title", "TeleZapp %s" % versao, "--notes-file", notas]
+               conferencia, consulta, "--title", "TeleZapp %s" % versao, "--notes-file", notas]
     comando.append("--prerelease" if args.prerelease else "--latest")
     if not args.publicar:
         print("Para publicar:\n  " + " ".join(comando))
