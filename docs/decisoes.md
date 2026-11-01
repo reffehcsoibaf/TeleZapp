@@ -958,3 +958,15 @@ O responsável testou muitas das melhorias do dia, sem dar retorno item a item e
 - **Atualização com "Continuar em segundo plano" (correção da 2026.10.24.0; retorno em 31/10/2026):** o problema foi identificado pelo próprio responsável, que o dá como solucionado.
 - **Retorno de quem relatou (31/10/2026):** Lucas, Valmir, José Gabriel e Vanderlei disseram ao responsável que suas demandas foram atendidas com as últimas atualizações. Relato de segunda mão, sem a versão nem o detalhe de cada um; as causas que eram hipótese continuam sem prova. O Vanderlei especificou que não sentiu mais falta de mensagens, o que é impressão de uso, não comparação com o celular. O Nuno (Windows ARM) segue sem confirmação.
 - **Endereço dos relatos (31/10/2026, pedido do responsável):** novo Worker `telezapp` (telezapp.fabioscheffer.workers.dev), com o mesmo KV. O aviso passou do ntfy para o bot do Telegram `telezapp_relatos_bot`: o ntfy grátis respondeu HTTP 429 de cota diária ao Worker, embora aceitasse o mesmo canal a partir do computador. **Verificado pelo responsável (31/10/2026):** o aviso de um relato de teste chegou ao bot. O link do aviso é assinado com a senha do `/admin` e abre só aquele relato e os logs dele, nunca a lista; quem tiver a mensagem do bot lê esse relato enquanto ele existir, e trocar `ADMIN_TOKEN` invalida os links. O responsável abriu o link direto da mensagem do bot e viu o relato (31/10/2026). **Janela de Feedback, verificado ao vivo (31/10/2026):** o responsável enviou pela janela real, rodando o código, um relato com log, que apareceu no `/admin`; o aviso chegou ao bot, o link abriu e os logs vieram com tamanho coerente. Não comentou como ficou com o leitor de tela nem usou "Enviar sem os logs". Foi criado em vez de renomeado porque a senha do `/admin` não estava guardada aqui e o Cloudflare não devolve segredos: `ADMIN_TOKEN` e `SAL` são novos. O `/admin` abriu com a senha e recusou sem ela. Um relato de teste com log falso, enviado por `nucleo/relatos.py`, apareceu na lista (31/10); o envio pela página e a notificação no celular não foram conferidos por mim. O `telezapp-relatos` fica no ar até `site/relatar.html` chegar à main, e depois deve ser apagado.
+
+## Verificado ao vivo pelo responsável: versão 2026.10.31.1
+
+- **Avisos de membros no Telegram (31/10/2026):** as entradas de membros apareceram no grupo real ao abrir. Não comentou um aviso chegando com o programa aberto nem a opção desligada.
+
+## Verificado ao vivo pelo responsável: código depois da 2026.10.31.1, ainda sem versão
+
+- **Conversas fixadas no Telegram (31/10/2026):** rodando pelo código, Mensagens salvas e o robô de feedback, que estavam em Arquivadas, foram para Fixadas. Não comentou fixar uma conversa realmente arquivada nem o WhatsApp.
+
+## Verificado ao vivo pelo responsável: código depois da 2026.10.31.1, ainda sem versão (continuação)
+
+- **Mídias expiradas pedidas ao celular (01/11/2026):** ao baixar as mídias que faltam, "está indo muito bem", duas por vez. Não detalhou conversa individual ou grupo, quantas vieram ou faltaram, nem se o WhatsApp precisa estar aberto na tela do celular.

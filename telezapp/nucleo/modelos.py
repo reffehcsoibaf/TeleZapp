@@ -768,11 +768,18 @@ LIMITE_IA_NA_LINHA = {"descricao": 0, "transcricao": 1000}
 
 # Ligado pela janela a partir da opcao `manter_apagadas`: o que o remetente
 # apaga para todos continua guardado aqui, so marcado.
-MANTER = {"apagadas": False}
+MANTER = {"apagadas": False,
+          # opcao `manter_apagadas_no_celular`: o que eu apago no WhatsApp do
+          # celular continua aqui
+          "do_celular": False}
 
 
 def definir_manter_apagadas(ligado):
     MANTER["apagadas"] = bool(ligado)
+
+
+def definir_manter_do_celular(ligado):
+    MANTER["do_celular"] = bool(ligado)
 
 
 def definir_limites_ia(descricao, transcricao):
@@ -953,8 +960,8 @@ def passa_filtro(c, tipo="todas", conta=CONTA_TODAS, busca="",
     """A conversa aparece na lista? `conta`: "todas", um servico
     ("telegram", "whatsapp") ou "conta:<id>". `tipo`: ver FILTROS_TIPO;
     `com_favoritas`: chaves das conversas que tem mensagem favorita. As
-    arquivadas so aparecem no tipo Arquivadas. Valor desconhecido nao
-    filtra."""
+    arquivadas so aparecem nos tipos Arquivadas e Fixadas. Valor desconhecido
+    nao filtra."""
     if busca and not casa_busca(c.nome, busca):
         return False
     if conta in SERVICOS and c.servico != conta:
@@ -971,6 +978,8 @@ def passa_filtro(c, tipo="todas", conta=CONTA_TODAS, busca="",
         return False             # trancada: so no tipo Trancadas
     if tipo == "arquivadas":
         return bool(c.arquivada)
+    if tipo == "fixadas":
+        return bool(c.fixada)    # mesmo arquivada, se o servico a mantem assim
     if c.arquivada:
         return False
     if tipo == "nao_lidas":
@@ -983,8 +992,6 @@ def passa_filtro(c, tipo="todas", conta=CONTA_TODAS, busca="",
         return c.tipo == "grupo"
     if tipo == "canais":
         return c.tipo == "canal"
-    if tipo == "fixadas":
-        return bool(c.fixada)
     if tipo == "favoritas":
         return c.chave in com_favoritas
     if tipo == "silenciadas":

@@ -11,6 +11,7 @@ import wx
 
 from telezapp import NOME, VERSAO, config
 from telezapp.interface.progresso import JanelaDeProgresso
+from telezapp.nucleo import copia_oficial
 from telezapp.nucleo import instalacao as ins
 
 
@@ -259,7 +260,8 @@ class DialogoBoasVindas(wx.Dialog):
         texto = wx.StaticText(self, label=(
             TEXTO_DE_BOAS_VINDAS if fonte is None else
             TEXTO_DE_BOAS_VINDAS.replace(" Você também pode usar sem "
-                                         "instalar.", "")))
+                                         "instalar.", ""))
+            + "\n\n" + copia_oficial.AVISO_CANAIS)
         texto.Wrap(460)
         lay.Add(texto, 0, wx.ALL, 12)
         self.botoes = {}
@@ -286,6 +288,21 @@ class DialogoBoasVindas(wx.Dialog):
         self.botoes["instalar"].SetFocus()
         self.CentreOnScreen()
         self.Bind(wx.EVT_CLOSE, lambda e: self._clicou("fechar"))
+        if fonte is not None:
+            threading.Thread(target=self._conferir_instalador, daemon=True,
+                             name="conferir-instalador").start()
+
+    def _conferir_instalador(self):
+        estado = copia_oficial.conferir_instalador()
+        if copia_oficial.nao_oficial(estado):
+            wx.CallAfter(self._alertar_instalador, estado)
+
+    def _alertar_instalador(self, estado):
+        wx.MessageBox(
+            "%s\n\n%s\n\nSó continue se você confia em quem lhe enviou este "
+            "arquivo." % (copia_oficial.TEXTOS_DO_ESTADO[estado],
+                          copia_oficial.AVISO_CANAIS),
+            "Instalador não oficial", wx.OK | wx.ICON_WARNING, self)
 
     def _clicou(self, chave):
         if chave == "instalar":

@@ -255,7 +255,8 @@ def test_interface_e_mensagens_reunem_as_categorias_antigas(mod):
     assert soltas == {"status_no_titulo", "avisar_chamadas_whatsapp",
                       "ocultar_contatos_duplicados",
                       "trazer_contatos_ao_abrir", "digitar_na_lista",
-                      "prioridade_abertura", "como_me_chamar"}
+                      "como_me_chamar"}
+    assert "prioridade_abertura" in {o.chave for o in mod.opcoes("Sistema")}
     assert "estilo" not in {o.chave for o in config.OPCOES}   # virou a lista
     assert {"ortografia_idioma", "enter_envia",
             "previa_links"} <= {o.chave for o in mod.opcoes("Mensagens")}

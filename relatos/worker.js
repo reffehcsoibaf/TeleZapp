@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Fábio Scheffer Moraes
 //
-// Recebe os relatos do formulario da pagina do TeleZapp (site/relatar.html) e
+// Recebe os relatos
 // da janela de Feedback do programa (telezapp/nucleo/relatos.py), guarda cada um no KV por 90 dias e deixa o responsavel le-los em /admin.
 // Veja relatos/LEIAME.md para publicar.
 

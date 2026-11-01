@@ -20,10 +20,6 @@ log = logging.getLogger("telezapp.banco")
 
 VERSAO_ESQUEMA = 12
 
-# quantas mensagens a lista mostra de cada vez, por conversa
-POR_VEZ_PADRAO = 100
-POR_VEZ_MINIMO, POR_VEZ_MAXIMO = 50, 5000
-
 ESQUEMA = """
 CREATE TABLE IF NOT EXISTS conversas (
     conta_id TEXT NOT NULL,
@@ -102,13 +98,6 @@ CREATE TABLE IF NOT EXISTS posicoes (
     conta_id TEXT NOT NULL,
     conversa_id TEXT NOT NULL,
     mensagem_id TEXT NOT NULL,
-    PRIMARY KEY (conta_id, conversa_id)
-);
--- Quantas mensagens mostrar de cada vez (so nas conversas que mudaram o padrao).
-CREATE TABLE IF NOT EXISTS mensagens_por_vez (
-    conta_id TEXT NOT NULL,
-    conversa_id TEXT NOT NULL,
-    quantas INTEGER NOT NULL,
     PRIMARY KEY (conta_id, conversa_id)
 );
 -- Arquivos de midia baixados (base da limpeza de conversas).
@@ -212,6 +201,8 @@ class Banco:
 
     def _atualizar_esquema(self):
         """Bancos de versoes anteriores ganham as colunas novas."""
+        # a quantidade por vez era de cada conversa; agora e uma opcao so
+        self._con.execute("DROP TABLE IF EXISTS mensagens_por_vez")
         conv = {linha[1] for linha in self._con.execute(
             "PRAGMA table_info(conversas)")}
         if "arquivada" not in conv:
@@ -332,8 +323,7 @@ class Banco:
             self._con.execute("DELETE FROM conversas WHERE conta_id=?",
                               (conta_id,))
             for tabela in ("mensagens", "recibos", "status", "midias",
-                           "fichas", "posicoes", "contatos", "limpas", "apagadas",
-                           "mensagens_por_vez"):
+                           "fichas", "posicoes", "contatos", "limpas", "apagadas"):
                 self._con.execute(
                     "DELETE FROM %s WHERE conta_id=?" % tabela, (conta_id,))
             self._agenda = None
@@ -425,19 +415,6 @@ class Banco:
                 (conta_id, conversa_id, AGUARDANDO)).fetchone()
         return _msg(linha) if linha else None
 
-    def por_vez(self, conta_id, conversa_id):
-        with self._trava:
-            linha = self._con.execute(
-                "SELECT quantas FROM mensagens_por_vez WHERE conta_id=? AND "
-                "conversa_id=?", (conta_id, conversa_id)).fetchone()
-        return linha[0] if linha else POR_VEZ_PADRAO
-
-    def salvar_por_vez(self, conta_id, conversa_id, quantas):
-        with self._trava, self._con:
-            self._con.execute(
-                "INSERT OR REPLACE INTO mensagens_por_vez VALUES (?, ?, ?)",
-                (conta_id, conversa_id, quantas))
-
     def mensagens_expiradas(self, agora=None):
         """Chaves (conta, conversa, id) das mensagens temporarias cujo prazo
         ja passou."""
@@ -456,6 +433,34 @@ class Banco:
                 % ", ".join(_CAMPOS_MSG),
                 (conta_id, conversa_id, limite)).fetchall()
         return [_msg(l) for l in reversed(linhas)]
+
+    def mensagens_que_citam(self, conta_id, conversa_id, meus=()):
+        """As mensagens dos outros que me mencionam ou respondem a uma minha,
+        da mais antiga para a mais nova. Olha tambem as mencoes e as respostas,
+        porque a marca citou_voce so existe no que chegou ao vivo. `meus`: os
+        usuarios desta conta nos enderecos do servico."""
+        marcas = ['%"citou_voce": true%']
+        for eu in meus:
+            marcas += ['%%"jid": "%s@%%' % eu, '%%"jid": "%s:%%' % eu]
+        condicoes = " OR ".join(["extras LIKE ?"] * len(marcas))
+        with self._trava:
+            linhas = self._con.execute(
+                "SELECT %s FROM mensagens WHERE conta_id=? AND conversa_id=? "
+                "AND minha=0 AND (%s OR resposta_a IN (SELECT id FROM "
+                "mensagens WHERE conta_id=? AND conversa_id=? AND minha=1)) "
+                "ORDER BY data, CAST(id AS INTEGER)" % (
+                    ", ".join(_CAMPOS_MSG), condicoes),
+                (conta_id, conversa_id, *marcas, conta_id,
+                 conversa_id)).fetchall()
+        return [_msg(l) for l in linhas]
+
+    def contar_desde(self, conta_id, conversa_id, data):
+        """Quantas mensagens da conversa sao desta data em diante."""
+        with self._trava:
+            return self._con.execute(
+                "SELECT COUNT(*) FROM mensagens WHERE conta_id=? AND "
+                "conversa_id=? AND data>=?",
+                (conta_id, conversa_id, data)).fetchone()[0]
 
     def ultimas_mensagens(self):
         """{(conta_id, conversa_id): Mensagem} a mais nova de cada conversa
@@ -897,7 +902,6 @@ class Banco:
                                 ("midias", "conversa_id"),
                                 ("depuracao", "conversa_id"),
                                 ("posicoes", "conversa_id"),
-                                ("mensagens_por_vez", "conversa_id"),
                                 ("limpas", "conversa_id")):
                 self._con.execute(
                     "DELETE FROM %s WHERE conta_id=? AND %s=?" % (tabela, col),

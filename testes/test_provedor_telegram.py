@@ -137,7 +137,7 @@ class ClienteFalso:
     async def iter_dialogs(self, limit=None, folder=None, archived=None):
         if folder == 1:
             yield types.SimpleNamespace(
-                id=77, name="Velha", unread_count=0, date=DATA,
+                id=77, name="Velha", unread_count=0, date=DATA, folder_id=1,
                 input_entity="peer77", is_group=False, is_channel=False,
                 dialog=types.SimpleNamespace(read_outbox_max_id=0))
             return
@@ -1798,3 +1798,35 @@ def test_converter_guarda_o_aviso_de_entrada_e_descarta_os_outros():
     assert "Ana Silva entrou" in linha and "Desconhecido" not in linha
     assert tg.converter(mensagem(6, sender=ANA, action=_acao(
         "MessageActionPinMessage")), "t1", -77) is None
+
+
+class ClienteComFixadaNaBuscaDeArquivadas(ClienteFalso):
+    """A busca de arquivadas tambem traz conversas fixadas da lista principal,
+    que nao tem pasta."""
+
+    async def iter_dialogs(self, limit=None, folder=None, archived=None):
+        fixada = types.SimpleNamespace(
+            id=10, name="Mensagens salvas", unread_count=0, date=DATA,
+            pinned=True, folder_id=None, input_entity="peer10",
+            is_group=False, is_channel=False,
+            dialog=types.SimpleNamespace(read_outbox_max_id=0))
+        yield fixada
+        if folder == 1:
+            yield types.SimpleNamespace(
+                id=77, name="Velha", unread_count=0, date=DATA, folder_id=1,
+                input_entity="peer77", is_group=False, is_channel=False,
+                dialog=types.SimpleNamespace(read_outbox_max_id=0))
+
+
+def test_fixada_na_busca_de_arquivadas_nao_fica_arquivada(ambiente):
+    p = ambiente.criar(ClienteComFixadaNaBuscaDeArquivadas())
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ContaPronta)
+        convs = esperar(ambiente.fila, ev.ConversasAtualizadas).conversas
+        assert [c.id for c in convs].count("10") == 1
+        por_id = {c.id: c for c in convs}
+        assert por_id["10"].fixada and not por_id["10"].arquivada
+        assert por_id["77"].arquivada
+    finally:
+        p.parar()

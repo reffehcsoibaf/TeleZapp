@@ -1162,3 +1162,36 @@ def test_esperas_com_ping_nao_abrem_janela():
         usos = [x for x in linhas if "DETACHED_PROCESS" in x
                 and not x.strip().startswith("#")]
         assert not usos, arquivo
+
+
+def test_fixada_e_arquivada_aparece_nas_fixadas():
+    c = m.Conversa("t1", "1", "Ana", arquivada=True, fixada=True)
+    assert m.passa_filtro(c, "fixadas") and m.passa_filtro(c, "arquivadas")
+    assert not m.passa_filtro(c, "todas")
+    assert not m.passa_filtro(
+        m.Conversa("t1", "2", "Bia", arquivada=True), "fixadas")
+    assert not m.passa_filtro(
+        m.Conversa("t1", "3", "Caio", fixada=True, trancada=True), "fixadas")
+
+
+def test_fixar_arquivada_tambem_desarquiva_na_conta():
+    from types import SimpleNamespace
+    from telezapp.interface.janela import Janela
+    feitos = []
+    prov = SimpleNamespace(
+        arquivar_conversa=lambda i, v: feitos.append(("arquivar", v)) or True,
+        fixar_conversa=lambda i, v: feitos.append(("fixar", v)) or True)
+    falhas = []
+
+    def avisar_conta(conv, acao, texto):
+        if not acao(prov):
+            falhas.append(texto)
+    janela = SimpleNamespace(_avisar_conta=avisar_conta)
+    c = m.Conversa("t1", "1", "Ana", arquivada=True)
+    assert Janela._aplicar_fixar(janela, c, True)
+    assert c.fixada and not c.arquivada
+    assert feitos == [("arquivar", False), ("fixar", True)] and not falhas
+    # conversa fora das arquivadas e desafixar nao mexem no arquivamento
+    feitos.clear()
+    assert not Janela._aplicar_fixar(janela, c, False)
+    assert feitos == [("fixar", False)]

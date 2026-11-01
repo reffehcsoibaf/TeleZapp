@@ -1154,11 +1154,16 @@ class ProvedorTelegram(Provedor):
         citacoes = {x.id: x.citacoes
                     for x in self.banco.conversas(self.conta.id)}
         # O Telegram so devolve a pasta principal (0) se nao se pede a
-        # pasta de arquivadas (1): sao duas buscas.
+        # pasta de arquivadas (1): sao duas buscas. Quem diz se esta arquivada
+        # e a propria conversa, nao a busca que a trouxe.
+        vistas = set()
         for pasta in (0, 1):
             async for d in self.cliente.iter_dialogs(
                     limit=LIMITE_CONVERSAS, folder=pasta):
                 cid = str(d.id)
+                if cid in vistas:
+                    continue
+                vistas.add(cid)
                 self._entidades[cid] = d.input_entity
                 c = m.Conversa(
                     conta_id=self.conta.id, id=cid,
@@ -1167,7 +1172,7 @@ class ProvedorTelegram(Provedor):
                     nao_lidas=d.unread_count or 0,
                     data=d.date.timestamp() if d.date else 0.0,
                     lidas_ate=getattr(d.dialog, "read_outbox_max_id", 0) or 0,
-                    arquivada=pasta == 1,
+                    arquivada=getattr(d, "folder_id", None) == 1,
                     fixada=bool(getattr(d, "pinned", False)),
                     silenciada_ate=silencio_do_dialogo(d),
                     somente_leitura=somente_leitura_do_telegram(

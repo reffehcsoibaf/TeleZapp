@@ -155,7 +155,8 @@ class ProgressoMidia:
 @dataclass
 class MidiaBaixada:
     """Fim de um download: `caminho` se deu certo; senao `erro` ou
-    `cancelada`. `automatica`: baixada sem a pessoa pedir."""
+    `cancelada`. `automatica`: baixada sem a pessoa pedir. `motivo`: ver
+    ErroMidia."""
     conta_id: str
     conversa_id: str
     mensagem_id: str
@@ -163,6 +164,7 @@ class MidiaBaixada:
     erro: str = ""
     cancelada: bool = False
     automatica: bool = False
+    motivo: str = ""
 
 
 @dataclass

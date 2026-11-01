@@ -1,8 +1,8 @@
-# Relatos pelo formulário da página
+# Relatos pela janela de Feedback
 
-`site/relatar.html` envia o relato (nome, contato, descrição, quando
-aconteceu, versão e os logs) para um Cloudflare Worker, `worker.js`, que o
-guarda no KV por 90 dias. Quem lê é só o responsável, em `/admin`.
+A janela Ajuda, Feedback do programa envia o relato (nome, contato, descrição,
+quando aconteceu, versão e os logs) para um Cloudflare Worker, `worker.js`, que
+o guarda no KV por 90 dias. Quem lê é só o responsável, em `/admin`.
 
 ## Publicar (uma vez)
 
@@ -17,7 +17,7 @@ npx wrangler kv namespace create RELATOS
 
 1. Copie o `id` que o último comando mostrar para `wrangler.toml`
    (`id = "..."`).
-2. Troque `SEU-USUARIO` em `wrangler.toml` e em `site/relatar.html` (a
+2. Troque `SEU-USUARIO` em `wrangler.toml` e em `telezapp/nucleo/relatos.py` (a
    constante `ENDERECO`) pelo subdomínio `workers.dev` da sua conta (o
    `wrangler deploy` mostra o endereço completo).
 3. Crie os segredos:

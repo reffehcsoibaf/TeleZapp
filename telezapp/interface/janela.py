@@ -21,10 +21,9 @@ import wx
 from telezapp import (GRUPO_DE_SUPORTE, NOME, PAGINA_DO_PROJETO, VERSAO,
                       config)
 from telezapp.acessibilidade.fala import Fala, bipe, definir_sons
-from telezapp.armazenamento.banco import POR_VEZ_MAXIMO
 from telezapp.interface import colagem, dialogos, robos, visualizadores
 from telezapp.interface import salvar as ui_salvar
-from telezapp.nucleo import silenciados
+from telezapp.nucleo import copia_oficial, silenciados
 from telezapp.nucleo import links_externos, links_recebidos, resumo_midias
 from telezapp.interface import emojis as ui_emojis
 from telezapp.interface import enquete as ui_enquete
@@ -455,7 +454,6 @@ class Janela(wx.Frame):
         self.reacoes_novas = {}       # chave -> reacoes novas as minhas msgs
         self.quem_reagiu = {}         # chave -> [(quem, emoji)] dessas reacoes
         self.cache = {}             # chave da conversa -> [Mensagem]
-        self._por_vez = {}            # chave -> mensagens mostradas por vez
         self._janelas = {}            # chave -> mensagens mantidas, se a pessoa
                                       # subiu alem do "por vez" com Home
         self._buscando_antigas = set()  # chaves com pedido em andamento
@@ -499,6 +497,7 @@ class Janela(wx.Frame):
         # mensagens para agir de uma vez pelo menu de contexto
         self.modo_conv, self.marc_conv = False, set()    # chaves de conversa
         self.modo_msg, self.marc_msg = False, set()      # ids de mensagem
+        self._salvando = None     # a conversa sendo salva num .zip
         self.anexos = []          # midias coladas na caixa, a enviar com o Enter
         self.locais = 0               # contador de mensagens "enviando"
         self.sincronia = {}           # conta_id -> (percentual, quando)
@@ -526,6 +525,8 @@ class Janela(wx.Frame):
         self._windows_ate = 0.0       # o Windows pediu para encerrar a sessao
         self._fora_do_alttab = False  # em segundo plano: so na barra de tarefas
         self._espera_de_versao = None   # temporizador da busca periodica
+        self._copia_conferida = None    # ver copia_oficial; None: ainda nao
+        self._trava_da_copia = threading.Lock()
         self._versao_ja_avisada = ""    # nao repete a janela a cada consulta
         self._versao_pendente = None    # achada em segundo plano: mostra na volta
         # atalhos que valem em qualquer programa (RegisterHotKey), cada um
@@ -606,7 +607,15 @@ class Janela(wx.Frame):
              "Ir para o filtro de &serviço ou conta\tAlt+4")
         item(m_ir, "ir_filtro_tipo",
              "Ir para o f&iltro de tipo de conversa\tAlt+5")
+        m_tipos = wx.Menu()
+        for valor, rotulo in m.FILTROS_TIPO:
+            item(m_tipos, "tipo_" + valor, rotulo)
+        m_ir.AppendSubMenu(m_tipos, "&Tipo de conversa")
         item(m_ir, "ir_respondida", "Ir para a mensagem respondi&da")
+        item(m_ir, "ir_citacao_proxima",
+             "Próxima menção ou res&posta a mim")
+        item(m_ir, "ir_citacao_anterior",
+             "Menção ou resposta a mim an&terior")
 
         m_ctt = wx.Menu()
         item(m_ctt, "contatos", "&Gerenciar contatos...")
@@ -825,9 +834,10 @@ class Janela(wx.Frame):
                       m_ctt: "Contatos", m_cham: "Chamadas",
                       m_mid: "Mídias", m_exib: "Exibir",
                       m_fer: "Ferramentas", m_aj: "Ajuda", m_dep: "Ajuda",
-                      m_baixar: "Mídias"}
+                      m_baixar: "Mídias", m_tipos: "Ir para"}
         # nos grupos de opcoes o nome do item sozinho nao diz do que se trata
-        grupos = {m_baixar: "Quando baixar as mídias"}
+        grupos = {m_baixar: "Quando baixar as mídias",
+                  m_tipos: "Tipo de conversa"}
         for chave, it in self.itens.items():
             grupo = grupos.get(self._menu_do_item[chave])
             self.atalhos.registrar(
@@ -927,6 +937,8 @@ class Janela(wx.Frame):
             "inserir_emoji": lambda e: self._inserir_emoji(),
             "ortografia": lambda e: self._verificar_ortografia(),
             "ir_respondida": lambda e: self._ir_para_respondida(),
+            "ir_citacao_proxima": lambda e: self._ir_para_citacao(True),
+            "ir_citacao_anterior": lambda e: self._ir_para_citacao(False),
             "detalhes": lambda e: self._detalhes(),
             "apagar_msg": lambda e: self._apagar_mensagem(),
             "favoritar_msg": lambda e: self._favoritar_mensagem(),
@@ -993,6 +1005,8 @@ class Janela(wx.Frame):
             "desinstalar": lambda e: self._desinstalar(),
             "sobre": lambda e: self._sobre(),
         }
+        for valor, _ in m.FILTROS_TIPO:
+            ligacoes["tipo_" + valor] =                 lambda e, valor=valor: self._ir_para_tipo(valor)
         for chave, tratador in ligacoes.items():
             self.Bind(wx.EVT_MENU, seguro(tratador), self.itens[chave])
         dispositivos.definir(*self._dispositivos_da_chamada()[:2],
@@ -1489,7 +1503,8 @@ class Janela(wx.Frame):
 
     def _atualizar_titulo(self):
         """Titulo da janela: conversa aberta e o que esta em andamento
-        (sincronia do historico, downloads de midia)."""
+        (sincronia do historico, downloads de midia). Sem nada disso, quantas
+        conversas tem nao lidas."""
         base = NOME
         conv = self.indice.get(self.atual) if self.atual else None
         if conv is not None:
@@ -1515,6 +1530,8 @@ class Janela(wx.Frame):
                 if self.contas else ""
             extras.append("%s sincronia interrompida em %d%%" % (servico,
                                                                   pct))
+        if self._salvando is not None:
+            extras.append(self._titulo_salvando())
         envios = list(self.progresso_envios.values())
         if len(envios) == 1:
             extras.append("enviando mídia %d%%" % envios[0])
@@ -1527,7 +1544,18 @@ class Janela(wx.Frame):
                           else "baixando mídia")
         elif n > 1:
             extras.append("baixando %d mídias" % n)
-        self.SetTitle(base + (" - " + ", ".join(extras) if extras else ""))
+        if conv is None and not extras:
+            n = self._conversas_nao_lidas()
+            if n:
+                base += " (%d)" % n
+        titulo = base + (" - " + ", ".join(extras) if extras else "")
+        if titulo != self.GetTitle():
+            self.SetTitle(titulo)
+
+    def _conversas_nao_lidas(self):
+        """As mesmas conversas do filtro Nao lidas, em todas as contas."""
+        return sum(1 for c in self.indice.values() if "#" not in c.id and
+                   m.passa_filtro(c, "nao_lidas"))
 
     # ============================================================== inicio
     def comecar(self):
@@ -1550,6 +1578,8 @@ class Janela(wx.Frame):
             self.lista_conv.SetSelection(0)
         log.info("fala direta pelo NVDA: %s", self.fala.ativa())
         self._apagar_expiradas()
+        threading.Thread(target=self._conferir_copia_ao_abrir, daemon=True,
+                         name="conferir-copia").start()
         if self.cfg.get("verificar_atualizacoes"):
             wx.CallLater(8000, lambda: self._verificar_atualizacoes(False))
         self._agendar_busca_de_versao()
@@ -2048,6 +2078,7 @@ class Janela(wx.Frame):
                  c, self.filtro_tipo, self.filtro_conta, self.busca,
                  favoritas))),
             key=lambda c: (not c.fixada, -c.data))
+        self._atualizar_titulo()
 
     # ------------------------------------------- lista de conversas
     def _lista_em_uso(self):
@@ -2354,6 +2385,34 @@ class Janela(wx.Frame):
                      "desmarca, a tecla Menu mostra as ações e Esc sai.")
         self.fala.falar(texto, interromper=True)
 
+    def _marcaveis(self, lista):
+        """O que a lista mostra e pode ser marcado."""
+        if lista is self.lista_conv:
+            return [k for k in self._chaves_conv if k in self.indice]
+        return [i for i in self.mapa if isinstance(i, str) and i != MARCADOR
+                and not i.startswith("local-")]
+
+    def _marcar_todas(self, lista):
+        """Marca tudo o que a lista mostra; com tudo marcado, desmarca."""
+        conversas = lista is self.lista_conv
+        marcas = self.marc_conv if conversas else self.marc_msg
+        todas = set(self._marcaveis(lista))
+        if todas and todas <= marcas:
+            marcas.clear()
+            texto = "Nenhuma marcada."
+        else:
+            marcas |= todas
+            n = len(marcas)
+            texto = "1 marcada." if n == 1 else "%d marcadas." % n
+            if not conversas:
+                texto += (" Só entram as mensagens que estão na lista; para "
+                          "incluir as anteriores, traga-as com Home.")
+        if conversas:
+            self._preencher_conversas()
+        else:
+            self._preencher_mensagens()
+        self.fala.falar(texto, interromper=True)
+
     def _sair_selecao(self, lista, falar=True):
         """Esc no modo de selecao: desfaz as marcas e sai do modo."""
         if lista is self.lista_conv:
@@ -2380,10 +2439,17 @@ class Janela(wx.Frame):
     def _plural(n, um, varios):
         return "%d %s" % (n, um if n == 1 else varios)
 
+    def _opcao_marcar_todas(self, lista, marcas):
+        tudo = set(self._marcaveis(lista)) <= marcas
+        return ("Desmarcar todas\tCtrl+A" if tudo
+                else "Marcar todas\tCtrl+A",
+                lambda: self._marcar_todas(lista))
+
     def _opcoes_em_massa_conv(self):
         convs = self._marcadas_conv()
         n = self._plural(len(convs), "conversa", "conversas")
         return [
+            self._opcao_marcar_todas(self.lista_conv, self.marc_conv),
             ("Marcar %s como %s" % (n, "lida" if len(convs) == 1 else "lidas"),
              lambda: self._massa_conversas("lidas")),
             ("%s %s" % ("Desarquivar" if all(c.arquivada for c in convs)
@@ -2404,6 +2470,7 @@ class Janela(wx.Frame):
         n = self._plural(len(msgs), "mensagem", "mensagens")
         fav = all(m.extras_de(x)["favorita"] for x in msgs)
         return [
+            self._opcao_marcar_todas(self.lista_msgs, self.marc_msg),
             ("%s %s" % ("Desfavoritar" if fav else "Favoritar", n),
              lambda: self._massa_mensagens("favoritar")),
             ("Copiar o texto de %s" % n,
@@ -2449,10 +2516,7 @@ class Janela(wx.Frame):
         elif acao == "fixar":
             fixar = not all(c.fixada for c in convs)
             for c in convs:
-                c.fixada = fixar
-                self._avisar_conta(
-                    c, lambda p, c=c: p.fixar_conversa(c.id, fixar),
-                    "O serviço não aceitou. A mudança ficou só no TeleZapp.")
+                self._aplicar_fixar(c, fixar)
             texto = "%s %s." % (quantas, "fixadas" if fixar else "desafixadas")
         elif acao == "silenciar":
             silenciar = not all(c.silenciada() for c in convs)
@@ -2741,6 +2805,23 @@ class Janela(wx.Frame):
         threading.Thread(target=avisar, daemon=True,
                          name="avisar-conta").start()
 
+    def _aplicar_fixar(self, conv, fixar):
+        """Fixa ou desafixa e avisa o servico. Fixar uma arquivada tambem a
+        desarquiva: senao ela seguiria fora do topo da lista. Devolve se
+        desarquivou."""
+        desarquivar = fixar and conv.arquivada
+        conv.fixada = fixar
+        if desarquivar:
+            conv.arquivada = False
+
+        def avisar(p):
+            ok = not desarquivar or p.arquivar_conversa(conv.id, False)
+            return p.fixar_conversa(conv.id, fixar) and ok
+        self._avisar_conta(
+            conv, avisar,
+            "O serviço não aceitou. A mudança ficou só no TeleZapp.")
+        return desarquivar
+
     def _fixar_conversa(self, conv=None):
         """Fixa a conversa no topo da lista, ou a desafixa; o servico e
         avisado."""
@@ -2751,12 +2832,10 @@ class Janela(wx.Frame):
             self.fala.falar("Nenhuma conversa selecionada.")
             return
         fixar = not conv.fixada
-        conv.fixada = fixar
+        desarquivou = self._aplicar_fixar(conv, fixar)
         self._depois_de_mudar_conversa(conv)
-        self._avisar_conta(
-            conv, lambda p: p.fixar_conversa(conv.id, fixar),
-            "O serviço não aceitou. A mudança ficou só no TeleZapp.")
-        self.fala.falar("Conversa fixada." if fixar
+        self.fala.falar("Conversa fixada e desarquivada." if desarquivou
+                        else "Conversa fixada." if fixar
                         else "Conversa desafixada.", interromper=True)
 
     DURACOES_SILENCIO = (("8 horas", 8 * 3600), ("1 semana", 7 * 86400),
@@ -3258,6 +3337,19 @@ class Janela(wx.Frame):
             self._aplicar_filtros(
                 falar=bool(self.cfg.get("falar_quantas_no_filtro")))
 
+    def _ir_para_tipo(self, valor):
+        """Escolhe o tipo direto e leva o foco para a lista de conversas."""
+        if valor not in dict(self._tipos_atuais):
+            self.fala.falar("As conversas trancadas estão escondidas.",
+                            interromper=True)
+            return
+        self.filtro_tipo = valor
+        self.cx_tipo.SetSelection(self._indice_tipo())
+        self._guardar_filtro_tipo()
+        self._esconder_se_saiu_das_trancadas()
+        self.lista_conv.SetFocus()
+        self._aplicar_filtros()
+
     def _esconder_se_saiu_das_trancadas(self):
         """Saiu do tipo Trancadas: elas somem de novo e so voltam quando o
         codigo for digitado outra vez na busca."""
@@ -3345,27 +3437,23 @@ class Janela(wx.Frame):
                         "apagado. Defina um novo em Configurações, "
                         "Privacidade.")
 
-    def _mensagens_por_vez(self, chave):
-        """O que a pessoa definiu nos detalhes da conversa."""
-        if chave not in self._por_vez:
-            self._por_vez[chave] = self.banco.por_vez(chave[0], chave[1])
-        return self._por_vez[chave]
+    def _mensagens_por_vez(self):
+        return int(self.cfg.get("mensagens_por_vez"))
 
     def _limite_memoria(self, chave):
         """Mensagens mantidas na lista da conversa: o "por vez", ou mais, se a
         pessoa ja subiu com Home ou ha muitas nao lidas."""
-        return max(self._janelas.get(chave, 0), self._mensagens_por_vez(chave))
+        return max(self._janelas.get(chave, 0), self._mensagens_por_vez())
 
-    def _definir_mensagens_por_vez(self, conv, quantas):
-        """Vale ja: a lista da conversa volta a ter esse tanto."""
-        chave = conv.chave
-        self.banco.salvar_por_vez(conv.conta_id, conv.id, quantas)
-        self._por_vez[chave] = quantas
-        self._janelas.pop(chave, None)
-        self.cache[chave] = self.cache.get(chave, [])[-quantas:]
-        self._mesclar(chave, self.banco.mensagens(conv.conta_id, conv.id,
-                                                  quantas))
-        if chave == self.atual:
+    def _mudou_mensagens_por_vez(self):
+        """Vale ja: as listas guardadas voltam a ter esse tanto."""
+        quantas = self._mensagens_por_vez()
+        self._janelas.clear()
+        for chave, lista in self.cache.items():
+            self.cache[chave] = lista[-quantas:]
+        if self.atual in self.cache:
+            self._mesclar(self.atual, self.banco.mensagens(
+                self.atual[0], self.atual[1], quantas))
             self._preencher_mensagens()
 
     @seguro
@@ -3379,7 +3467,7 @@ class Janela(wx.Frame):
                             interromper=True)
             return
         antes = len(self.cache.get(chave, []))
-        por_vez = self._mensagens_por_vez(chave)
+        por_vez = self._mensagens_por_vez()
         janela = max(self._limite_memoria(chave), antes)
         while True:
             janela += por_vez
@@ -4050,6 +4138,12 @@ class Janela(wx.Frame):
                 if evt.ControlDown() or modo:
                     self._alternar_marca(foco)
                     return
+            if k == ord("A") and evt.ControlDown() and not (
+                    evt.AltDown() or evt.ShiftDown()) and (
+                    (foco is self.lista_conv and self.modo_conv) or
+                    (foco is self.lista_msgs and self.modo_msg)):
+                self._marcar_todas(foco)
+                return
             if k == wx.WXK_ESCAPE and sem_mod and \
                     self._gravacao_rapida is not None:
                 self._terminar_gravacao_rapida(enviar=False)
@@ -4294,7 +4388,7 @@ class Janela(wx.Frame):
         self.carga_inicial = True     # a 1a resposta do servico ainda e a abertura
         # no WhatsApp o historico e local e rapido; no Telegram cada 100
         # mensagens sao uma consulta ao servidor
-        teto = POR_VEZ_MAXIMO if self.contas.servico(conv.conta_id) == \
+        teto = config.MENSAGENS_POR_VEZ[1] if self.contas.servico(conv.conta_id) == \
             "whatsapp" else 1000
         if conv.nao_lidas:
             # todas as nao lidas, para o marcador ficar no lugar certo
@@ -6745,13 +6839,21 @@ class Janela(wx.Frame):
         if conv is None:
             self.fala.falar("Selecione uma conversa.")
             return
+        if self._salvando is not None:
+            self.fala.falar(self._texto_ainda_salvando(), interromper=True)
+            return
         caminho = dialogos.escolher_destino_zip(
             self, exportar.nome_sugerido(conv),
             self.cfg.get("pasta_exportar") or "")
         if not caminho:
             return
         self.cfg.set("pasta_exportar", os.path.dirname(caminho))
-        mensagens = self.banco.mensagens(conv.conta_id, conv.id, 10 ** 9)
+        self._salvando = {"nome": conv.nome, "feitas": 0, "total": 0}
+        self._atualizar_titulo()
+
+        def progresso(feitas, total):
+            self._salvando.update(feitas=feitas, total=total)
+            wx.CallAfter(self._atualizar_titulo)
 
         def da_midia(x):
             if x.tipo not in armazem.BAIXAVEIS or                     self.banco.foi_limpa(x.conta_id, x.conversa_id, x.id):
@@ -6761,8 +6863,12 @@ class Janela(wx.Frame):
 
         def trabalho():
             try:
+                # a conversa pode ser enorme: ler fora da tela nao a trava
+                mensagens = self.banco.mensagens(conv.conta_id, conv.id,
+                                                 10 ** 9)
+                self._salvando["total"] = len(mensagens)
                 n, midias = exportar.gravar_zip(
-                    caminho, conv, mensagens, da_midia,
+                    caminho, conv, mensagens, da_midia, progresso,
                     nome_do_remetente=self._nome_do_remetente)
                 texto = ("Conversa salva: %d mensagens e %d mídias em %s."
                          % (n, midias, caminho))
@@ -6773,12 +6879,33 @@ class Janela(wx.Frame):
                 texto = "Não consegui salvar a conversa: %s" % e
                 grave = True
             wx.CallAfter(self._conversa_salva, texto, grave)
-        self.fala.falar("Salvando %d mensagens da conversa com %s. Aviso "
-                        "quando terminar." % (len(mensagens), conv.nome),
-                        interromper=True)
-        threading.Thread(target=trabalho, daemon=True).start()
+
+        def comecar():
+            self.fala.falar("Preparando o conteúdo da conversa com %s para "
+                            "salvar. Aviso quando terminar." % conv.nome,
+                            interromper=True)
+            threading.Thread(target=trabalho, daemon=True).start()
+        # o leitor de tela anuncia o foco ao fechar o dialogo de arquivo, e
+        # isso cortaria o aviso se ele saisse agora
+        wx.CallLater(500, comecar)
+
+    def _titulo_salvando(self):
+        s = self._salvando
+        texto = "preparando conversa com %s para salvar" % s["nome"]
+        if s["feitas"]:
+            texto += " %d%%" % (100 * s["feitas"] // s["total"])
+        return texto
+
+    def _texto_ainda_salvando(self):
+        s = self._salvando
+        texto = "Ainda preparando o conteúdo da conversa com %s" % s["nome"]
+        if s["feitas"]:
+            texto += ": %d de %d mensagens" % (s["feitas"], s["total"])
+        return texto + "."
 
     def _conversa_salva(self, texto, grave):
+        self._salvando = None
+        self._atualizar_titulo()
         bipe("erro" if grave else "tarefa_pronta")
         self.fala.falar(texto, interromper=True)
         if grave:
@@ -6931,6 +7058,50 @@ class Janela(wx.Frame):
         self.volta_para.append(x.id)
         self.lista_msgs.SetSelection(self.mapa.index(x.resposta_a))
         self.lista_msgs.SetFocus()
+
+    def _ir_para_citacao(self, depois):
+        """Leva a selecao a mensagem seguinte ou anterior que me menciona ou
+        responde a uma minha; as fora da lista sao trazidas do banco."""
+        chave = self.atual
+        if chave is None:
+            self.fala.falar(TEXTO_SEM_CONVERSA, interromper=True)
+            return
+        prov = self.contas.provedor(chave[0])
+        meus = prov.meus_ids() if prov is not None else ()
+        x = self._mensagem_selecionada()
+        achadas = self.banco.mensagens_que_citam(chave[0], chave[1], meus)
+        if x is not None:
+            achadas = [y for y in achadas
+                       if (_ordem(y) > _ordem(x)) == depois and y.id != x.id]
+        for alvo in achadas if depois else reversed(achadas):
+            if alvo.id not in self.mapa and not self._trazer_ate(alvo):
+                return
+            if alvo.id in self.mapa:     # senao: de quem foi silenciado
+                self.selecao_automatica = False
+                if x is not None:
+                    self.volta_para.append(x.id)
+                self.lista_msgs.SetSelection(self.mapa.index(alvo.id))
+                self.lista_msgs.SetFocus()
+                return
+        self.lista_msgs.SetFocus()
+        bipe("erro")
+        self.fala.falar("Nenhuma menção ou resposta a você %s desta." % (
+            "depois" if depois else "antes"), interromper=True)
+
+    def _trazer_ate(self, alvo):
+        """Poe na lista as mensagens desde `alvo`, sem deixar buraco. False se
+        forem demais para uma lista."""
+        chave = self.atual
+        quantas = self.banco.contar_desde(chave[0], chave[1], alvo.data)
+        if quantas > config.MENSAGENS_POR_VEZ[1]:
+            self.fala.falar(
+                "A menção ou resposta está longe demais na conversa. Use a "
+                "Busca por critérios.", interromper=True)
+            return False
+        self._janelas[chave] = max(self._limite_memoria(chave), quantas)
+        self._mesclar(chave, self.banco.mensagens(chave[0], chave[1], quantas))
+        self._preencher_mensagens()
+        return True
 
     def _ir_para_mensagem_do_grupo(self, x):
         """Resposta em particular a uma mensagem de grupo: abre a conversa do
@@ -8455,7 +8626,10 @@ class Janela(wx.Frame):
     def _aplicar_opcao(self, chave, valor):
         """Aplica uma opcao vinda da janela de configuracoes, com os mesmos
         efeitos e avisos dos menus, e mantem os itens de menu em dia."""
-        if chave == "depuracao":
+        if chave == "mensagens_por_vez":
+            self.cfg.set(chave, valor)
+            self._mudou_mensagens_por_vez()
+        elif chave == "depuracao":
             self._modo_depuracao(valor)
             self.itens["depuracao"].Check(bool(valor))
         elif chave == "log_detalhado_whatsapp":
@@ -8564,6 +8738,8 @@ class Janela(wx.Frame):
                     self._preencher_mensagens()
             elif chave == "manter_apagadas":
                 m.definir_manter_apagadas(valor)
+            elif chave == "manter_apagadas_no_celular":
+                m.definir_manter_do_celular(valor)
             elif chave in ("chamada_eco", "chamada_ruido",
                            "chamada_retorno"):
                 self._carregar_eco()
@@ -8618,6 +8794,8 @@ class Janela(wx.Frame):
         self._carregar_eco()
         """Quanto do texto da IA entra na linha de cada mensagem."""
         m.definir_manter_apagadas(self.cfg.get("manter_apagadas"))
+        m.definir_manter_do_celular(
+            self.cfg.get("manter_apagadas_no_celular"))
         m.definir_limites_ia(self.cfg.get("ia_linha_descricao"),
                              self.cfg.get("ia_linha_transcricao"))
 
@@ -9080,6 +9258,39 @@ class Janela(wx.Frame):
         if lanc is not None:
             wx.CallAfter(self._resultado_atualizacao, lanc, "", True)
 
+    def _estado_da_copia(self):
+        """Confere a copia uma vez por abertura; quem chega durante a
+        conferencia espera o resultado. Sem conferir, tenta de novo depois."""
+        with self._trava_da_copia:
+            if self._copia_conferida in (None, copia_oficial.SEM_CONFERIR):
+                self._copia_conferida = copia_oficial.conferir_programa()
+            return self._copia_conferida
+
+    def _conferir_copia_ao_abrir(self):
+        estado = self._estado_da_copia()
+        if copia_oficial.nao_oficial(estado):
+            wx.CallAfter(self._alertar_copia, estado)
+
+    @seguro
+    def _alertar_copia(self, estado):
+        if self._ocupado_para_avisar():
+            wx.CallLater(30000, self._alertar_copia, estado)
+            return
+        bipe("erro")
+        wx.MessageBox(copia_oficial.texto_do_alerta(estado),
+                      "Cópia não oficial do %s" % NOME,
+                      wx.OK | wx.ICON_WARNING, self)
+
+    @seguro
+    def _copia_sem_atualizacoes(self, estado, manual):
+        log.info("sem busca de atualizações: cópia %s", estado)
+        if not manual:
+            return
+        wx.MessageBox(
+            copia_oficial.TEXTOS_DO_ESTADO[estado] +
+            "\n\nEsta cópia não busca atualizações.", NOME,
+            wx.OK | wx.ICON_INFORMATION, self)
+
     def _verificar_atualizacoes(self, manual=True, periodica=False):
         """Consulta as versoes publicadas no GitHub, sem travar a janela.
         Manual: sempre responde. Automatica (ao abrir): so fala se ha versao
@@ -9094,6 +9305,10 @@ class Janela(wx.Frame):
             self.cfg.set("atualizacao_dia", hoje)
 
         def trabalho():
+            estado = self._estado_da_copia()
+            if copia_oficial.sem_atualizacoes(estado):
+                wx.CallAfter(self._copia_sem_atualizacoes, estado, manual)
+                return
             if baixar_do_dia:
                 atualizacao.baixar_arquivo_do_dia()
             try:
@@ -9246,12 +9461,15 @@ class Janela(wx.Frame):
         atualizador.aplicar(programa, nova)
 
     def _sobre(self):
+        conferida = copia_oficial.TEXTOS_DO_ESTADO.get(
+            self._copia_conferida, "Ainda estou conferindo esta cópia.")
         wx.MessageBox(
-            "%s %s\nCliente de WhatsApp e Telegram feito para leitores de "
-            "tela.\nSoftware experimental: use por sua conta e risco.\n"
+            "%s %s\n%s\nCliente de WhatsApp e Telegram feito para leitores "
+            "de tela.\nSoftware experimental: use por sua conta e risco.\n"
             "Software livre sob a licença GPL versão 3 ou "
-            "posterior.\nDados guardados em: %s" % (
-                NOME, VERSAO, config.pasta_dados()),
+            "posterior.\n%s\nDados guardados em: %s" % (
+                NOME, VERSAO, conferida, copia_oficial.AVISO_CANAIS,
+                config.pasta_dados()),
             "Sobre o %s" % NOME, wx.OK | wx.ICON_INFORMATION, self)
 
     # ================================================================ saida

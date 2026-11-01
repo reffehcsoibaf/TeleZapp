@@ -1,0 +1,109 @@
+﻿diff --git a/retry.go b/retry.go
+index 140e9e5..2b8174b 100644
+--- a/retry.go
++++ b/retry.go
+@@ -43,6 +43,8 @@ type recentMessageKey struct {
+ type RecentMessage struct {
+ 	wa *waE2E.Message
+ 	fb *waMsgApplication.MessageApplication
++	// peer: sent only to our own devices (never saved in the retry message store)
++	peer bool
+ }
+ 
+ func (rm RecentMessage) IsEmpty() bool {
+@@ -92,6 +94,21 @@ func (cli *Client) addRecentMessage(ctx context.Context, to types.JID, id types.
+ 	return nil
+ }
+ 
++func (cli *Client) addRecentPeerMessage(to types.JID, id types.MessageID, wa *waE2E.Message) {
++	cli.recentMessagesLock.Lock()
++	defer cli.recentMessagesLock.Unlock()
++	key := recentMessageKey{to, id}
++	if cli.recentMessagesList[cli.recentMessagesPtr].ID != "" {
++		delete(cli.recentMessagesMap, cli.recentMessagesList[cli.recentMessagesPtr])
++	}
++	cli.recentMessagesMap[key] = RecentMessage{wa: wa, peer: true}
++	cli.recentMessagesList[cli.recentMessagesPtr] = key
++	cli.recentMessagesPtr++
++	if cli.recentMessagesPtr >= len(cli.recentMessagesList) {
++		cli.recentMessagesPtr = 0
++	}
++}
++
+ func (cli *Client) getRecentMessage(to types.JID, id types.MessageID) RecentMessage {
+ 	cli.recentMessagesLock.RLock()
+ 	defer cli.recentMessagesLock.RUnlock()
+@@ -263,7 +280,7 @@ func (cli *Client) handleRetryReceipt(ctx context.Context, receipt *events.Recei
+ 				AxolotlSenderKeyDistributionMessage: signalSKDMessage.Serialize(),
+ 			}
+ 		}
+-	} else if receipt.IsFromMe {
++	} else if receipt.IsFromMe && !msg.peer {
+ 		if msg.wa != nil {
+ 			msg.wa = &waE2E.Message{
+ 				DeviceSentMessage: &waE2E.DeviceSentMessage{
+@@ -379,6 +396,9 @@ func (cli *Client) handleRetryReceipt(ctx context.Context, receipt *events.Recei
+ 	if edit, ok := node.Attrs["edit"]; ok {
+ 		attrs["edit"] = edit
+ 	}
++	if msg.peer {
++		addPeerMessageAttrs(attrs, msg.wa)
++	}
+ 	var content []waBinary.Node
+ 	if msg.wa != nil {
+ 		content = cli.getMessageContent(
+diff --git a/send.go b/send.go
+index be8bf3b..6923707 100644
+--- a/send.go
++++ b/send.go
+@@ -386,8 +386,9 @@ func (cli *Client) SendMessage(ctx context.Context, to types.JID, message *waE2E
+ 	resp.DebugTimings.Queue = time.Since(start)
+ 	defer cli.messageSendLock.Unlock()
+ 
+-	// Peer message retries aren't implemented yet
+-	if !req.Peer {
++	if req.Peer {
++		cli.addRecentPeerMessage(to, req.ID, message)
++	} else {
+ 		err = cli.addRecentMessage(ctx, to, req.ID, message, nil)
+ 		if err != nil {
+ 			return
+@@ -1064,6 +1065,16 @@ func getEditAttribute(msg *waE2E.Message) types.EditAttribute {
+ 	return types.EditAttributeEmpty
+ }
+ 
++func addPeerMessageAttrs(attrs waBinary.Attrs, message *waE2E.Message) {
++	attrs["category"] = "peer"
++	if message.GetProtocolMessage().GetType() == waE2E.ProtocolMessage_APP_STATE_SYNC_KEY_REQUEST {
++		attrs["push_priority"] = "high"
++	} else if message.GetProtocolMessage().GetPeerDataOperationRequestMessage().GetPeerDataOperationRequestType() == waE2E.PeerDataOperationRequestType_HISTORY_SYNC_ON_DEMAND {
++		attrs["push_priority"] = "high_force"
++		attrs["privacy_sensitive"] = "1"
++	}
++}
++
+ func (cli *Client) preparePeerMessageNode(
+ 	ctx context.Context,
+ 	to types.JID,
+@@ -1072,17 +1083,11 @@ func (cli *Client) preparePeerMessageNode(
+ 	timings *MessageDebugTimings,
+ ) (*waBinary.Node, error) {
+ 	attrs := waBinary.Attrs{
+-		"id":       id,
+-		"type":     "text",
+-		"category": "peer",
+-		"to":       to,
+-	}
+-	if message.GetProtocolMessage().GetType() == waE2E.ProtocolMessage_APP_STATE_SYNC_KEY_REQUEST {
+-		attrs["push_priority"] = "high"
+-	} else if message.GetProtocolMessage().GetPeerDataOperationRequestMessage().GetPeerDataOperationRequestType() == waE2E.PeerDataOperationRequestType_HISTORY_SYNC_ON_DEMAND {
+-		attrs["push_priority"] = "high_force"
+-		attrs["privacy_sensitive"] = "1"
++		"id":   id,
++		"type": "text",
++		"to":   to,
+ 	}
++	addPeerMessageAttrs(attrs, message)
+ 	start := time.Now()
+ 	plaintext, err := proto.Marshal(message)
+ 	timings.Marshal = time.Since(start)

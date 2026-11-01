@@ -3,6 +3,32 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.11.01.0
+
+- Título da janela (pedido do responsável): sem conversa aberta e sem atividade em andamento, mostra entre parênteses o total de conversas não lidas, como `TeleZapp (3)`, as mesmas do filtro Não lidas (fora arquivadas, trancadas e status), em todas as contas.
+
+- Salvar o conteúdo da conversa (pedido do responsável): avisa logo que está preparando, em vez de ficar em silêncio com a janela parada enquanto lê uma conversa grande; a leitura saiu da tela. Pedir de novo durante o preparo informa o andamento, sem abrir outro salvamento, e o título da janela mostra o preparo enquanto ele dura.
+
+- Marcar todas no modo de seleção (pedido do responsável): primeiro item do menu de contexto e Ctrl+A, nas conversas e nas mensagens. Vale para o que a lista mostra.
+
+- Navegar entre menções e respostas (sugestão de usuário): `ir_citacao_proxima` e `ir_citacao_anterior` em Ir para, sem tecla de fábrica. `Banco.mensagens_que_citam` procura na hora a marca, as menções guardadas e as respostas a mensagens minhas, então vale para o histórico sem migrar nada. No WhatsApp, as menções só são reconhecidas com a conta conectada.
+
+- Opção `manter_apagadas_no_celular` (Privacidade, desmarcada; pedido do responsável): os avisos de mensagem e conversa apagadas no WhatsApp do celular são ignorados, e a mensagem minha apagada para todos fica marcada como apagada pelo autor. Só vale para o WhatsApp. Sem teste real.
+
+- Formulário `site/relatar.html` removido (pedido do responsável): os relatos vêm só de Ajuda, Feedback, e a página do projeto aponta para lá e para o GitHub. O Worker continua, porque a janela de Feedback o usa.
+
+- Home e busca de mensagens que faltam com a sessão quebrada (relato de usuário; sem teste real): o celular não decifrava o pedido e pedia reenvio, mas o whatsmeow não reenvia mensagens `peer`. Patch `whatsmeow-reenvio-peer.diff` na DLL faz o reenvio. Se mesmo assim não houver resposta, `TEXTO_SESSAO_COM_DEFEITO` orienta o novo pareamento, no lugar de mandar abrir o WhatsApp.
+
+- Verificar um arquivo na página do projeto (pedido do responsável): o navegador calcula o SHA-256 do arquivo escolhido e compara com os das notas das Releases. As notas passam a trazer também o hash do instalador e do `TeleZapp.exe` da pasta; o do zip já estava em todas, então zips antigos são reconhecidos. Publica quando a `main` muda. As notas das 18 Releases já publicadas ganharam o hash do instalador (cópia das notas antigas em `Backup/notas-das-releases-antes-dos-hashes`); o do `TeleZapp.exe` da pasta só existe da próxima em diante.
+
+- Cópias oficiais (pedido do responsável): `nucleo/copia_oficial.py` compara os arquivos em uso com `TeleZapp.conferencia.txt`, novo arquivo de cada Release (hash de cada arquivo do programa e do instalador), gerado por `empacotar.py`. Sobre mostra o resultado; cópia diferente ou de versão não publicada recebe alerta ao abrir e não busca atualizações, e o instalador alerta na tela de boas-vindas. Pelo código-fonte não há alerta nem atualização. Aviso de responsabilidade em Sobre, boas-vindas, guia, README, notas da Release e página.
+
+- Quantas mensagens por vez agora é opção geral (pedido do responsável): `mensagens_por_vez` (Mensagens, 50 a 5000, padrão 100) no lugar do botão nos detalhes da conversa. A tabela `mensagens_por_vez` sai do banco, e os valores por conversa se perdem.
+- Mídia expirada do WhatsApp pedida ao celular (pedido do responsável; sem teste real ainda): DLL com `MediaRetryStart/Wait/Cancel` (`fontes\chamadas\media_retry.go`, cópia em `docs/neonize/chamadas-media_retry.go`), sobre `SendMediaRetryReceipt` do whatsmeow. Em `baixar_arquivo`, status 403, 404 ou 410 faz o pedido, espera até 45 s, guarda o caminho novo na ficha e baixa de novo; sem resposta, `CelularSemResposta`. No lote, `GerenteMidias` espera e tenta de novo a cada 20 s, até 30 minutos, com aviso uma vez: confirmado em log que a pausa anterior de 5 minutos fazia cerca de 3900 mídias falharem em menos de um minuto. O resumo separa "fora do celular" de "sem resposta".
+- Atalho para cada tipo de conversa (pedido do responsável): submenu Ir para, Tipo de conversa, com um item `tipo_<valor>` por entrada de `FILTROS_TIPO`, sem tecla de fábrica. `Janela._ir_para_tipo` escolhe o tipo, leva o foco à lista e fala o resumo; Trancadas escondidas continuam exigindo o código.
+- Conversa fixada no Telegram ia para Arquivadas (relato do responsável: Mensagens salvas e um robô, que não estavam arquivados; correção confirmada por ele no programa real): `_atualizar_conversas` marcava como arquivada tudo que vinha da busca `folder=1`, e a segunda busca sobrescrevia a primeira. Agora vale o `folder_id` da própria conversa, e cada conversa entra uma vez só.
+- Conversa fixada ficava em Arquivadas e fora de Fixadas (relato do responsável): `passa_filtro` tirava toda arquivada antes de olhar `fixadas`, e fixar não mexia no arquivamento. Agora `Janela._aplicar_fixar` (conversa e seleção) desarquiva ao fixar, também na conta, e o tipo Fixadas mostra as que já estão fixadas e arquivadas. Desafixar e arquivar seguem como antes.
+
 ## 2026.10.31.1
 
 - Emoji na janela Novo status (pedido do responsável): botão "Inserir emoji" e a tecla de `inserir_emoji`, personalizada ou não, por `EVT_CHAR_HOOK`, porque a aceleradora da janela principal não chega ao diálogo. **Sem teste com leitor de tela.**

@@ -37,64 +37,13 @@ Aperte Alt para abrir o Menu. Use a seta para baixo para percorrer, a seta para 
 
 Os submenus, nesta ordem:
 Novo: tudo o que se cria. Nova mensagem, Nova chamada, Nova enquete, Novo contato, Novo status ou história, Nova conta, Novo grupo, Novo canal, Nova comunidade e Entrar em um grupo por link, que serve também para links de comunidade e de canal do WhatsApp.
-Ir para: a lista de conversas, a lista de mensagens, o campo editável (onde se escreve a mensagem), os filtros de serviço ou conta e de tipo de conversa, e a mensagem respondida.
+Ir para: a lista de conversas, a lista de mensagens, o campo editável (onde se escreve a mensagem), os filtros de serviço ou conta e de tipo de conversa, o submenu Tipo de conversa, que escolhe um tipo direto, e a mensagem respondida.
 Mensagens, Conversas, Contatos, Chamadas e Mídias: os comandos de cada assunto.
 Exibir: o que as listas mostram e o que é falado.
-Ferramentas: Gerenciar contas, Reconectar as contas, Fazer backup, Restaurar backup, Configurações, Instalar, Criar cópia portátil, Desinstalar e Sair.
-Ajuda: o guia, as teclas de atalho, as novidades, Verificar atualizações, as pastas de logs e de sons, o submenu Depurar e Sobre.
+Ferramentas: Gerenciar contas, Reconectar as contas, Editar o meu perfil, Fazer backup, Restaurar backup, Configurações, Instalar, Criar cópia portátil, Desinstalar, Personalizar os atalhos, Minimizar a janela e continuar em segundo plano e Sair.
+Ajuda: Guia de uso, Teclas de atalho, Novidades desta versão, Página do projeto na internet, Feedback, Entrar no grupo de suporte no WhatsApp, Verificar atualizações, Exportar logs, Abrir a pasta de logs, Abrir a pasta de sons, o submenu Depurar e Sobre o TeleZapp.
 
 Para sair do programa, há também o botão Sair, logo depois do campo de busca, e Ctrl+Q.
-
-# Atalhos
-Esta é a lista de fábrica. Veja também o assunto Mudar os atalhos.
-
-Alt+1: lista de conversas.
-Alt+2: na lista de conversas, vai para a próxima conversa com mensagens não lidas; dentro da conversa, vai para o marcador de não lidas.
-Alt+3: lista de mensagens.
-Alt+4: filtro de serviço ou conta.
-Alt+5: filtro de tipo de conversa.
-Home e End: início e fim da lista.
-Ctrl+E: ir para a caixa de digitação.
-Ctrl+F: buscar conversa.
-Ctrl+N: nova mensagem.
-Ctrl+R: ouvir a última mensagem da conversa aberta.
-F5: atualizar a lista de conversas.
-Ctrl+I: detalhes da conversa selecionada.
-Delete: apagar a conversa ou a mensagem selecionada, sempre perguntando antes.
-Ctrl+Espaço: modo de seleção, nas duas listas.
-Tecla Aplicativos ou Shift+F10: menu do item selecionado.
-Alt+Enter: dados e texto completo da mensagem.
-F2: editar a mensagem de texto selecionada.
-Ctrl+Shift+R: responder.
-Ctrl+Shift+E: encaminhar.
-Ctrl+Shift+C: copiar o texto.
-Ctrl+Shift+G: reagir.
-Ctrl+Shift+F: favoritar ou desfavoritar.
-Ctrl+ponto: inserir emoji.
-F7: verificar a ortografia.
-Ctrl+V, na caixa de digitar: colar arquivos ou imagens.
-Ctrl+Enter: enviar a mensagem digitada.
-Ctrl+O: abrir a mídia.
-Ctrl+B: baixar a mídia sem abrir.
-Ctrl+Shift+A: anexar e enviar arquivo.
-Ctrl+Shift+M: gravar do microfone.
-Ctrl+Shift+S: gravar o som do computador.
-Ctrl+Shift+B: gravar o som do computador e o microfone.
-Ctrl+Shift+Seta para cima e para baixo: áudio mais rápido e mais lento.
-Ctrl+Shift+0: velocidade normal.
-Ctrl+Shift+Seta para a esquerda e para a direita: voltar e avançar 5 segundos.
-Ctrl+Shift+Page Up e Page Down: voltar e avançar 30 segundos.
-Ctrl+Shift+L: ligar para a conversa.
-Ctrl+Shift+J: mostrar a janela da chamada.
-Ctrl+Shift+K: silenciar ou ativar o microfone.
-Ctrl+Shift+H: desligar.
-Ctrl+Shift+U: novo status ou história.
-Ctrl+Shift+T: esconder as conversas trancadas.
-Ctrl+Shift+D: depurar a mensagem.
-Ctrl+vírgula: configurações.
-F1: este guia.
-Shift+F1: resumo das teclas.
-Ctrl+Q: sair.
 
 # Mudar os atalhos
 Quase toda função do menu tem uma tecla de atalho, e você pode mudar todas em Configurações, categoria Atalhos. Há uma busca por função ou por tecla e uma lista com a tecla de cada função.
@@ -104,6 +53,8 @@ Enter na função abre a janela em que você aperta a combinação nova. Se ela 
 Também dá para remover o atalho de uma função e voltar ao padrão, de uma função ou de todas.
 
 Funções como pausar ou descartar a gravação por atalho nascem sem tecla: escolha uma nessa tela.
+
+Cada tipo de conversa também tem o seu atalho, que nasce sem tecla: Todas as conversas, Não lidas, Pessoais, Grupos e os outros, em "Tipo de conversa". O atalho escolhe o tipo e leva você para a lista de conversas. Sem atalho, os mesmos tipos estão no menu Ir para, submenu Tipo de conversa.
 
 Os atalhos personalizados entram no backup, na parte Configurações, e voltam na restauração.
 
@@ -171,6 +122,8 @@ Se a conversa tem mensagens não lidas, ela abre com o foco no marcador, mesmo q
 
 Com uma conversa aberta, o título da janela mostra o status da pessoa depois do nome: online, visto por último ou digitando. A opção está em Configurações, Interface: "Mostrar status de presença no título da janela".
 
+Sem conversa aberta e sem nenhuma atividade em andamento, o título mostra entre parênteses quantas conversas têm mensagens não lidas, por exemplo "TeleZapp (3)". São as mesmas do filtro Não lidas, somando todas as contas.
+
 Os avanços longos abrem uma janela com uma barra de progresso, que o leitor de tela acompanha: atualizar o TeleZapp, instalar, criar cópia portátil, fazer e restaurar backup, baixar uma mídia que você pediu e enviar um arquivo grande.
 
 O download e o envio só abrem a janela se passarem de um segundo. O download pode ser cancelado ali, também com Esc. Dá para desligar isso para as transferências em Configurações, Mídias.
@@ -181,6 +134,8 @@ O TeleZapp não fala a porcentagem. Se a barra fala, bipa, faz os dois ou fica q
 Ctrl+Espaço, na lista de conversas ou na de mensagens, liga o modo de seleção e já marca o item em foco.
 
 Depois, Espaço marca ou desmarca os outros itens. O leitor de tela diz "Marcada" e quantas há.
+
+Para marcar tudo, aperte Ctrl+A no modo de seleção ou escolha "Marcar todas" na tecla Aplicativos. Com tudo marcado, o mesmo comando desmarca. Vale para o que a lista está mostrando: nas conversas, o que passa pelos filtros; nas mensagens, as que já estão na lista, então traga as anteriores com Home antes, se quiser incluí-las.
 
 A tecla Aplicativos ou Shift+F10 mostra as ações para todos os marcados:
 Nas conversas: arquivar, fixar, silenciar, marcar como lidas e apagar.
@@ -229,7 +184,7 @@ Em Exibir, você também liga ou desliga o som e a fala das mensagens novas.
 # Ler mensagens
 Na lista de conversas, Enter abre a conversa e leva você às mensagens: ao item Início das mensagens não lidas, se houver, ou à última mensagem. O leitor de tela fala esse item uma vez só, com a contagem, e a seta para baixo lê a primeira mensagem não lida. Esc fecha a conversa e volta para as conversas.
 
-A lista mostra 100 mensagens de cada vez. Para ver as anteriores, aperte Home: a primeira vez leva à primeira da lista, e a seguinte traz mais mensagens, com a seleção no mesmo lugar, e a seta para cima continua a leitura. Quando as guardadas no computador acabam, o TeleZapp pede mais ao serviço. No WhatsApp, ele avisa para abrir o aplicativo no celular, de onde vêm até 50 mensagens por vez. Para mudar o número de uma conversa, use o botão Mensagens por vez nos detalhes dela (Ctrl+I).
+A lista mostra 100 mensagens de cada vez. Para ver as anteriores, aperte Home: a primeira vez leva à primeira da lista, e a seguinte traz mais mensagens, com a seleção no mesmo lugar, e a seta para cima continua a leitura. Quando as guardadas no computador acabam, o TeleZapp pede mais ao serviço. No WhatsApp, ele avisa para abrir o aplicativo no celular, de onde vêm até 50 mensagens por vez. Para mudar esse número, use "Quantas mensagens buscar por vez", em Configurações, Mensagens. Ele vale para todas as conversas.
 
 Nos grupos do Telegram, a lista também mostra quem entrou, saiu, foi adicionado ou removido, sem som nem fala ao chegar. Para esconder esses avisos, desmarque "Mostrar os avisos de entrada e saída de membros" em Configurações, Mensagens.
 
@@ -238,6 +193,8 @@ Enter numa mensagem de texto abre o texto numa caixa somente leitura, com os bot
 Ctrl+R ouve a última mensagem da conversa aberta.
 
 Uma resposta mostra, depois do texto dela, um trecho da mensagem original: a resposta, em resposta a Ana: "o texto da mensagem". Se a original é muito antiga e não está guardada, a linha diz que é uma resposta a uma mensagem mais antiga.
+
+Em Ir para, "Próxima menção ou resposta a mim" e "Menção ou resposta a mim anterior" levam a seleção até a mensagem seguinte ou anterior que menciona você ou responde a uma mensagem sua, nesta conversa. As que estão fora da lista são trazidas das guardadas no computador, e Esc volta para onde você estava. Elas nascem sem tecla: escolha as suas em Configurações, Atalhos.
 
 No menu de contexto de uma resposta, e em Ir para, o item "Ir para a mensagem respondida" leva a seleção até a mensagem original. Esc volta para a resposta de onde você saiu, e um novo Esc fecha a conversa.
 
@@ -312,6 +269,8 @@ Quando alguém reage a uma mensagem, a reação aparece no fim da linha dela, po
 Se a reação for a uma mensagem sua, o TeleZapp também fala quem reagiu, com qual emoji e o começo da mensagem. Essa fala pode ser desligada em Configurações, categoria Avisos, "Falar reações às minhas mensagens".
 
 Para reagir, use Ctrl+Shift+G com a mensagem selecionada ou "Reagir..." no menu de contexto. Escolha um dos emojis da lista curta, "Outro emoji..." para buscar pelo nome ou "Tirar a minha reação".
+
+No WhatsApp, o que você apaga no celular também é apagado aqui. Para manter uma cópia neste computador, marque "Manter no computador o que eu apagar no WhatsApp do celular", em Configurações, Privacidade.
 
 Uma mensagem editada mostra o texto novo e termina com "(editada)". Uma mensagem apagada para todos pelo autor passa a ser lida como "mensagem apagada". Isso só vale para mensagens que o TeleZapp já tinha guardado.
 
@@ -397,13 +356,13 @@ Numa conversa do WhatsApp que só mostra o telefone, o TeleZapp procura o nome n
 A janela traz:
 Dados e uso de espaço.
 Mídias, com filtro por tipo.
-Baixar as mídias que faltam: avisa o que vai fazer e baixa de uma vez as mídias da conversa que ainda não estão neste computador, com barra de progresso, resumo no fim e Cancelar. Algumas podem não estar mais disponíveis nos servidores do WhatsApp.
+Baixar as mídias que faltam: avisa o que vai fazer e baixa de uma vez as mídias da conversa que ainda não estão neste computador, com barra de progresso, resumo no fim e Cancelar. Quando uma mídia do WhatsApp expirou nos servidores, o TeleZapp pede ao celular que a envie de novo. Para isso, deixe o WhatsApp aberto e online no celular, que também precisa ainda ter o arquivo. Se ele parar de responder, por exemplo com a tela bloqueada, o TeleZapp avisa e espera: os downloads continuam sozinhos quando ele voltar, e o botão Cancelar segue valendo. Depois de 30 minutos sem resposta, o que faltar fica de fora, e o resumo diz quantas; é só usar o botão de novo.
 Membros e grupos em comum.
 As mensagens favoritas e as fixadas da conversa.
 Limpar a conversa: a janela de limpeza só dessa conversa.
 Para administradores de grupo do WhatsApp, as ferramentas de administração.
 
-Salvar o conteúdo da conversa, no menu de contexto da conversa ou em Conversas, grava um .zip com o texto das mensagens e as mídias já baixadas.
+Salvar o conteúdo da conversa, no menu de contexto da conversa ou em Conversas, grava um .zip com o texto das mensagens e as mídias já baixadas. Depois de escolher o arquivo, o TeleZapp avisa que está preparando o conteúdo e avisa de novo ao terminar. Enquanto isso, o título da janela mostra o preparo; pedir de novo nesse meio tempo informa quanto já foi feito.
 
 # Abrir fotos, vídeos, áudios e documentos
 Numa mensagem com mídia, Enter ou Ctrl+O abre a mídia dentro do TeleZapp. Se ela ainda não foi baixada, o TeleZapp baixa primeiro e avisa o andamento pelo leitor de tela. Esc cancela. Ctrl+B baixa sem abrir.
@@ -798,6 +757,12 @@ Arquivos temporários ficam numa subpasta do próprio programa e são apagados a
 Para onde vão as suas mensagens: o TeleZapp não tem servidor próprio e não envia dados de uso a ninguém. Ele conversa direto com o WhatsApp e com o Telegram, com a criptografia que esses serviços já usam. As suas conversas, sessões e mídias ficam só neste computador. O que vai para quem mantém o TeleZapp é só o que você mandar em Ajuda, Feedback. O código do programa é aberto, e qualquer pessoa pode examiná-lo.
 
 Consulta de versão nova: o TeleZapp consulta o GitHub e, uma vez por dia, baixa de lá um arquivo público. O GitHub soma os downloads de cada arquivo, e esse total dá uma ideia de quantas cópias estão em uso. Nada identifica você nem o seu computador. Quem desliga "Avisar quando houver versão nova do TeleZapp" só faz esse download ao usar Ajuda, Verificar atualizações.
+
+Cópias oficiais: os canais oficiais do TeleZapp são a página do projeto e as atualizações feitas pelo próprio programa. Cópias obtidas fora deles não são de responsabilidade de Fábio Scheffer Moraes. A cada abertura, o TeleZapp baixa do GitHub a lista dos arquivos publicados com esta versão e compara com os que estão no computador; o instalador faz o mesmo consigo. O resultado aparece em Ajuda, Sobre. Se a cópia for diferente, ou se a versão não tiver sido publicada, o programa avisa e não busca atualizações: baixe a versão oficial pela página do projeto. Essa conferência ajuda, mas não é uma garantia, porque quem altera o programa também pode alterar o aviso, e ela olha só os arquivos do programa, não o que vier em volta deles.
+
+O TeleZapp oficial funciona no Windows 10 ou 11 e não é distribuído em contêiner. Uma cópia que rode em Windows mais antigo ou que venha nesse formato não foi feita nem verificada pelo autor.
+
+Se você recebeu o TeleZapp de outra pessoa, confira o arquivo recebido na página do projeto antes de executar. Na dúvida, baixe sempre pela página do projeto. Essa página também tem a seção Verificar um arquivo: escolha o instalador que você recebeu, e o navegador diz, sem enviar o arquivo a ninguém, se é o que foi publicado.
 
 Senhas e códigos: o telefone, o código de confirmação e a senha de duas etapas são digitados só nas telas de entrada do WhatsApp e do Telegram. O TeleZapp não guarda a senha. O que fica guardado é a sessão, que mantém a conta conectada.
 

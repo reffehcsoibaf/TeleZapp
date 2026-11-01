@@ -57,6 +57,11 @@ h2 { font-size: 1.4rem; margin: 2.2rem 0 .6rem; }
 .botao:hover { filter: brightness(1.1); }
 .secundario { background: transparent; color: var(--destaque); border: 2px solid var(--destaque); }
 .nota { color: var(--suave); font-size: .95rem; margin: .3rem 0 0; }
+.verificar { display: flex; flex-wrap: wrap; gap: .8rem; align-items: center; margin: .8rem 0; }
+.verificar label { flex-basis: 100%; font-weight: 700; }
+button.botao { border: 0; font: inherit; font-weight: 700; cursor: pointer; }
+.resultado { font-weight: 700; margin: .8rem 0; }
+.resultado:empty { display: none; }
 .aviso {
   background: var(--aviso-fundo);
   border-left: 5px solid var(--aviso-borda);
@@ -88,6 +93,7 @@ footer { border-top: 1px solid var(--linha); margin-top: 3rem; padding: 1.5rem 0
       <a class="botao secundario" href="https://github.com/reffehcsoibaf/TeleZapp/releases">Todas as versões</a>
     </div>
     <p class="nota" id="versao" role="status">Para Windows 10 ou 11. Gratuito, sem anúncios.</p>
+    <p class="nota">Esta página, as versões publicadas no GitHub do projeto e as atualizações feitas pelo próprio programa são os canais oficiais. Cópias obtidas fora deles não são de responsabilidade de Fábio Scheffer Moraes. Em Ajuda, Sobre, o programa diz se a cópia confere com a versão publicada.</p>
     <div class="aviso" role="note">
       <strong>Software experimental.</strong> O TeleZapp está em desenvolvimento e pode ter erros, inclusive em mensagens e conversas. Use por sua conta e risco. Não é um produto oficial do WhatsApp nem do Telegram.
     </div>
@@ -101,6 +107,20 @@ footer { border-top: 1px solid var(--linha); margin-top: 3rem; padding: 1.5rem 0
       <li>Para atualizar, use <em>Ajuda, Verificar atualizações</em> dentro do programa: ele baixa a versão nova, confere o arquivo e se reabre atualizado, mantendo os seus dados.</li>
     </ol>
     <p>Na página de cada versão há também o <code>TeleZapp.zip</code>, a pasta do programa pronta para extrair, que o próprio TeleZapp usa para se atualizar, e o código de conferência SHA-256 dele.</p>
+  </section>
+
+  <section aria-labelledby="verificar">
+    <h2 id="verificar">Verificar um arquivo</h2>
+    <p>Recebeu o TeleZapp de outra pessoa ou de outro site? Escolha o arquivo aqui para saber se é o que foi publicado. Serve para o instalador <code>TeleZapp.exe</code>, para o <code>TeleZapp.zip</code> e para o <code>TeleZapp.exe</code> da pasta do programa instalado. O arquivo não é enviado a lugar nenhum: a conferência acontece no seu navegador.</p>
+    <p>O TeleZapp oficial funciona no Windows 10 ou 11 e não é distribuído em contêiner. Uma cópia que rode em Windows mais antigo ou que venha nesse formato não foi feita nem verificada pelo autor. Use esta seção antes de executar.</p>
+    <p>Confira se está mesmo em <code>reffehcsoibaf.github.io/TeleZapp</code>, porque um site falso poderia dizer que qualquer arquivo é oficial.</p>
+    <form class="verificar" id="form-verificar">
+      <label for="arquivo-verificar">Arquivo a verificar</label>
+      <input type="file" id="arquivo-verificar" accept=".exe,.zip" required>
+      <button type="submit" class="botao" id="botao-verificar">Verificar</button>
+    </form>
+    <p class="resultado" id="resultado-verificar" role="status"></p>
+    <p class="nota">Na pasta instalada, só o <code>TeleZapp.exe</code> é conferido aqui. A conferência de todos os arquivos fica em Ajuda, Sobre, dentro do programa.</p>
   </section>
 
   <section aria-labelledby="recursos">
@@ -120,7 +140,7 @@ footer { border-top: 1px solid var(--linha); margin-top: 3rem; padding: 1.5rem 0
     <h2 id="mais">Mais informações</h2>
     <ul>
       <li><a href="https://github.com/reffehcsoibaf/TeleZapp#readme">Leia o README</a>, com o que já foi comprovado e como rodar pelo código-fonte.</li>
-      <li><a href="relatar.html">Relatar um problema, sugerir algo ou tirar uma dúvida</a>: um formulário simples, sem precisar de conta no GitHub, onde também dá para enviar o registro (log). Quem prefere pode usar o <a href="https://github.com/reffehcsoibaf/TeleZapp/issues">GitHub</a>.</li>
+      <li>Para relatar um problema, sugerir algo ou tirar uma dúvida, use <em>Ajuda, Feedback</em> dentro do programa, sem precisar de conta em lugar nenhum. Quem prefere pode usar o <a href="https://github.com/reffehcsoibaf/TeleZapp/issues">GitHub</a>.</li>
       <li><a href="https://github.com/reffehcsoibaf/TeleZapp">Código-fonte no GitHub</a>.</li>
     </ul>
   </section>
@@ -163,6 +183,80 @@ footer { border-top: 1px solid var(--linha); margin-top: 3rem; padding: 1.5rem 0
         ". Para Windows 10 ou 11. Gratuito, sem anúncios.";
     })
     .catch(function () {});
+})();
+
+// Verificar um arquivo: o navegador calcula o SHA-256 e compara com os valores
+// das notas de cada versão publicada no GitHub. Nada sai deste computador.
+(function () {
+  var form = document.getElementById("form-verificar");
+  var entrada = document.getElementById("arquivo-verificar");
+  var botao = document.getElementById("botao-verificar");
+  var saida = document.getElementById("resultado-verificar");
+  var NOMES = { "zip": "o TeleZapp.zip", "instalador": "o instalador",
+                "programa instalado": "o programa instalado" };
+
+  function publicados() {
+    return fetch("https://api.github.com/repos/reffehcsoibaf/TeleZapp/releases?per_page=100",
+                 { headers: { Accept: "application/vnd.github+json" } })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+      .then(function (lista) {
+        var achados = {};
+        lista.forEach(function (r) {
+          if (r.draft) { return; }
+          var re = /SHA-256 do (zip|instalador|programa instalado)[^:\n]*: `([0-9a-f]{64})`/g;
+          var m;
+          while ((m = re.exec(r.body || ""))) {
+            achados[m[2]] = { oque: NOMES[m[1]], versao: r.tag_name,
+                              data: r.published_at };
+          }
+        });
+        return achados;
+      });
+  }
+
+  function emHexa(buffer) {
+    return Array.prototype.map.call(new Uint8Array(buffer), function (b) {
+      return ("0" + b.toString(16)).slice(-2);
+    }).join("");
+  }
+
+  function mostrar(texto) {
+    saida.textContent = texto;
+    botao.disabled = false;
+  }
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var arquivo = entrada.files[0];
+    if (!arquivo) { return; }
+    if (!window.crypto || !crypto.subtle) {
+      mostrar("Este navegador não consegue fazer a conferência. Baixe o TeleZapp pelo botão desta página.");
+      return;
+    }
+    botao.disabled = true;
+    saida.textContent = "Conferindo o arquivo, aguarde...";
+    arquivo.arrayBuffer()
+      .then(function (dados) { return crypto.subtle.digest("SHA-256", dados); })
+      .then(function (resumo) {
+        var hash = emHexa(resumo);
+        return publicados().then(function (achados) {
+          var a = achados[hash];
+          if (a) {
+            mostrar("Arquivo oficial: é " + a.oque + " da versão " + a.versao +
+                    ", publicada em " + new Date(a.data).toLocaleDateString("pt-BR") + ".");
+          } else {
+            mostrar("Este arquivo não confere com nenhuma versão registrada. " +
+                    "Não o execute: baixe o TeleZapp pelo botão desta página.");
+          }
+        }, function () {
+          mostrar("Não consegui consultar as versões publicadas no GitHub. " +
+                  "Tente de novo daqui a uma hora, ou baixe o TeleZapp pelo botão desta página.");
+        });
+      })
+      .catch(function () {
+        mostrar("Não consegui ler este arquivo. Baixe o TeleZapp pelo botão desta página.");
+      });
+  });
 })();
 </script>
 </body>

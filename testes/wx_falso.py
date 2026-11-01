@@ -120,7 +120,7 @@ class Frame(Janela):
         self.titulo = t
 
     def GetTitle(self):
-        return self.titulo
+        return getattr(self, "titulo", "")
 
     def CreateStatusBar(self):
         self.status = ""

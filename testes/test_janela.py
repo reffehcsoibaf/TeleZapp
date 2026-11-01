@@ -361,6 +361,8 @@ def test_sincronia_interrompida_avisa_e_oferece_parear(j, monkeypatch):
 
 
 def test_esc_fecha_a_conversa(j):
+    j.indice[("t1", "10")].nao_lidas = 0     # titulo sem o total de nao lidas
+    j._ordenar()
     j._abrir_conversa(j.indice[("t1", "20")])
     j._char_hook(Tecla(wx_falso.WXK_ESCAPE))
     assert j.atual is None and wx_falso._foco[0] is j.lista_conv
@@ -373,7 +375,32 @@ def test_esc_fecha_a_conversa(j):
     assert j.lista_conv.itens[1] == "Bruno, Telegram, 1 não lida"
 
 
+def test_titulo_mostra_total_de_conversas_nao_lidas(j):
+    j.indice[("t1", "10")].nao_lidas = 0     # titulo sem o total de nao lidas
+    j._ordenar()
+    assert j.GetTitle() == "TeleZapp"
+    c = j.indice[("t1", "20")]
+    c.nao_lidas = 7                       # conta a conversa, nao as mensagens
+    j._ordenar()
+    assert j.GetTitle() == "TeleZapp (1)"
+    j.indice[("t1", "10")].nao_lidas = 1
+    j._ordenar()
+    assert j.GetTitle() == "TeleZapp (2)"
+    j.indice[("t1", "10")].arquivada = True      # fora, como no filtro
+    j._ordenar()
+    assert j.GetTitle() == "TeleZapp (1)"
+    j.b.publicar(ev.ProgressoMidia("t1", "10", "1", 45))  # atividade: so ela
+    assert j.GetTitle() == "TeleZapp - baixando mídia 45%"
+    j.b.publicar(ev.MidiaBaixada("t1", "10", "1", cancelada=True))
+    assert j.GetTitle() == "TeleZapp (1)"
+    j._abrir_conversa(j.indice[("t1", "30")] if ("t1", "30") in j.indice
+                      else j.indice[("t1", "10")])
+    assert "(1)" not in j.GetTitle()             # conversa aberta: so ela
+
+
 def test_titulo_mostra_sincronia_e_downloads(j):
+    j.indice[("t1", "10")].nao_lidas = 0     # titulo sem o total de nao lidas
+    j._ordenar()
     j.b.publicar(ev.ProgressoSincronia("w1", 40))
     assert j.GetTitle() == "TeleZapp - WhatsApp sincronizando 40%"
     j.b.publicar(ev.ProgressoSincronia("w1", 100))
@@ -2300,18 +2327,77 @@ def _conversa_longa(j, n=350, nao_lidas=0):
     return conv
 
 
-def test_mensagens_por_vez_e_de_cada_conversa_e_vale_ao_abrir(j):
+def _com_citacoes(j, n=350):
+    """Conversa longa: 20 me menciona pelo endereco, 200 tem a marca, 340
+    responde a 339, que e minha, e 345 cita outra pessoa."""
+    conv = m.Conversa("t1", "90", "Longa")
+    msgs = [m.Mensagem("t1", "90", str(i), autor="Ana", data=AGORA - n + i,
+                       texto="m%d" % i) for i in range(1, n + 1)]
+    m.atualizar_extras(msgs[19], mencoes=[{"jid": "5500:3@s.whatsapp.net"}])
+    m.atualizar_extras(msgs[199], citou_voce=True)
+    msgs[338].minha = True
+    msgs[339].resposta_a = "339"
+    m.atualizar_extras(msgs[344], mencoes=[{"jid": "55001@s.whatsapp.net"}])
+    j.banco.salvar_mensagens(msgs)
+    j.indice[conv.chave] = conv
+    j._abrir_conversa(conv)
+    prov = j.contas.provedor
+    j.contas.provedor = lambda c: types.SimpleNamespace(
+        meus_ids=lambda: ("5500",))
+    return conv, prov
+
+
+def test_navegar_entre_mencoes_e_respostas(j):
+    conv, prov = _com_citacoes(j)
+    try:
+        selecao = lambda: j.mapa[j.lista_msgs.GetSelection()]
+        j.lista_msgs.SetSelection(j.mapa.index("350"))
+        j._ir_para_citacao(False)
+        assert selecao() == "340"                 # a resposta a mim
+        j._ir_para_citacao(False)                 # 200 esta fora da lista
+        assert selecao() == "200"
+        ditas = []
+        j.fala.falar = lambda t, interromper=False: ditas.append(t)
+        j._ir_para_citacao(False)                 # so pela mencao guardada
+        assert selecao() == "20"
+        # sem buraco: o que ha entre elas tambem veio
+        assert "100" in j.mapa and "21" in j.mapa
+        j._ir_para_citacao(False)
+        assert selecao() == "20" and "antes desta" in ditas[-1]
+        j._ir_para_citacao(True)
+        assert selecao() == "200"
+        j._ir_para_citacao(True)
+        j._ir_para_citacao(True)
+        assert selecao() == "340" and "depois desta" in ditas[-1]
+    finally:
+        j.contas.provedor = prov
+
+
+def test_mencao_longe_demais_avisa(j, monkeypatch):
+    conv, prov = _com_citacoes(j)
+    monkeypatch.setattr(jm.config, "MENSAGENS_POR_VEZ", (50, 200))
+    try:
+        ditas = []
+        j.fala.falar = lambda t, interromper=False: ditas.append(t)
+        j.lista_msgs.SetSelection(j.mapa.index("251"))
+        j._ir_para_citacao(False)
+        assert j.mapa[j.lista_msgs.GetSelection()] == "200"
+        j.lista_msgs.SetSelection(0)
+        j._ir_para_citacao(False)
+        assert "longe demais" in ditas[-1]
+    finally:
+        j.contas.provedor = prov
+
+
+def test_mensagens_por_vez_vem_da_opcao_e_vale_ja(j):
     conv = _conversa_longa(j)
     assert len(j.cache[conv.chave]) == 100         # o padrao
-    assert j.banco.por_vez("t1", "outra") == 100
-    j._definir_mensagens_por_vez(conv, 300)
+    j._aplicar_opcao("mensagens_por_vez", 300)
+    assert j.cfg.get("mensagens_por_vez") == 300
     assert len(j.cache[conv.chave]) == 300 and len(j.mapa) == 300
-    j._definir_mensagens_por_vez(conv, 50)
+    j._aplicar_opcao("mensagens_por_vez", 50)
     assert len(j.cache[conv.chave]) == 50 and len(j.mapa) == 50
-    assert j.banco.por_vez("t1", "90") == 50       # fica guardado
-    assert j.banco.por_vez("t1", "outra") == 100   # e so desta conversa
     j.cache.pop(conv.chave)
-    j._por_vez.clear()
     j._abrir_conversa(conv)
     assert len(j.cache[conv.chave]) == 50
 
@@ -2710,7 +2796,9 @@ def test_menu_unico_com_submenus_na_ordem_pedida(j):
         "Ir para a lista de conversas", "Ir para a lista de mensagens",
         "Ir para o campo editável", "Ir para o filtro de serviço ou conta",
         "Ir para o filtro de tipo de conversa",
-        "Ir para a mensagem respondida"]
+        "Ir para a mensagem respondida",
+        "Próxima menção ou resposta a mim",
+        "Menção ou resposta a mim anterior"]
     assert "Escrever mensagem" not in nomes(menus["Conversas"])
     # Contas deixou de ser um menu: o que sobrou foi para Ferramentas
     assert "Contas" not in menus
@@ -3050,6 +3138,80 @@ def test_modo_de_selecao_nas_mensagens_favorita_em_massa(j):
     assert not j.modo_msg and not j.marc_msg
 
 
+def test_salvar_conversa_avisa_que_esta_preparando(j, monkeypatch, tmp_path):
+    _conversa_longa(j, 3)
+    conv = j.indice[j.atual]
+    destino = tmp_path / "c.zip"
+    escolhas = []
+
+    def escolher(*a):
+        escolhas.append(a)
+        return str(destino)
+    monkeypatch.setattr(jm.dialogos, "escolher_destino_zip", escolher)
+    pendentes, threads = [], []
+    monkeypatch.setattr(jm.wx, "CallLater",
+                        lambda ms, f: pendentes.append(f), raising=False)
+
+    class Fio:
+        def __init__(self, target, daemon):
+            self.target = target
+
+        def start(self):
+            threads.append(self.target)
+    monkeypatch.setattr(jm.threading, "Thread", Fio)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+
+    j._salvar_conversa(conv)
+    assert not ditas                 # espera o foco voltar antes de falar
+    assert "preparando conversa com %s" % conv.nome in j.GetTitle()
+    pendentes.pop()()
+    assert "Preparando" in ditas[-1] and conv.nome in ditas[-1]
+
+    j._salvar_conversa(conv)         # pedir de novo so informa
+    assert ditas[-1].startswith("Ainda preparando") and len(escolhas) == 1
+
+    threads.pop()()
+    assert j._salvando is None and destino.exists()
+    assert "preparando" not in j.GetTitle()
+    assert "Conversa salva: 3 mensagens" in ditas[-1]
+
+
+def test_titulo_mostra_o_andamento_do_preparo(j):
+    j._salvando = {"nome": "Ana", "feitas": 50, "total": 200}
+    j._atualizar_titulo()
+    assert "preparando conversa com Ana para salvar 25%" in j.GetTitle()
+    j._salvando = None
+
+
+def test_marcar_todas_as_mensagens_e_desmarcar(j):
+    _conversa_longa(j, 5)
+    j.lista_msgs.SetFocus()
+    j.lista_msgs.SetSelection(len(j.lista_msgs.itens) - 1)
+    j._char_hook(Tecla(ord("A"), ctrl=True))       # fora do modo nao marca
+    assert not j.marc_msg
+    j._char_hook(Tecla(wx_falso.WXK_SPACE, ctrl=True))
+    assert j._opcoes_em_massa_msg()[0][0].startswith("Marcar todas")
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._char_hook(Tecla(ord("A"), ctrl=True))
+    ids = {x.id for x in j._mensagens_atuais()}
+    assert j.marc_msg == ids and "%d marcadas." % len(ids) in ditas[-1]
+    assert all(i.startswith("Marcada: ") for i in j.lista_msgs.itens)
+    assert j._opcoes_em_massa_msg()[0][0].startswith("Desmarcar todas")
+    j._marcar_todas(j.lista_msgs)
+    assert not j.marc_msg and j.modo_msg and ditas[-1] == "Nenhuma marcada."
+
+
+def test_marcar_todas_as_conversas_respeita_a_lista(j):
+    j.lista_conv.SetFocus()
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_SPACE, ctrl=True))
+    j._opcoes_em_massa_conv()[0][1]()
+    assert j.marc_conv == set(j._chaves_conv)
+    assert len(j._marcadas_conv()) == len(j._chaves_conv)
+
+
 def test_atalhos_de_conversa_valem_para_todas_as_marcadas(j):
     j.lista_conv.SetFocus()
     j.lista_conv.SetSelection(0)
@@ -3370,7 +3532,7 @@ def test_detalhes_de_pessoa_mostra_dados_do_contato_e_botoes(j):
         "&Editar contato", "&Mídias", "&Baixar as mídias que faltam...",
         "&Grupos em comum",
         "Mensagens fa&voritas", "Mensagens fi&xadas",
-        "Mensagens por ve&z: 100...", "&Limpar a conversa..."]
+        "&Limpar a conversa..."]
 
 
 def test_detalhes_de_grupo_mostram_membros_e_so_admin_ve_administrar(j):
@@ -3391,7 +3553,6 @@ def test_detalhes_de_grupo_mostram_membros_e_so_admin_ve_administrar(j):
     assert rotulos == ["Ver &membros (2)", "&Mídias",
                        "&Baixar as mídias que faltam...",
                        "Mensagens fa&voritas", "Mensagens fi&xadas",
-                       "Mensagens por ve&z: 100...",
                        "Participantes si&lenciados", "&Limpar a conversa..."]
     dados["sou_admin"] = True
     assert "&Administrar grupo" in [r for r, _ in c._botoes()]
@@ -3803,6 +3964,8 @@ def test_qr_depois_de_pedir_codigo_recomeca_a_conexao(j, monkeypatch):
 
 
 def test_status_da_pessoa_no_titulo_da_janela(j):
+    j.indice[("t1", "10")].nao_lidas = 0     # titulo sem o total de nao lidas
+    j._ordenar()
     j.cfg.set("status_no_titulo", True)
     j._abrir_conversa(j.indice[("t1", "20")])
     assert ("observar", "20") in j.contas.p.pedidos
@@ -6213,6 +6376,33 @@ def test_baixar_faltantes_explica_antes_e_nao_comeca_se_a_pessoa_recusar(j):
     assert j.midias.lotes == []
 
 
+def test_resumo_do_lote_separa_o_que_nao_voltou():
+    import telezapp.interface.detalhes as dd
+    lote = types.SimpleNamespace(baixadas=2, indisponiveis=0, canceladas=0,
+                                 fora_do_celular=3, sem_resposta=1)
+    texto = dd.resumo_do_lote(lote)
+    assert "Baixei 2 mídias." in texto
+    assert "3 mídias não estão mais nem no servidor nem no celular." in texto
+    assert "1 mídia ficou de fora, porque o celular parou" in texto
+    assert "servidores" not in texto
+
+
+def test_aviso_de_faltantes_diz_de_onde_vem_a_midia():
+    import telezapp.interface.detalhes as dd
+    whats = dd._onde_buscar_midias(
+        m.Conversa("w1", "1", "A", "whatsapp", "privada"))
+    assert "também no celular" in whats
+    assert "deixe o WhatsApp aberto e online no celular" in whats
+    assert "celular" in dd._onde_buscar_midias(
+        m.Conversa("w1", "2", "G", "whatsapp", "grupo"))
+    canal = dd._onde_buscar_midias(
+        m.Conversa("w1", "3", "C", "whatsapp", "canal"))
+    assert "celular" not in canal and "servidores do WhatsApp" in canal
+    tele = dd._onde_buscar_midias(
+        m.Conversa("t1", "4", "T", "telegram", "privada"))
+    assert "celular" not in tele and "servidores do Telegram" in tele
+
+
 def test_baixar_faltantes_baixa_e_diz_o_resumo(j, monkeypatch):
     import telezapp.interface.detalhes as dd
     from telezapp.interface import progresso
@@ -6827,3 +7017,23 @@ def test_aviso_oculto_em_outra_conversa_nao_conta_como_nao_lida(j):
     conv = m.Conversa("t1", "60", "Grupo", tipo="grupo", nao_lidas=3)
     j.b.publicar(ev.MensagemNova(_aviso_de_entrada(conversa="60"), conv))
     assert j.indice[("t1", "60")].nao_lidas == 2
+
+
+def test_atalho_de_cada_tipo_de_conversa(j):
+    for valor, rotulo in m.FILTROS_TIPO:
+        acao = j.atalhos.acoes["tipo_" + valor]
+        assert acao.padrao == "" and acao.categoria == "Ir para"
+        assert acao.rotulo == "Tipo de conversa: " + rotulo
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._ir_para_tipo("nao_lidas")
+    assert j.filtro_tipo == "nao_lidas" and j.cfg.get(
+        "filtro_conversas") == "nao_lidas"
+    assert j.cx_tipo.GetSelection() == j._indice_tipo()
+    assert ditas[-1].startswith("Não lidas, ")
+    # trancadas escondidas nao abrem pelo atalho
+    j.cfg.set("trancadas_exigir_codigo", True)
+    j._montar_tipos()
+    j._ir_para_tipo("trancadas")
+    assert j.filtro_tipo == "nao_lidas"
+    assert ditas[-1] == "As conversas trancadas estão escondidas."
