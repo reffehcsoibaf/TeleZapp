@@ -57,6 +57,7 @@ from telezapp.nucleo import atualizador
 from telezapp.nucleo import inicializacao
 from telezapp.nucleo import atalhos as nucleo_atalhos
 from telezapp.nucleo import mencoes as nucleo_mencoes
+from telezapp.nucleo import aparencia
 from telezapp.nucleo.ia import catalogo as cat_ia
 from telezapp.nucleo.ia import cofre as cofre_ia
 from telezapp.nucleo.ia import prompts as prompts_ia
@@ -551,9 +552,14 @@ class Janela(wx.Frame):
         self._base_menu = {}
         self._menu_do_item = {}
         self._criar_menus()
+        # decidido uma vez ao abrir: trocar de lista com a janela aberta
+        # confundiria o leitor de tela
+        self.modo_exibicao = aparencia.modo(cfg.get("modo_exibicao"))
+        log.info("modo de exibição: %s", self.modo_exibicao)
         self._criar_controles()
         self._rotular_controles()
         self.CreateStatusBar()
+        self._aplicar_letra()
         self.Bind(wx.EVT_CLOSE, self._ao_fechar)
         if hasattr(wx, "EVT_HOTKEY"):
             self.Bind(wx.EVT_HOTKEY, self._ao_atalho_global)
@@ -1209,6 +1215,29 @@ class Janela(wx.Frame):
         self.fala.falar("TeleZapp", interromper=True)
         self._mostrar_versao_pendente()
 
+    def _aplicar_letra(self, mudou=False):
+        """Poe o tamanho de letra escolhido em todos os controles da janela.
+        No normal, ao abrir, nao mexe em nada: a janela fica como sempre."""
+        porcento = self.cfg.get("tamanho_letra")
+        if not mudou and aparencia.tamanho_da_letra(1, porcento) == 1:
+            return
+        base = wx.SystemSettings.GetFont(wx.SYS_DEFAULT_GUI_FONT)
+        fonte = wx.Font(base)
+        fonte.SetFractionalPointSize(aparencia.tamanho_da_letra(
+            base.GetFractionalPointSize(), porcento))
+
+        def aplicar(controle):
+            controle.SetFont(fonte)
+            for filho in controle.GetChildren():
+                aplicar(filho)
+        self.Freeze()
+        try:
+            aplicar(self)
+            self.painel.Layout()
+            self.Layout()
+        finally:
+            self.Thaw()
+
     def _sair(self):
         """Encerra de verdade, mesmo com a opcao de segundo plano ligada."""
         self._saindo = True
@@ -1244,8 +1273,12 @@ class Janela(wx.Frame):
         rot_conv = wx.StaticText(painel, label="Conversas")
         self.lista_conv = ListaDeTextos(painel, name="Conversas")
         self.rot_msgs = wx.StaticText(painel, label="Mensagens")
-        self.lista_msgs = wx.ListBox(painel, style=wx.LB_SINGLE | wx.LB_HSCROLL,
-                                     name="Mensagens")
+        if self.modo_exibicao == aparencia.VISUAL:
+            from telezapp.interface.lista_visual import ListaVisual
+            self.lista_msgs = ListaVisual(painel, name="Mensagens")
+        else:
+            self.lista_msgs = wx.ListBox(
+                painel, style=wx.LB_SINGLE | wx.LB_HSCROLL, name="Mensagens")
         # botoes de resposta da mensagem selecionada: controles de verdade,
         # criados aqui para ficarem na ordem de Tab logo depois da lista
         # (so aparecem quando a mensagem selecionada tem botoes ou opcoes)
@@ -4769,10 +4802,20 @@ class Janela(wx.Frame):
         lista = self.cfg.get("lista_mensagens")
         itens_linha = lista_msg_nucleo.ativos(lista)
         so_quando_muda = lista_msg_nucleo.so_quando_muda(lista)
+        visual = self.modo_exibicao == aparencia.VISUAL
+        info = []          # no modo visual: (tipo, dia, estado) por item
+        if visual:
+            # o estado vai pequeno, fora do texto do balao
+            itens_linha = [x for x in itens_linha if x != "estado"]
         for x in msgs:
             if marcador is not None and x.id == marcador:
                 itens.append(m.texto_marcador(self.marcador_n))
                 mapa.append(MARCADOR)
+                info.append(("marcador", "", ""))
+            if visual:
+                info.append(("minha" if x.minha else "outra",
+                             aparencia.rotulo_do_dia(x.data),
+                             (x.estado or "") if x.minha else ""))
             itens.append(self._com_marca(
                 m.formatar(x, m.ESTILO_AUTOR_PRIMEIRO, anterior,
                            quem=self._quem_enviou(x), itens=itens_linha,
@@ -4791,6 +4834,8 @@ class Janela(wx.Frame):
         velho_mapa, velhos = self.mapa, self._itens_msgs
         self.mapa = mapa
         self._itens_msgs = itens
+        if visual:
+            self.lista_msgs.definir_info(info)
         if destino is None and mapa[:len(velho_mapa)] == velho_mapa \
                 and velho_mapa != [None] and \
                 self.lista_msgs.GetCount() == len(velho_mapa):
@@ -8894,6 +8939,9 @@ class Janela(wx.Frame):
         if chave == "mensagens_por_vez":
             self.cfg.set(chave, valor)
             self._mudou_mensagens_por_vez()
+        elif chave == "tamanho_letra":
+            self.cfg.set(chave, valor)
+            self._aplicar_letra(mudou=True)
         elif chave == "depuracao":
             self._modo_depuracao(valor)
             self.itens["depuracao"].Check(bool(valor))

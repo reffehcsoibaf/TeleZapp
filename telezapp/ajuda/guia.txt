@@ -669,6 +669,8 @@ Transcrição e descrição automáticas: no menu de contexto de uma conversa, "
 # Configurações
 Ferramentas, Configurações (Ctrl+vírgula) abre uma janela com todas as opções do TeleZapp.
 
+Aparência, em Configurações, tem o Tamanho da letra, que aumenta as letras da janela principal na hora (listas, caixa de digitar e botões), e o Modo de exibição: para leitor de tela, a janela de sempre, ou visual, para quem lê na tela. No automático, o TeleZapp escolhe ao abrir conforme haja um leitor de tela ligado.
+
 O primeiro campo é a busca. Digite uma palavra, como velocidade, e aparece no alto da lista de categorias Resultados da busca, com tudo o que combina: as opções, que podem ser mudadas ali mesmo, e botões que levam ao que fica em outro lugar, como um item das janelas Lista de conversas e Lista de mensagens, um evento de som, um atalho, a privacidade da conta ou um provedor de inteligência artificial. Tab vai da busca para a lista de categorias, depois para as opções da categoria escolhida e, por fim, para os botões OK, Cancelar e Aplicar.
 
 Status do WhatsApp: em Novo status, o botão Gravar mensagem de voz publica um status de voz de até 1 minuto, sem texto. O botão Mencionar pessoas escolhe até 5 pessoas, que podem ver o status e recebem um aviso. Num status de outra pessoa, Control Shift G (Reagir) curte, e Recompartilhar o status, no menu de contexto ou em Mensagem, publica o conteúdo como um status seu, depois de perguntar. Foto, vídeo ou áudio precisam estar baixados antes.

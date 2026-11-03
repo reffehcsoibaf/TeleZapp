@@ -193,6 +193,23 @@ OPCOES = (
           "conversas. Conversas com mais não lidas que isso mostram todas "
           "elas. No WhatsApp, o que vem do celular chega em até 50 de cada "
           "vez.", numero=MENSAGENS_POR_VEZ),
+    Opcao("modo_exibicao", "Modo de exibição", "Aparência", "automatico",
+          "Para leitor de tela: a janela de sempre, feita para ser ouvida, "
+          "com cada mensagem numa linha. Visual: para quem lê na tela, com "
+          "as mensagens longas quebradas em várias linhas e as suas "
+          "destacadas. Os atalhos e os menus são os mesmos nos dois. "
+          "Automático: ao abrir, o TeleZapp usa o modo para leitor de tela "
+          "se houver um leitor de tela ligado, e o visual se não houver. "
+          "Vale na próxima vez que o TeleZapp abrir.",
+          escolhas=(("automatico", "Automático, conforme haja leitor de "
+                     "tela ligado"),
+                    ("leitor", "Para leitor de tela"),
+                    ("visual", "Visual"))),
+    Opcao("tamanho_letra", "Tamanho da letra", "Aparência", 100,
+          "O tamanho das letras da janela principal: listas, caixa de "
+          "digitar e botões. Vale nos dois modos de exibição, na hora.",
+          escolhas=((100, "Normal"), (125, "Grande"), (150, "Maior"),
+                    (175, "Bem maior"), (200, "Dobro do normal"))),
     Opcao("status_no_titulo",
           "Mostrar status de presença no título da janela",
           "Interface", True,
