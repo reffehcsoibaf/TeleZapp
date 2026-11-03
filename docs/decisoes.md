@@ -974,3 +974,11 @@ O responsável testou muitas das melhorias do dia, sem dar retorno item a item e
 ## Verificado ao vivo pelo responsável: 2026.11.02.0, ainda sem publicar
 
 - **Tipo da localização nos dados da mensagem (02/11/2026):** uma localização em tempo real recebida passou a dizer "localização em tempo real" em vez de "mensagem sem suporte ainda". Os outros tipos (enquete, contato, convite, evento, produto) não foram comentados.
+
+## Verificado ao vivo pelo responsável: código da 2026.11.03.0, ainda sem publicar
+
+- **Apagar no celular (03/11/2026):** numa limpeza de 100 mensagens de grupo pelo código, minhas e de outras pessoas (remetente LID), o celular apagou, "apesar de demorar alguns segundos". Isso descarta a forma do índice como causa do relato do Valderi; o que pesou foi a demora e o 429 que parava a rodada. Não houve exclusão feita no celular no mesmo teste, então a forma que o celular manda continua sem registro.
+
+## Retorno de usuária: backup e restauração
+
+- **Duda Ferreira (03/11/2026), repassado pelo responsável:** fez o backup e "deu certo". Não disse a versão, se usou senha ou partes, nem se chegou a restaurar; vale como primeira confirmação de alguém além do responsável de que o backup funciona.

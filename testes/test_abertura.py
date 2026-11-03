@@ -36,6 +36,26 @@ def test_marca_antiga_so_com_o_numero_do_processo(tmp_path):
     assert "não traz a hora" in principal.descrever_marca(str(marca))
 
 
+def test_abrir_marca_so_avisa_se_a_anterior_ficou(tmp_path, caplog):
+    log = logging.getLogger("telezapp.teste_abertura")
+    with caplog.at_level(logging.WARNING, logger=log.name):
+        marca = principal.abrir_marca(str(tmp_path), log)
+        assert marca == str(tmp_path / "sessao-aberta")
+        assert "sem fechar normalmente" not in caplog.text
+        principal.abrir_marca(str(tmp_path), log)
+    assert "sem fechar normalmente" in caplog.text
+
+
+def test_marca_so_depois_de_saber_que_nao_ha_outro_aberto():
+    # relato (03/11/2026): clicar no atalho com o TeleZapp aberto mostra a
+    # janela dele e sai, mas antes achava a marca do que estava aberto e
+    # registrava uma queda que nao houve
+    import inspect
+    fonte = inspect.getsource(principal.main)
+    assert fonte.index("IsAnotherRunning") < fonte.index("abrir_marca(")
+    assert "sessao-aberta" not in fonte
+
+
 def test_erro_nativo_do_windows_vai_para_o_arquivo(tmp_path):
     import ctypes
     import sys

@@ -56,6 +56,7 @@ from telezapp.nucleo import atualizacao
 from telezapp.nucleo import atualizador
 from telezapp.nucleo import inicializacao
 from telezapp.nucleo import atalhos as nucleo_atalhos
+from telezapp.nucleo import mencoes as nucleo_mencoes
 from telezapp.nucleo.ia import catalogo as cat_ia
 from telezapp.nucleo.ia import cofre as cofre_ia
 from telezapp.nucleo.ia import prompts as prompts_ia
@@ -3609,7 +3610,8 @@ class Janela(wx.Frame):
 
     def _mesclar(self, chave, novas):
         """Junta mensagens ao cache da conversa, sem repetir, em ordem."""
-        atuais = {x.id: x for x in self.cache.get(chave, [])}
+        velhas = self.cache.get(chave, [])
+        atuais = {x.id: x for x in velhas}
         for x in novas:
             if self.banco.foi_limpa(x.conta_id, x.conversa_id,
                                     x.id) == "mensagem" or \
@@ -3619,7 +3621,15 @@ class Janela(wx.Frame):
                               # mensagem nova ou novo pareamento
             atuais[x.id] = x
         lista = sorted(atuais.values(), key=_ordem)
-        self.cache[chave] = lista[-self._limite_memoria(chave):]
+        limite = self._limite_memoria(chave)
+        if chave == self.atual and velhas:
+            # na conversa aberta, a que chega nao tira do comeco as que ja
+            # estao na lista: refazer a lista repoe a selecao e o leitor de
+            # tela le de novo a mensagem em foco
+            primeira = _ordem(velhas[0])
+            limite = max(limite, sum(1 for x in lista
+                                     if _ordem(x) >= primeira))
+        self.cache[chave] = lista[-limite:]
         return self.cache[chave]
 
     def _ev_nova(self, e):
@@ -4376,9 +4386,16 @@ class Janela(wx.Frame):
             self._escolher_mencao(gente, pos)
 
     def _escolher_mencao(self, membros, pos):
+        prov = self.contas.provedor(self.atual[0]) if self.contas else None
+        if getattr(prov, "MENCIONA_TODOS", False):
+            membros = [nucleo_mencoes.membro_todos()] + list(membros)
         escolhido = dialogos.escolher_membro(self, membros)
         self.caixa.SetFocus()
         if escolhido is None:
+            return
+        if escolhido.get("todos"):
+            self._escrever_mencao(pos, nucleo_mencoes.TODOS + " ")
+            self.fala.falar("Mencionados todos do grupo.")
             return
         nome = escolhido["nome"]
         for outro in self.mencoes:
@@ -4391,14 +4408,17 @@ class Janela(wx.Frame):
         if not any(x["id"] == men["id"] and x["nome"] == nome
                    for x in self.mencoes):
             self.mencoes.append(men)
+        self._escrever_mencao(pos, "@" + nome + " ")
+        self.fala.falar("Mencionado %s." % nome)
+
+    def _escrever_mencao(self, pos, marca):
+        """Poe a marca no lugar do @ digitado (ou onde esta o cursor)."""
         texto = self.caixa.GetValue()
-        marca = "@" + nome + " "
         if texto[pos:pos + 1] == "@":
             self.caixa.Replace(pos, pos + 1, marca)
             self.caixa.SetInsertionPoint(pos + len(marca))
         else:
             self.caixa.WriteText(marca)
-        self.fala.falar("Mencionado %s." % nome)
 
     def _digitou_na_lista(self, evt):
         """Caractere digitado numa lista: pula para o item com a inicial (o

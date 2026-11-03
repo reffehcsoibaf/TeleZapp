@@ -6,7 +6,31 @@ Na caixa de digitar a mencao fica como "@Nome", legivel para quem escreve.
 Ao enviar, cada servico troca esse trecho pelo que ele entende. Uma mencao
 e um dicionario {"id": identificador do participante, "nome": nome mostrado,
 "usuario": "@usuario" quando o servico tem}.
+
+Mencionar todos do grupo (so no WhatsApp) e o trecho "@all" no texto: e ele
+que o WhatsApp destaca, e e ele que liga o aviso a todos ao enviar.
 """
+import re
+
+TODOS = "@all"
+NOME_TODOS = "Todos do grupo"
+_TODOS = re.compile(r"(?:^|(?<=\s))@all(?![\w@])", re.IGNORECASE)
+
+
+def membro_todos():
+    """O item "Todos do grupo" que abre a lista de quem mencionar; o filtro
+    acha ele por "todos" ou por "all"."""
+    return {"id": "", "nome": NOME_TODOS, "telefone": TODOS, "todos": True}
+
+
+def menciona_todos(texto):
+    """O texto tem "@all" sozinho (no comeco ou depois de espaco)?"""
+    return bool(_TODOS.search(texto or ""))
+
+
+def com_todos_minusculo(texto):
+    """"@All" ou "@ALL" viram "@all", a forma que o WhatsApp reconhece."""
+    return _TODOS.sub(TODOS, texto or "")
 
 
 def localizar(texto, mencoes):

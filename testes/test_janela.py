@@ -843,6 +843,27 @@ def _abrir_ana(j, n=6):
         msg(str(i), "texto %d" % i, conversa="10") for i in range(1, n + 1)]))
 
 
+def test_conversa_cheia_mensagem_nova_nao_refaz_a_lista(j):
+    # com a lista cheia, a nova tirava a mais antiga do comeco, a lista era
+    # refeita e o leitor de tela lia de novo a mensagem em foco
+    por_vez = j._mensagens_por_vez()
+    _abrir_ana(j, por_vez + 20)
+    j.selecao_automatica = False
+    j.lista_msgs.SetSelection(j.mapa.index("30"))
+    antes = j.lista_msgs.GetCount()
+    chamadas = []
+    original = j.lista_msgs.Set
+    j.lista_msgs.Set = lambda itens: (chamadas.append(1), original(itens))
+    c = j.indice[("t1", "10")]
+    for k in range(3):
+        j.b.publicar(ev.MensagemNova(msg(str(500 + k), "nova %d" % k,
+                                         conversa="10"), c))
+    assert chamadas == []
+    assert j._chave_selecionada() == "30"
+    assert j.lista_msgs.GetCount() == antes + 3
+    assert j.lista_msgs.itens[-1].endswith("nova 2")
+
+
 def test_reabre_no_ponto_em_que_parou(j):
     _abrir_ana(j)
     j.lista_msgs.SetSelection(j.mapa.index("2"))
@@ -7236,3 +7257,27 @@ def test_atualizar_com_janela_aberta_cancela_ela_antes_de_fechar(j, monkeypatch)
     modal.EndModal = lambda c: ordem.append("cancelou")
     j._depois_dos_modais(lambda: ordem.append("seguiu"), tentativas=2)
     assert ordem == ["cancelou", "cancelou", "seguiu"]
+
+
+def test_mencionar_todos_do_grupo_pelo_arroba(j, monkeypatch):
+    j._abrir_conversa(j.indice[("t1", "20")])
+    j.indice[("t1", "20")].tipo = "grupo"
+    ana = {"id": "1@s.whatsapp.net", "nome": "Ana"}
+    vistos, ditas = [], []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+
+    def escolher(pai, membros):
+        vistos.append(list(membros))
+        return membros[0]
+    monkeypatch.setattr(jm.dialogos, "escolher_membro", escolher)
+    j.contas.p.MENCIONA_TODOS = True
+    j.caixa.SetValue("oi ")
+    j.caixa.SetInsertionPoint(3)
+    j._escolher_mencao([ana], 3)
+    assert vistos[0][0]["todos"] and vistos[0][1] == ana
+    assert j.caixa.GetValue() == "oi @all "
+    assert j.mencoes == [] and ditas == ["Mencionados todos do grupo."]
+
+    j.contas.p.MENCIONA_TODOS = False          # Telegram: sem o item
+    j._escolher_mencao([ana], 0)
+    assert vistos[1] == [ana]

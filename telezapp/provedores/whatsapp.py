@@ -254,6 +254,28 @@ def jid_texto(jid):
     return "%s@%s" % (jid.User, jid.Server)
 
 
+def limite_de_pedidos(erro):
+    """O WhatsApp recusou por excesso de pedidos (status 429)?"""
+    texto = str(erro)
+    return "rate-overlimit" in texto or "status 429" in texto
+
+
+def forma_da_exclusao(conversa, minha, remetente):
+    """Como uma exclusao "so para mim" aponta a mensagem, sem os numeros:
+    "grupo, de outra pessoa, remetente LID". O celular so apaga se a forma
+    bater com a que ele guarda."""
+    servidor = conversa.rsplit("@", 1)[-1] if "@" in conversa else ""
+    tipo = {"g.us": "grupo", "lid": "individual por LID",
+            "s.whatsapp.net": "individual por número"}.get(
+                servidor, "conversa %s" % (servidor or "sem endereço"))
+    if minha:
+        return "%s, minha" % tipo
+    rem = remetente.rsplit("@", 1)[-1] if "@" in (remetente or "") else ""
+    quem = {"lid": "remetente LID", "s.whatsapp.net": "remetente número"}.get(
+        rem, "sem remetente")
+    return "%s, de outra pessoa, %s" % (tipo, quem)
+
+
 def segundos(ts):
     """Timestamp do neonize (segundos ou milissegundos) -> segundos."""
     t = float(ts or 0)
@@ -1228,6 +1250,8 @@ class ProvedorWhatsApp(Provedor):
         # saindo da mesma versao batem no servidor (409)
         self._trava_envio_estado = threading.Lock()
         self._colecoes_fora = set()  # nao adianta enviar ate o celular responder
+        self._apagadas_daqui = set()  # ids que o TeleZapp mandou apagar
+        self._no_limite = False      # o ultimo aviso de estado bateu no 429
         self._enviando_pendentes = False
         self._busca_ativa = False   # laco da busca periodica do estado
         self._ultimas_posicoes = {}  # (conversa, quem) -> (lat, lon, quando)
@@ -1707,12 +1731,17 @@ class ProvedorWhatsApp(Provedor):
             with self._trava:
                 self._enviando_pendentes = False
 
+    ESPERA_NO_LIMITE = 60           # segundos, quando o WhatsApp pede calma
+    VEZES_NO_LIMITE = 10            # esperas seguidas antes de deixar para depois
+
     def _rodada_de_pendentes(self):
         pendentes = self.banco.apagar_pendentes(self.conta.id)
         enviadas = 0
+        esperas = [0]
         for cid, mid, minha, data, remetente in pendentes:
-            if self._parar.is_set() or self._apagar_para_mim(
-                    cid, mid, minha, data, remetente) is not True:
+            if not self._apagar_com_calma(
+                    (cid, mid, minha, data, remetente), esperas, enviadas,
+                    len(pendentes)):
                 break
             self.banco.tirar_apagar_pendente(self.conta.id, cid, mid)
             enviadas += 1
@@ -1721,7 +1750,28 @@ class ProvedorWhatsApp(Provedor):
             log.info("exclusões pendentes: %d de %d enviadas", enviadas,
                      len(pendentes))
         if enviadas:
-            self._avisar("Mensagens apagadas no celular: %d." % enviadas)
+            faltam = len(pendentes) - enviadas
+            self._avisar("Mensagens apagadas no celular: %d.%s" % (
+                enviadas, " Faltam %d, que saem na próxima vez que o "
+                "WhatsApp aceitar." % faltam if faltam else ""))
+
+    def _apagar_com_calma(self, item, esperas, enviadas, total):
+        """Manda uma exclusao. Se o WhatsApp pedir calma ("429
+        rate-overlimit"), espera e tenta de novo, ate VEZES_NO_LIMITE esperas
+        na rodada (esperas: [contador]). True se foi aceita. Relato do
+        Valderi (03/11/2026): a rodada parava ali e mais da metade so ia na
+        abertura seguinte."""
+        while not self._parar.is_set():
+            self._no_limite = False
+            if self._apagar_para_mim(*item) is True:
+                return True
+            if not self._no_limite or esperas[0] >= self.VEZES_NO_LIMITE:
+                return False
+            esperas[0] += 1
+            log.info("exclusões: espero %d s para continuar (%d de %d "
+                     "enviadas)", self.ESPERA_NO_LIMITE, enviadas, total)
+            self._parar.wait(self.ESPERA_NO_LIMITE)
+        return False
 
     ESPERA_DA_RECUPERACAO = 90      # segundos, no total
     PASSO_DA_RECUPERACAO = 5        # segundos entre as conferencias
@@ -2088,7 +2138,14 @@ class ProvedorWhatsApp(Provedor):
             log.warning("aviso %s não enviado: estado %s fora de sincronia",
                         indice, e)
             return False
-        except Exception:
+        except Exception as e:
+            if limite_de_pedidos(e):
+                # o aviso costuma ter ido; o que o WhatsApp barrou foi a
+                # leitura logo depois. Quem manda varios espera e continua
+                self._no_limite = True
+                log.warning("aviso %s: o WhatsApp pediu para esperar (%s)",
+                            indice, e)
+                return False
             log.exception("não consegui avisar o WhatsApp (%s)", indice)
             return False
 
@@ -2796,11 +2853,19 @@ class ProvedorWhatsApp(Provedor):
         try:
             if evento.FromFullSync:
                 return      # exclusao antiga, de antes: nao apaga daqui
-            if m.MANTER["do_celular"]:
-                log.info("mensagem apagada no celular: mantida aqui")
+            # o WhatsApp devolve tambem as que o TeleZapp mandou apagar; a
+            # forma (sem numeros) mostra se o celular usa a mesma que nos
+            daqui = evento.MessageID in self._apagadas_daqui
+            manter = m.MANTER["do_celular"]
+            log.info("mensagem apagada no celular%s (%s; %s)",
+                     ": mantida aqui" if manter else "", "aviso que o "
+                     "TeleZapp mandou" if daqui else "feito em outro aparelho",
+                     forma_da_exclusao(jid_texto(evento.ChatJID),
+                                       bool(evento.IsFromMe),
+                                       jid_texto(evento.SenderJID)))
+            if manter:
                 return
             cid = self._id_da_conversa(evento.ChatJID)
-            log.info("mensagem apagada no celular")
             self.barramento.publicar(ev.MensagemApagadaNoCelular(
                 self.conta.id, cid, evento.MessageID))
         except Exception:
@@ -2911,12 +2976,19 @@ class ProvedorWhatsApp(Provedor):
             DeleteMessageForMeAction, SyncActionValue)
         if minha or not conversa_id.endswith("@g.us") or not remetente:
             remetente = "0"
-        return self._enviar_estado(
+        self._apagadas_daqui.add(mensagem_id)
+        if len(self._apagadas_daqui) > MAX_GUARDADAS:
+            self._apagadas_daqui.clear()
+        aceito = self._enviar_estado(
             "deleteMessageForMe", 3, PatchInfo.REGULAR_HIGH,
             SyncActionValue(
                 deleteMessageForMeAction=DeleteMessageForMeAction(
                     deleteMedia=True, messageTimestamp=int(data))),
             conversa_id, extra=(mensagem_id, "1" if minha else "0", remetente))
+        if aceito:
+            log.info("apagar para mim enviado (%s)", forma_da_exclusao(
+                conversa_id, minha, "" if remetente == "0" else remetente))
+        return aceito
 
     def _ao_apagar_conversa(self, cliente, evento):
         """A conversa foi apagada no celular: sai das conversas do
@@ -3009,7 +3081,9 @@ class ProvedorWhatsApp(Provedor):
     def _id_da_conversa(self, chat):
         """JID da conversa -> texto. Conversas individuais com endereco LID
         sao trocadas pelo numero, quando o WhatsApp informa."""
-        if chat.Server == "lid" and jid_texto(chat) in self._lid_para_numero:
+        if chat.Server != "lid":
+            return jid_texto(chat)     # grupo ou numero: nada a trocar
+        if jid_texto(chat) in self._lid_para_numero:
             return self._lid_para_numero[jid_texto(chat)]
         pn = self._pn_do_lid(chat)
         if pn is not None and pn.User:
@@ -3473,7 +3547,10 @@ class ProvedorWhatsApp(Provedor):
             return ()
 
     def _cita_voce(self, msg):
-        """A mensagem menciona (@) esta conta, pelo telefone ou pelo LID?"""
+        """A mensagem menciona (@) esta conta, pelo telefone ou pelo LID, ou
+        menciona todos do grupo ("@all")?"""
+        if nucleo_mencoes.menciona_todos(msg.texto):
+            return True
         mencoes = m.extras_de(msg)["mencoes"]
         meus = self.meus_ids() if mencoes else ()
         if not meus:
@@ -4210,6 +4287,7 @@ class ProvedorWhatsApp(Provedor):
         return False
 
     PODE_REAGIR = True
+    MENCIONA_TODOS = True
 
     def reagir(self, mensagem, emoji):
         self._fila.put(lambda: self._reagir(mensagem, emoji))
@@ -4894,6 +4972,17 @@ class ProvedorWhatsApp(Provedor):
         novo, _ = nucleo_mencoes.aplicar(texto, mencoes, trocar)
         return novo, jids
 
+    @staticmethod
+    def _todos_no_texto(conversa_id, texto):
+        """(texto, True) quando "@all" menciona todos do grupo: o WhatsApp
+        pede o texto com "@all" e nonJIDMentions = 1 no ContextInfo (o mesmo
+        que o mentionAll do Baileys). Em grupo com mais de 32 membros so
+        administradores podem; quem decide e o WhatsApp."""
+        if not conversa_id.endswith("@g.us") or \
+                not nucleo_mencoes.menciona_todos(texto):
+            return texto, False
+        return nucleo_mencoes.com_todos_minusculo(texto), True
+
     def _mensagem_de_texto(self, conversa_id, texto, resposta_a, previa=None,
                            mencoes=None):
         from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (
@@ -4904,11 +4993,15 @@ class ProvedorWhatsApp(Provedor):
                       "title": previa.get("titulo", ""),
                       "description": previa.get("descricao", "")}
         texto, jids = self._mencoes_no_texto(texto, mencoes)
+        texto, todos = self._todos_no_texto(conversa_id, texto)
         if not resposta_a:
-            if campos or jids:
+            if campos or jids or todos:
+                ctx = ContextInfo(mentionedJID=jids) if jids or todos \
+                    else None
+                if todos:
+                    ctx.nonJIDMentions = 1
                 return Message(extendedTextMessage=ExtendedTextMessage(
-                    text=texto, contextInfo=ContextInfo(
-                        mentionedJID=jids) if jids else None, **campos))
+                    text=texto, contextInfo=ctx, **campos))
             return Message(conversation=texto)
         if resposta_a.startswith(RESPOSTA_A_STATUS):
             return self._resposta_a_status(
@@ -4916,6 +5009,8 @@ class ProvedorWhatsApp(Provedor):
         ctx = self._contexto_da_resposta(conversa_id, resposta_a)
         if jids:
             ctx.mentionedJID.extend(jids)
+        if todos:
+            ctx.nonJIDMentions = 1
         return Message(extendedTextMessage=ExtendedTextMessage(
             text=texto, contextInfo=ctx, **campos))
 
@@ -5181,14 +5276,17 @@ class ProvedorWhatsApp(Provedor):
         """(legenda, ContextInfo ou None) de uma midia enviada como resposta
         e/ou com mencoes na legenda."""
         legenda, jids = self._mencoes_no_texto(legenda, mencoes)
+        legenda, todos = self._todos_no_texto(conversa_id, legenda)
         if resposta_a.startswith(RESPOSTA_A_STATUS):
             resposta_a = ""         # status so recebe resposta de texto
-        if not resposta_a and not jids:
+        if not resposta_a and not jids and not todos:
             return legenda, None
         from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import ContextInfo
         ctx = self._contexto_da_resposta(conversa_id, resposta_a) \
             if resposta_a else ContextInfo()
         ctx.mentionedJID.extend(jids)
+        if todos:
+            ctx.nonJIDMentions = 1
         return legenda, ctx
 
     @staticmethod

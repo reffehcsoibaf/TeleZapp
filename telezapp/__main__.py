@@ -72,6 +72,24 @@ def _manter_marca(marca):
             pass
 
 
+def abrir_marca(pasta, log):
+    """Avisa no log se a vez anterior caiu (a marca some no fim normal; se
+    ainda existir, ela caiu) e poe a marca desta vez, mantida em dia. Devolve
+    o caminho da marca, ou None se nao der para grava-la."""
+    marca = os.path.join(pasta, "sessao-aberta")
+    try:
+        if os.path.exists(marca):
+            log.warning("a vez anterior terminou sem fechar normalmente "
+                        "(queda do programa ou do Windows); veja "
+                        "falha-nativa.log. %s", descrever_marca(marca))
+        escrever_marca(marca)
+        threading.Thread(target=_manter_marca, args=(marca,), daemon=True,
+                         name="marca-de-sessao").start()
+    except OSError:
+        return None
+    return marca
+
+
 def descrever_marca(marca):
     """O que a marca da vez anterior conta: quando ela deu o ultimo sinal e
     se o Windows foi religado desde entao (quando o tempo ligado e menor que
@@ -191,18 +209,6 @@ def main():
         redirecionar_erro_nativo(_ARQUIVO_FALHA)
     except Exception:
         log.exception("não foi possível ativar o registro de falhas nativas")
-    # a marca some no fim normal; se ainda existir, a vez anterior caiu
-    marca = os.path.join(os.path.dirname(arquivo_log), "sessao-aberta")
-    try:
-        if os.path.exists(marca):
-            log.warning("a vez anterior terminou sem fechar normalmente "
-                        "(queda do programa ou do Windows); veja "
-                        "falha-nativa.log. %s", descrever_marca(marca))
-        escrever_marca(marca)
-        threading.Thread(target=_manter_marca, args=(marca,), daemon=True,
-                         name="marca-de-sessao").start()
-    except OSError:
-        marca = None
 
     def erro_nao_tratado(tipo, valor, tb):
         log.error("ERRO NÃO TRATADO:\n%s",
@@ -281,6 +287,9 @@ def main():
             wx.MessageBox("O %s já está aberto." % NOME, NOME,
                           wx.OK | wx.ICON_INFORMATION)
         return 0
+    # so depois de saber que e a unica aberta: a marca de quem ainda esta
+    # aberto nao e sinal de queda (e nao pode ser trocada pela desta)
+    marca = abrir_marca(os.path.dirname(arquivo_log), log)
     from telezapp.nucleo import instancia
     sinal = instancia.criar_sinal()
     config.limpar_temporarios()   # sobras de uma abertura anterior

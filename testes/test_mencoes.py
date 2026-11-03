@@ -26,3 +26,20 @@ def test_aplicar_troca_e_diz_onde_ficou():
 def test_sem_mencoes_nada_muda():
     assert mc.aplicar("oi @Ana", [], str) == ("oi @Ana", [])
     assert mc.aplicar("oi", [ANA], str) == ("oi", [])
+
+
+def test_menciona_todos_so_com_all_sozinho():
+    assert mc.menciona_todos("@all reuniao hoje")
+    assert mc.menciona_todos("pessoal, @All, olhem")
+    assert mc.menciona_todos("oi\n@ALL")
+    assert not mc.menciona_todos("mail@all.com")
+    assert not mc.menciona_todos("@allan chegou")
+    assert not mc.menciona_todos("@todos")
+    assert not mc.menciona_todos("")
+    assert mc.com_todos_minusculo("oi @All e @ALL") == "oi @all e @all"
+
+
+def test_item_todos_e_achado_por_todos_ou_all():
+    item = mc.membro_todos()
+    rotulo = "%s, %s" % (item["nome"], item["telefone"])
+    assert item["todos"] and "todos" in rotulo.lower() and "@all" in rotulo
