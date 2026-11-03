@@ -4974,14 +4974,14 @@ class ProvedorWhatsApp(Provedor):
 
     @staticmethod
     def _todos_no_texto(conversa_id, texto):
-        """(texto, True) quando "@all" menciona todos do grupo: o WhatsApp
-        pede o texto com "@all" e nonJIDMentions = 1 no ContextInfo (o mesmo
+        """(texto, True) quando "@all" ou "@todos" menciona todos do grupo:
+        o WhatsApp pede o texto com "@all" e nonJIDMentions = 1 no ContextInfo (o mesmo
         que o mentionAll do Baileys). Em grupo com mais de 32 membros so
         administradores podem; quem decide e o WhatsApp."""
         if not conversa_id.endswith("@g.us") or \
                 not nucleo_mencoes.menciona_todos(texto):
             return texto, False
-        return nucleo_mencoes.com_todos_minusculo(texto), True
+        return nucleo_mencoes.todos_para_enviar(texto), True
 
     def _mensagem_de_texto(self, conversa_id, texto, resposta_a, previa=None,
                            mencoes=None):

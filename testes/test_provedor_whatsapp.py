@@ -4542,3 +4542,10 @@ def test_limite_que_nao_passa_deixa_o_resto_e_diz_quantas_faltam(amb):
     assert len(amb.banco.apagar_pendentes("w1")) == 2
     assert wa.limite_de_pedidos(RuntimeError(ERRO_429))
     assert not wa.limite_de_pedidos(RuntimeError("sem rede"))
+
+
+def test_todos_digitado_vai_como_all(amb):
+    # pergunta do Wanderlei: "@todos" so abria a escolha de um membro
+    msg = amb.p._mensagem_de_texto("120363@g.us", "@todos bom dia", "")
+    ext = msg.extendedTextMessage
+    assert ext.text == "@all bom dia" and ext.contextInfo.nonJIDMentions == 1

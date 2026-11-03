@@ -7,29 +7,40 @@ Ao enviar, cada servico troca esse trecho pelo que ele entende. Uma mencao
 e um dicionario {"id": identificador do participante, "nome": nome mostrado,
 "usuario": "@usuario" quando o servico tem}.
 
-Mencionar todos do grupo (so no WhatsApp) e o trecho "@all" no texto: e ele
-que o WhatsApp destaca, e e ele que liga o aviso a todos ao enviar.
+Mencionar todos do grupo (so no WhatsApp) e o trecho "@todos" ou "@all" na
+caixa. Ao enviar ele vai como "@all", o que o WhatsApp entende e liga o aviso
+a todos; o celular e o TeleZapp mostram "@todos".
 """
 import re
 
 TODOS = "@all"
+TODOS_VISIVEL = "@todos"
 NOME_TODOS = "Todos do grupo"
-_TODOS = re.compile(r"(?:^|(?<=\s))@all(?![\w@])", re.IGNORECASE)
+_TODOS = re.compile(r"(?:^|(?<=\s))@(?:all|todos)(?![\w@])", re.IGNORECASE)
 
 
 def membro_todos():
     """O item "Todos do grupo" que abre a lista de quem mencionar; o filtro
     acha ele por "todos" ou por "all"."""
-    return {"id": "", "nome": NOME_TODOS, "telefone": TODOS, "todos": True}
+    return {"id": "", "nome": NOME_TODOS,
+            "telefone": "%s ou %s" % (TODOS_VISIVEL, TODOS), "todos": True}
 
 
 def menciona_todos(texto):
-    """O texto tem "@all" sozinho (no comeco ou depois de espaco)?"""
+    """O texto tem "@all" ou "@todos" sozinho (no comeco ou depois de
+    espaco)?"""
     return bool(_TODOS.search(texto or ""))
 
 
-def com_todos_minusculo(texto):
-    """"@All" ou "@ALL" viram "@all", a forma que o WhatsApp reconhece."""
+def todos_visivel(texto):
+    """"@all" aparece como "@todos", como o celular mostra a mencao a
+    todos."""
+    return _TODOS.sub(TODOS_VISIVEL, texto or "")
+
+
+def todos_para_enviar(texto):
+    """"@todos", "@All" e parecidos viram "@all", a forma que o WhatsApp
+    reconhece."""
     return _TODOS.sub(TODOS, texto or "")
 
 

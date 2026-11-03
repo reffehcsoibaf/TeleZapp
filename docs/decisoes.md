@@ -978,6 +978,7 @@ O responsável testou muitas das melhorias do dia, sem dar retorno item a item e
 ## Verificado ao vivo pelo responsável: código da 2026.11.03.0, ainda sem publicar
 
 - **Apagar no celular (03/11/2026):** numa limpeza de 100 mensagens de grupo pelo código, minhas e de outras pessoas (remetente LID), o celular apagou, "apesar de demorar alguns segundos". Isso descarta a forma do índice como causa do relato do Valderi; o que pesou foi a demora e o 429 que parava a rodada. Não houve exclusão feita no celular no mesmo teste, então a forma que o celular manda continua sem registro.
+- **Mencionar todos (03/11/2026):** enviado com "@all" pelo código, no celular a menção chegou clicável e aparece como "@todos". No TeleZapp aparecia "@all" cru: agora aparece "@todos" nos grupos do WhatsApp, e "@todos" digitado também vale. O aviso aos membros e a regra dos 32 membros não foram vistos.
 
 ## Retorno de usuária: backup e restauração
 

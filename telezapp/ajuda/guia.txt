@@ -238,7 +238,7 @@ Para responder a uma mensagem, selecione-a e use Ctrl+Shift+R. Esc cancela a res
 
 Em grupos, digitar @ no começo da mensagem ou depois de um espaço abre a lista de membros para mencionar. Digite para filtrar, e Enter escolhe.
 
-No WhatsApp, o primeiro item dessa lista é "Todos do grupo, @all", que também aparece ao filtrar por "todos" ou "all". Ele escreve @all na mensagem, e todos os membros do grupo são avisados. Escrever @all à mão tem o mesmo efeito. Em grupos com mais de 32 membros, o WhatsApp só deixa administradores mencionarem todos. O Telegram não tem esse recurso.
+No WhatsApp, o primeiro item dessa lista é "Todos do grupo, @todos ou @all", que também aparece ao filtrar por "todos" ou "all". Ele escreve @todos na mensagem, e todos os membros do grupo são avisados. Escrever @todos ou @all à mão tem o mesmo efeito. A menção a todos aparece como @todos, no TeleZapp e no celular. Em grupos com mais de 32 membros, o WhatsApp só deixa administradores mencionarem todos. O Telegram não tem esse recurso.
 
 Ctrl+V na caixa cola arquivos copiados no Explorer ou imagens. Eles esperam o Enter, e o texto da caixa, escrito antes ou depois da colagem, vira a legenda. Esc remove a mídia colada.
 

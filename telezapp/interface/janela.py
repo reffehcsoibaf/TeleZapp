@@ -4394,7 +4394,7 @@ class Janela(wx.Frame):
         if escolhido is None:
             return
         if escolhido.get("todos"):
-            self._escrever_mencao(pos, nucleo_mencoes.TODOS + " ")
+            self._escrever_mencao(pos, nucleo_mencoes.TODOS_VISIVEL + " ")
             self.fala.falar("Mencionados todos do grupo.")
             return
         nome = escolhido["nome"]

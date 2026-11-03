@@ -548,6 +548,17 @@ def _partes(*itens):
     return ", ".join(p for p in itens if p)
 
 
+def texto_visivel(m):
+    """O texto como aparece: num grupo do WhatsApp, "@all" (mencionar todos)
+    aparece como "@todos", como no celular. O texto guardado continua com
+    "@all", que e o que o WhatsApp entende ao editar."""
+    texto = m.texto or ""
+    if not (m.conversa_id or "").endswith("@g.us") or "@" not in texto:
+        return texto
+    from telezapp.nucleo import mencoes
+    return mencoes.todos_visivel(texto)
+
+
 def conteudo(m, com_estado=True):
     """Texto falado do conteudo de uma mensagem, sem autor nem hora.
     `com_estado`: acrescenta "ouvida" num audio ou voz que ja foi tocado
@@ -557,11 +568,12 @@ def conteudo(m, com_estado=True):
         return "mensagem apagada"
     ouvida = "ouvida" if com_estado and extras["ouvida"] and \
         not m.minha else ""
-    legenda = ("legenda: " + m.texto) if m.texto else ""
+    texto = texto_visivel(m)
+    legenda = ("legenda: " + texto) if texto else ""
     dur = duracao_legivel(m.segundos) if m.segundos else ""
     tam = tamanho_legivel(m.tamanho) if m.tamanho else ""
     if m.tipo in (TEXTO, AVISO_MEMBROS):
-        return m.texto
+        return texto
     if m.tipo == FOTO:
         return _partes("foto", legenda)
     if m.tipo == VIDEO:

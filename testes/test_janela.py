@@ -7275,7 +7275,7 @@ def test_mencionar_todos_do_grupo_pelo_arroba(j, monkeypatch):
     j.caixa.SetInsertionPoint(3)
     j._escolher_mencao([ana], 3)
     assert vistos[0][0]["todos"] and vistos[0][1] == ana
-    assert j.caixa.GetValue() == "oi @all "
+    assert j.caixa.GetValue() == "oi @todos "
     assert j.mencoes == [] and ditas == ["Mencionados todos do grupo."]
 
     j.contas.p.MENCIONA_TODOS = False          # Telegram: sem o item
