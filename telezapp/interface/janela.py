@@ -56,6 +56,8 @@ from telezapp.nucleo import atualizacao
 from telezapp.nucleo import atualizador
 from telezapp.nucleo import inicializacao
 from telezapp.nucleo import atalhos as nucleo_atalhos
+from telezapp.nucleo import mencoes as nucleo_mencoes
+from telezapp.nucleo import aparencia
 from telezapp.nucleo.ia import catalogo as cat_ia
 from telezapp.nucleo.ia import cofre as cofre_ia
 from telezapp.nucleo.ia import prompts as prompts_ia
@@ -506,6 +508,8 @@ class Janela(wx.Frame):
         self._salvando = None     # a conversa sendo salva num .zip
         self.anexos = []          # midias coladas na caixa, a enviar com o Enter
         self.locais = 0               # contador de mensagens "enviando"
+        # local-N -> o que foi mandado, para tentar de novo se falhar
+        self._anexos_locais = {}
         self.sincronia = {}           # conta_id -> (percentual, quando)
         self.audio = None             # (chave, Reprodutor) tocando sem janela
         self.interrompidas = {}       # conta_id -> % em que a sincronia parou
@@ -550,9 +554,14 @@ class Janela(wx.Frame):
         self._base_menu = {}
         self._menu_do_item = {}
         self._criar_menus()
+        # decidido uma vez ao abrir: trocar de lista com a janela aberta
+        # confundiria o leitor de tela
+        self.modo_exibicao = aparencia.modo(cfg.get("modo_exibicao"))
+        log.info("modo de exibição: %s", self.modo_exibicao)
         self._criar_controles()
         self._rotular_controles()
         self.CreateStatusBar()
+        self._aplicar_letra()
         self.Bind(wx.EVT_CLOSE, self._ao_fechar)
         if hasattr(wx, "EVT_HOTKEY"):
             self.Bind(wx.EVT_HOTKEY, self._ao_atalho_global)
@@ -1208,6 +1217,29 @@ class Janela(wx.Frame):
         self.fala.falar("TeleZapp", interromper=True)
         self._mostrar_versao_pendente()
 
+    def _aplicar_letra(self, mudou=False):
+        """Poe o tamanho de letra escolhido em todos os controles da janela.
+        No normal, ao abrir, nao mexe em nada: a janela fica como sempre."""
+        porcento = self.cfg.get("tamanho_letra")
+        if not mudou and aparencia.tamanho_da_letra(1, porcento) == 1:
+            return
+        base = wx.SystemSettings.GetFont(wx.SYS_DEFAULT_GUI_FONT)
+        fonte = wx.Font(base)
+        fonte.SetFractionalPointSize(aparencia.tamanho_da_letra(
+            base.GetFractionalPointSize(), porcento))
+
+        def aplicar(controle):
+            controle.SetFont(fonte)
+            for filho in controle.GetChildren():
+                aplicar(filho)
+        self.Freeze()
+        try:
+            aplicar(self)
+            self.painel.Layout()
+            self.Layout()
+        finally:
+            self.Thaw()
+
     def _sair(self):
         """Encerra de verdade, mesmo com a opcao de segundo plano ligada."""
         self._saindo = True
@@ -1243,8 +1275,12 @@ class Janela(wx.Frame):
         rot_conv = wx.StaticText(painel, label="Conversas")
         self.lista_conv = ListaDeTextos(painel, name="Conversas")
         self.rot_msgs = wx.StaticText(painel, label="Mensagens")
-        self.lista_msgs = wx.ListBox(painel, style=wx.LB_SINGLE | wx.LB_HSCROLL,
-                                     name="Mensagens")
+        if self.modo_exibicao == aparencia.VISUAL:
+            from telezapp.interface.lista_visual import ListaVisual
+            self.lista_msgs = ListaVisual(painel, name="Mensagens")
+        else:
+            self.lista_msgs = wx.ListBox(
+                painel, style=wx.LB_SINGLE | wx.LB_HSCROLL, name="Mensagens")
         # botoes de resposta da mensagem selecionada: controles de verdade,
         # criados aqui para ficarem na ordem de Tab logo depois da lista
         # (so aparecem quando a mensagem selecionada tem botoes ou opcoes)
@@ -3609,7 +3645,8 @@ class Janela(wx.Frame):
 
     def _mesclar(self, chave, novas):
         """Junta mensagens ao cache da conversa, sem repetir, em ordem."""
-        atuais = {x.id: x for x in self.cache.get(chave, [])}
+        velhas = self.cache.get(chave, [])
+        atuais = {x.id: x for x in velhas}
         for x in novas:
             if self.banco.foi_limpa(x.conta_id, x.conversa_id,
                                     x.id) == "mensagem" or \
@@ -3619,7 +3656,15 @@ class Janela(wx.Frame):
                               # mensagem nova ou novo pareamento
             atuais[x.id] = x
         lista = sorted(atuais.values(), key=_ordem)
-        self.cache[chave] = lista[-self._limite_memoria(chave):]
+        limite = self._limite_memoria(chave)
+        if chave == self.atual and velhas:
+            # na conversa aberta, a que chega nao tira do comeco as que ja
+            # estao na lista: refazer a lista repoe a selecao e o leitor de
+            # tela le de novo a mensagem em foco
+            primeira = _ordem(velhas[0])
+            limite = max(limite, sum(1 for x in lista
+                                     if _ordem(x) >= primeira))
+        self.cache[chave] = lista[-limite:]
         return self.cache[chave]
 
     def _ev_nova(self, e):
@@ -3738,6 +3783,9 @@ class Janela(wx.Frame):
         texto = "Não foi possível enviar: %s." % e.motivo
         if chave == self.atual and e.devolver_texto:
             texto += " O texto voltou para a caixa de digitação."
+        elif self._pode_reenviar(achada):
+            texto += (" Para tentar de novo, use Tentar enviar de novo no "
+                      "menu de contexto da mensagem.")
         self.fala.falar(texto, interromper=True)
         self.SetStatusText(texto)
         log.info("envio falhou (%s)", e.motivo)
@@ -4376,9 +4424,16 @@ class Janela(wx.Frame):
             self._escolher_mencao(gente, pos)
 
     def _escolher_mencao(self, membros, pos):
+        prov = self.contas.provedor(self.atual[0]) if self.contas else None
+        if getattr(prov, "MENCIONA_TODOS", False):
+            membros = [nucleo_mencoes.membro_todos()] + list(membros)
         escolhido = dialogos.escolher_membro(self, membros)
         self.caixa.SetFocus()
         if escolhido is None:
+            return
+        if escolhido.get("todos"):
+            self._escrever_mencao(pos, nucleo_mencoes.TODOS_VISIVEL + " ")
+            self.fala.falar("Mencionados todos do grupo.")
             return
         nome = escolhido["nome"]
         for outro in self.mencoes:
@@ -4391,14 +4446,17 @@ class Janela(wx.Frame):
         if not any(x["id"] == men["id"] and x["nome"] == nome
                    for x in self.mencoes):
             self.mencoes.append(men)
+        self._escrever_mencao(pos, "@" + nome + " ")
+        self.fala.falar("Mencionado %s." % nome)
+
+    def _escrever_mencao(self, pos, marca):
+        """Poe a marca no lugar do @ digitado (ou onde esta o cursor)."""
         texto = self.caixa.GetValue()
-        marca = "@" + nome + " "
         if texto[pos:pos + 1] == "@":
             self.caixa.Replace(pos, pos + 1, marca)
             self.caixa.SetInsertionPoint(pos + len(marca))
         else:
             self.caixa.WriteText(marca)
-        self.fala.falar("Mencionado %s." % nome)
 
     def _digitou_na_lista(self, evt):
         """Caractere digitado numa lista: pula para o item com a inicial (o
@@ -4749,10 +4807,20 @@ class Janela(wx.Frame):
         lista = self.cfg.get("lista_mensagens")
         itens_linha = lista_msg_nucleo.ativos(lista)
         so_quando_muda = lista_msg_nucleo.so_quando_muda(lista)
+        visual = self.modo_exibicao == aparencia.VISUAL
+        info = []          # no modo visual: (tipo, dia, estado) por item
+        if visual:
+            # o estado vai pequeno, fora do texto do balao
+            itens_linha = [x for x in itens_linha if x != "estado"]
         for x in msgs:
             if marcador is not None and x.id == marcador:
                 itens.append(m.texto_marcador(self.marcador_n))
                 mapa.append(MARCADOR)
+                info.append(("marcador", "", ""))
+            if visual:
+                info.append(("minha" if x.minha else "outra",
+                             aparencia.rotulo_do_dia(x.data),
+                             (x.estado or "") if x.minha else ""))
             itens.append(self._com_marca(
                 m.formatar(x, m.ESTILO_AUTOR_PRIMEIRO, anterior,
                            quem=self._quem_enviou(x), itens=itens_linha,
@@ -4771,6 +4839,8 @@ class Janela(wx.Frame):
         velho_mapa, velhos = self.mapa, self._itens_msgs
         self.mapa = mapa
         self._itens_msgs = itens
+        if visual:
+            self.lista_msgs.definir_info(info)
         if destino is None and mapa[:len(velho_mapa)] == velho_mapa \
                 and velho_mapa != [None] and \
                 self.lista_msgs.GetCount() == len(velho_mapa):
@@ -7790,6 +7860,8 @@ class Janela(wx.Frame):
         # transcrever/descrever e o primeiro item do menu; depois, abrir ou
         # reproduzir a midia (o Enter pode estar configurado para a IA)
         opcoes[0:0] = self._opcoes_ia(sel) + self._opcoes_midia(sel)
+        if self._pode_reenviar(sel):
+            opcoes.insert(0, ("Tentar enviar de novo", self._reenviar))
         for rotulo, tratador in opcoes:
             it = menu.Append(wx.ID_ANY, rotulo)
             self.Bind(wx.EVT_MENU, seguro(lambda e, t=tratador: t()), it)
@@ -8016,6 +8088,7 @@ class Janela(wx.Frame):
         achada = self._local_enviando(lista, texto, tipo)
         if achada is not None:
             lista.remove(achada)
+            self._anexos_locais.pop(achada.id, None)
         bipe("enviada")
         if self.cfg.get("confirmar_envio"):
             self.fala.falar("Enviada.")
@@ -8242,17 +8315,50 @@ class Janela(wx.Frame):
         mencoes = self.mencoes if legenda else []
         if legenda:
             self.mencoes = []
-        if resposta or mencoes:
-            p.enviar_arquivo(conversa_id, anexo, legenda, resposta,
-                             mencoes or None)
-        else:
-            p.enviar_arquivo(conversa_id, anexo, legenda)
+        self._anexos_locais[local.id] = (anexo, legenda, resposta,
+                                         mencoes or None)
+        self._mandar_anexo(p, conversa_id, local.id)
         if resposta and limpar_resposta:
             self.resposta_a = None
             self._rotular_caixa()
         log.info("arquivo (%s, %d bytes) enviado para a fila", anexo.tipo,
                  anexo.tamanho)
         return True
+
+    def _mandar_anexo(self, p, conversa_id, local_id):
+        anexo, legenda, resposta, mencoes = self._anexos_locais[local_id]
+        if resposta or mencoes:
+            p.enviar_arquivo(conversa_id, anexo, legenda, resposta, mencoes)
+        else:
+            p.enviar_arquivo(conversa_id, anexo, legenda)
+
+    def _pode_reenviar(self, x):
+        return x is not None and x.estado == m.FALHOU and             x.id in self._anexos_locais
+
+    def _reenviar(self, x=None):
+        """Midia que falhou: manda o mesmo arquivo de novo, do mesmo jeito
+        (legenda, resposta, mencoes). Relato do Valmir (03/11/2026): uma voz
+        que o Telegram recusou por falha dele so podia ser gravada de novo."""
+        x = x or self._mensagem_selecionada()
+        if not self._pode_reenviar(x):
+            return
+        anexo = self._anexos_locais[x.id][0]
+        if not os.path.isfile(anexo.caminho):
+            bipe("erro")
+            self.fala.falar("O arquivo desta mensagem não existe mais. "
+                            "Anexe ou grave de novo.", interromper=True)
+            return
+        p = self.contas.provedor(x.conta_id) if self.contas else None
+        if p is None or self.estados.get(x.conta_id) != ev.CONECTADA:
+            bipe("erro")
+            self.fala.falar("A conta não está conectada.", interromper=True)
+            return
+        x.estado = m.ENVIANDO
+        if (x.conta_id, x.conversa_id) == self.atual:
+            self._preencher_mensagens()
+        self.fala.falar("Enviando de novo.", interromper=True)
+        log.info("envio de %s repetido a pedido", anexo.tipo)
+        self._mandar_anexo(p, x.conversa_id, x.id)
 
     # ======================================================== colar midia
     def _ao_colar(self, evt):
@@ -8874,6 +8980,9 @@ class Janela(wx.Frame):
         if chave == "mensagens_por_vez":
             self.cfg.set(chave, valor)
             self._mudou_mensagens_por_vez()
+        elif chave == "tamanho_letra":
+            self.cfg.set(chave, valor)
+            self._aplicar_letra(mudou=True)
         elif chave == "depuracao":
             self._modo_depuracao(valor)
             self.itens["depuracao"].Check(bool(valor))

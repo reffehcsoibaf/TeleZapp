@@ -4409,3 +4409,143 @@ def test_comunidade_vem_dos_dados_do_grupo(amb):
                                 GroupName=N.GroupName(Name="Turma"))]
     amb.p._atualizar_nomes_de_grupos()
     assert conv.comunidade is False
+
+
+def test_enviar_texto_com_all_menciona_todos_do_grupo(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.p.enviar_texto("120363@g.us", "@All reunião às 8")
+    esperar(amb.fila, ev.MensagemNova)
+    ext = amb.c.enviadas[-1][1].extendedTextMessage
+    assert ext.text == "@all reunião às 8"
+    assert ext.contextInfo.nonJIDMentions == 1
+    assert list(ext.contextInfo.mentionedJID) == []
+
+
+def test_all_junto_com_mencao_e_em_resposta(amb):
+    p = amb.p
+    msg = p._mensagem_de_texto("120363@g.us", "@all e @Ana", "", mencoes=[
+        {"id": "5552@s.whatsapp.net", "nome": "Ana"}])
+    ctx = msg.extendedTextMessage.contextInfo
+    assert ctx.nonJIDMentions == 1
+    assert list(ctx.mentionedJID) == ["5552@s.whatsapp.net"]
+    resp = p._mensagem_de_texto("120363@g.us", "@all olhem", "P1")
+    assert resp.extendedTextMessage.contextInfo.nonJIDMentions == 1
+
+
+def test_all_fora_de_grupo_e_texto_comum(amb):
+    msg = amb.p._mensagem_de_texto("5551999990000@s.whatsapp.net", "@all oi",
+                                   "")
+    assert msg.conversation == "@all oi"
+
+
+def test_legenda_com_all_menciona_todos(amb):
+    legenda, ctx = amb.p._contexto_da_midia("120363@g.us", "veja @all", "",
+                                            None)
+    assert legenda == "veja @all" and ctx.nonJIDMentions == 1
+    _, nada = amb.p._contexto_da_midia("120363@g.us", "veja", "", None)
+    assert nada is None
+
+
+def test_all_recebido_cita_voce(amb):
+    x = m.Mensagem(amb.p.conta.id, "120363@g.us", "R1", autor="Ana",
+                   texto="@all reunião às 8")
+    assert amb.p._cita_voce(x)
+    x.texto = "mail@all.com"
+    assert not amb.p._cita_voce(x)
+
+
+def test_conversa_de_grupo_nao_pergunta_numero_de_lid(amb):
+    # cada exclusao em grupo gravava "sem número para um endereço LID"
+    perguntas = []
+    amb.c.get_pn_from_lid = lambda j: perguntas.append(j) or jid("5551")
+    amb.p._conectada = True
+    assert amb.p._id_da_conversa(jid("120363", "g.us")) == "120363@g.us"
+    assert amb.p._id_da_conversa(jid("5551")) == "5551@s.whatsapp.net"
+    assert perguntas == []
+    assert amb.p._id_da_conversa(jid("lid1", "lid")) == "5551@s.whatsapp.net"
+
+
+def test_forma_da_exclusao_sem_numeros():
+    f = wa.forma_da_exclusao
+    assert f("120363@g.us", False, "9999@lid") == \
+        "grupo, de outra pessoa, remetente LID"
+    assert f("120363@g.us", False, "5551@s.whatsapp.net") == \
+        "grupo, de outra pessoa, remetente número"
+    assert f("120363@g.us", True, "") == "grupo, minha"
+    assert f("5551@s.whatsapp.net", False, "") == \
+        "individual por número, de outra pessoa, sem remetente"
+    assert f("88@lid", True, "") == "individual por LID, minha"
+    assert "5551" not in f("5551@s.whatsapp.net", False, "5551@s.whatsapp.net")
+
+
+def test_exclusao_devolvida_diz_se_veio_do_telezapp(amb, caplog):
+    amb.p._conectada = True
+    amb.p._apagadas_daqui.add("M1")
+    with caplog.at_level(logging.INFO, logger="telezapp.whatsapp"):
+        for mid in ("M1", "M2"):
+            amb.p._ao_apagar_mensagem(amb.c, N.MessageDeleteForMe(
+                ChatJID=jid("120363", "g.us"), MessageID=mid,
+                SenderJID=jid("9999", "lid"), IsFromMe=False))
+    assert "(aviso que o TeleZapp mandou; grupo, de outra pessoa, " \
+        "remetente LID)" in caplog.text
+    assert "(feito em outro aparelho; grupo" in caplog.text
+    assert "9999" not in caplog.text
+
+
+ERRO_429 = ("failed to fetch app state after sending update: failed to fetch "
+            "app state regular_high patches: info query returned status 429: "
+            "rate-overlimit")
+
+
+def test_limite_do_whatsapp_espera_e_continua(amb):
+    # relato do Valderi (03/11/2026): no 429 a rodada parava em 91 de 212
+    amb.p._conectada = True
+    amb.p.PAUSA_ENTRE_EXCLUSOES = 0
+    amb.p.ESPERA_NO_LIMITE = 0
+    enviados, recusas = [], [1]
+
+    def send_app_state(patch):
+        mid = patch.Mutations[0].Index[2]
+        if mid == "L1" and recusas[0]:
+            recusas[0] -= 1
+            raise RuntimeError(ERRO_429)
+        enviados.append(mid)
+    amb.c.send_app_state = send_app_state
+    itens = [("120363@g.us", "L%d" % i, False, TS + i, "9@lid")
+             for i in range(3)]
+    amb.p.apagar_varias_mensagens(itens)
+    assert esperar(amb.fila, ev.Aviso).texto == \
+        "Mensagens apagadas no celular: 3."
+    assert enviados == ["L0", "L1", "L2"]
+    assert amb.banco.apagar_pendentes("w1") == []
+
+
+def test_limite_que_nao_passa_deixa_o_resto_e_diz_quantas_faltam(amb):
+    amb.p._conectada = True
+    amb.p.PAUSA_ENTRE_EXCLUSOES = 0
+    amb.p.ESPERA_NO_LIMITE = 0
+    amb.p.VEZES_NO_LIMITE = 2
+    enviados = []
+
+    def send_app_state(patch):
+        mid = patch.Mutations[0].Index[2]
+        if mid != "L0":
+            raise RuntimeError(ERRO_429)
+        enviados.append(mid)
+    amb.c.send_app_state = send_app_state
+    amb.p.apagar_varias_mensagens([("120363@g.us", "L%d" % i, False, TS + i,
+                                    "9@lid") for i in range(3)])
+    texto = esperar(amb.fila, ev.Aviso).texto
+    assert texto.startswith("Mensagens apagadas no celular: 1.")
+    assert "Faltam 2" in texto
+    assert len(amb.banco.apagar_pendentes("w1")) == 2
+    assert wa.limite_de_pedidos(RuntimeError(ERRO_429))
+    assert not wa.limite_de_pedidos(RuntimeError("sem rede"))
+
+
+def test_todos_digitado_vai_como_all(amb):
+    # pergunta do Wanderlei: "@todos" so abria a escolha de um membro
+    msg = amb.p._mensagem_de_texto("120363@g.us", "@todos bom dia", "")
+    ext = msg.extendedTextMessage
+    assert ext.text == "@all bom dia" and ext.contextInfo.nonJIDMentions == 1

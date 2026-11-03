@@ -238,6 +238,8 @@ Para responder a uma mensagem, selecione-a e use Ctrl+Shift+R. Esc cancela a res
 
 Em grupos, digitar @ no começo da mensagem ou depois de um espaço abre a lista de membros para mencionar. Digite para filtrar, e Enter escolhe.
 
+No WhatsApp, o primeiro item dessa lista é "Todos do grupo, @todos ou @all", que também aparece ao filtrar por "todos" ou "all". Ele escreve @todos na mensagem, e todos os membros do grupo são avisados. Escrever @todos ou @all à mão tem o mesmo efeito. A menção a todos aparece como @todos, no TeleZapp e no celular. Em grupos com mais de 32 membros, o WhatsApp só deixa administradores mencionarem todos. O Telegram não tem esse recurso.
+
 Ctrl+V na caixa cola arquivos copiados no Explorer ou imagens. Eles esperam o Enter, e o texto da caixa, escrito antes ou depois da colagem, vira a legenda. Esc remove a mídia colada.
 
 Com uma conversa aberta, o botão "Iniciar chamada", depois de "Anexar e enviar arquivo", pergunta se a chamada é de áudio ou de vídeo. Esc sai sem ligar. Se a conta não fizer vídeo, só a chamada de áudio aparece.
@@ -345,6 +347,8 @@ Período: de e até, com dia, mês e ano.
 Duração de áudio, voz ou vídeo.
 Tamanho do arquivo em MB.
 Estado das suas mensagens enviadas: enviada, entregue, lida, ouvida, falhou.
+
+Se uma foto, áudio, gravação ou arquivo falhar, o menu de contexto da mensagem ganha, no topo, Tentar enviar de novo: o mesmo arquivo vai outra vez, com a mesma legenda, sem gravar de novo. Vale enquanto o TeleZapp estiver aberto. Texto que falha volta para a caixa de digitação.
 
 Buscar mostra até 500 resultados na lista de baixo, das mais novas para as mais antigas, ou ao contrário, pela lista Ordem. Cada linha diz a conversa, o dia e a hora, a conta, quem enviou e um trecho.
 
@@ -666,6 +670,8 @@ Transcrição e descrição automáticas: no menu de contexto de uma conversa, "
 
 # Configurações
 Ferramentas, Configurações (Ctrl+vírgula) abre uma janela com todas as opções do TeleZapp.
+
+Em Configurações, Interface, o Tamanho da letra aumenta as letras da janela principal na hora (listas, caixa de digitar e botões).
 
 O primeiro campo é a busca. Digite uma palavra, como velocidade, e aparece no alto da lista de categorias Resultados da busca, com tudo o que combina: as opções, que podem ser mudadas ali mesmo, e botões que levam ao que fica em outro lugar, como um item das janelas Lista de conversas e Lista de mensagens, um evento de som, um atalho, a privacidade da conta ou um provedor de inteligência artificial. Tab vai da busca para a lista de categorias, depois para as opções da categoria escolhida e, por fim, para os botões OK, Cancelar e Aplicar.
 

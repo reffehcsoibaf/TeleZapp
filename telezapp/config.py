@@ -185,6 +185,21 @@ class Opcao:
 
 MENSAGENS_POR_VEZ = (50, 5000)
 
+# Escondida enquanto aparencia.MODO_VISUAL_DISPONIVEL for False
+OPCAO_MODO_EXIBICAO = Opcao(
+    "modo_exibicao", "Modo de exibição", "Interface", "automatico",
+          "Para leitor de tela: a janela de sempre, feita para ser ouvida, "
+          "com cada mensagem numa linha. Visual: para quem lê na tela, com "
+          "as mensagens longas quebradas em várias linhas e as suas "
+          "destacadas. Os atalhos e os menus são os mesmos nos dois. "
+          "Automático: ao abrir, o TeleZapp usa o modo para leitor de tela "
+          "se houver um leitor de tela ligado, e o visual se não houver. "
+          "Vale na próxima vez que o TeleZapp abrir.",
+          escolhas=(("automatico", "Automático, conforme haja leitor de "
+                     "tela ligado"),
+                    ("leitor", "Para leitor de tela"),
+                    ("visual", "Visual")))
+
 OPCOES = (
     Opcao("mensagens_por_vez", "Quantas mensagens buscar por vez", "Mensagens",
           100,
@@ -193,6 +208,11 @@ OPCOES = (
           "conversas. Conversas com mais não lidas que isso mostram todas "
           "elas. No WhatsApp, o que vem do celular chega em até 50 de cada "
           "vez.", numero=MENSAGENS_POR_VEZ),
+    Opcao("tamanho_letra", "Tamanho da letra", "Interface", 100,
+          "O tamanho das letras da janela principal: listas, caixa de "
+          "digitar e botões. Vale na hora.",
+          escolhas=((100, "Normal"), (125, "Grande"), (150, "Maior"),
+                    (175, "Bem maior"), (200, "Dobro do normal"))),
     Opcao("status_no_titulo",
           "Mostrar status de presença no título da janela",
           "Interface", True,
@@ -660,6 +680,10 @@ OPCOES = (
           ((50, "50 MB"), (100, "100 MB"), (500, "500 MB"),
            (100000, "Nunca perguntar"))),
 )
+
+from telezapp.nucleo import aparencia as _aparencia  # noqa: E402
+if _aparencia.MODO_VISUAL_DISPONIVEL:
+    OPCOES = (OPCAO_MODO_EXIBICAO,) + OPCOES
 
 
 # Sons dos eventos: (nome em acessibilidade.fala.bipe, rotulo, descricao).

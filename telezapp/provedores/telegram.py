@@ -1056,10 +1056,13 @@ class ProvedorTelegram(Provedor):
         from telethon import TelegramClient
         api_id, api_hash = self.credenciais
         caminho = os.path.join(self.pasta_sessoes, self.conta.id)
+        # raise_last_call_error: esgotadas as tentativas, vem o erro do
+        # Telegram, e nao um ValueError generico (relato do Valmir,
+        # 03/11/2026: "erro do Telegram (ValueError)" numa falha do servidor)
         return TelegramClient(
             caminho, api_id, api_hash, device_model=NOME,
             system_version="Windows", app_version=VERSAO, lang_code="pt",
-            system_lang_code="pt-BR")
+            system_lang_code="pt-BR", raise_last_call_error=True)
 
     async def _desistir_de_conectar(self):
         """Sem isto o cliente seguiria reconectando sozinho, para sempre, em
@@ -3380,4 +3383,9 @@ def _motivo(erro):
         return "você não tem permissão para escrever nesta conversa"
     if isinstance(erro, (ConnectionError, OSError)):
         return "sem conexão"
+    from telethon import errors
+    if isinstance(erro, errors.ServerError) or (
+            isinstance(erro, ValueError) and "unsuccessful" in str(erro)):
+        return ("o Telegram está com falha nos servidores dele agora. Tente "
+                "de novo daqui a pouco")
     return "erro do Telegram (%s)" % nome

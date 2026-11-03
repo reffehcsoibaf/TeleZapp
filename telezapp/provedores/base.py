@@ -387,6 +387,9 @@ class Provedor(ABC):
         """A pessoa abriu a conversa: o servico pode conferir (sem travar) se
         ela ainda pode escrever nela, marcando `somente_leitura`."""
 
+    # True nos servicos em que "@all" num grupo menciona todos os membros
+    MENCIONA_TODOS = False
+
     # True nos servicos que sabem reagir a uma mensagem
     PODE_REAGIR = False
 
