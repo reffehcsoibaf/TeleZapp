@@ -2,15 +2,104 @@
 # Copyright (C) 2026 Fábio Scheffer Moraes
 """Logica da janela de configuracoes, sem wx (assim e testavel em qualquer
 sistema): categorias, busca e valores ainda nao aplicados."""
+from dataclasses import dataclass
+
 from telezapp import config
 from telezapp.midia import velocidade as vel
+from telezapp.nucleo import atalhos as nucleo_atalhos
 from telezapp.nucleo import codigo_secreto as cs
 from telezapp.nucleo import lista_conversas as lc
 from telezapp.nucleo import lista_mensagens as lm
+from telezapp.nucleo import pacotes_de_som
+from telezapp.nucleo.ia import catalogo
 from telezapp.nucleo.pacotes_de_som import EstadoDeSons
 from telezapp.nucleo import privacidade_conta as pw
 
 CATEGORIA_BUSCA = "Resultados da busca"
+# acima disto, a busca mostra um botao so para as funcoes achadas em Atalhos
+LIMITE_ATALHOS_NA_BUSCA = 20
+
+
+@dataclass
+class Destino:
+    """O que a busca acha fora de config.OPCOES: uma linha de janela propria
+    ou de tela propria. A janela mostra um botao que leva a ela."""
+    rotulo: str
+    tipo: str        # lista_conversas, lista_mensagens, sons, atalhos, ...
+    alvo: str = ""   # o item dentro do lugar
+    descricao: str = ""
+    termos: str = ""  # outras palavras que acham este destino
+
+
+def _destinos_da_lista(tipo, titulo, nucleo):
+    ajuda = "Abre a janela %s neste item." % titulo
+    itens = [Destino("%s: %s" % (titulo, r), tipo, c, ajuda)
+             for c, r in nucleo.ITENS]
+    itens.append(Destino(
+        "%s: ao digitar uma letra nesta lista" % titulo, tipo, "digitar",
+        ajuda, " ".join(r for _, r in nucleo.ESCOLHAS_DIGITAR) +
+        " caractere tecla"))
+    if hasattr(nucleo, "ROTULO_SO_QUANDO_MUDA"):
+        itens.append(Destino("%s: %s" % (titulo, nucleo.ROTULO_SO_QUANDO_MUDA),
+                             tipo, "so_muda", ajuda))
+    itens += [
+        Destino("%s: mudar a ordem das informações" % titulo, tipo, "cima",
+                ajuda, "mover para cima baixo"),
+        Destino("%s: restaurar o padrão" % titulo, tipo, "padrao", ajuda)]
+    return itens
+
+
+def _destinos_da_privacidade():
+    ajuda = "Leva à categoria Privacidade, neste campo da conta."
+    itens = []
+    for campo in pw.CAMPOS:
+        itens.append(Destino(
+            "Privacidade da conta: " + campo.rotulo, "privacidade", campo.nome,
+            ajuda, " ".join((pw.ROTULOS_TELEGRAM.get(campo.nome, ""),
+                             *[r for _, r in campo.opcoes],
+                             "whatsapp telegram"))))
+    itens.append(Destino("Privacidade da conta: Quem pode ver meu status",
+                         "privacidade", "status", ajuda, "whatsapp"))
+    return itens
+
+
+def _destinos_da_ia():
+    itens = []
+    for tarefa in catalogo.TAREFAS:
+        nomes = [n for _, n in catalogo.provedores_da_tarefa(tarefa)]
+        itens.append(Destino(
+            "Inteligência artificial: " + catalogo.NOMES_DE_TAREFA[tarefa],
+            "ia", tarefa,
+            "Leva à lista de provedores desta tarefa.",
+            " ".join(nomes) + " provedores ordem tarefa ia"))
+    for prov in catalogo.PROVEDORES.values():
+        itens.append(Destino(
+            "Inteligência artificial: configurar " + prov.nome,
+            "provedor_ia", prov.chave,
+            "Abre a janela deste provedor.",
+            "chave modelo testar obter modelos apagar privacidade provedor "
+            "ia"))
+    return itens
+
+
+def _destinos_dos_sons(estado):
+    ajuda = "Leva à categoria Sons."
+    nomes = " ".join(n for _, n in estado.pacotes())
+    itens = [Destino("Sons: pacote de sons", "sons", "", ajuda,
+                     nomes + " novo personalizado excluir")]
+    for chave, rotulo in pacotes_de_som.eventos():
+        itens.append(Destino(
+            "Sons: " + rotulo, "sons", chave,
+            pacotes_de_som.descricao_do_evento(chave) or ajuda,
+            "evento som ouvir procurar ativar desativar"))
+    return itens
+
+
+def _destinos_do_codigo():
+    ajuda = "Leva à opção do código secreto, em Privacidade."
+    return [Destino("Privacidade: " + r, "codigo", "", ajuda,
+                    "trancadas secreto")
+            for r in ("Código atual", "Novo código", "Repita o novo código")]
 
 
 def categorias():
@@ -70,6 +159,45 @@ class ModeloConfiguracoes:
             return config.buscar_opcoes(self.busca)
         return [o for o in config.OPCOES
                 if o.categoria == categoria and not o.grupo]
+
+    def destinos_da_busca(self):
+        """O que a busca acha fora de config.OPCOES (ver `Destino`). As funcoes
+        de Atalhos sao muitas: passando do limite, viram um botao so."""
+        palavras = config._sem_acento(self.busca).split()
+        if not palavras:
+            return []
+
+        def casa(*textos):
+            alvo = config._sem_acento(" ".join(textos))
+            return all(p in alvo for p in palavras)
+        achados = [d for d in (
+            _destinos_da_lista("lista_conversas", "Lista de conversas", lc) +
+            _destinos_da_lista("lista_mensagens", "Lista de mensagens", lm) +
+            _destinos_dos_sons(self.sons) + _destinos_da_privacidade() +
+            _destinos_do_codigo() + _destinos_da_ia())
+            if casa(d.rotulo, d.descricao, d.termos)]
+        return achados + self._destinos_dos_atalhos(casa)
+
+    def _destinos_dos_atalhos(self, casa):
+        if self.registro is None:
+            return []
+        achadas = []
+        for a, canon in self.atalhos_lista():
+            tecla = nucleo_atalhos.exibir(canon)
+            if casa(a.rotulo, a.categoria, canon, canon.replace("+", " "),
+                    tecla, "atalho atalhos tecla"):
+                achadas.append((a, tecla))
+        if len(achadas) > LIMITE_ATALHOS_NA_BUSCA:
+            texto = " ".join(p for p in self.busca.split()
+                             if not config._sem_acento(p).startswith("atalho"))
+            return [Destino(
+                "Atalhos: ver as %d funções achadas" % len(achadas),
+                "atalhos_busca", texto,
+                "Leva à categoria Atalhos, com a busca já preenchida.")]
+        return [Destino("Atalhos: %s, %s: %s" % (
+            a.rotulo, a.categoria, tecla or "sem atalho"), "atalhos", a.chave,
+            "Leva à categoria Atalhos, nesta função.")
+            for a, tecla in achadas]
 
     def grupos(self, categoria):
         """Nomes dos botoes da categoria, cada um com um grupo de opcoes."""

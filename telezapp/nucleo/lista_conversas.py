@@ -4,7 +4,8 @@
 
 Sem wx, para testar em qualquer sistema. A escolha vive em `lista_conversas`
 (config): {"ordem": [as chaves de ITENS, na ordem], "ocultos": [chaves que
-ficam de fora]}. Sempre sobra pelo menos um item ativado.
+ficam de fora], "digitar": "campo" (so se a pessoa escolheu)}. Sempre sobra
+pelo menos um item ativado.
 """
 from telezapp.nucleo import modelos as m
 
@@ -25,6 +26,8 @@ PADRAO = {"ordem": list(CHAVES),
           "ocultos": ["autor", "previa", "reacoes", "quem_reagiu"]}
 TAMANHO_DA_PREVIA = 80
 MENSAGEM_DO_MINIMO = "Pelo menos um item precisa ficar ativado."
+ESCOLHAS_DIGITAR = (("pular", "Pular para o item que começa com a letra"),
+                    ("campo", "Ir direto para o campo de busca"))
 
 
 def normalizar(valor):
@@ -53,7 +56,23 @@ def normalizar(valor):
     ocultos = [c for c in ordem if c in escondidos]
     if len(ocultos) >= len(ordem):
         ocultos = []
-    return {"ordem": ordem, "ocultos": ocultos}
+    lay = {"ordem": ordem, "ocultos": ocultos}
+    if valor.get("digitar") == "campo":
+        lay["digitar"] = "campo"
+    return lay
+
+
+def digitar(valor):
+    """O que digitar um caractere com o foco na lista faz: "pular" ou "campo"."""
+    return normalizar(valor).get("digitar", "pular")
+
+
+def definir_digitar(valor, modo):
+    lay = normalizar(valor)
+    lay.pop("digitar", None)
+    if modo == "campo":
+        lay["digitar"] = "campo"
+    return lay
 
 
 def ativos(valor):

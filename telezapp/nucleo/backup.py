@@ -46,7 +46,8 @@ NOMES_PARTES = dict(PARTES)
 # (formato 1) tudo isso era uma parte so, "configuracoes"
 PARTES_DE_OPCOES = ("configuracoes", "atalhos", "sons")
 OPCOES_DE_PARTE = {"atalhos": ("atalhos", "mostrar_atalhos"),
-                   "sons": ("pacote_de_sons", "sons_desativados")}
+                   "sons": ("pacote_de_sons", "sons_desativados",
+                            "sons_de_conversa")}
 FORMATO = 2
 
 
@@ -91,6 +92,7 @@ class Manifesto:
 # Preferencias fora de config.OPCOES que tambem vao (a ordem dos provedores
 # de IA e os modelos; as chaves so em backup com senha, ver CHAVES_IA)
 EXTRAS = ("ia_ordem", "ia_modelos", "pacote_de_sons", "sons_desativados",
+          "sons_de_conversa",
           "atalhos", "lista_conversas", "lista_mensagens",
           "participantes_silenciados")
 
@@ -184,6 +186,17 @@ def opcoes_validas(lidas, partes=None):
         # lista de mensagens
         from telezapp.nucleo import lista_mensagens
         boas["lista_mensagens"] = lista_mensagens.do_estilo(lidas["estilo"])
+    if lidas.get("digitar_na_lista") == "campo":
+        # backup antigo: a opcao unica virou uma escolha em cada lista
+        from telezapp.nucleo import lista_conversas, lista_mensagens
+        for chave, nucleo in (("lista_conversas", lista_conversas),
+                              ("lista_mensagens", lista_mensagens)):
+            boas[chave] = nucleo.definir_digitar(boas.get(chave), "campo")
+    por_conversa = lidas.get("sons_de_conversa")
+    if isinstance(por_conversa, dict):
+        boas["sons_de_conversa"] = {
+            c: os.path.basename(v) for c, v in por_conversa.items()
+            if isinstance(c, str) and isinstance(v, str) and v}
     desativados = lidas.get("sons_desativados")
     if isinstance(desativados, dict):
         boas["sons_desativados"] = {
@@ -501,6 +514,32 @@ def restaurar(arquivo, senha, partes, pasta_dados, resultado=None,
             json.dump({"partes": em_espera,
                        "pasta_midias": manifesto.pasta_midias}, f)
     return opcoes, em_espera
+
+
+AVISO_CONVERSAS_SEM_CONTAS = (
+    "As conversas só aparecem junto da conta a que pertencem. Sem as contas e "
+    "sessões, elas ficam guardadas, mas não aparecem em outra instalação nem "
+    "depois de parear a conta de novo.")
+
+
+def conversas_sem_conta(pasta_dados, contas):
+    """True se o banco em espera tem conversas de contas fora de `contas`
+    (ids): depois de trocar, a lista nao as mostraria."""
+    caminho = os.path.join(pasta_dados, ESPERA, "telezapp.db")
+    if not os.path.isfile(caminho):
+        return False
+    con = None
+    try:
+        con = sqlite3.connect("file:%s?mode=ro" % caminho.replace("\\", "/"),
+                              uri=True)
+        do_backup = {c for c, in con.execute(
+            "SELECT DISTINCT conta_id FROM conversas")}
+    except sqlite3.Error:
+        return False
+    finally:
+        if con is not None:
+            con.close()
+    return bool(do_backup - set(contas))
 
 
 def ha_pendente(pasta_dados):

@@ -147,13 +147,16 @@ class DialogoConfiguracoes(wx.Dialog):
             self.painel.FitInside()
             return
         opcoes = self.modelo.opcoes(categoria)
-        if not opcoes:
+        destinos = self._destinos() if categoria == CATEGORIA_BUSCA else []
+        if not opcoes and not destinos:
             self.lay_painel.Add(
                 wx.StaticText(self.painel,
                               label="Nenhuma configuração encontrada."),
                 0, wx.ALL, 8)
         for o in opcoes:
             self._criar_opcao(o)
+        for i, d in enumerate(destinos):
+            self._criar_destino(i, d)
         if categoria != CATEGORIA_BUSCA:
             for grupo in self.modelo.grupos(categoria):
                 self._criar_botao_grupo(categoria, grupo)
@@ -169,6 +172,88 @@ class DialogoConfiguracoes(wx.Dialog):
             self._criar_ia()
         self.painel.Layout()
         self.painel.FitInside()
+
+    # ------------------------------------- o que a busca acha fora das opcoes
+    def _destinos(self):
+        """Sem o que esta janela nao tem como mostrar."""
+        fora = set()
+        if self.privacidade is None:
+            fora.add("privacidade")
+        if self.ia is None:
+            fora |= {"ia", "provedor_ia"}
+        return [d for d in self.modelo.destinos_da_busca()
+                if d.tipo not in fora]
+
+    def _criar_destino(self, i, destino):
+        """Botao que leva ao lugar onde o item achado fica."""
+        b = wx.Button(self.painel, label=destino.rotulo)
+        b.Bind(wx.EVT_BUTTON, lambda e, d=destino, k=i: self._ir_para(d, k))
+        b.Bind(wx.EVT_SET_FOCUS, lambda e, d=destino: self._ao_focar(e, d))
+        self.lay_painel.Add(b, 0, wx.ALL, 8)
+        self.controles["destino:%d" % i] = b
+
+    def _ir_para(self, destino, indice=None):
+        """Janelas das listas abrem por cima dos resultados, para seguir
+        neles depois; o resto fica numa categoria, e a busca sai da frente."""
+        if destino.tipo in ("lista_conversas", "lista_mensagens"):
+            if destino.tipo == "lista_conversas":
+                self._abrir_lista_conversas(destino.alvo)
+            else:
+                self._abrir_lista_mensagens(destino.alvo)
+            b = self.controles.get("destino:%s" % indice)
+            if b:
+                b.SetFocus()
+            return
+        categoria = {"sons": "Sons", "atalhos": "Atalhos",
+                     "atalhos_busca": "Atalhos", "codigo": "Privacidade",
+                     "privacidade": "Privacidade",
+                     "ia": "Inteligência artificial",
+                     "provedor_ia": "Inteligência artificial"}[destino.tipo]
+        self.busca.ChangeValue("")
+        self.modelo.busca = ""
+        self._preencher_categorias(categoria)
+        getattr(self, "_focar_" + destino.tipo)(destino.alvo)
+
+    def _focar_sons(self, evento):
+        chaves = [c for c, _ in pacotes_de_som.eventos()]
+        if evento in chaves:
+            self.lista_sons.SetSelection(chaves.index(evento))
+            self.lista_sons.SetFocus()
+        else:
+            self.cx_pacote.SetFocus()
+
+    def _focar_atalhos(self, chave):
+        self._atalhos_preencher(chave)
+        self.lista_atalhos.SetFocus()
+
+    def _focar_atalhos_busca(self, texto):
+        self.busca_atalhos.ChangeValue(texto)
+        self._atalhos_preencher()
+        self.lista_atalhos.SetFocus()
+
+    def _focar_codigo(self, _):
+        self.controles["trancadas_exigir_codigo"].SetFocus()
+
+    def _focar_privacidade(self, campo):
+        """A leitura da conta pode estar em andamento, com as caixas apagadas:
+        nesse caso o foco chega quando ela terminar."""
+        par = getattr(self, "_priv_caixas", {}).get(campo)
+        if campo == "status" and hasattr(self, "_priv_status"):
+            self._priv_status.SetFocus()
+        elif par is not None and par[1].IsEnabled():
+            par[1].SetFocus()
+        elif par is not None:
+            self._priv_foco = campo
+            self.lista.SetFocus()
+        else:
+            self.lista.SetFocus()
+
+    def _focar_ia(self, tarefa):
+        self._ia_listas[tarefa][0].SetFocus()
+
+    def _focar_provedor_ia(self, provedor):
+        self._ia_botoes[provedor].SetFocus()
+        self._configurar_provedor_ia(provedor)
 
     # ------------------------------------------------------------ atalhos
     def _criar_atalhos(self):
@@ -520,14 +605,15 @@ class DialogoConfiguracoes(wx.Dialog):
         self.lay_painel.Add(b, 0, wx.ALL, 8)
         self.controles["lista_mensagens"] = b
 
-    def _abrir_lista_mensagens(self):
+    def _abrir_lista_mensagens(self, foco=None):
         from telezapp.interface.lista_conversas import DialogoListaConversas
         from telezapp.nucleo import lista_mensagens as lm
         dlg = DialogoListaConversas(
             self, self.modelo.lista_msg_em_uso, self.modelo.lista_msg_definir,
             self.fala, nucleo=lm, titulo="Lista de mensagens",
             explicacao="O que cada mensagem mostra na lista de uma conversa "
-                       "e em que ordem. Pelo menos um item fica ativado.")
+                       "e em que ordem. Pelo menos um item fica ativado.",
+            foco=foco)
         try:
             dlg.ShowModal()
         finally:
@@ -536,10 +622,11 @@ class DialogoConfiguracoes(wx.Dialog):
         if b:
             b.SetFocus()
 
-    def _abrir_lista_conversas(self):
+    def _abrir_lista_conversas(self, foco=None):
         from telezapp.interface.lista_conversas import DialogoListaConversas
         dlg = DialogoListaConversas(self, self.modelo.lista_em_uso,
-                                    self.modelo.lista_definir, self.fala)
+                                    self.modelo.lista_definir, self.fala,
+                                    foco=foco)
         try:
             dlg.ShowModal()
         finally:
@@ -800,6 +887,9 @@ class DialogoConfiguracoes(wx.Dialog):
         self._priv_status.SetValue(lido.get("status") or "")
         self.painel.Layout()
         self.painel.FitInside()
+        foco, self._priv_foco = getattr(self, "_priv_foco", None), None
+        if foco in campos:
+            self._priv_caixas[foco][1].SetFocus()
 
     # ------------------------------------------- codigo das trancadas
     def _criar_campos_codigo(self):

@@ -970,3 +970,7 @@ O responsável testou muitas das melhorias do dia, sem dar retorno item a item e
 ## Verificado ao vivo pelo responsável: código depois da 2026.10.31.1, ainda sem versão (continuação)
 
 - **Mídias expiradas pedidas ao celular (01/11/2026):** ao baixar as mídias que faltam, "está indo muito bem", duas por vez. Não detalhou conversa individual ou grupo, quantas vieram ou faltaram, nem se o WhatsApp precisa estar aberto na tela do celular.
+
+## Verificado ao vivo pelo responsável: 2026.11.02.0, ainda sem publicar
+
+- **Tipo da localização nos dados da mensagem (02/11/2026):** uma localização em tempo real recebida passou a dizer "localização em tempo real" em vez de "mensagem sem suporte ainda". Os outros tipos (enquete, contato, convite, evento, produto) não foram comentados.

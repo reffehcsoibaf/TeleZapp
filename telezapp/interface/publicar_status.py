@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Fábio Scheffer Moraes
 """Janela de publicar um status (WhatsApp) ou uma historia (Telegram)."""
+import os
+
 import wx
 
 from telezapp.interface.emojis import escolher_emoji
@@ -11,16 +13,22 @@ from telezapp.nucleo import emojis, publicar_status as ps
 class DialogoPublicarStatus(wx.Dialog):
     """contas: [(id, rotulo, servico)]. Depois de ShowModal() == wx.ID_OK,
     `resultado` tem conta_id, texto, anexo e publico. atalho_emoji: a mesma
-    tecla de inserir emoji da janela principal, que aqui nao chega."""
+    tecla de inserir emoji da janela principal, que aqui nao chega.
+    gravar_voz(pai) -> caminho da gravacao ou None (so no WhatsApp).
+    escolher_mencoes(pai, conta_id, atuais) -> [(id, nome)] ou None."""
 
     def __init__(self, pai, contas, escolher_arquivo, atalho_emoji="",
-                 fala=None):
+                 fala=None, gravar_voz=None, escolher_mencoes=None):
         super().__init__(pai, title="Novo status",
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.contas = list(contas)
         self.escolher_arquivo = escolher_arquivo
         self.atalho_emoji = atalho_emoji
         self.fala = fala
+        self.gravar_voz = gravar_voz
+        self.voz = False                # o arquivo e uma gravacao daqui
+        self.escolher_mencoes = escolher_mencoes
+        self.mencoes = []               # [(id, nome)]
         self.resultado = None
         lay = wx.BoxSizer(wx.VERTICAL)
         lay.Add(wx.StaticText(self, label="&Conta"), 0,
@@ -49,6 +57,10 @@ class DialogoPublicarStatus(wx.Dialog):
         linha.Add(self.btn_procurar, 0, wx.RIGHT, 8)
         linha.Add(self.btn_limpar, 0)
         lay.Add(linha, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        self.btn_gravar = wx.Button(self, label="&Gravar mensagem de voz...")
+        lay.Add(self.btn_gravar, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.btn_mencoes = wx.Button(self, label="&Mencionar pessoas...")
+        lay.Add(self.btn_mencoes, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.rot_publico = wx.StaticText(self, label="Quem pode &ver "
                                                      "(Telegram)")
         lay.Add(self.rot_publico, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
@@ -71,6 +83,8 @@ class DialogoPublicarStatus(wx.Dialog):
         self.cx_conta.Bind(wx.EVT_CHOICE, lambda e: self._ao_trocar_conta())
         self.btn_procurar.Bind(wx.EVT_BUTTON, lambda e: self._procurar())
         self.btn_limpar.Bind(wx.EVT_BUTTON, lambda e: self._limpar())
+        self.btn_gravar.Bind(wx.EVT_BUTTON, lambda e: self._gravar())
+        self.btn_mencoes.Bind(wx.EVT_BUTTON, lambda e: self._mencionar())
         self.ok.Bind(wx.EVT_BUTTON, lambda e: self._publicar())
         self._ao_trocar_conta()
         self.CentreOnParent()
@@ -100,28 +114,60 @@ class DialogoPublicarStatus(wx.Dialog):
         telegram = self._servico() == "telegram"
         self.rot_publico.Show(telegram)
         self.cx_publico.Show(telegram)
+        self.btn_gravar.Show(not telegram and self.gravar_voz is not None)
+        self.btn_mencoes.Show(not telegram and
+                              self.escolher_mencoes is not None)
+        self.mencoes = []               # a escolha era de outra conta
+        self.btn_mencoes.SetLabel("&Mencionar pessoas...")
         self.Layout()
 
     def _procurar(self):
         caminho = self.escolher_arquivo(self)
         if caminho:
+            self._limpar()
             self.caminho = caminho
             self.arquivo.SetValue(caminho)
 
+    def _mencionar(self):
+        conta_id = self.contas[max(self.cx_conta.GetSelection(), 0)][0]
+        escolha = self.escolher_mencoes(self, conta_id, self.mencoes)
+        if escolha is None:
+            return
+        self.mencoes = escolha
+        self.btn_mencoes.SetLabel(
+            "&Mencionar pessoas: " + ", ".join(n for _, n in escolha)
+            if escolha else "&Mencionar pessoas...")
+        self.Layout()
+
+    def _gravar(self):
+        caminho = self.gravar_voz(self)
+        if not caminho:
+            return
+        self._limpar()
+        self.caminho, self.voz = caminho, True
+        self.arquivo.SetValue("Mensagem de voz gravada")
+        self.ok.SetFocus()
+
     def _limpar(self):
-        self.caminho = ""
+        if self.voz:                    # a gravacao so existe para este envio
+            try:
+                os.remove(self.caminho)
+            except OSError:
+                pass
+        self.caminho, self.voz = "", False
         self.arquivo.SetValue("")
 
     def _publicar(self):
         conta_id, _, servico = self.contas[max(self.cx_conta.GetSelection(),
                                                0)]
         anexo, texto, erro = ps.validar(servico, self.texto.GetValue(),
-                                        self.caminho)
+                                        self.caminho, self.voz)
         if erro:
             wx.MessageBox(erro, "Novo status", wx.OK | wx.ICON_WARNING,
                           self)
             return
         publico = ps.PUBLICOS[max(self.cx_publico.GetSelection(), 0)][0]
         self.resultado = {"conta_id": conta_id, "texto": texto,
-                          "anexo": anexo, "publico": publico}
+                          "anexo": anexo, "publico": publico,
+                          "mencoes": [c for c, _ in self.mencoes]}
         self.EndModal(wx.ID_OK)

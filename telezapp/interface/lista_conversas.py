@@ -20,9 +20,12 @@ class DialogoListaConversas(wx.Dialog):
     def __init__(self, pai, ler, gravar, fala=None, nucleo=lc,
                  titulo="Lista de conversas",
                  explicacao="O que cada conversa mostra na lista, na ordem em "
-                            "que aparece. Pelo menos um item fica ativado."):
+                            "que aparece. Pelo menos um item fica ativado.",
+                 foco=None):
         """ler() -> valor atual; gravar(valor) guarda o novo; fala, se houver,
-        diz o que mudou. `nucleo`: lista_conversas ou lista_mensagens."""
+        diz o que mudou. `nucleo`: lista_conversas ou lista_mensagens. `foco`:
+        onde comecar, como a busca das configuracoes pede (uma informacao,
+        "digitar", "so_muda", "cima" ou "padrao")."""
         super().__init__(pai, title=titulo, style=wx.DEFAULT_DIALOG_STYLE)
         self.ler, self.gravar, self.fala = ler, gravar, fala
         self.lc, self.titulo = nucleo, titulo
@@ -41,6 +44,14 @@ class DialogoListaConversas(wx.Dialog):
             lay.Add(self.so_muda, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
             self.so_muda.Bind(wx.EVT_CHECKBOX,
                               lambda e: self.mudar_so_quando_muda())
+        rotulo = "&Ao digitar uma letra nesta lista:"
+        lay.Add(wx.StaticText(self, label=rotulo), 0, wx.LEFT | wx.RIGHT, 10)
+        self.digitar = wx.Choice(
+            self, choices=[r for _, r in nucleo.ESCOLHAS_DIGITAR],
+            name=rotulo.replace("&", ""))
+        lay.Add(self.digitar, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+        self._mostrar_digitar()
+        self.digitar.Bind(wx.EVT_CHOICE, lambda e: self.mudar_digitar())
         linha = wx.WrapSizer(wx.HORIZONTAL)
         self.botoes = {}
         for chave, rotulo in (("cima", "Mover para &cima"),
@@ -62,6 +73,19 @@ class DialogoListaConversas(wx.Dialog):
         self.botoes["padrao"].Bind(wx.EVT_BUTTON, lambda e: self.restaurar())
         self.preencher(0)
         self.lista.SetFocus()
+        if foco is not None:
+            self._focar(foco)
+
+    def _focar(self, foco):
+        ordem = self.lc.normalizar(self.ler())["ordem"]
+        if foco in ordem:
+            self.preencher(ordem.index(foco))
+        elif foco == "digitar":
+            self.digitar.SetFocus()
+        elif foco == "so_muda" and self.so_muda is not None:
+            self.so_muda.SetFocus()
+        elif foco in self.botoes and self.botoes[foco].IsEnabled():
+            self.botoes[foco].SetFocus()
 
     # -------------------------------------------------------------- lista
     def preencher(self, selecionar=0):
@@ -124,10 +148,21 @@ class DialogoListaConversas(wx.Dialog):
         self._dizer("Nome de quem enviou só quando muda: %s." % (
             "ativado" if ligado else "desativado"))
 
+    def _mostrar_digitar(self):
+        modos = [c for c, _ in self.lc.ESCOLHAS_DIGITAR]
+        self.digitar.SetSelection(modos.index(self.lc.digitar(self.ler())))
+
+    def mudar_digitar(self):
+        modo = self.lc.ESCOLHAS_DIGITAR[self.digitar.GetSelection()][0]
+        novo = self.lc.definir_digitar(self.ler(), modo)
+        self.gravar(novo)
+        self.botoes["padrao"].Enable(not self.lc.eh_padrao(novo))
+
     def restaurar(self):
         if self.so_muda is not None:
             self.so_muda.SetValue(False)
         self.gravar(self.lc.padrao())
+        self._mostrar_digitar()
         self.preencher(0)
         self._dizer("%s no padrão." % self.titulo)
         self.lista.SetFocus()

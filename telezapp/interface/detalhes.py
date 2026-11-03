@@ -12,8 +12,10 @@ import traceback
 
 import wx
 
+from telezapp.acessibilidade.fala import bipe
 from telezapp.nucleo import detalhes as det
 from telezapp.nucleo import modelos as m
+from telezapp.nucleo import pacotes_de_som
 from telezapp.nucleo import silenciados
 
 log = logging.getLogger("telezapp.detalhes")
@@ -300,6 +302,93 @@ def _quando(ts):
     return time.strftime("%d/%m/%Y", time.localtime(ts)) if ts else ""
 
 
+class DialogoSomDaConversa(wx.Dialog):
+    """O som proprio de uma conversa: vale na hora, sem passar pelas
+    configuracoes."""
+
+    def __init__(self, pai, jan, conv):
+        super().__init__(pai, title="Som de %s" % conv.nome,
+                         style=wx.DEFAULT_DIALOG_STYLE)
+        self.jan, self.conv = jan, conv
+        lay = wx.BoxSizer(wx.VERTICAL)
+        self.situacao = wx.StaticText(self, label="")
+        lay.Add(self.situacao, 0, wx.ALL, 10)
+        linha = wx.WrapSizer(wx.HORIZONTAL)
+        self.botoes = {}
+        for chave, rotulo, funcao in (
+                ("escolher", "&Escolher um arquivo de som...", self.escolher),
+                ("ouvir", "&Ouvir", self.ouvir),
+                ("remover", "&Voltar ao som do tipo de conversa", self.remover)):
+            b = wx.Button(self, label=rotulo)
+            b.Bind(wx.EVT_BUTTON, lambda e, f=funcao: f())
+            linha.Add(b, 0, wx.RIGHT | wx.TOP, 6)
+            self.botoes[chave] = b
+        lay.Add(linha, 0, wx.LEFT | wx.RIGHT, 10)
+        lay.Add(wx.Button(self, wx.ID_CANCEL, "&Fechar"), 0,
+                wx.ALL | wx.ALIGN_RIGHT, 10)
+        self.SetEscapeId(wx.ID_CANCEL)
+        self.SetSizerAndFit(lay)
+        self.CentreOnParent()
+        self._mostrar()
+        self.botoes["escolher"].SetFocus()
+
+    def _arquivo(self):
+        return pacotes_de_som.arquivo_da_conversa(self.jan.cfg, self.conv.chave)
+
+    def _mostrar(self):
+        self.situacao.SetLabel(texto_do_som_da_conversa(self.jan.cfg,
+                                                        self.conv))
+        self.botoes["remover"].Enable(bool(self._arquivo()))
+        self.Layout()
+
+    def ouvir(self):
+        arquivo = self._arquivo()
+        if arquivo:
+            bipe("nova", arquivo)
+        else:
+            bipe(pacotes_de_som.evento_da_conversa(self.conv))
+
+    def escolher(self):
+        dlg = wx.FileDialog(
+            self, "Escolha o som desta conversa",
+            wildcard="Sons|*.wav;*.ogg;*.opus;*.mp3;*.flac|"
+                     "Todos os arquivos|*.*",
+            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST)
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            origem = dlg.GetPath()
+        finally:
+            dlg.Destroy()
+        try:
+            pacotes_de_som.definir_som_da_conversa(self.jan.cfg,
+                                                   self.conv.chave, origem)
+        except OSError as e:
+            log.warning("som da conversa não copiado: %r", e)
+            self.jan.fala.falar("Não consegui copiar este arquivo de som.",
+                                interromper=True)
+            return
+        self._mostrar()
+        self.jan.fala.falar("Som escolhido: %s." % os.path.basename(origem),
+                            interromper=True)
+        self.botoes["ouvir"].SetFocus()
+
+    def remover(self):
+        pacotes_de_som.remover_som_da_conversa(self.jan.cfg, self.conv.chave)
+        self._mostrar()
+        self.jan.fala.falar("Esta conversa voltou ao som do tipo dela.",
+                            interromper=True)
+        self.botoes["escolher"].SetFocus()
+
+
+def texto_do_som_da_conversa(cfg, conv):
+    """"Som das mensagens: ..." para os detalhes e a janela do som."""
+    if pacotes_de_som.arquivo_da_conversa(cfg, conv.chave):
+        return "Som das mensagens: próprio desta conversa."
+    return "Som das mensagens: o de %s." % dict(pacotes_de_som.eventos())[
+        pacotes_de_som.evento_da_conversa(conv)]
+
+
 class ControleDetalhes:
     """Os detalhes de uma conversa (pessoa, grupo ou canal)."""
 
@@ -382,7 +471,8 @@ class ControleDetalhes:
         tipo = {"privada": "Conversa com uma pessoa", "grupo": "Grupo",
                 "canal": "Canal"}.get(conv.tipo, "Conversa")
         linhas = ["Nome: %s" % conv.nome, "Tipo: %s" % tipo,
-                  "Conta: %s, %s" % (conta, servico)]
+                  "Conta: %s, %s" % (conta, servico),
+                  texto_do_som_da_conversa(jan.cfg, conv)]
         if self._pode_temporarias():
             linhas.append("Mensagens temporárias: %s" % m.texto_periodo(
                 self._conv_atual().temporaria_s, conv.servico))
@@ -549,6 +639,7 @@ class ControleDetalhes:
                                if d.get("silenciado") else "&Silenciar o canal",
                                self.silenciar_canal))
                 botoes.append(("&Deixar de seguir", self.deixar_de_seguir))
+        botoes.append(("S&om desta conversa...", self.som_da_conversa))
         botoes.append(("Mensagens fa&voritas", self.favoritas))
         botoes.append(("Mensagens fi&xadas", self.fixadas))
         if self.conv.tipo == "grupo":
@@ -564,6 +655,15 @@ class ControleDetalhes:
                          self._botoes())
         threading.Thread(target=self._carregar, daemon=True,
                          name="detalhes").start()
+
+    def som_da_conversa(self):
+        dlg = DialogoSomDaConversa(self.dlg, self.jan, self.conv)
+        try:
+            dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+        self.dlg.definir(self._linhas() if self.dados is not None
+                         else self._linhas_locais(), self._botoes())
 
     def limpar(self):
         """Abre a limpeza de mídias e mensagens so desta conversa; se algo

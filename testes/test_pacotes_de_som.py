@@ -55,14 +55,15 @@ def test_pacotes_da_casa_trazem_um_arquivo_por_evento(dados):
 
 def test_mapa_de_cada_pacote_para_o_modulo_de_sons(dados):
     eventos = {e for e, _ in pk.eventos()}
-    assert pk.mapa("padrao") == {e: fala.BIP for e in eventos}
+    assert pk.mapa("padrao") == {
+        e: "" if e in pk.EVENTOS_QUE_SEGUEM else fala.BIP for e in eventos}
     assert pk.mapa("padrao", ["nova"])["nova"] == "desligado"
     telezapp = pk.mapa("telezapp", ["erro"])
     assert telezapp["erro"] == "desligado"
     assert telezapp["nova"].endswith("nova.ogg") and os.path.isfile(
         telezapp["nova"])
     pacote_id, _ = pk.criar("Meu")
-    assert set(pk.mapa(pacote_id).values()) == {fala.BIP}   # sem arquivo: bip
+    assert set(pk.mapa(pacote_id).values()) == {fala.BIP, ""}  # sem arquivo
     destino = pk.importar_arquivo(pacote_id, "nova", som(dados / "x", "a.MP3"))
     assert destino.endswith(os.path.join("Meu", "nova.mp3"))
     assert pk.mapa(pacote_id)["nova"] == destino
@@ -167,7 +168,8 @@ def test_opcoes_som_e_toque_de_chamada_viram_eventos_desativados(tmp_path,
     assert "som" not in cfg.dados and "toque_chamada" not in cfg.dados
     desativados = cfg.get("sons_desativados")
     for pacote in (pk.PADRAO, pk.TELEZAPP):
-        assert set(desativados[pacote]) == {"nova", "nova_aberta",
+        assert set(desativados[pacote]) == {"nova", "nova_aberta", "nova_pessoal",
+                                            "nova_canal", "nova_comunidade",
                                             "nova_grupo", "toque", "chamando"}
     pk.migrar_liga_desliga(config.Config())        # de novo: nada muda
 
@@ -181,3 +183,83 @@ def test_quem_tinha_os_sons_ligados_nao_ganha_eventos_desativados(
     pk.migrar_liga_desliga(cfg)
     assert "som" not in cfg.dados
     assert not cfg.get("sons_desativados")
+
+
+def test_tipos_de_conversa_seguem_o_som_geral_ate_ter_um_arquivo(dados, tmp_path):
+    from telezapp.nucleo import modelos as m
+    pacote, _ = pk.criar("Tipos")
+    origem = tmp_path / "x.ogg"
+    origem.write_bytes(b"som")
+    for e in pk.EVENTOS_QUE_SEGUEM:
+        assert pk.valor_do_evento(pacote, e) == ""
+    assert pk.valor_do_evento(pacote, "nova_canal", ["nova_canal"]) == \
+        "desligado"
+    arquivo = pk.importar_arquivo(pacote, "nova_canal", str(origem))
+    assert pk.valor_do_evento(pacote, "nova_canal") == arquivo
+    fala.definir_sons({"nova": "desligado", "nova_grupo": fala.BIP,
+                       **{e: "" for e in pk.EVENTOS_QUE_SEGUEM}})
+    assert fala.acao_do_som("nova_pessoal") == ("nenhum", "")
+    assert fala.acao_do_som("nova_comunidade") == ("padrao", "")
+    fala.definir_sons({})
+    conv = m.Conversa("w1", "c", "C")
+    assert pk.evento_da_conversa(conv) == "nova_pessoal"
+    conv.tipo = "canal"
+    assert pk.evento_da_conversa(conv) == "nova_canal"
+    conv.tipo = "grupo"
+    assert pk.evento_da_conversa(conv) == "nova_grupo"
+    conv.comunidade = True
+    assert pk.evento_da_conversa(conv) == "nova_comunidade"
+
+
+def test_tela_de_sons_mostra_e_toca_o_que_o_tipo_segue(dados, tmp_path):
+    cfg = config.Config(str(tmp_path / "c.json"))
+    est = pk.EstadoDeSons(cfg)
+    pacote, _ = pk.criar("Segue")
+    assert est.texto_do_evento(pacote, "nova_canal", "canal") == \
+        "Canal: ativado, som: o mesmo de mensagem recebida"
+    arquivo = pk.importar_arquivo(pacote, "nova_grupo",
+                                  som(tmp_path / "s", "g.ogg"))
+    assert est.valor_para_ouvir(pacote, "nova_comunidade") == arquivo
+    assert est.valor_para_ouvir("telezapp", "nova_canal") == \
+        pk.arquivo_do_evento("telezapp", "nova_canal")
+
+
+def test_quem_desligou_o_som_de_origem_continua_sem_som(dados, tmp_path):
+    cfg = config.Config(str(tmp_path / "c.json"))
+    cfg.dados["sons_desativados"] = {"telezapp": ["nova", "erro"],
+                                     "cristal": ["nova_grupo"]}
+    pk.migrar_tipos_de_conversa(cfg)
+    assert cfg.get("sons_desativados") == {
+        "telezapp": ["erro", "nova", "nova_canal", "nova_pessoal"],
+        "cristal": ["nova_comunidade", "nova_grupo"]}
+    cfg.dados["sons_desativados"]["telezapp"].remove("nova_canal")
+    pk.migrar_tipos_de_conversa(cfg)                # so uma vez
+    assert "nova_canal" not in cfg.get("sons_desativados")["telezapp"]
+    assert pk.valor_do_evento("telezapp", "nova_canal", ["nova"]).endswith(
+        "nova_canal.ogg")
+
+
+def test_bip_proprio_de_cada_tipo_no_pacote_padrao():
+    assert fala.tom_padrao("nova_pessoal") == "nova_pessoal"
+    assert fala.tom_padrao("nova_comunidade") == "nova_comunidade"
+    assert fala.tom_padrao("nova_grupo") == "nova"
+
+
+def test_som_proprio_da_conversa(dados, tmp_path):
+    cfg = config.Config(str(tmp_path / "c.json"))
+    chave = ("w1", "123@g.us")
+    assert pk.arquivo_da_conversa(cfg, chave) == ""
+    a, b = tmp_path / "a.ogg", tmp_path / "b.mp3"
+    a.write_bytes(b"a")
+    b.write_bytes(b"b")
+    primeiro = pk.definir_som_da_conversa(cfg, chave, str(a))
+    assert pk.arquivo_da_conversa(cfg, chave) == primeiro
+    a.unlink()                         # a copia continua valendo
+    assert pk.arquivo_da_conversa(cfg, chave) == primeiro
+    segundo = pk.definir_som_da_conversa(cfg, chave, str(b))
+    assert segundo != primeiro and not os.path.exists(primeiro)
+    assert config.Config(str(tmp_path / "c.json")).get(
+        "sons_de_conversa") == {"w1|123@g.us": os.path.basename(segundo)}
+    pk.remover_som_da_conversa(cfg, chave)
+    assert pk.arquivo_da_conversa(cfg, chave) == ""
+    assert not os.path.exists(segundo)

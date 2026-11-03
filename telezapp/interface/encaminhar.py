@@ -10,22 +10,26 @@ class DialogoEncaminhar(wx.Dialog):
     """Busca por nome e lista de conversas com caixa de marcar. As marcas
     sobrevivem a uma nova busca."""
 
-    def __init__(self, pai, destinos, rotulo_de, resumo, categorias=None):
+    def __init__(self, pai, destinos, rotulo_de, resumo, categorias=None,
+                 titulo="Encaminhar", instrucao=None, rotulo_ok="&Encaminhar",
+                 minimo=1, limite=0, marcados=()):
         """destinos: ver nucleo.encaminhar.destinos; rotulo_de(destino) ->
         texto da linha; resumo: o que esta sendo encaminhado; categorias:
-        ver nucleo.encaminhar.categorias (sem ela nao ha o filtro Mostrar)."""
-        super().__init__(pai, title="Encaminhar",
+        ver nucleo.encaminhar.categorias (sem ela nao ha o filtro Mostrar).
+        titulo, instrucao, rotulo_ok, minimo, limite (0 = sem limite) e
+        marcados servem a quem usa a janela para escolher outra coisa."""
+        super().__init__(pai, title=titulo,
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.todos, self.rotulo_de = destinos, rotulo_de
-        self.marcados = set()               # (conta_id, conversa_id)
+        self.marcados = set(marcados)       # (conta_id, conversa_id)
+        self.titulo, self.minimo, self.limite = titulo, minimo, limite
         self._mostrados = []
         self.categorias = categorias
         self.modo = None
         lay = wx.BoxSizer(wx.VERTICAL)
-        lay.Add(wx.StaticText(self, label="Encaminhar %s. Digite para buscar "
-                                          "e marque com Espaço as conversas "
-                                          "que vão receber." % resumo),
-                0, wx.ALL, 10)
+        lay.Add(wx.StaticText(self, label=instrucao or (
+            "Encaminhar %s. Digite para buscar e marque com Espaço as "
+            "conversas que vão receber." % resumo)), 0, wx.ALL, 10)
         if categorias is not None:
             lay.Add(wx.StaticText(self, label="Mostrar"), 0,
                     wx.LEFT | wx.RIGHT, 10)
@@ -46,7 +50,7 @@ class DialogoEncaminhar(wx.Dialog):
         lay.Add(self.contagem, 0, wx.ALL, 10)
         botoes = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
         self.ok = self.FindWindowById(wx.ID_OK)
-        self.ok.SetLabel("&Encaminhar")
+        self.ok.SetLabel(rotulo_ok)
         lay.Add(botoes, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
         self.SetSizerAndFit(lay)
         self.busca.Bind(wx.EVT_TEXT, lambda e: self._preencher())
@@ -82,8 +86,12 @@ class DialogoEncaminhar(wx.Dialog):
                                "1 marcada" if n == 1 else "%d marcadas" % n)
 
     def _ok(self, evt):
-        if not self.marcados:
-            wx.MessageBox("Marque pelo menos uma conversa.", "Encaminhar",
+        if len(self.marcados) < self.minimo:
+            wx.MessageBox("Marque pelo menos uma conversa.", self.titulo,
+                          wx.OK | wx.ICON_WARNING, self)
+            return
+        if self.limite and len(self.marcados) > self.limite:
+            wx.MessageBox("Marque no máximo %d." % self.limite, self.titulo,
                           wx.OK | wx.ICON_WARNING, self)
             return
         evt.Skip()

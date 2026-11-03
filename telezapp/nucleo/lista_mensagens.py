@@ -4,7 +4,8 @@
 
 Sem wx, para testar em qualquer sistema. A escolha vive em `lista_mensagens`
 (config): {"ordem": [as chaves de ITENS, na ordem], "ocultos": [chaves que
-ficam de fora], "autor_so_quando_muda": bool}. Sempre sobra pelo menos um item
+ficam de fora], "autor_so_quando_muda": bool, "digitar": "campo" (so se a
+pessoa escolheu)}. Sempre sobra pelo menos um item
 ativado. Substitui a antiga opcao `estilo` ("Como cada mensagem e lida"):
 `do_estilo` converte o que a pessoa tinha.
 """
@@ -28,6 +29,8 @@ CONTEUDO = ("conteudo", "marcas", "links", "previa", "ia", "reacoes",
 # a linha de sempre: "Ana, 10:00: oi (editada) ... Lida"
 PADRAO = {"ordem": list(CHAVES), "ocultos": [], "autor_so_quando_muda": False}
 MENSAGEM_DO_MINIMO = "Pelo menos um item precisa ficar ativado."
+ESCOLHAS_DIGITAR = (("pular", "Pular para o item que começa com a letra"),
+                    ("campo", "Ir direto para o campo de escrever a mensagem"))
 ROTULO_SO_QUANDO_MUDA = ("Mostrar o nome de quem enviou só quando muda "
                          "(some também a repetição seguida)")
 
@@ -48,8 +51,25 @@ def normalizar(valor):
     ocultos = [c for c in ordem if c in escondidos]
     if len(ocultos) >= len(ordem):
         ocultos = []
-    return {"ordem": ordem, "ocultos": ocultos,
-            "autor_so_quando_muda": valor.get("autor_so_quando_muda") is True}
+    lay = {"ordem": ordem, "ocultos": ocultos,
+           "autor_so_quando_muda": valor.get("autor_so_quando_muda") is True}
+    if valor.get("digitar") == "campo":
+        lay["digitar"] = "campo"
+    return lay
+
+
+def digitar(valor):
+    """O que digitar um caractere com o foco na lista faz: "pular" ou "campo".
+    Sem conversa aberta nao ha campo, e a lista continua pulando."""
+    return normalizar(valor).get("digitar", "pular")
+
+
+def definir_digitar(valor, modo):
+    lay = normalizar(valor)
+    lay.pop("digitar", None)
+    if modo == "campo":
+        lay["digitar"] = "campo"
+    return lay
 
 
 def do_estilo(estilo):

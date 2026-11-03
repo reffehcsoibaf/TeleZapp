@@ -1,0 +1,76 @@
+﻿diff --git a/send.go b/send.go
+index be8bf3b..650b99d 100644
+--- a/send.go
++++ b/send.go
+@@ -159,6 +159,8 @@ type SendRequestExtra struct {
+ 	Meta *types.MsgMetaInfo
+ 	// use this only if you know what you are doing
+ 	AdditionalNodes *[]waBinary.Node
++	// Status: quem recebe alem de quem a privacidade do status ja inclui (as pessoas mencionadas)
++	StatusRecipients []types.JID
+ }
+ 
+ // SendMessage sends the given message.
+@@ -324,6 +326,11 @@ func (cli *Client) SendMessage(ctx context.Context, to types.JID, message *waE2E
+ 				err = fmt.Errorf("failed to get broadcast list members: %w", err)
+ 				return
+ 			}
++			for _, extra := range req.StatusRecipients {
++				if !slices.ContainsFunc(groupParticipants, func(j types.JID) bool { return j.User == extra.User }) {
++					groupParticipants = append(groupParticipants, extra)
++				}
++			}
+ 		}
+ 		resp.DebugTimings.GetParticipants = time.Since(start)
+ 	} else if to.Server == types.HiddenUserServer {
+@@ -386,8 +393,9 @@ func (cli *Client) SendMessage(ctx context.Context, to types.JID, message *waE2E
+ 	resp.DebugTimings.Queue = time.Since(start)
+ 	defer cli.messageSendLock.Unlock()
+ 
+-	// Peer message retries aren't implemented yet
+-	if !req.Peer {
++	if req.Peer {
++		cli.addRecentPeerMessage(to, req.ID, message)
++	} else {
+ 		err = cli.addRecentMessage(ctx, to, req.ID, message, nil)
+ 		if err != nil {
+ 			return
+@@ -1064,6 +1072,16 @@ func getEditAttribute(msg *waE2E.Message) types.EditAttribute {
+ 	return types.EditAttributeEmpty
+ }
+ 
++func addPeerMessageAttrs(attrs waBinary.Attrs, message *waE2E.Message) {
++	attrs["category"] = "peer"
++	if message.GetProtocolMessage().GetType() == waE2E.ProtocolMessage_APP_STATE_SYNC_KEY_REQUEST {
++		attrs["push_priority"] = "high"
++	} else if message.GetProtocolMessage().GetPeerDataOperationRequestMessage().GetPeerDataOperationRequestType() == waE2E.PeerDataOperationRequestType_HISTORY_SYNC_ON_DEMAND {
++		attrs["push_priority"] = "high_force"
++		attrs["privacy_sensitive"] = "1"
++	}
++}
++
+ func (cli *Client) preparePeerMessageNode(
+ 	ctx context.Context,
+ 	to types.JID,
+@@ -1072,17 +1090,11 @@ func (cli *Client) preparePeerMessageNode(
+ 	timings *MessageDebugTimings,
+ ) (*waBinary.Node, error) {
+ 	attrs := waBinary.Attrs{
+-		"id":       id,
+-		"type":     "text",
+-		"category": "peer",
+-		"to":       to,
+-	}
+-	if message.GetProtocolMessage().GetType() == waE2E.ProtocolMessage_APP_STATE_SYNC_KEY_REQUEST {
+-		attrs["push_priority"] = "high"
+-	} else if message.GetProtocolMessage().GetPeerDataOperationRequestMessage().GetPeerDataOperationRequestType() == waE2E.PeerDataOperationRequestType_HISTORY_SYNC_ON_DEMAND {
+-		attrs["push_priority"] = "high_force"
+-		attrs["privacy_sensitive"] = "1"
++		"id":   id,
++		"type": "text",
++		"to":   to,
+ 	}
++	addPeerMessageAttrs(attrs, message)
+ 	start := time.Now()
+ 	plaintext, err := proto.Marshal(message)
+ 	timings.Marshal = time.Since(start)

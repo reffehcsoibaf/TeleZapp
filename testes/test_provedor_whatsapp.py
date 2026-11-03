@@ -1005,6 +1005,77 @@ def test_conteudo_desconhecido_diz_qual_e_o_tipo_para_tratarmos():
     assert "requestPhoneNumberMessage" in msg.texto
 
 
+def test_registro_de_chamada_vira_linha_na_conversa():
+    def texto(**campos):
+        tipo, texto, *_ = wa.conteudo_de(E.Message(
+            callLogMesssage=E.CallLogMessage(**campos)))
+        assert tipo == m.OUTRO
+        return texto
+    C = E.CallLogMessage
+    assert texto(callOutcome=C.MISSED) == "Chamada de voz perdida"
+    assert texto(isVideo=True, callOutcome=C.REJECTED) == \
+        "Chamada de vídeo recusada"
+    assert texto(callOutcome=C.CONNECTED, durationSecs=65) == \
+        "Chamada de voz atendida, durou 1 minuto e 5 segundos"
+    assert texto(callOutcome=C.ACCEPTED_ELSEWHERE) == \
+        "Chamada de voz atendida em outro aparelho"
+    assert texto(callOutcome=C.MISSED, callType=C.VOICE_CHAT) == \
+        "Conversa de voz perdida"
+    assert texto(callOutcome=C.SILENCED_UNKNOWN_CALLER) == \
+        "Chamada de voz de desconhecido silenciada"
+
+
+def _resposta_da_meta_ai(*secoes, **campos):
+    import json
+    x = E.Message().richResponseMessage.__class__(**campos)
+    if secoes:
+        x.unifiedResponse.data = json.dumps(
+            {"response_id": "r", "sections": list(secoes)}).encode()
+    return E.Message(richResponseMessage=x)
+
+
+def _secao(**primitivo):
+    return {"view_model": {"__typename": "GenAISingleLayoutViewModel",
+                           "primitive": primitivo}}
+
+
+def test_resposta_da_meta_ai_formato_novo_vira_texto():
+    tipo, texto, *_ = wa.conteudo_de(_resposta_da_meta_ai(
+        _secao(__typename="GenAIBotThinkingStatusPrimitive", title="Pensando"),
+        _secao(__typename="GenAIMarkdownTextUXPrimitive",
+               text="Olá {{c1}}mundo{{/c1}}"),
+        _secao(__typename="GenAICodeUXPrimitive",
+               code_blocks=[{"content": "a = "}, {"content": "1"}]),
+        _secao(__typename="GenATableUXPrimitive",
+               rows=[{"cells": ["x", "y"]}, {"cells": ["1", "2"]}]),
+        _secao(__typename="GenAIDividerPrimitive"),
+        {"view_model": {"__typename": "GenAIVStackLayoutViewModel",
+                        "primitives": [{"__typename": "FOATextPrimitive",
+                                        "text": "fim"}]}}))
+    assert tipo == m.TEXTO
+    assert texto == "Olá mundo\na = 1\nx | y\n1 | 2\nfim"
+
+
+def test_resposta_da_meta_ai_formato_antigo_vira_texto():
+    x = E.Message()
+    r = x.richResponseMessage
+    r.submessages.add(messageText="Oi")
+    tabela = r.submessages.add()
+    tabela.tableMetadata.title = "Tabela"
+    tabela.tableMetadata.rows.add(items=["a", "b"])
+    assert wa.conteudo_de(x)[:2] == (m.TEXTO, "Oi\nTabela\na | b")
+
+
+def test_resposta_da_meta_ai_ilegivel_segue_dizendo_o_tipo():
+    x = E.Message()
+    x.richResponseMessage.unifiedResponse.data = b"\x00nao e json"
+    tipo, texto, *_ = wa.conteudo_de(x)
+    assert (tipo, texto) == (m.OUTRO, "tipo do WhatsApp: richResponseMessage")
+    tipo, texto, *_ = wa.conteudo_de(_resposta_da_meta_ai(
+        _secao(__typename="GenAIDividerPrimitive")))
+    assert (tipo, texto) == (m.OUTRO, "tipo do WhatsApp: richResponseMessage")
+
+
 def test_conversa_so_com_telefone_ganha_nome_verificado_da_empresa(amb):
     amb.f["Connected"](amb.c, N.Connected())
     esperar(amb.fila, ev.ContaPronta)
@@ -1853,6 +1924,110 @@ def test_colecao_fora_de_sincronia_e_recuperada_e_o_envio_repete(amb):
     assert len(tentativas) == 2
 
 
+def _apagavel(id_="M1"):
+    return m.Mensagem("w1", "5551@s.whatsapp.net", id_, data=TS)
+
+
+def test_avisos_de_estado_saem_um_por_vez(amb):
+    amb.p._conectada = True
+    dentro, maximo = [0], [0]
+
+    def send_app_state(patch):
+        dentro[0] += 1
+        maximo[0] = max(maximo[0], dentro[0])
+        threading.Event().wait(0.02)
+        dentro[0] -= 1
+    amb.c.send_app_state = send_app_state
+    tarefas = [threading.Thread(target=amb.p.apagar_mensagem,
+                                args=(_apagavel("M%d" % i),))
+               for i in range(5)]
+    for t in tarefas:
+        t.start()
+    for t in tarefas:
+        t.join()
+    assert maximo[0] == 1
+
+
+def test_apagar_com_estado_fora_fica_pendente_e_sai_quando_voltar(amb):
+    c, p = amb.c, amb.p
+    p._conectada = True
+    p.ESPERA_DA_RECUPERACAO = 0
+    enviados, voltou, pedidos = [], [False], []
+
+    def send_app_state(patch):
+        if not voltou[0]:
+            raise RuntimeError("409 conflict")
+        enviados.append(patch.Mutations[0].Index[2])
+
+    def fetch_app_state(nome, full_sync=False):
+        if not voltou[0]:
+            raise RuntimeError("failed to verify patch: mismatching LTHash")
+    c.send_app_state, c.fetch_app_state = send_app_state, fetch_app_state
+    c.request_app_state_recovery = pedidos.append
+    p._tentar_de_novo = lambda nome: None
+    assert p.apagar_mensagem(_apagavel("M1")) == wa.APAGAR_PENDENTE
+    # a segunda nem tenta enviar, para nao acumular pedidos
+    assert p.apagar_mensagem(_apagavel("M2")) == wa.APAGAR_PENDENTE
+    assert [x[1] for x in amb.banco.apagar_pendentes("w1")] == ["M1", "M2"]
+    for _ in range(100):
+        if pedidos and not p._recuperando:
+            break
+        threading.Event().wait(0.02)
+    assert len(pedidos) == 1
+
+    voltou[0] = True
+    p._reparar_colecao("regular_high", forcar=False)
+    for _ in range(100):
+        if not amb.banco.apagar_pendentes("w1"):
+            break
+        threading.Event().wait(0.02)
+    assert enviados == ["M1", "M2"]
+    assert "regular_high" not in p._colecoes_fora
+    avisos = []
+    while True:
+        avisos.append(esperar(amb.fila, ev.Aviso).texto)
+        if "apagadas no celular" in avisos[-1]:
+            break
+    assert "Mensagens apagadas no celular: 2" in avisos[-1]
+
+
+def test_limpar_conversa_no_celular_manda_clear_chat(amb):
+    amb.p._conectada = True
+    enviados = []
+    amb.c.send_app_state = enviados.append
+    assert amb.p.limpar_conversa("5551@s.whatsapp.net",
+                                 _apagavel("U1")) is True
+    mutacao = enviados[0].Mutations[0]
+    assert list(mutacao.Index) == ["clearChat", "5551@s.whatsapp.net", "1", "0"]
+    assert mutacao.Version == 6
+    assert mutacao.Value.clearChatAction.messageRange.messages[0].key.ID == "U1"
+    assert amb.p.apagar_conversa("5551@s.whatsapp.net") is True
+    assert list(enviados[1].Mutations[0].Index)[0] == "deleteChat"
+
+
+def test_varias_mensagens_saem_aos_poucos_e_uma_rodada_so(amb):
+    amb.p._conectada = True
+    amb.p.PAUSA_ENTRE_EXCLUSOES = 0
+    enviados = []
+    amb.c.send_app_state = lambda p: enviados.append(p.Mutations[0].Index[2])
+    itens = [("5551@s.whatsapp.net", "L%d" % i, False, TS + i, "")
+             for i in range(3)]
+    assert amb.p.apagar_varias_mensagens(itens) == 3
+    assert "3" in esperar(amb.fila, ev.Aviso).texto
+    assert enviados == ["L0", "L1", "L2"]
+    assert amb.banco.apagar_pendentes("w1") == []
+
+
+def test_falha_comum_ao_apagar_nao_fica_pendente(amb):
+    amb.p._conectada = True
+
+    def send_app_state(patch):
+        raise RuntimeError("sem rede")
+    amb.c.send_app_state = send_app_state
+    assert amb.p.apagar_mensagem(_apagavel()) is False
+    assert amb.banco.apagar_pendentes("w1") == []
+
+
 def test_envelopes_novos_do_whatsapp_sao_abertos():
     for envelope in ("groupMentionedMessage", "spoilerMessage",
                      "questionMessage"):
@@ -2331,9 +2506,32 @@ def _chamada(evento, id_, quem="5551988887777", **campos):
                            reason=campos.pop("reason", "timeout"))
 
 
+def test_oferta_velha_da_fila_nao_avisa_que_esta_tocando(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "V1"))
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.mensagem.texto == "Chamada de voz encerrada"
+    assert amb.p._oferta_velha("V1")
+    # o fim que vem na fila acerta a linha, sem aviso
+    amb.f["CallTerminate"](amb.c, _chamada("fim", "V1", ts=TS + 30))
+    assert esperar(amb.fila, ev.MensagemAtualizada).mensagem.texto == \
+        "Chamada de voz perdida"
+    assert amb.p._oferta_velha("V1")
+    # recente, mesmo na fila, toca
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "V2", ts=int(time.time())))
+    assert esperar(amb.fila, ev.ChamadaWhatsApp).chamada_id == "V2"
+    assert not amb.p._oferta_velha("V2")
+    # acabada a fila, a data nao importa: o relogio do computador pode errar
+    amb.p._ao_fim_sincronia(None, None)
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "V3"))
+    assert esperar(amb.fila, ev.ChamadaWhatsApp).chamada_id == "V3"
+
+
 def test_chamada_recebida_vira_aviso_e_linha_na_conversa(amb):
     amb.f["Connected"](amb.c, N.Connected())
     esperar(amb.fila, ev.ContaPronta)
+    amb.p._ao_fim_sincronia(None, None)
     amb.f["CallOffer"](amb.c, _chamada("oferta", "C1", video=True))
     nova = esperar(amb.fila, ev.MensagemNova)
     assert nova.silenciosa and nova.mensagem.id == "chamada-C1"
@@ -2357,6 +2555,7 @@ def test_chamada_recebida_vira_aviso_e_linha_na_conversa(amb):
 def test_chamada_atendida_em_outro_aparelho_e_recusada(amb):
     amb.f["Connected"](amb.c, N.Connected())
     esperar(amb.fila, ev.ContaPronta)
+    amb.p._ao_fim_sincronia(None, None)
     amb.f["CallOffer"](amb.c, _chamada("oferta", "C2"))
     esperar(amb.fila, ev.ChamadaWhatsApp)
     amb.f["CallAccept"](amb.c, _chamada("atendida", "C2", ts=TS + 5))
@@ -2519,6 +2718,74 @@ def test_publicar_status_de_texto_e_de_foto(amb, tmp_path):
     assert [x.texto for x in amb.banco.mensagens(
         "w1", "status:5551999998888@s.whatsapp.net", 10)] == [
         "bom dia", "praia"]
+
+
+def test_publicar_status_de_voz_e_recompartilhar(amb, tmp_path):
+    from telezapp.midia import envio
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    voz = tmp_path / "v.ogg"
+    voz.write_bytes(b"OggS" + b"0" * 50)
+    amb.c.upload = lambda dados: types.SimpleNamespace(
+        url="u", DirectPath="d", FileEncSHA256=b"e", FileLength=len(dados),
+        MediaKey=b"k", FileSHA256=b"s")
+    anexo = envio.preparar(str(voz), voz=True, temporario=True)
+    anexo.segundos = 3
+    amb.p.publicar_status("", anexo)
+    assert esperar(amb.fila, ev.Aviso).texto == "Status publicado."
+    para, corpo = amb.c.enviadas[-1]
+    assert para == "status@broadcast" and corpo.audioMessage.PTT
+    assert corpo.audioMessage.backgroundArgb
+    assert not corpo.audioMessage.contextInfo.statusAttributions
+    # recompartilhar: texto e foto levam a marca
+    amb.p.recompartilhar_status("oi de novo", None)
+    assert esperar(amb.fila, ev.Aviso).texto == "Status recompartilhado."
+    para, corpo = amb.c.enviadas[-1]
+    ctx = corpo.extendedTextMessage.contextInfo
+    assert para == "status@broadcast" and corpo.extendedTextMessage.text == \
+        "oi de novo"
+    assert ctx.statusAttributions[0].type == \
+        ctx.statusAttributions[0].RESHARE
+    assert ctx.statusAttributionType == ctx.RESHARED_FROM_POST
+    foto = tmp_path / "f.jpg"
+    foto.write_bytes(b"\xff\xd8\xff" + b"0" * 50)
+    amb.p.recompartilhar_status("praia", envio.preparar(str(foto)))
+    assert esperar(amb.fila, ev.Aviso).texto == "Status recompartilhado."
+    _, corpo = amb.c.enviadas[-1]
+    assert corpo.imageMessage.caption == "praia"
+    assert corpo.imageMessage.contextInfo.statusAttributions
+
+
+def test_publicar_status_com_mencoes_passa_pela_dll(amb, monkeypatch):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    chamadas = []
+
+    def enviar(mensagem, mencoes):
+        chamadas.append((mensagem.extendedTextMessage.text, mencoes))
+        return types.SimpleNamespace(ID="S1", Timestamp=TS), chamadas[-1][1][1:]\
+            and 1 or 0
+    monkeypatch.setattr(amb.p, "_enviar_status_com_mencoes", enviar)
+    amb.p.publicar_status("oi", None, mencoes=["5551@s.whatsapp.net"])
+    assert esperar(amb.fila, ev.Aviso).texto == \
+        "Status publicado, com 1 pessoa mencionada."
+    amb.p.publicar_status("oi", None, mencoes=["1@s.whatsapp.net",
+                                               "2@s.whatsapp.net"])
+    assert "não chegou a 1" in esperar(amb.fila, ev.Aviso).texto
+    assert chamadas[0] == ("oi", ("5551@s.whatsapp.net",))
+
+
+def test_mencoes_leem_a_resposta_da_dll(amb):
+    funcoes = types.SimpleNamespace(StatusComMencoes=lambda *a: b"ok:ABC:1792000000:2")
+    amb.c._NewClient__client = funcoes
+    amb.c.uuid = "w1"
+    resp, falhas = amb.p._enviar_status_com_mencoes(E.Message(conversation="x"),
+                                                    ("1@s.whatsapp.net",))
+    assert (resp.ID, resp.Timestamp, falhas) == ("ABC", 1792000000, 2)
+    funcoes.StatusComMencoes = lambda *a: b"erro:sem rede"
+    with pytest.raises(RuntimeError):
+        amb.p._enviar_status_com_mencoes(E.Message(conversation="x"),
+                                         ("1@s.whatsapp.net",))
 
 
 def test_publicar_status_sem_conexao_avisa(amb):
@@ -3421,11 +3688,32 @@ def test_localizacao_fixa_e_em_tempo_real_mostram_lugar_coordenadas_e_mapa():
     viva = E.LiveLocationMessage(degreesLatitude=1.5, degreesLongitude=2.5,
                                  caption="A caminho")
     texto = wa.conteudo_de(E.Message(liveLocationMessage=viva))[1]
-    assert texto.startswith("localização em tempo real\nA caminho\n")
+    assert texto.startswith("localização em tempo real\nA caminho\n"
+                            "Este é o ponto de quando")
     assert texto.endswith("https://www.google.com/maps?q=1.500000,2.500000")
 
     sem = wa.conteudo_de(E.Message(locationMessage=E.LocationMessage()))[1]
     assert sem == "localização"
+
+
+def test_movimento_da_localizacao_ao_vivo_vai_ao_log_sem_coordenadas(
+        amb, caplog):
+    def viva(lat, seq):
+        return E.Message(liveLocationMessage=E.LiveLocationMessage(
+            degreesLatitude=lat, degreesLongitude=-51.25, sequenceNumber=seq,
+            timeOffset=seq * 10))
+    with caplog.at_level(logging.INFO, logger="telezapp.whatsapp"):
+        amb.f["Message"](amb.c, evento("V1", viva(-30.5, 1)))
+        amb.f["Message"](amb.c, evento("V2", viva(-30.501, 2)))
+        amb.f["Message"](amb.c, evento("V2", viva(-30.502, 3)))
+        amb.f["Message"](amb.c, evento("V3", E.Message(conversation="oi")))
+    linhas = [r.getMessage() for r in caplog.records
+              if "localização ao vivo" in r.getMessage()]
+    assert len(linhas) == 3
+    assert "movimento=primeira" in linhas[0] and "seq=1 offset=10" in linhas[0]
+    assert "movimento=111 m em" in linhas[1] and "repetida=False" in linhas[1]
+    assert "repetida=True" in linhas[2]
+    assert "30.5" not in caplog.text and "51.25" not in caplog.text
 
 
 def _pedir_historico_de_teste(amb, monkeypatch, espera):
@@ -4101,3 +4389,23 @@ def test_celular_que_nao_responde_pausa_os_pedidos(tmp_path, monkeypatch):
         p.baixar_arquivo(msg, str(tmp_path / "f"), lambda v: None,
                          lambda: False)
     assert len(cel.pedidos) == 1
+
+
+def test_comunidade_vem_dos_dados_do_grupo(amb):
+    cid = "120363@g.us"
+    conv = m.Conversa("w1", cid, "Turma", "whatsapp", "grupo")
+    amb.p._conversas[cid] = conv
+    amb.banco.salvar_conversas([conv])
+    amb.c.grupos = [N.GroupInfo(
+        JID=jid("120363", "g.us"), GroupName=N.GroupName(Name="Turma"),
+        GroupLinkedParent=N.GroupLinkedParent(
+            LinkedParentJID=jid("999", "g.us")))]
+    amb.p._conectada = True
+    amb.p._atualizar_nomes_de_grupos()
+    assert conv.comunidade is True
+    salvas = {c.id: c for c in amb.banco.conversas("w1")}
+    assert salvas[cid].comunidade
+    amb.c.grupos = [N.GroupInfo(JID=jid("120363", "g.us"),
+                                GroupName=N.GroupName(Name="Turma"))]
+    amb.p._atualizar_nomes_de_grupos()
+    assert conv.comunidade is False

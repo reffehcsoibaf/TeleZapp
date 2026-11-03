@@ -298,3 +298,55 @@ def test_item_autor_em_configuracao_antiga_segue_o_trecho():
                                "ocultos": ["previa"]})
     assert "autor" in desligado["ocultos"]
     assert "autor" in lc.padrao()["ocultos"]
+
+
+def test_digitar_fica_na_lista_e_sobrevive_as_outras_mudancas():
+    assert lc.digitar(None) == "pular"
+    assert "digitar" not in lc.padrao()
+    lay = lc.definir_digitar(None, "campo")
+    assert lc.digitar(lay) == "campo" and not lc.eh_padrao(lay)
+    novo, _ = lc.alternar(lay, "previa")
+    assert lc.digitar(novo) == "campo"
+    assert lc.digitar(lc.definir_digitar(lay, "pular")) == "pular"
+    assert lc.digitar({"digitar": "lixo"}) == "pular"
+
+
+def test_dialogo_escolhe_o_que_digitar_faz_e_restaura():
+    d, g, _ = dialogo()
+    assert d.digitar.GetSelection() == 0
+    assert lc.ESCOLHAS_DIGITAR[1][1] == "Ir direto para o campo de busca"
+    d.digitar.SetSelection(1)
+    d.mudar_digitar()
+    assert lc.digitar(g.valor) == "campo"
+    assert d.botoes["padrao"].IsEnabled()
+    d.restaurar()
+    assert lc.digitar(g.valor) == "pular"
+    assert d.digitar.GetSelection() == 0
+
+
+def test_opcao_antiga_de_digitar_passa_para_as_duas_listas(tmp_path):
+    import json
+    from telezapp import config
+    from telezapp.nucleo import lista_mensagens as lm
+    arq = tmp_path / "config.json"
+    arq.write_text(json.dumps({"digitar_na_lista": "campo",
+                               "lista_conversas": {"ordem": ["servico"]}}))
+    cfg = config.Config(str(arq))
+    assert "digitar_na_lista" not in cfg.dados
+    assert lc.digitar(cfg.get("lista_conversas")) == "campo"
+    assert lm.digitar(cfg.get("lista_mensagens")) == "campo"
+    assert lc.normalizar(cfg.get("lista_conversas"))["ordem"][0] == "servico"
+    arq.write_text(json.dumps({"digitar_na_lista": "pular"}))
+    cfg = config.Config(str(arq))
+    assert lc.digitar(cfg.get("lista_conversas")) == "pular"
+    boas = backup.opcoes_validas({"digitar_na_lista": "campo"})
+    assert lc.digitar(boas["lista_conversas"]) == "campo"
+    assert lm.digitar(boas["lista_mensagens"]) == "campo"
+
+
+def test_dialogo_comeca_onde_a_busca_pediu():
+    g = Gravador(None)
+    d = DialogoListaConversas(None, g.ler, g.gravar, foco="previa")
+    assert d.chave() == "previa"
+    d = DialogoListaConversas(None, g.ler, g.gravar, foco="digitar")
+    assert wx_falso._foco[0] is d.digitar

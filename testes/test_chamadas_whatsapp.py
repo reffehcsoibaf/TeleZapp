@@ -302,6 +302,16 @@ def test_chamada_recebida_atender_e_desligar(mundo):
     assert esperar(lambda: bus.estados()[-1] == (ch.ENCERRADA, ch.DESLIGADA))
 
 
+def test_oferta_velha_nao_toca_nem_desliga(mundo):
+    v, ponte, bus, _ = mundo
+    v.oferta_velha = lambda chamada: chamada == "R0"
+    ponte.fila.put({"ev": "incoming", "call": "R0", "peer": "1@lid"})
+    ponte.fila.put({"ev": "incoming", "call": "R1", "peer": "1@lid"})
+    assert esperar(lambda: bus.estados() == [(ch.TOCANDO, "")])
+    assert v.ligacoes[CID].call_id == "R1"
+    assert ponte.desligadas == []
+
+
 def test_recusar_e_chamada_perdida(mundo):
     v, ponte, bus, _ = mundo
     chamada_recebida(ponte, bus)

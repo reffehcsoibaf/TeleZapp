@@ -78,6 +78,8 @@ class Conversa:
                                # (0 = desligado)
     citacoes: int = 0          # grupo: das nao lidas, quantas me mencionam ou
                                # respondem a mim (so as que chegaram ao vivo)
+    comunidade: bool = False   # WhatsApp: grupo de uma comunidade ou o aviso
+                               # dela (visto ao conferir os grupos)
 
     @property
     def chave(self):
@@ -1134,6 +1136,29 @@ def texto_pessoas(n):
     return "1 pessoa" if n == 1 else "%d pessoas" % n
 
 
+# Como comeca o texto do que o TeleZapp entende, mas guarda como OUTRO; a mais
+# longa antes da que comeca igual
+_TIPOS_PELO_TEXTO = (
+    ("localização em tempo real", "localização em tempo real"),
+    ("localização", "localização"), ("enquete", "enquete"),
+    ("contato", "contato"), ("convite para o grupo", "convite de grupo"),
+    ("evento", "evento"), ("produto", "produto"))
+
+
+def nome_do_tipo(m):
+    """O nome do tipo nos dados da mensagem: como em conteudo(), so o que o
+    TeleZapp nao reconhece diz "sem suporte"."""
+    if m.tipo != OUTRO or not m.texto or \
+            m.texto.startswith("tipo do WhatsApp"):
+        return NOMES_TIPOS.get(m.tipo, m.tipo)
+    for inicio, nome in _TIPOS_PELO_TEXTO:
+        if m.texto.startswith(inicio):
+            return nome
+    if re.match(r"\d+ contatos", m.texto):
+        return "contatos"
+    return "outro conteúdo"     # chamada, por exemplo: o texto ja diz o que e
+
+
 def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
              midia=None, grupo=False, contagens=True):
     linhas = [
@@ -1141,7 +1166,7 @@ def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
         "De: %s" % (meu_nome() if m.minha else (m.autor or "Desconhecido")),
         "Data: %s" % (time.strftime("%d/%m/%Y %H:%M", time.localtime(m.data))
                       if m.data else "-"),
-        "Tipo: %s" % NOMES_TIPOS.get(m.tipo, m.tipo),
+        "Tipo: %s" % nome_do_tipo(m),
     ]
     extras_m = extras_de(m)
     if extras_m["editada"]:

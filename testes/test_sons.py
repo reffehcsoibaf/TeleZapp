@@ -26,7 +26,8 @@ def test_todo_evento_tem_um_som_nos_pacotes_da_casa():
     eventos = {nome for nome, _, _ in config.EVENTOS_SOM}
     assert eventos == {"nova", "enviada", "erro", "conectado", "pronto",
                        "atualizado", "toque", "chamando", "desligada",
-                       "nova_aberta", "nova_grupo", "desconectada",
+                       "nova_aberta", "nova_grupo", "nova_pessoal",
+                       "nova_canal", "nova_comunidade", "desconectada",
                        "reconectada", "falha_envio", "download_pronto",
                        "tarefa_pronta", "reacao_recebida",
                        "mencao_ou_resposta", "gravando", "gravacao_parada",

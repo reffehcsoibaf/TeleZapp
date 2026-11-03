@@ -8,12 +8,13 @@ O Padrao e os da casa (TeleZapp, Cristal, Marimba, Retro e Suave) nao se editam.
 um arquivo importado para a pasta do pacote quando a pessoa aplica. Cada
 evento de cada pacote pode estar ativado ou desativado.
 """
+import hashlib
 import os
 import re
 import shutil
 
 from telezapp import config
-from telezapp.acessibilidade.fala import BIP
+from telezapp.acessibilidade.fala import BIP, HERDA
 
 PADRAO, TELEZAPP = "padrao", "telezapp"
 PREFIXO = "p:"                       # id de um pacote personalizado
@@ -35,6 +36,9 @@ def _pasta_da_casa(pacote_id):
         return PASTA_TELEZAPP
     return os.path.join(PASTA_TELEZAPP, "pacotes", pacote_id)
 EXTENSOES = (".ogg", ".opus", ".mp3", ".wav", ".flac")
+# Num pacote personalizado sem arquivo para eles, seguem o evento de que herdam
+# (HERDA), ligado ou nao, e nada muda ate a pessoa escolher um som
+EVENTOS_QUE_SEGUEM = ("nova_pessoal", "nova_canal", "nova_comunidade")
 _PROIBIDOS = re.compile(r'[\\/:*?"<>|]')
 
 
@@ -110,6 +114,8 @@ def valor_do_evento(pacote_id, evento, desativados=()):
     arquivo ou o bip do sistema."""
     if evento in desativados:
         return "desligado"
+    if evento in EVENTOS_QUE_SEGUEM:
+        return arquivo_do_evento(pacote_id, evento)
     return arquivo_do_evento(pacote_id, evento) or BIP
 
 
@@ -117,6 +123,65 @@ def mapa(pacote_id, desativados=()):
     """{evento: valor} do pacote, para fala.definir_sons."""
     return {e: valor_do_evento(pacote_id, e, desativados)
             for e, _ in eventos()}
+
+
+def evento_da_conversa(conv):
+    """O som de mensagem nova numa conversa que nao esta aberta."""
+    if conv.tipo == "grupo":
+        return "nova_comunidade" if conv.comunidade else "nova_grupo"
+    return {"canal": "nova_canal", "privada": "nova_pessoal"}.get(conv.tipo,
+                                                                  "nova")
+
+
+# ------------------------------------------------- som proprio de uma conversa
+def _chave_da_conversa(chave):
+    return "%s|%s" % chave
+
+
+def arquivo_da_conversa(cfg, chave):
+    """O arquivo de som proprio da conversa (conta, id), ou "" se ela nao tem
+    ou se o arquivo sumiu."""
+    nome = (cfg.get("sons_de_conversa") or {}).get(_chave_da_conversa(chave))
+    if not nome:
+        return ""
+    caminho = os.path.join(config.pasta("sons", "conversas"),
+                           os.path.basename(nome))
+    return caminho if os.path.isfile(caminho) else ""
+
+
+def definir_som_da_conversa(cfg, chave, origem):
+    """Copia o arquivo para a pasta de sons (o original pode sumir) e o guarda
+    como o som da conversa. OSError se nao der para copiar."""
+    texto = _chave_da_conversa(chave)
+    ext = os.path.splitext(origem)[1].lower() or ".wav"
+    nome = hashlib.sha1(texto.encode("utf-8")).hexdigest()[:16] + ext
+    destino = os.path.join(config.pasta("sons", "conversas"), nome)
+    antigo = arquivo_da_conversa(cfg, chave)
+    if os.path.normcase(os.path.abspath(origem)) != \
+            os.path.normcase(os.path.abspath(destino)):
+        shutil.copyfile(origem, destino)
+    if antigo and os.path.normcase(antigo) != os.path.normcase(destino):
+        _apagar(antigo)
+    sons = dict(cfg.get("sons_de_conversa") or {})
+    sons[texto] = nome
+    cfg.set("sons_de_conversa", sons)
+    return destino
+
+
+def remover_som_da_conversa(cfg, chave):
+    antigo = arquivo_da_conversa(cfg, chave)
+    if antigo:
+        _apagar(antigo)
+    sons = dict(cfg.get("sons_de_conversa") or {})
+    if sons.pop(_chave_da_conversa(chave), None) is not None:
+        cfg.set("sons_de_conversa", sons)
+
+
+def _apagar(caminho):
+    try:
+        os.remove(caminho)
+    except OSError:
+        pass
 
 
 def criar(nome):
@@ -189,7 +254,8 @@ def migrar_antigos(cfg):
     cfg.salvar()
 
 
-EVENTOS_DO_SOM_DE_MENSAGEM = ("nova", "nova_aberta", "nova_grupo")
+EVENTOS_DO_SOM_DE_MENSAGEM = ("nova", "nova_aberta", "nova_grupo",
+                              "nova_pessoal", "nova_canal", "nova_comunidade")
 EVENTOS_DO_SOM_DE_CHAMADA = ("toque", "chamando")
 
 
@@ -216,6 +282,23 @@ def migrar_liga_desliga(cfg):
                 guardado[pacote] = sorted(set(guardado.get(pacote, []))
                                           | desligar)
         cfg.dados["sons_desativados"] = guardado
+    cfg.salvar()
+
+
+def migrar_tipos_de_conversa(cfg):
+    """Os sons de mensagem pessoal, de canal e de comunidade vieram depois:
+    quem desligou o som de que eles nasceram continua sem som. Roda uma vez."""
+    if cfg.dados.get("sons_por_tipo_migrados"):
+        return
+    guardado = {}
+    for pacote, lista in (cfg.get("sons_desativados") or {}).items():
+        novos = set(lista)
+        for evento in EVENTOS_QUE_SEGUEM:
+            if HERDA[evento] in novos:
+                novos.add(evento)
+        guardado[pacote] = sorted(novos)
+    cfg.dados["sons_desativados"] = guardado
+    cfg.dados["sons_por_tipo_migrados"] = True
     cfg.salvar()
 
 
@@ -264,14 +347,21 @@ class EstadoDeSons:
             "ativado" if self.ativado(pacote_id, evento) else "desativado")]
         if pacote_id != PADRAO:
             arq = self.arquivo(pacote_id, evento)
-            partes.append("som: " + (os.path.basename(arq) if arq
-                                     else "bip do sistema"))
+            if not arq and evento in EVENTOS_QUE_SEGUEM:
+                partes.append("som: o mesmo de " + dict(eventos())[HERDA[evento]])
+            else:
+                partes.append("som: " + (os.path.basename(arq) if arq
+                                         else "bip do sistema"))
         return ", ".join(partes)
 
     def valor_para_ouvir(self, pacote_id, evento):
         """O valor que fala.bipe toca para ouvir o evento agora, ativado ou
         nao."""
-        return self.arquivo(pacote_id, evento) or BIP
+        arq = self.arquivo(pacote_id, evento)
+        while not arq and evento in EVENTOS_QUE_SEGUEM:
+            evento = HERDA[evento]
+            arq = self.arquivo(pacote_id, evento)
+        return arq or BIP
 
     def mudou(self):
         return self.mexeu

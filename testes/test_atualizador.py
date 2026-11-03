@@ -166,3 +166,14 @@ def test_extrair_informa_o_avanco(tmp_path):
     au.extrair(str(z), str(tmp_path / "espera"),
                lambda feito, total: vistos.append((feito, total)))
     assert vistos[-1][0] == vistos[-1][1] == 2 and len(vistos) == 2
+
+
+def test_script_avisa_quando_desiste_e_a_abertura_consome_o_aviso(tmp_path):
+    prog = str(tmp_path / "TeleZapp")
+    texto = au.montar_script(prog, str(tmp_path / "nova"))
+    assert au.marca_de_falha(prog) in texto and "goto desistir" in texto
+    assert not au.troca_falhou(prog)
+    with open(au.marca_de_falha(prog), "w") as f:
+        f.write("falhou")
+    assert au.troca_falhou(prog)
+    assert not au.troca_falhou(prog)

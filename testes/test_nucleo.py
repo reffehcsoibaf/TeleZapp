@@ -182,12 +182,12 @@ def test_config_corrompida_usa_padroes(tmp_path, monkeypatch):
 def test_credenciais_do_arquivo_de_testes(tmp_path, monkeypatch):
     monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path))
     arq = tmp_path / "configuracao-telegram.txt"
-    arq.write_text("# comentario\nAPI_ID=12345\nAPI_HASH=0123456789abcdef01\n"
+    arq.write_text("# comentario\nAPI_ID=12345\nAPI_HASH=0123456789abcdef0123456789abcdef\n"
                    "TELEFONE=+5551999998888\n", encoding="utf-8")
     c = config.Config()
     assert config.credenciais_telegram(c, str(tmp_path / "nao.txt")) is None
     assert config.credenciais_telegram(c, str(arq)) == (
-        12345, "0123456789abcdef01")
+        12345, "0123456789abcdef0123456789abcdef")
     # ficou gravado na configuracao
     salvo = json.loads((tmp_path / "config.json").read_text("utf-8"))
     assert salvo["telegram_api_id"] == 12345
@@ -750,6 +750,13 @@ def test_conferir_o_que_vai_ser_publicado_como_status(tmp_path):
     assert "precisa de uma foto" in ps.validar("telegram", "so texto", "")[2]
     assert not ps.validar("telegram", "legenda", str(foto))[2]
     assert "passa de 200" in ps.validar("telegram", "a" * 201, str(foto))[2]
+    # voz: so no WhatsApp e sem texto
+    voz = tmp_path / "v.ogg"
+    voz.write_bytes(b"OggS" + b"0" * 50)
+    anexo, texto, erro = ps.validar("whatsapp", " ", str(voz), voz=True)
+    assert anexo.tipo == "voz" and anexo.temporario and not erro
+    assert "não leva texto" in ps.validar("whatsapp", "oi", str(voz), True)[2]
+    assert "não aceita" in ps.validar("telegram", "", str(voz), True)[2]
 
 
 # ------------------------------------------------ mensagens temporarias
@@ -834,9 +841,9 @@ def test_credenciais_embutidas_no_programa_valem_antes_das_outras(
     monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path))
     c = config.Config()
     monkeypatch.setattr(config, "credenciais_embutidas",
-                        lambda: (777, "abcdefghijklmnop0123"))
+                        lambda: (777, "0123456789abcdef0123456789abcdef"))
     assert config.credenciais_telegram(c, str(tmp_path / "nao.txt")) == (
-        777, "abcdefghijklmnop0123")
+        777, "0123456789abcdef0123456789abcdef")
     monkeypatch.setattr(config, "credenciais_embutidas", lambda: None)
     assert config.credenciais_telegram(c, str(tmp_path / "nao.txt")) is None
 
@@ -845,13 +852,81 @@ def test_modulo_de_credenciais_embutidas_e_lido(monkeypatch):
     import sys
     import types
     falso = types.ModuleType("telezapp._credenciais")
-    falso.API_ID, falso.API_HASH = 42, "0123456789abcdef"
+    falso.API_ID, falso.API_HASH = 42, "0123456789abcdef0123456789abcdef"
     monkeypatch.setitem(sys.modules, "telezapp._credenciais", falso)
     import telezapp
     monkeypatch.setattr(telezapp, "_credenciais", falso, raising=False)
-    assert config.credenciais_embutidas() == (42, "0123456789abcdef")
+    assert config.credenciais_embutidas() == (42, "0123456789abcdef0123456789abcdef")
     falso.API_HASH = "curto"
     assert config.credenciais_embutidas() is None
+
+
+def test_tipo_nos_dados_so_diz_sem_suporte_do_que_nao_foi_reconhecido():
+    def tipo(texto):
+        msg = m.Mensagem("c", "g1", "1", tipo=m.OUTRO, texto=texto)
+        return m.nome_do_tipo(msg)
+    assert tipo("localização\ncoordenadas 1, 2") == "localização"
+    assert tipo("localização em tempo real\nlink") == \
+        "localização em tempo real"
+    assert tipo("enquete: Q?") == "enquete"
+    assert tipo("2 contatos: A, B") == "contatos"
+    assert tipo("Chamada de voz perdida") == "outro conteúdo"
+    assert tipo("tipo do WhatsApp: xMessage") == "mensagem sem suporte ainda"
+    assert tipo("") == "mensagem sem suporte ainda"
+    texto = m.Mensagem("c", "g1", "1", texto="oi")
+    assert m.nome_do_tipo(texto) == "texto"
+    local = m.Mensagem("c", "g1", "1", tipo=m.OUTRO, texto="localização")
+    assert "Tipo: localização" in m.detalhes(local, "Grupo")
+
+
+def test_acompanhamento_fala_o_movimento_e_o_fim():
+    from telezapp.nucleo import localizacao as loc
+    agora = [1000.0]
+    a = loc.Acompanhamento("Ana", {"lat": -30.0, "lon": -51.0, "ate": 2000.0,
+                                   "quando": 1000.0}, lambda: agora[0])
+    assert "Compartilhando até" in a.texto() and not a.terminou
+    # perto demais: e so imprecisao, e a soma conta desde o ultimo aviso
+    assert a.atualizar({"lat": -30.0001, "lon": -51.0, "ate": 2000.0}) == ""
+    assert a.atualizar({"lat": -30.002, "lon": -51.0, "ate": 2000.0}) == \
+        "Andou 220 metros para o sul."
+    assert "Último movimento: Andou 220 metros" in a.texto()
+    assert a.atualizar({"lat": -30.002, "lon": -50.98, "ate": 2000.0}) == \
+        "Andou 1,9 quilômetros para o leste."
+    assert a.link().endswith("q=-30.002000,-50.980000")
+    agora[0] = 2001.0
+    assert a.conferir_fim() == "Ana parou de compartilhar a localização."
+    assert a.conferir_fim() == ""
+    assert "última posição" in a.texto()
+
+
+def test_acompanhamento_encerrada_pelo_telegram_guarda_a_posicao():
+    from telezapp.nucleo import localizacao as loc
+    a = loc.Acompanhamento("Ana", {"lat": 1.0, "lon": 2.0})
+    assert "sem prazo" in a.texto()
+    assert "parou de compartilhar" in a.atualizar({"encerrada": True})
+    assert a.link().endswith("q=1.000000,2.000000")
+
+
+def test_limpeza_so_manda_ao_celular_o_que_apagou_aqui():
+    from telezapp.nucleo import limpeza
+    sel = limpeza.Selecao(limpeza.MENSAGENS, itens=[
+        ("w", "c", "1", "texto", 0, 5.0, 1, ""),
+        ("w", "c", "2", "texto", 0, 6.0, 0, "r@lid"),
+        ("w", "c", "local-3", "texto", 0, 7.0, 1, "")])
+    sel.feitas = [("w", "c", "2"), ("w", "c", "local-3")]
+    assert limpeza.para_o_celular(sel) == {
+        "w": [("c", "2", False, 6.0, "r@lid")]}
+
+
+def test_credenciais_recusam_telefone_e_nome():
+    bom = "0123456789abcdef0123456789abcdef"
+    assert config.credenciais_validas(12345, bom)
+    assert config.credenciais_validas("2147483647", bom.upper())
+    assert not config.credenciais_validas("554199990000", bom)
+    assert not config.credenciais_validas(0, bom)
+    assert not config.credenciais_validas(12345, "Fulano de Tal da Silva")
+    assert not config.credenciais_validas(12345, "g" * 32)
+    assert not config.credenciais_validas("abc", bom)
 
 
 def test_filtro_mencoes_e_respostas_so_de_grupo_com_citacao_nao_lida():
