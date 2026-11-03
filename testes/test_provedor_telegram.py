@@ -8,6 +8,7 @@ import asyncio
 import datetime
 import os
 import queue
+import struct
 import time
 import types
 
@@ -283,6 +284,42 @@ def esperar(fila, tipo, segundos=5):
         e = fila.get(timeout=segundos)
         if isinstance(e, tipo):
             return e
+
+
+class ClienteQueFalhaAoConectar(ClienteFalso):
+    erro = struct.error("'i' format requires ...")
+    desconexoes = 0
+
+    async def connect(self):
+        raise self.erro
+
+    async def disconnect(self):
+        self.desconexoes += 1
+
+
+def test_falha_ao_conectar_desliga_o_cliente_e_avisa(ambiente):
+    cliente = ClienteQueFalhaAoConectar()
+    p = ambiente.criar(cliente)
+    p.iniciar()
+    try:
+        aviso = esperar(ambiente.fila, ev.Aviso)
+        assert aviso.grave and "Não consegui conectar" in aviso.texto
+        assert cliente.desconexoes == 1
+    finally:
+        p.parar()
+
+
+def test_falha_de_rede_ao_conectar_tambem_desliga_e_diz_que_sem_conexao(
+        ambiente):
+    cliente = ClienteQueFalhaAoConectar()
+    cliente.erro = ConnectionError("rede")
+    p = ambiente.criar(cliente)
+    p.iniciar()
+    try:
+        assert "Sem conexão" in esperar(ambiente.fila, ev.Aviso).texto
+        assert cliente.desconexoes == 1
+    finally:
+        p.parar()
 
 
 def test_sessao_salva_conecta_e_lista_conversas(ambiente):
@@ -1534,7 +1571,36 @@ def test_localizacao_do_telegram_traz_lugar_coordenadas_e_mapa():
         pass
     viva = tg.converter(mensagem(3, "", geo=geo, media=MessageMediaGeoLive(),
                                  sender=ANA), "t1", 10)
-    assert viva.texto.startswith("localização em tempo real\n")
+    assert viva.texto == "localização em tempo real"
+    acao = m.extras_de(viva)["acoes"][-1]
+    assert acao["rotulo"] == "Ver localização em tempo real"
+    assert (acao["lat"], acao["lon"]) == (geo.lat, geo.long)
+
+
+def test_movimento_da_localizacao_muda_o_botao_sem_marcar_edicao(ambiente):
+    class MessageMediaGeoLive:
+        period = 3600
+    ns = types.SimpleNamespace
+    data = datetime.datetime(2026, 11, 2, 12, tzinfo=datetime.timezone.utc)
+    p = ambiente.criar(ClienteFalso())
+
+    def viva(lat):
+        return mensagem(3, "", geo=ns(lat=lat, long=2.0), date=data,
+                        media=MessageMediaGeoLive(), sender=ANA)
+    x = tg.converter(viva(1.0), "t1", "10")
+    assert m.extras_de(x)["acoes"][-1]["ate"] == data.timestamp() + 3600
+    ambiente.banco.salvar_mensagens([x])
+    asyncio.run(p._ao_editada(ns(message=viva(1.5), chat_id=10)))
+    e = esperar(ambiente.fila, ev.MensagemAtualizada)
+    assert e.motivo == "localizacao"
+    assert m.extras_de(e.mensagem)["acoes"][-1]["lat"] == 1.5
+    assert not m.extras_de(e.mensagem)["editada"]
+    # a pessoa parou: o Telegram tira o ponto
+    asyncio.run(p._ao_editada(ns(message=mensagem(
+        3, "", geo=ns(), date=data, media=MessageMediaGeoLive(), sender=ANA),
+        chat_id=10)))
+    e = esperar(ambiente.fila, ev.MensagemAtualizada)
+    assert m.extras_de(e.mensagem)["acoes"][-1]["encerrada"] is True
 
 
 def test_comandos_de_bot_info():

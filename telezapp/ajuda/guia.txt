@@ -272,6 +272,8 @@ Para reagir, use Ctrl+Shift+G com a mensagem selecionada ou "Reagir..." no menu 
 
 No WhatsApp, o que você apaga no celular também é apagado aqui. Para manter uma cópia neste computador, marque "Manter no computador o que eu apagar no WhatsApp do celular", em Configurações, Privacidade.
 
+No sentido contrário, ao apagar no TeleZapp, o WhatsApp também pode apagar no celular: ao apagar mensagens e conversas, ao limpar a conversa de um grupo, ao sair de um grupo apagando a conversa e na janela de limpeza, com a caixa "Apagar as mensagens também no celular". Deixe o WhatsApp aberto no celular para ele apagar junto; o TeleZapp pede isso antes de apagar conversas e de limpar. Numa limpeza grande, as mensagens saem aos poucos, em segundo plano. Só as mídias baixadas e as mensagens temporárias vencidas saem apenas deste computador.
+
 Uma mensagem editada mostra o texto novo e termina com "(editada)". Uma mensagem apagada para todos pelo autor passa a ser lida como "mensagem apagada". Isso só vale para mensagens que o TeleZapp já tinha guardado.
 
 # Emojis
@@ -292,6 +294,8 @@ O dicionário é o do idioma escolhido em Configurações, categoria Escrita. A 
 "Enviar a minha localização...", no menu Mensagens, envia onde o computador está para a conversa aberta, no WhatsApp e no Telegram. O TeleZapp diz a precisão e pede confirmação.
 
 Sem localizador, ou com a localização bloqueada no Windows, ele avisa e deixa digitar a latitude e a longitude. A posição vem do Windows, muitas vezes pelo Wi-Fi, e pode não ser exata. É um ponto fixo, não a localização em tempo real.
+
+Ao receber uma localização em tempo real no Telegram, a mensagem tem o botão "Ver localização em tempo real". A janela se atualiza sozinha, fala a distância e a direção do movimento e tem "Abrir no mapa". A caixa "Falar o movimento" liga e desliga a fala. No WhatsApp, o movimento só aparece no celular: o TeleZapp mostra o ponto de quando a localização foi enviada.
 
 "Enviar contatos...", no mesmo menu, envia cartões de contato para a conversa aberta. Digite para buscar na sua agenda e marque com Espaço quem vai no envio; só aparece quem tem telefone.
 
@@ -663,7 +667,11 @@ Transcrição e descrição automáticas: no menu de contexto de uma conversa, "
 # Configurações
 Ferramentas, Configurações (Ctrl+vírgula) abre uma janela com todas as opções do TeleZapp.
 
-O primeiro campo é a busca. Digite uma palavra, como velocidade, e aparece no alto da lista de categorias Resultados da busca, com as opções que combinam. Tab vai da busca para a lista de categorias, depois para as opções da categoria escolhida e, por fim, para os botões OK, Cancelar e Aplicar.
+O primeiro campo é a busca. Digite uma palavra, como velocidade, e aparece no alto da lista de categorias Resultados da busca, com tudo o que combina: as opções, que podem ser mudadas ali mesmo, e botões que levam ao que fica em outro lugar, como um item das janelas Lista de conversas e Lista de mensagens, um evento de som, um atalho, a privacidade da conta ou um provedor de inteligência artificial. Tab vai da busca para a lista de categorias, depois para as opções da categoria escolhida e, por fim, para os botões OK, Cancelar e Aplicar.
+
+Status do WhatsApp: em Novo status, o botão Gravar mensagem de voz publica um status de voz de até 1 minuto, sem texto. O botão Mencionar pessoas escolhe até 5 pessoas, que podem ver o status e recebem um aviso. Num status de outra pessoa, Control Shift G (Reagir) curte, e Recompartilhar o status, no menu de contexto ou em Mensagem, publica o conteúdo como um status seu, depois de perguntar. Foto, vídeo ou áudio precisam estar baixados antes.
+
+Sons de mensagem: em Configurações, Sons, cada tipo de conversa tem o seu evento: mensagem pessoal, num grupo, num canal e numa comunidade do WhatsApp. Os pacotes que vêm com o programa já trazem um som para cada um. Num pacote personalizado, escolha um arquivo para o evento; sem arquivo, ele toca o som de mensagem recebida (a comunidade, o de grupo). A conversa aberta usa o som de mensagem recebida na conversa aberta. Para uma conversa só, use o botão Som desta conversa nos detalhes dela: o som escolhido vale também com ela aberta e até com os sons de mensagem desativados. Uma menção ou resposta a você num grupo continua com o som próprio dela. Conversas silenciadas, arquivadas ou trancadas seguem sem som.
 
 Cada opção é uma caixa de seleção ou uma lista de escolhas. Logo depois que você chega nela, o TeleZapp fala a explicação; F1 repete. Se isso atrapalhar, desmarque "Falar a descrição de cada opção" (categoria Interface, botão Conteúdo falado), e a explicação passa a ser falada só com F1.
 
@@ -710,6 +718,8 @@ Há campos de senha, opcionais, para proteger o arquivo. Depois, você escolhe o
 Ferramentas, Restaurar backup pede o arquivo e a senha, se tiver, e mostra o que o backup contém, para você marcar o que volta.
 
 As configurações valem na hora. As contas, as conversas e as mídias trocam o que existe hoje na próxima vez que o TeleZapp abrir, e ele oferece reiniciar agora. O que havia antes fica guardado na pasta antes-da-restauracao, dentro da pasta de dados.
+
+As conversas só aparecem junto da conta a que pertencem. Para levar tudo a outra instalação ou cópia portátil, marque Contas e sessões e Conversas no mesmo backup, de preferência com senha. Sem as contas, o TeleZapp avisa ao fazer e ao restaurar: as conversas ficam guardadas, mas não aparecem, nem depois de parear a conta de novo.
 
 Se perder a senha, não há como recuperar o backup.
 

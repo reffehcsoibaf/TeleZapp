@@ -276,6 +276,30 @@ def texto_na_conversa(video, fase, segundos=0):
     return base + " encerrada"
 
 
+_RESULTADOS_DO_REGISTRO = {
+    "MISSED": " perdida", "FAILED": " não completada",
+    "REJECTED": " recusada", "ACCEPTED_ELSEWHERE": " atendida em outro aparelho",
+    "ONGOING": " em andamento",
+    "SILENCED_BY_DND": " silenciada pelo modo não perturbe",
+    "SILENCED_UNKNOWN_CALLER": " de desconhecido silenciada",
+}
+
+
+def texto_do_registro(video, resultado, segundos=0, tipo="REGULAR"):
+    """A linha de uma chamada que o WhatsApp guardou no historico: `resultado`
+    e `tipo` sao os nomes que vem no CallLogMessage."""
+    if tipo == "VOICE_CHAT":
+        base = "Conversa de voz"
+    elif tipo == "SCHEDULED_CALL":
+        base = "Chamada agendada de %s" % _tipo(video)
+    else:
+        base = "Chamada de %s" % _tipo(video)
+    texto = base + _RESULTADOS_DO_REGISTRO.get(
+        resultado, " atendida" if resultado == "CONNECTED" else "")
+    return texto + (", durou " + falar_duracao(segundos)
+                    if segundos > 0 else "")
+
+
 def texto_do_aviso(nome, video):
     """O que a janela de aviso diz quando alguem liga."""
     return ("%s está te chamando por %s. O TeleZapp ainda não dá suporte "

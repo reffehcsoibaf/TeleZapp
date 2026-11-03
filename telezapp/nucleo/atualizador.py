@@ -38,6 +38,19 @@ def pasta_antiga(programa):
     return programa.rstrip("\\/") + ".antiga"
 
 
+def marca_de_falha(programa):
+    return programa.rstrip("\\/") + ".nao-atualizou"
+
+
+def troca_falhou(programa):
+    """A ultima troca de pasta nao aconteceu? Consome o aviso do script."""
+    try:
+        os.remove(marca_de_falha(programa))
+        return True
+    except OSError:
+        return False
+
+
 def limpar_restos(programa):
     """Na abertura: tira as pastas que uma atualizacao anterior deixou."""
     for p in (pasta_de_espera(programa), pasta_antiga(programa)):
@@ -143,13 +156,14 @@ chcp 65001 >nul
 set "P=@P@"
 set "N=@N@"
 set "A=@A@"
+set "F=@F@"
 set /a t=0
 :esperar
 if exist "%A%" rmdir /s /q "%A%" 2>nul
 move "%P%" "%A%" >nul 2>&1
 if not errorlevel 1 goto trocar
 set /a t+=1
-if %t% geq 90 goto abrir
+if %t% geq 90 goto desistir
 ping -n 2 127.0.0.1 >nul
 goto esperar
 :trocar
@@ -159,6 +173,8 @@ for %%K in (@MANTER@) do if exist "%A%\%%K" move "%A%\%%K" "%P%\" >nul
 goto abrir
 :desfazer
 move "%A%" "%P%" >nul 2>&1
+:desistir
+echo falhou> "%F%"
 :abrir
 start "" "%P%\@EXE@"
 exit
@@ -170,6 +186,7 @@ def montar_script(programa, nova, executavel=EXE):
     texto = MODELO
     for chave, valor in (("@P@", _bat(programa)), ("@N@", _bat(nova)),
                          ("@A@", _bat(pasta_antiga(programa))),
+                         ("@F@", _bat(marca_de_falha(programa))),
                          ("@MANTER@", " ".join(MANTER)),
                          ("@EXE@", executavel)):
         texto = texto.replace(chave, valor)

@@ -3,6 +3,38 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.11.02.0
+
+- Backup com conversas sem contas (relato de usuária: restaurou, disse que deu certo e a lista ficou vazia, porque a janela só carrega conversas de contas da configuração): `DialogoBackup` e `_restaurar_backup` avisam antes, e `conversas_sem_conta` confere o banco em espera e acrescenta o aviso ao fim. Não recupera backup já feito sem as contas. Só testes automáticos.
+
+- Apagar também no celular em todas as limpezas (pedido do responsável): limpar a conversa de grupo pergunta e manda `clearChat` (formato do Baileys, sem teste real); sair do grupo e apagar pode mandar `deleteChat`; a janela de limpeza tem a caixa, só para mensagens, e `apagar_varias_mensagens` envia pela tabela `apagar_pendente`, com pausa, retomando na abertura. `_lembrar_celular` pede para abrir o WhatsApp no celular antes de conversas e limpezas; em mensagem avulsa o aviso vai na pergunta. Mídia baixada e temporárias vencidas seguem só aqui, e o Telegram não entrou. Só testes automáticos.
+
+- Apagar no celular (relato de usuário: `409 conflict` e `mismatching LTHash` em `regular_high`, depois de várias falhas no mesmo segundo): `_mandar_estado` serializa os avisos de estado, porque `SendAppState` não trava e cada exclusão tinha sua thread. Com a coleção fora de sincronia, não repete envios nem pedidos; `deleteMessageForMe` vai para a tabela `apagar_pendente` (`APAGAR_PENDENTE`) e sai sozinho em `_colecao_voltou` ou na abertura seguinte. Que a concorrência quebre o `LTHash` é hipótese; não conserta cópia já quebrada se o celular não responder. Só testes automáticos.
+
+- Dados da mensagem (relato do responsável): `Tipo:` dizia "mensagem sem suporte ainda" em localização, enquete, contato, convite, evento e produto, que `conteudo` já descreve. `nome_do_tipo` usa o começo do texto; o aviso fica para o não reconhecido.
+
+- Localização em tempo real (pedido do responsável). WhatsApp: em dois testes com a pessoa em trânsito não chegou nenhuma atualização, nem nos pacotes crus (`whatsmeow/diagnostico_pacotes.go`, ligado por `TELEZAPP_PACOTES`); o texto agora avisa que é o ponto inicial (`AVISO_PONTO_INICIAL`), e `_registrar_localizacao_ao_vivo` segue no log, sem coordenadas. Telegram: botão `ver_localizacao` no lugar do link, com a posição em `acoes`; a edição vira motivo `localizacao`, sem marca de editada e sem aviso, e `DialogoLocalizacao` fala distância e rumo (`Acompanhamento`, a partir de `MOVIMENTO_MINIMO_M`). O movimento no Telegram não foi visto com um compartilhamento real; só testes automáticos.
+
+- Telegram, falha ao entrar (relato de usuário: telefone e nome no lugar de api id e api hash, em cópia antiga sem credenciais embutidas): `credenciais_validas` exige api id de 32 bits e api hash de 32 dígitos hexadecimais, e credencial errada já salva volta a ser pedida. Falha antes de a conta ficar pronta agora desconecta o cliente, que antes reconectava para sempre, e marca `DESCONECTADA`; erro inesperado vira aviso grave. Só testes automáticos, mais o `struct.error` reproduzido com Telethon real.
+
+- Chamada antiga não toca ao abrir (relato de usuário): `_ao_chamada` marca como velha a oferta com mais de `OFERTA_VELHA_S` (60 s) antes do fim da fila offline (`_fila_entregue`); a janela consulta `oferta_velha` e não abre nem desliga, e a linha fica "encerrada" até o fim vindo da fila, sem aviso. Depois da fila a data não conta, para um relógio errado não calar chamadas. Causa deduzida do código, sem log do caso; só testes automáticos.
+
+- `richResponseMessage` (resposta da Meta AI) vira texto: `_texto_da_meta_ai` lê `unifiedResponse.data` (JSON, formato do pacote `richresponse` da whatsmeow) e, sem texto, as `submessages`; ilegível segue como "tipo do WhatsApp". Sem amostra real: testado com dados montados.
+
+- `callLogMesssage` vira linha na conversa (`chamadas.texto_do_registro`). Só testes automáticos.
+
+- Opção `digitar_na_lista` removida (pedido do responsável): agora `digitar` dentro de `lista_conversas` e `lista_mensagens`, com `wx.Choice` em `DialogoListaConversas`. `Config._carregar` e `backup.opcoes_validas` levam o antigo `campo` às duas listas. Só testes automáticos; não verificado com leitor de tela.
+
+- Busca das configurações cobre tudo (pedido do responsável): `buscar_opcoes` olha também grupo e escolhas; `ModeloConfiguracoes.destinos_da_busca` acha o que fica fora de `OPCOES` (listas, sons, atalhos, privacidade, código, IA) e `_ir_para` leva ao item. Mais de `LIMITE_ATALHOS_NA_BUSCA` funções viram um botão só. Janela real montada sem mostrar, em script; não vista com leitor de tela.
+
+- Programa preso sem janela ao atualizar com diálogo aberto (visto em logs de usuário; reproduzido com wx real): destruir a janela com um modal aberto deixa o `MainLoop` preso, e `ExitMainLoop` não resolve. `Janela._depois_dos_modais` cancela os modais antes de `Close`, `_ao_fechar` faz o mesmo por qualquer caminho, e `vigiar_o_fim` (`__main__`) encerra o processo 30 s depois de a janela fechar. O script da atualização grava `<pasta>.nao-atualizou` ao desistir, e a abertura seguinte avisa.
+
+- Mencionar no status (sugestão de usuário): `StatusComMencoes` na DLL (`fontes/chamadas/status_mencao.go`) e `SendRequestExtra.StatusRecipients` no whatsmeow local; botão em Novo status, até 5 pessoas (`LIMITE_MENCOES`). Formato tirado de forks do Baileys, não de documentação; sem teste real.
+
+- Status do WhatsApp (sugestão de usuário): voz em Novo status (`publicar_status.validar(voz=)`, `Janela._gravar_voz_do_status`, limite `SEGUNDOS_VOZ_NO_STATUS`) e `recompartilhar_status`, com `statusAttributions` RESHARE e `statusAttributionType` RESHARED_FROM_POST no `ContextInfo`. Só testes automáticos: não se sabe como o celular de quem vê mostra a voz e a marca.
+
+- Sons por tipo de conversa (pedido do responsável): eventos `nova_pessoal`, `nova_canal` e `nova_comunidade` (`EVENTOS_QUE_SEGUEM`), com som próprio nos pacotes da casa (`gerar_sons.py`, só os novos gerados) e bip próprio no Padrão; em pacote personalizado sem arquivo, herdam `nova` e `nova_grupo`. `migrar_tipos_de_conversa` mantém sem som quem tinha o evento de origem desligado. `Conversa.comunidade` (coluna nova) vem de `GroupParent` e `GroupLinkedParent` ao conferir os grupos. Som próprio: `sons_de_conversa` e `sons/conversas`, `DialogoSomDaConversa` nos detalhes. Só testes automáticos e janela montada por script; sem teste ao vivo.
+
 ## 2026.11.01.0
 
 - Título da janela (pedido do responsável): sem conversa aberta e sem atividade em andamento, mostra entre parênteses o total de conversas não lidas, como `TeleZapp (3)`, as mesmas do filtro Não lidas (fora arquivadas, trancadas e status), em todas as contas.

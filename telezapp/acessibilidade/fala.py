@@ -79,6 +79,8 @@ LIMITE_SEGUNDOS_ARQUIVO = 15
 # Eventos que, no som padrao, tocam o mesmo som de outro (e acompanham a
 # escolha dele): a pessoa so muda se quiser diferenciar
 HERDA = {"nova_aberta": "nova", "nova_grupo": "nova",
+         "nova_pessoal": "nova", "nova_canal": "nova",
+         "nova_comunidade": "nova_grupo",
          "reconectada": "conectado", "falha_envio": "erro",
          "tarefa_pronta": "enviada", "gravacao_parada": "enviada",
          "voto_enviado": "enviada"}
@@ -90,7 +92,7 @@ DURACAO_TOM_DE_CHAMADA_MS = 1500
 
 def tom_padrao(tipo):
     """O tipo cujo som sintetico o evento usa quando nao ha escolha."""
-    while tipo in HERDA:
+    while tipo in HERDA and tipo not in NOTAS:
         tipo = HERDA[tipo]
     return tipo
 
@@ -228,6 +230,9 @@ def _tocar_arquivo(tipo, caminho):
 # Os sons padrao, nota a nota: (frequencia em Hz, duracao em ms)
 NOTAS = {
     "nova": ((880, 90), (1175, 120)),
+    "nova_pessoal": ((880, 90), (1319, 120)),
+    "nova_canal": ((587, 110), (784, 130)),
+    "nova_comunidade": ((988, 70), (784, 70), (988, 90)),
     "enviada": ((660, 80),),
     "pronto": ((660, 90), (880, 90), (1100, 90)),
     "atualizado": ((990, 70), (990, 70)),

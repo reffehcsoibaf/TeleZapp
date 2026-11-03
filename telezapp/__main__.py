@@ -144,6 +144,18 @@ def _vigiar_aviso(sinal, janela, instancia):
             return
 
 
+def _vigiar_o_fim():
+    """Janela fechada: se o programa nao terminar, a pessoa nao o ve mais, nao
+    consegue abri-lo de novo e uma atualizacao nao troca a pasta."""
+    def vigia():
+        time.sleep(30)
+        logging.getLogger("telezapp").warning(
+            "a janela fechou e o programa não terminou; encerrando")
+        logging.shutdown()
+        os._exit(0)
+    threading.Thread(target=vigia, daemon=True, name="vigia-do-fim").start()
+
+
 def main():
     # Sem terminal (pythonw), stdout e stderr nao existem: bibliotecas que
     # escrevem neles nao podem falhar por isso.
@@ -238,6 +250,16 @@ def main():
     from telezapp.nucleo import atualizador, instalacao
     programa = instalacao.pasta_do_programa()
     if programa:
+        if atualizador.troca_falhou(programa):
+            log.warning("a atualização anterior não conseguiu trocar a pasta "
+                        "do programa")
+            wx.MessageBox(
+                "A atualização não terminou, porque a pasta do %s estava em "
+                "uso, e esta continua sendo a versão %s. Feche o programa, "
+                "confira no Gerenciador de Tarefas se ele não ficou aberto e "
+                "tente de novo. Se continuar, baixe o instalador na página "
+                "do projeto." % (NOME, VERSAO), NOME,
+                wx.OK | wx.ICON_WARNING)
         atualizador.limpar_restos(programa)     # sobras de uma atualizacao
         from telezapp.interface.instalacao import mostrar_boas_vindas
         if mostrar_boas_vindas() != "continuar":
@@ -280,6 +302,7 @@ def main():
         etapa(log, "banco aberto")
         barramento = Barramento(wx.CallAfter)
         janela = Janela(cfg, banco, barramento)
+        janela.vigiar_o_fim = _vigiar_o_fim
         etapa(log, "janela criada")
         janela.contas = Contas(cfg, banco, barramento, janela.pedir,
                                janela.obter_credenciais_telegram)

@@ -55,6 +55,31 @@ def tipo_da_mensagem(msg):
     return m.TEXTO
 
 
+def _e_ao_vivo(msg):
+    return type(getattr(msg, "media", None)).__name__ == "MessageMediaGeoLive"
+
+
+def acoes_de_localizacao(msg):
+    """O botao de acompanhar uma localizacao em tempo real, com a posicao
+    atual: o Telegram a move editando a mensagem."""
+    if not _e_ao_vivo(msg):
+        return []
+    acao = {"tipo": localizacao.ACAO_VER, "rotulo": localizacao.ROTULO_VER}
+    geo = getattr(msg, "geo", None)
+    if hasattr(geo, "lat"):
+        acao["lat"], acao["lon"] = geo.lat, geo.long
+    else:
+        acao["encerrada"] = True       # GeoPointEmpty: a pessoa parou
+    data = getattr(msg, "date", None)
+    editada = getattr(msg, "edit_date", None) or data
+    if editada is not None:
+        acao["quando"] = editada.timestamp()
+    periodo = getattr(msg.media, "period", 0) or 0
+    if data is not None and periodo and periodo < 0x7FFFFFFF:
+        acao["ate"] = data.timestamp() + periodo
+    return [acao]
+
+
 def _texto_extra(msg):
     """Descricao curta de tipos ainda sem suporte (enquete, local...)."""
     poll = getattr(msg, "poll", None)
@@ -65,12 +90,12 @@ def _texto_extra(msg):
             return "enquete"
     geo = getattr(msg, "geo", None)
     if geo:
+        if _e_ao_vivo(msg):
+            return localizacao.TITULO_AO_VIVO   # o resto fica no botao
         venue = getattr(msg, "venue", None)
-        media = getattr(msg, "media", None)
         return localizacao.descrever(
             getattr(geo, "lat", 0.0), getattr(geo, "long", 0.0),
-            getattr(venue, "title", ""), getattr(venue, "address", ""),
-            ao_vivo=type(media).__name__ == "MessageMediaGeoLive")
+            getattr(venue, "title", ""), getattr(venue, "address", ""))
     contato = getattr(msg, "contact", None)
     if contato is not None:
         nome = " ".join(p for p in (getattr(contato, "first_name", ""),
@@ -608,7 +633,8 @@ def converter(msg, conta_id, conversa_id, lidas_ate=0, nome_padrao=""):
     links, botoes, mencoes = extras_do_telegram(msg)
     m.guardar_extras(nova, links, botoes, mencoes,
                      acoes=entradas_do_telegram(links) + (
-                         [] if minha else acoes_do_robo(msg)),
+                         [] if minha else acoes_do_robo(msg)) +
+                     acoes_de_localizacao(msg),
                      previa=previa_do_telegram(msg))
     enquete = enquete_do_telegram(msg)
     if enquete:
@@ -1035,21 +1061,40 @@ class ProvedorTelegram(Provedor):
             system_version="Windows", app_version=VERSAO, lang_code="pt",
             system_lang_code="pt-BR")
 
+    async def _desistir_de_conectar(self):
+        """Sem isto o cliente seguiria reconectando sozinho, para sempre, em
+        uma conta que nao vai mais ficar pronta."""
+        try:
+            await self.cliente.disconnect()
+        except Exception:
+            log.exception("erro ao desconectar")
+        self._estado(ev.DESCONECTADA, "falha ao conectar")
+
     async def _conectar(self):
-        from telethon import events
+        from telethon import errors, events
         from telethon.tl import types as tipos
         self._estado(ev.CONECTANDO)
         inicio = time.perf_counter()
         self.cliente = self._novo_cliente()
-        await self.cliente.connect()
-        log.info("conectou aos servidores em %.2fs",
-                 time.perf_counter() - inicio)
-        if not await self.cliente.is_user_authorized():
-            if not await self._login():
-                self._estado(ev.PRECISA_LOGIN, "login cancelado")
-                await self.cliente.disconnect()
-                return
-        eu = await self.cliente.get_me()
+        try:
+            await self.cliente.connect()
+            log.info("conectou aos servidores em %.2fs",
+                     time.perf_counter() - inicio)
+            if not await self.cliente.is_user_authorized():
+                if not await self._login():
+                    self._estado(ev.PRECISA_LOGIN, "login cancelado")
+                    await self.cliente.disconnect()
+                    return
+            eu = await self.cliente.get_me()
+        except Exception as e:
+            await self._desistir_de_conectar()
+            if isinstance(e, (errors.FloodWaitError, ConnectionError,
+                              OSError)):
+                raise                   # _protegido tem o aviso de cada um
+            log.exception("não consegui conectar ao Telegram")
+            self._avisar("Não consegui conectar ao Telegram. Os detalhes "
+                         "estão no log.", True)
+            return
         telefone = "+" + eu.phone if getattr(eu, "phone", None) else \
             self.conta.telefone
         self.conta.nome = nome_de(eu) or self.conta.nome
@@ -2046,7 +2091,8 @@ class ProvedorTelegram(Provedor):
 
     PODE_PUBLICAR_STATUS = True
 
-    def publicar_status(self, texto, anexo=None, publico="contatos"):
+    def publicar_status(self, texto, anexo=None, publico="contatos",
+                        mencoes=()):
         """Publica uma historia (foto ou video, com a legenda). `publico`:
         "contatos" ou "todos"."""
         if anexo is None:
@@ -3041,7 +3087,9 @@ class ProvedorTelegram(Provedor):
                     nova.texto, nova.tipo, nova.nome_arquivo, nova.tamanho) and \
                     all(antes[c] == v for c, v in campos.items()):
                 return
-            if x.texto != nova.texto:
+            # a localizacao em tempo real se move editando: nao e edicao
+            viva = bool(acoes_de_localizacao(msg))
+            if x.texto != nova.texto and not viva:
                 campos["editada"] = True
             x.texto = nova.texto
             if (x.tipo, x.nome_arquivo, x.tamanho) != (
@@ -3054,7 +3102,7 @@ class ProvedorTelegram(Provedor):
             m.atualizar_extras(x, **campos)
             self.banco.salvar_mensagens([x])
             self.barramento.publicar(ev.MensagemAtualizada(
-                self.conta.id, cid, x, "editada"))
+                self.conta.id, cid, x, "localizacao" if viva else "editada"))
         except Exception:
             log.exception("erro ao tratar mensagem editada")
 

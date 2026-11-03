@@ -34,10 +34,10 @@ def test_busca_acrescenta_categoria_de_resultados(mod):
 
 
 def test_pendentes_so_valem_ao_aplicar_e_voltar_ao_atual_desfaz(mod):
-    mod.definir("digitar_na_lista", "campo")
-    assert mod.valor("digitar_na_lista") == "campo"
-    assert mod.cfg.get("digitar_na_lista") == "pular"
-    mod.definir("digitar_na_lista", "pular")
+    mod.definir("previa_links", "titulo")
+    assert mod.valor("previa_links") == "titulo"
+    assert mod.cfg.get("previa_links") == "completa"
+    mod.definir("previa_links", "completa")
     assert mod.mudancas() == []
 
 
@@ -54,9 +54,9 @@ def test_aplicar_na_ordem_das_opcoes_e_zera(mod):
 
 
 def test_indice_da_escolha(mod):
-    o = next(o for o in config.OPCOES if o.chave == "digitar_na_lista")
+    o = next(o for o in config.OPCOES if o.chave == "previa_links")
     assert mod.indice_da_escolha(o) == 0
-    mod.definir("digitar_na_lista", "campo")
+    mod.definir("previa_links", "titulo")
     assert mod.indice_da_escolha(o) == 1
 
 
@@ -254,7 +254,7 @@ def test_interface_e_mensagens_reunem_as_categorias_antigas(mod):
     soltas = {o.chave for o in mod.opcoes("Interface")}
     assert soltas == {"status_no_titulo", "avisar_chamadas_whatsapp",
                       "ocultar_contatos_duplicados",
-                      "trazer_contatos_ao_abrir", "digitar_na_lista",
+                      "trazer_contatos_ao_abrir",
                       "como_me_chamar"}
     assert "prioridade_abertura" in {o.chave for o in mod.opcoes("Sistema")}
     assert "estilo" not in {o.chave for o in config.OPCOES}   # virou a lista
@@ -265,3 +265,65 @@ def test_interface_e_mensagens_reunem_as_categorias_antigas(mod):
 def test_busca_acha_opcao_dentro_de_um_grupo(mod):
     mod.busca = "reacoes"
     assert "falar_reacoes" in [o.chave for o in mod.opcoes(CATEGORIA_BUSCA)]
+
+
+def _destinos(mod, texto):
+    mod.busca = texto
+    return mod.destinos_da_busca()
+
+
+def test_busca_sem_texto_nao_tem_destinos(mod):
+    assert _destinos(mod, "  ") == []
+
+
+def test_busca_acha_o_que_fica_nas_janelas_das_listas(mod):
+    achados = {(d.tipo, d.alvo) for d in _destinos(mod, "digitar uma letra")}
+    assert achados == {("lista_conversas", "digitar"),
+                       ("lista_mensagens", "digitar")}
+    assert ("lista_mensagens", "so_muda") in {
+        (d.tipo, d.alvo) for d in _destinos(mod, "só quando muda")}
+    assert ("lista_conversas", "previa") in {
+        (d.tipo, d.alvo) for d in _destinos(mod, "trecho da ultima")}
+    assert ("lista_mensagens", "digitar") in {
+        (d.tipo, d.alvo) for d in _destinos(mod, "escrever a mensagem")}
+
+
+def test_busca_cobre_cada_item_das_telas_proprias(mod):
+    from telezapp.nucleo import lista_conversas as lc
+    from telezapp.nucleo import lista_mensagens as lm
+    from telezapp.nucleo import pacotes_de_som as ps
+    from telezapp.nucleo import privacidade_conta as pw
+    from telezapp.nucleo.ia import catalogo
+    casos = ([("lista_conversas", c, r) for c, r in lc.ITENS] +
+             [("lista_mensagens", c, r) for c, r in lm.ITENS] +
+             [("sons", c, r) for c, r in ps.eventos()] +
+             [("privacidade", c.nome, c.rotulo) for c in pw.CAMPOS] +
+             [("privacidade", n, r) for n, r in pw.ROTULOS_TELEGRAM.items()] +
+             [("ia", t, n) for t, n in catalogo.NOMES_DE_TAREFA.items()] +
+             [("provedor_ia", p.chave, p.nome)
+              for p in catalogo.PROVEDORES.values()])
+    for tipo, alvo, rotulo in casos:
+        assert (tipo, alvo) in {(d.tipo, d.alvo)
+                                for d in _destinos(mod, rotulo)}, rotulo
+
+
+def test_busca_acha_os_campos_do_codigo_e_a_chave_da_ia(mod):
+    assert "codigo" in {d.tipo for d in _destinos(mod, "novo código")}
+    assert "provedor_ia" in {d.tipo for d in _destinos(mod, "chave gemini")}
+
+
+def test_busca_acha_as_escolhas_das_opcoes(mod):
+    mod.busca = "só o título"
+    assert "previa_links" in [o.chave for o in mod.opcoes(CATEGORIA_BUSCA)]
+
+
+def test_busca_de_atalhos_acha_a_funcao_ou_junta_muitas(mod, monkeypatch):
+    from telezapp.nucleo import configuracoes as nc
+    mod.registro = _registro()
+    assert [(d.tipo, d.alvo) for d in _destinos(mod, "beta")
+            if d.tipo == "atalhos"] == [("atalhos", "b")]
+    monkeypatch.setattr(nc, "LIMITE_ATALHOS_NA_BUSCA", 1)
+    juntos = [d for d in _destinos(mod, "atalhos")
+              if d.tipo == "atalhos_busca"]
+    assert len(juntos) == 1 and juntos[0].alvo == ""
+    assert "2 funções" in juntos[0].rotulo

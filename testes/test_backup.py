@@ -22,7 +22,7 @@ def preparar(pasta):
                 (str(pasta / "midias" / "w1" / "a.jpg"),))
     con.commit()
     con.close()
-    return {"status_no_titulo": False, "digitar_na_lista": "campo",
+    return {"status_no_titulo": False, "previa_links": "titulo",
             "contas": [{"id": "w1"}],
             "telegram_api_id": 7, "codigo_trancadas": "hash",
             "trancadas_exigir_codigo": True, "depuracao": True,
@@ -40,9 +40,9 @@ def test_so_as_opcoes_seguras_vao_no_backup():
 
 def test_opcoes_validas_descarta_lixo_e_valores_fora_da_faixa():
     boas = bk.opcoes_validas({"status_no_titulo": "sim",
-                              "digitar_na_lista": "campo", "inexistente": 1,
+                              "previa_links": "titulo", "inexistente": 1,
                               "depuracao": True, "audio_velocidade": 1.5})
-    assert boas == {"digitar_na_lista": "campo", "audio_velocidade": 1.5}
+    assert boas == {"previa_links": "titulo", "audio_velocidade": 1.5}
 
 
 def test_backup_com_senha_restaura_configuracoes_e_deixa_o_resto_em_espera(
@@ -72,7 +72,7 @@ def test_backup_com_senha_restaura_configuracoes_e_deixa_o_resto_em_espera(
                                   ["configuracoes", "contas", "conversas",
                                    "midias"], str(destino))
     assert opcoes["status_no_titulo"] is False
-    assert opcoes["digitar_na_lista"] == "campo"
+    assert opcoes["previa_links"] == "titulo"
     assert "depuracao" not in opcoes
     assert espera == ["contas", "conversas", "midias"]
     assert bk.ha_pendente(str(destino))
@@ -102,7 +102,7 @@ def test_backup_sem_senha_e_so_configuracoes(tmp_path):
     assert not bk.precisa_de_senha(arquivo)
     opcoes, espera = bk.restaurar(arquivo, "", ["configuracoes", "midias"],
                                   str(tmp_path / "b"))
-    assert opcoes["digitar_na_lista"] == "campo" and espera == []
+    assert opcoes["previa_links"] == "titulo" and espera == []
     assert not bk.ha_pendente(str(tmp_path / "b"))
 
 
@@ -277,7 +277,7 @@ def test_cada_parte_de_configuracao_vai_e_volta_sozinha(tmp_path):
     origem, cfg = _com_sons(tmp_path)
     esperado = {
         "atalhos": {"atalhos", "mostrar_atalhos"},
-        "sons": {"pacote_de_sons", "sons_desativados"}}
+        "sons": {"pacote_de_sons", "sons_desativados", "sons_de_conversa"}}
     for parte, chaves in esperado.items():
         arquivo = str(tmp_path / (parte + ".zip"))
         resumo = bk.criar(arquivo, str(origem), cfg, [parte])
@@ -299,10 +299,25 @@ def test_configuracoes_nao_leva_atalhos_nem_sons(tmp_path):
     destino = tmp_path / "d"
     os.makedirs(destino)
     opcoes, _ = bk.restaurar(arquivo, "", ["configuracoes"], str(destino))
-    assert "digitar_na_lista" in opcoes
+    assert "previa_links" in opcoes
     assert not {"atalhos", "mostrar_atalhos", "pacote_de_sons",
                 "sons_desativados"} & set(opcoes)
     assert not (destino / "sons").exists()
+
+
+def test_conversas_de_conta_que_nao_existe_sao_percebidas(tmp_path):
+    pasta = tmp_path / "ç dados"
+    assert not bk.conversas_sem_conta(str(pasta), ["w1"])
+    espera = pasta / bk.ESPERA
+    espera.mkdir(parents=True)
+    con = sqlite3.connect(str(espera / "telezapp.db"))
+    con.execute("CREATE TABLE conversas (conta_id TEXT)")
+    con.execute("INSERT INTO conversas VALUES ('w1')")
+    con.commit()
+    con.close()
+    assert not bk.conversas_sem_conta(str(pasta), ["w1"])
+    assert bk.conversas_sem_conta(str(pasta), [])
+    assert bk.conversas_sem_conta(str(pasta), ["w2"])
 
 
 def test_restaurar_so_atalhos_de_um_backup_com_tudo(tmp_path):
@@ -336,5 +351,5 @@ def test_backup_antigo_restaura_atalhos_e_sons_com_as_configuracoes(tmp_path):
     destino = tmp_path / "d"
     os.makedirs(destino)
     opcoes, _ = bk.restaurar(antigo, "", ["configuracoes"], str(destino))
-    assert {"atalhos", "pacote_de_sons", "digitar_na_lista"} <= set(opcoes)
+    assert {"atalhos", "pacote_de_sons", "previa_links"} <= set(opcoes)
     assert (destino / "sons" / "pacotes" / "Meu" / "nova.ogg").exists()

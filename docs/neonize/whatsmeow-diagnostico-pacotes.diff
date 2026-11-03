@@ -1,0 +1,12 @@
+﻿diff --git a/client.go b/client.go
+index 5ca43e0..d1729fd 100644
+--- a/client.go
++++ b/client.go
+@@ -863,6 +863,7 @@ func (cli *Client) handleFrame(ctx context.Context, data []byte, queue chan *waB
+ 		return
+ 	}
+ 	cli.recvLog.Debugf("%s", node)
++	registrarPacote(node)
+ 	if node.Tag == "xmlstreamend" {
+ 		if !cli.isExpectedDisconnect() {
+ 			cli.Log.Warnf("Received stream end frame")

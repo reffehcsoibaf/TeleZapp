@@ -38,6 +38,7 @@ class Selecao:
     o_que: str = MIDIAS
     itens: list = field(default_factory=list)
     bytes: int = 0                # espaco de arquivos que sera liberado
+    feitas: list = field(default_factory=list)  # (conta, conversa, id) apagadas
 
     @property
     def quantidade(self):
@@ -111,6 +112,7 @@ def apagar(banco, selecao):
             feitas.append((conta, conversa, mensagem))
         banco.apagar_mensagens(feitas)
         banco.registrar_limpeza(feitas, "mensagem")
+        selecao.feitas = feitas
         return len(feitas), liberados, falhas
     feitas = []
     for conta, conversa, mensagem, _, caminho, tam, _d in selecao.itens:
@@ -126,6 +128,18 @@ def apagar(banco, selecao):
     banco.apagar_fichas(feitas)
     banco.registrar_limpeza(feitas, "midia")
     return len(feitas), liberados, falhas
+
+
+def para_o_celular(selecao):
+    """{conta: [(conversa, id, minha, data, remetente)]} das mensagens que a
+    limpeza apagou mesmo: as que falharam ficam aqui e tambem la."""
+    feitas = set(selecao.feitas)
+    contas = {}
+    for conta, conversa, mid, _, _, data, minha, remetente in selecao.itens:
+        if (conta, conversa, mid) in feitas and not mid.startswith("local-"):
+            contas.setdefault(conta, []).append(
+                (conversa, mid, bool(minha), data, remetente))
+    return contas
 
 
 def apagar_mensagem(banco, conta_id, conversa_id, mensagem_id):

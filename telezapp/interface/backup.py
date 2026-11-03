@@ -64,6 +64,15 @@ class DialogoBackup(wx.Dialog):
                 self)
             if r != wx.YES:
                 return
+        if self.caixas["conversas"].GetValue() and (
+                not self.caixas["contas"].GetValue()):
+            r = wx.MessageBox(
+                bk.AVISO_CONVERSAS_SEM_CONTAS + " Marque também Contas e "
+                "sessões para levá-las a outra instalação. Fazer o backup "
+                "sem as contas?", "Fazer backup",
+                wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING, self)
+            if r != wx.YES:
+                return
         evt.Skip()
 
     def partes(self):

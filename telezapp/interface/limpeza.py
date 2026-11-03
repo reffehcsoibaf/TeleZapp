@@ -17,23 +17,25 @@ TODOS = "Todos"
 
 class DialogoLimpeza(wx.Dialog):
     def __init__(self, pai, banco, contas, conversas, falar, ao_limpar,
-                 so_a_conversa=None):
+                 so_a_conversa=None, no_celular=None):
         """contas: [(conta_id, rotulo)]; conversas: [(conta_id, conversa_id,
         nome)] de todas as conversas. so_a_conversa: (conta_id, conversa_id,
         nome) para limpar so uma conversa; a janela nao mostra conta nem
-        conversa e as demais opcoes seguem iguais."""
+        conversa e as demais opcoes seguem iguais. no_celular: None (nenhuma
+        conta pode) ou (lembrar() -> False se desistiu, enviar(sel) -> texto)."""
         titulo = "Limpar mídias e mensagens"
         if so_a_conversa:
             titulo = "Limpar a conversa: %s" % so_a_conversa[2]
         super().__init__(pai, title=titulo, style=wx.DEFAULT_DIALOG_STYLE)
         self.banco, self.falar, self.ao_limpar = banco, falar, ao_limpar
         self.so_a_conversa = so_a_conversa
+        self.no_celular = no_celular
         self.contas = [("", "Todas as contas")] + list(contas)
         self.todas_conversas = list(conversas)
         self._conversas = []
         lay = wx.BoxSizer(wx.VERTICAL)
         lay.Add(wx.StaticText(
-            self, label="Apaga neste computador, não na conta. O que for "
+            self, label="Apaga neste computador. O que for "
                         "limpo não volta, nem por histórico nem por download, "
                         "até a conta ser pareada de novo. O total aparece "
                         "antes de confirmar."),
@@ -72,6 +74,13 @@ class DialogoLimpeza(wx.Dialog):
             self, label="Manter as mensagens &favoritas")
         self.favoritas.SetValue(True)
         lay.Add(self.favoritas, 0, wx.ALL, 10)
+        self.celular = None
+        if no_celular:
+            self.celular = wx.CheckBox(
+                self, label="Apagar as mensagens também no &celular (WhatsApp)")
+            lay.Add(self.celular, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+            self.celular.Enable(False)
+            self.o_que.Bind(wx.EVT_CHOICE, lambda e: self._ajustar_celular())
         self.tipo.SetSelection(0)
         if not so_a_conversa:
             self.conta.SetSelection(0)
@@ -88,6 +97,13 @@ class DialogoLimpeza(wx.Dialog):
         self.SetEscapeId(wx.ID_CANCEL)
         self.CentreOnParent()
         (self.o_que if so_a_conversa else self.conta).SetFocus()
+
+    def _ajustar_celular(self):
+        """As mensagens saem do celular; so a midia baixada, nao ha como."""
+        msgs = self.o_que.GetSelection() == 1
+        self.celular.Enable(msgs)
+        if not msgs:
+            self.celular.SetValue(False)
 
     def _montar_conversas(self):
         conta = self.contas[max(self.conta.GetSelection(), 0)][0]
@@ -129,6 +145,10 @@ class DialogoLimpeza(wx.Dialog):
                           wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
         if r != wx.YES:
             return
+        celular = msgs and self.celular is not None and \
+            self.celular.GetValue()
+        if celular and not self.no_celular[0]():
+            return
         feitos, liberados, falhas = limpeza.apagar(self.banco, sel)
         if msgs:
             texto = "%d %s" % (feitos, "mensagem apagada" if feitos == 1
@@ -142,6 +162,8 @@ class DialogoLimpeza(wx.Dialog):
         if falhas:
             texto += " %d não puderam ser apagados (talvez em uso)." % falhas
         self.ao_limpar(sel)
+        if celular:
+            texto += " " + self.no_celular[1](sel)
         self.falar(texto)
         wx.MessageBox(texto, "Limpar mídias e mensagens",
                       wx.OK | wx.ICON_INFORMATION, self)

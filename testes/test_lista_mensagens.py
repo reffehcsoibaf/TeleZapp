@@ -258,3 +258,13 @@ def test_backup_antigo_com_estilo_vira_a_lista_de_mensagens():
     nova = lay(ocultos=["hora"])
     assert backup.opcoes_validas({"estilo": 3, "lista_mensagens": nova})[
         "lista_mensagens"] == lm.normalizar(nova)
+
+
+def test_dialogo_de_mensagens_escolhe_o_que_digitar_faz():
+    dlg, estado, _ = _dialogo(lm.padrao())
+    assert lm.ESCOLHAS_DIGITAR[1][1] == \
+        "Ir direto para o campo de escrever a mensagem"
+    dlg.digitar.SetSelection(1)
+    dlg.mudar_digitar()
+    assert lm.digitar(estado["v"]) == "campo"
+    assert lm.so_quando_muda(estado["v"]) is False

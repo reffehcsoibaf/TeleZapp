@@ -15,6 +15,8 @@ from abc import ABC, abstractmethod
 PEDIR_TELEFONE = "telefone"
 PEDIR_CODIGO = "codigo"
 PEDIR_SENHA = "senha"
+# apagar_mensagem: o servico nao aceitou agora, e o pedido ficou guardado
+APAGAR_PENDENTE = "pendente"
 
 
 class ErroMidia(Exception):
@@ -222,6 +224,16 @@ class Provedor(ABC):
         mensagem mais nova que o TeleZapp tem, ou None. Devolve True se o
         servico foi avisado."""
         return False
+
+    def limpar_conversa(self, conversa_id, ultima=None):
+        """Apaga as mensagens da conversa na conta, sem tirar a conversa da
+        lista. Devolve True se o servico foi avisado."""
+        return False
+
+    def apagar_varias_mensagens(self, itens):
+        """A limpeza apagou muitas: itens = [(conversa, id, minha, data,
+        remetente)], so para mim, em segundo plano. Devolve quantas aceitou."""
+        return 0
 
     # True nos servicos em que o TeleZapp sabe tirar a conta de um grupo
     SAI_DE_GRUPO = False
@@ -442,9 +454,15 @@ class Provedor(ABC):
     # True nos servicos em que da para publicar status (historia)
     PODE_PUBLICAR_STATUS = False
 
-    def publicar_status(self, texto, anexo=None, publico="contatos"):
+    def publicar_status(self, texto, anexo=None, publico="contatos",
+                        mencoes=()):
         """Publica um status: `texto` (no Telegram, a legenda) e, se houver,
         `anexo` (foto ou video). O resultado chega como ev.Aviso."""
+
+    PODE_RECOMPARTILHAR_STATUS = False
+
+    def recompartilhar_status(self, texto, anexo=None):
+        """Publica de novo o status de outra pessoa. Avisa pelo barramento."""
 
     def responder_status(self, mensagem, texto):
         """Responde em particular a um status (ou historia) de alguem."""

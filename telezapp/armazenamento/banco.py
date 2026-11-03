@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS conversas (
     somente_leitura INTEGER NOT NULL DEFAULT 0,
     temporaria_s INTEGER NOT NULL DEFAULT 0,
     citacoes INTEGER NOT NULL DEFAULT 0,
+    comunidade INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (conta_id, id)
 );
 CREATE TABLE IF NOT EXISTS mensagens (
@@ -119,6 +120,16 @@ CREATE TABLE IF NOT EXISTS limpas (
     conversa_id TEXT NOT NULL,
     mensagem_id TEXT NOT NULL,
     alvo TEXT NOT NULL,
+    PRIMARY KEY (conta_id, conversa_id, mensagem_id)
+);
+-- Mensagens apagadas aqui que o WhatsApp ainda nao aceitou apagar no celular.
+CREATE TABLE IF NOT EXISTS apagar_pendente (
+    conta_id TEXT NOT NULL,
+    conversa_id TEXT NOT NULL,
+    mensagem_id TEXT NOT NULL,
+    minha INTEGER NOT NULL DEFAULT 0,
+    data REAL NOT NULL DEFAULT 0,
+    remetente TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (conta_id, conversa_id, mensagem_id)
 );
 -- Conversas apagadas pela pessoa: so voltam com mensagem mais nova que `ate`
@@ -226,6 +237,9 @@ class Banco:
         if "citacoes" not in conv:
             self._con.execute("ALTER TABLE conversas ADD COLUMN "
                               "citacoes INTEGER NOT NULL DEFAULT 0")
+        if "comunidade" not in conv:
+            self._con.execute("ALTER TABLE conversas ADD COLUMN "
+                              "comunidade INTEGER NOT NULL DEFAULT 0")
         colunas = {linha[1] for linha in self._con.execute(
             "PRAGMA table_info(mensagens)")}
         if "remetente" not in colunas:
@@ -323,7 +337,8 @@ class Banco:
             self._con.execute("DELETE FROM conversas WHERE conta_id=?",
                               (conta_id,))
             for tabela in ("mensagens", "recibos", "status", "midias",
-                           "fichas", "posicoes", "contatos", "limpas", "apagadas"):
+                           "fichas", "posicoes", "contatos", "limpas", "apagadas",
+                           "apagar_pendente"):
                 self._con.execute(
                     "DELETE FROM %s WHERE conta_id=?" % tabela, (conta_id,))
             self._agenda = None
@@ -805,11 +820,12 @@ class Banco:
 
     def mensagens_para_limpar(self, conta_id="", conversa_id="", tipos=(),
                               antes=None, minimo=0):
-        """[(conta_id, conversa_id, id, tipo, tamanho, data)] que passam
+        """[(conta_id, conversa_id, id, tipo, tamanho, data, minha, remetente)]
+        que passam
         pelos filtros: conta/conversa ('' = todas), tipos (() = todos), mais
         antigas que `antes` (segundos) e maiores que `minimo` bytes."""
-        sql = ("SELECT conta_id, conversa_id, id, tipo, tamanho, data "
-               "FROM mensagens WHERE 1=1")
+        sql = ("SELECT conta_id, conversa_id, id, tipo, tamanho, data, minha, "
+               "remetente FROM mensagens WHERE 1=1")
         args = []
         if conta_id:
             sql += " AND conta_id=?"
@@ -859,6 +875,30 @@ class Banco:
             self._con.executemany(
                 "DELETE FROM fichas WHERE conta_id=? AND conversa_id=? AND "
                 "mensagem_id=?", [tuple(k) for k in chaves])
+
+    def guardar_apagar_pendente(self, conta_id, conversa_id, mensagem_id,
+                                minha, data, remetente):
+        with self._trava, self._con:
+            self._con.execute(
+                "INSERT OR REPLACE INTO apagar_pendente VALUES (?,?,?,?,?,?)",
+                (conta_id, conversa_id, mensagem_id, int(bool(minha)), data,
+                 remetente or ""))
+
+    def apagar_pendentes(self, conta_id):
+        """[(conversa_id, mensagem_id, minha, data, remetente)], antigas antes."""
+        with self._trava:
+            return [(c, i, bool(mi), d, r) for c, i, mi, d, r in
+                    self._con.execute(
+                        "SELECT conversa_id, mensagem_id, minha, data, "
+                        "remetente FROM apagar_pendente WHERE conta_id=? "
+                        "ORDER BY data", (conta_id,))]
+
+    def tirar_apagar_pendente(self, conta_id, conversa_id, mensagem_id):
+        with self._trava, self._con:
+            self._con.execute(
+                "DELETE FROM apagar_pendente WHERE conta_id=? AND "
+                "conversa_id=? AND mensagem_id=?",
+                (conta_id, conversa_id, mensagem_id))
 
     def esquecer_limpezas(self, conta_id):
         """Novo pareamento: o que foi limpo ou apagado pode voltar."""

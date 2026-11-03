@@ -1259,6 +1259,48 @@ def _conversa_com_botoes(j):
     return x
 
 
+def test_botao_de_localizacao_abre_a_janela_e_a_atualiza(j, monkeypatch):
+    from telezapp.interface import janela as modulo
+    from telezapp.nucleo import eventos as ev2
+    from telezapp.nucleo import localizacao as loc
+    abertas = []
+
+    class Dialogo:
+        def __init__(self, pai, quem, acao, falar):
+            self.quem, self.acao, self.recebidas = quem, acao, []
+            abertas.append(self)
+
+        def ShowModal(self):
+            nova = m.Mensagem("t1", "10", "9", autor="Ana", tipo=m.OUTRO,
+                              texto=loc.TITULO_AO_VIVO)
+            m.guardar_extras(nova, acoes=[{
+                "tipo": loc.ACAO_VER, "rotulo": loc.ROTULO_VER, "lat": 2.0,
+                "lon": 3.0}])
+            outra = m.Mensagem("t1", "10", "8", tipo=m.OUTRO)
+            m.guardar_extras(outra, acoes=[{
+                "tipo": loc.ACAO_VER, "rotulo": loc.ROTULO_VER, "lat": 9.0,
+                "lon": 9.0}])
+            j._ev_atualizada(ev2.MensagemAtualizada("t1", "10", outra,
+                                                    "localizacao"))
+            j._ev_atualizada(ev2.MensagemAtualizada("t1", "10", nova,
+                                                    "localizacao"))
+
+        def atualizar(self, acao):
+            self.recebidas.append(acao["lat"])
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(modulo, "DialogoLocalizacao", Dialogo)
+    x = m.Mensagem("t1", "10", "9", autor="Ana", tipo=m.OUTRO,
+                   texto=loc.TITULO_AO_VIVO)
+    acao = {"tipo": loc.ACAO_VER, "rotulo": loc.ROTULO_VER, "lat": 1.0,
+            "lon": 1.0}
+    j._tocar_acao(x, acao)
+    assert abertas[0].quem == "Ana" and abertas[0].acao["lat"] == 1.0
+    assert abertas[0].recebidas == [2.0]
+    assert j._acompanhando is None
+
+
 def test_botoes_da_mensagem_viram_controles_na_ordem_de_tab(j):
     _conversa_com_botoes(j)
     assert "com 2 opções (Tab)" not in j.lista_msgs.itens[0]   # botão + opção
@@ -2554,7 +2596,7 @@ def test_detalhes_lista_e_desfavorita_as_mensagens_favoritas(j):
     m.atualizar_extras(c.mensagens[0], favorita=True)
     m.atualizar_extras(c.mensagens[1], favorita=True)
     assert [x.id for x in det_nucleo.favoritas(c.mensagens)] == ["2", "1"]
-    assert "Mensagens fa&voritas" in [r for r, _ in c._botoes()]
+    assert "S&om desta conversa...", "Mensagens fa&voritas" in [r for r, _ in c._botoes()]
     opcoes = [r for r, _ in c._menu_favorita(c.mensagens[0])]
     assert opcoes[:2] == ["Ver na conversa", "Desfavoritar"]
     c._desfavoritar(c.mensagens[0])
@@ -3281,12 +3323,38 @@ def test_grupo_sair_so_apaga_da_lista_se_o_servico_aceitou(j):
     assert chave not in j.indice
 
 
+def test_limpar_conversa_escolhendo_celular_lembra_e_manda(j, monkeypatch):
+    conv = j.indice[("t1", "20")]
+    conv.tipo = "grupo"
+    j.banco.salvar_mensagens([m.Mensagem("t1", "20", "L1", texto="oi")])
+    pedidos = []
+    prov = j.contas.provedor("t1")
+    prov.limpar_conversa = lambda cid, ultima: pedidos.append(
+        (cid, ultima.id)) or True
+    monkeypatch.setattr(j, "_perguntar_celular", lambda *a: None)
+    j._limpar_conversa(conv)                     # desistiu: nada sai
+    assert j.banco.mensagens("t1", "20", 1)
+    monkeypatch.setattr(j, "_perguntar_celular", lambda *a: True)
+
+    class Direto:
+        def __init__(self, target, args, **k):
+            self.t, self.a = target, args
+
+        def start(self):
+            self.t(*self.a)
+    monkeypatch.setattr(jm.threading, "Thread", Direto)
+    j._limpar_conversa(conv)
+    assert pedidos == [("20", "L1")]
+    assert not j.banco.mensagens("t1", "20", 1)
+
+
 def test_grupo_apagar_pergunta_a_acao_e_encaminha(j, monkeypatch):
     conv = j.indice[("t1", "20")]
     conv.tipo = "grupo"
     chamadas = []
     j._limpar_conversa = lambda c: chamadas.append(("limpar", c.id))
-    j._sair_do_grupo = lambda c, p, ap: chamadas.append(("sair", ap))
+    j._sair_do_grupo = lambda c, p, ap, cel=False: chamadas.append(
+        ("sair", ap))
     for acao in ("limpar", "sair_apagar", None):
         monkeypatch.setattr(jm.dialogos, "escolher_acao_grupo",
                             lambda pai, nome, pode, a=acao: a)
@@ -3531,6 +3599,7 @@ def test_detalhes_de_pessoa_mostra_dados_do_contato_e_botoes(j):
     assert [r for r, _ in c._botoes()] == [
         "&Editar contato", "&Mídias", "&Baixar as mídias que faltam...",
         "&Grupos em comum",
+        "S&om desta conversa...",
         "Mensagens fa&voritas", "Mensagens fi&xadas",
         "&Limpar a conversa..."]
 
@@ -3552,6 +3621,7 @@ def test_detalhes_de_grupo_mostram_membros_e_so_admin_ve_administrar(j):
     rotulos = [r for r, _ in c._botoes()]
     assert rotulos == ["Ver &membros (2)", "&Mídias",
                        "&Baixar as mídias que faltam...",
+                       "S&om desta conversa...",
                        "Mensagens fa&voritas", "Mensagens fi&xadas",
                        "Participantes si&lenciados", "&Limpar a conversa..."]
     dados["sou_admin"] = True
@@ -4310,7 +4380,8 @@ def test_postar_status_escolhe_conta_e_chama_o_provedor(j, monkeypatch):
         resultado = {"conta_id": "t1", "texto": "bom dia", "anexo": None,
                      "publico": "todos"}
 
-        def __init__(self, pai, contas, escolher, atalho_emoji, fala):
+        def __init__(self, pai, contas, escolher, atalho_emoji, fala,
+                     gravar_voz, escolher_mencoes):
             Dialogo.contas = contas
             Dialogo.atalho = atalho_emoji
 
@@ -4421,7 +4492,7 @@ def test_mencao_ou_resposta_num_grupo_toca_o_som_proprio(j, monkeypatch):
     # conversa com uma pessoa: nunca
     sons.clear()
     chega("48", citou=True, conv=j.indice[("t1", "20")])
-    assert sons == ["nova"]
+    assert sons == ["nova_pessoal"]
     # grupo silenciado e fechado: mudo
     sons.clear()
     grupo.silenciada_ate = 2 ** 31 - 1
@@ -5247,6 +5318,19 @@ def test_restaurar_backup_aplica_o_mapa_de_atalhos_nos_menus(j):
     assert j.cfg.get("atalhos") == {"responder": "Alt+R"}
 
 
+def test_restaurar_conversas_sem_as_contas_avisa_no_fim(j, monkeypatch):
+    ditas = []
+    monkeypatch.setattr(j.fala, "falar", lambda t, **k: ditas.append(t))
+    monkeypatch.setattr(jm.backup, "conversas_sem_conta", lambda p, c: True)
+    j._fim_da_restauracao({}, ["conversas"], "")
+    assert "não vão aparecer" in ditas[-1]
+    monkeypatch.setattr(jm.backup, "conversas_sem_conta", lambda p, c: False)
+    j._fim_da_restauracao({}, ["conversas"], "")
+    assert "não vão aparecer" not in ditas[-1]
+    j._fim_da_restauracao({}, ["contas", "conversas"], "")
+    assert "não vão aparecer" not in ditas[-1]
+
+
 def test_enter_envia_vem_ligado_de_fabrica(tmp_path, monkeypatch):
     monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path))
     assert config.Config().get("enter_envia") is True
@@ -5611,7 +5695,7 @@ class CharDigitado(Tecla):
 
 
 def test_digitar_na_lista_pula_pelo_padrao(j):
-    assert j.cfg.get("digitar_na_lista") == "pular"
+    assert jm.lista_msg_nucleo.digitar(j.cfg.get("lista_mensagens")) == "pular"
     j.atual = ("t1", "c1")
     e = CharDigitado(j.lista_msgs, "a")
     j._digitou_na_lista(e)
@@ -5620,7 +5704,8 @@ def test_digitar_na_lista_pula_pelo_padrao(j):
 
 
 def test_digitar_na_lista_de_mensagens_vai_para_a_caixa(j):
-    j.cfg.set("digitar_na_lista", "campo")
+    j.cfg.set("lista_mensagens", {"digitar": "campo"})
+    j.cfg.set("lista_conversas", {"digitar": "campo"})
     j.atual = ("t1", "c1")
     e = CharDigitado(j.lista_msgs, "o")
     j._digitou_na_lista(e)
@@ -5630,7 +5715,8 @@ def test_digitar_na_lista_de_mensagens_vai_para_a_caixa(j):
 
 
 def test_digitar_na_lista_de_conversas_vai_para_a_busca(j):
-    j.cfg.set("digitar_na_lista", "campo")
+    j.cfg.set("lista_mensagens", {"digitar": "campo"})
+    j.cfg.set("lista_conversas", {"digitar": "campo"})
     e = CharDigitado(j.lista_conv, "m")
     j._digitou_na_lista(e)
     assert not e.pulou
@@ -5640,7 +5726,8 @@ def test_digitar_na_lista_de_conversas_vai_para_a_busca(j):
 
 def test_digitar_na_lista_sem_conversa_aberta_ou_com_control_continua_pulando(
         j):
-    j.cfg.set("digitar_na_lista", "campo")
+    j.cfg.set("lista_mensagens", {"digitar": "campo"})
+    j.cfg.set("lista_conversas", {"digitar": "campo"})
     j.atual = None
     e = CharDigitado(j.lista_msgs, "a")
     j._digitou_na_lista(e)
@@ -6091,7 +6178,7 @@ def test_botao_limpar_a_conversa_abre_a_limpeza_so_dela(j, monkeypatch):
 
     class Falsa:
         def __init__(self, pai, banco, contas, conversas, falar, ao_limpar,
-                     so_a_conversa=None):
+                     so_a_conversa=None, no_celular=None):
             abertas.append(so_a_conversa)
             self.ao_limpar = ao_limpar
 
@@ -7037,3 +7124,115 @@ def test_atalho_de_cada_tipo_de_conversa(j):
     j._ir_para_tipo("trancadas")
     assert j.filtro_tipo == "nao_lidas"
     assert ditas[-1] == "As conversas trancadas estão escondidas."
+
+
+def test_digitar_vale_para_cada_lista_em_separado(j):
+    j.cfg.set("lista_conversas", {"digitar": "campo"})
+    j.atual = ("t1", "c1")
+    e = CharDigitado(j.lista_msgs, "a")
+    j._digitou_na_lista(e)
+    assert e.pulou and j.caixa.GetValue() == ""
+    e = CharDigitado(j.lista_conv, "m")
+    j._digitou_na_lista(e)
+    assert not e.pulou and j.campo_busca.GetValue() == "m"
+
+
+def test_som_da_nova_segue_o_tipo_e_o_proprio_da_conversa(j, monkeypatch,
+                                                          tmp_path):
+    from telezapp.nucleo import pacotes_de_som as pk
+    sons = []
+    monkeypatch.setattr(jm, "bipe", lambda tipo, valor=None: sons.append(
+        (tipo, valor)))
+    conv = j.indice[("t1", "20")]
+    nova = lambda i: m.Mensagem("t1", "20", i, autor="Bia", texto="oi",
+                                data=AGORA + 50)
+    for n, (tipo, comunidade, som) in enumerate((
+            ("privada", False, "nova_pessoal"), ("canal", False, "nova_canal"),
+            ("grupo", False, "nova_grupo"),
+            ("grupo", True, "nova_comunidade"))):
+        conv.tipo, conv.comunidade = tipo, comunidade
+        sons.clear()
+        j.b.publicar(ev.MensagemNova(nova("4%d" % n), conv))
+        assert sons == [(som, None)]
+    origem = tmp_path / "meu.ogg"
+    origem.write_bytes(b"som")
+    arquivo = pk.definir_som_da_conversa(j.cfg, conv.chave, str(origem))
+    sons.clear()
+    j.b.publicar(ev.MensagemNova(nova("50"), conv))
+    assert sons == [("nova", arquivo)]
+    j._abrir_conversa(conv)            # tambem com ela aberta
+    sons.clear()
+    j.b.publicar(ev.MensagemNova(nova("51"), conv))
+    assert sons == [("nova", arquivo)]
+    pk.remover_som_da_conversa(j.cfg, conv.chave)
+
+
+def test_recompartilhar_status_pergunta_e_chama_o_provedor(j, monkeypatch,
+                                                           tmp_path):
+    feitos, ditas, respostas = [], [], [jm.wx.YES]
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.contas.p.PODE_RECOMPARTILHAR_STATUS = True
+    j.contas.p.recompartilhar_status = lambda texto, anexo=None: \
+        feitos.append((texto, anexo))
+    monkeypatch.setattr(jm.wx, "MessageBox",
+                        lambda *a, **k: respostas[0], raising=False)
+    j.estados["t1"] = ev.CONECTADA
+    conv = m.Conversa("t1", "status:9", "Status de Ana", "telegram", "status")
+    j.indice[conv.chave] = conv
+    x = m.Mensagem("t1", "status:9", "s1", autor="Ana", texto="bom dia",
+                   data=AGORA, remetente="9")
+    monkeypatch.setattr(j, "_mensagem_selecionada", lambda: x)
+    assert j._pode_recompartilhar(x)
+    j._recompartilhar_status()
+    assert feitos == [("bom dia", None)] and "Recompartilhando" in ditas[-1]
+    # nao confirmou: nada sai
+    respostas[0] = jm.wx.NO
+    j._recompartilhar_status()
+    assert len(feitos) == 1
+    # midia sem baixar nao vai
+    respostas[0] = jm.wx.YES
+    x.tipo = m.FOTO
+    monkeypatch.setattr(j, "_caminho_da_midia", lambda y: None)
+    j._recompartilhar_status()
+    assert len(feitos) == 1 and "Não dá para recompartilhar" in ditas[-1]
+    # baixada, vai com o arquivo
+    foto = tmp_path / "f.jpg"
+    foto.write_bytes(b"\xff\xd8\xff" + b"0" * 50)
+    monkeypatch.setattr(j, "_caminho_da_midia", lambda y: str(foto))
+    x.texto = "praia"
+    j._recompartilhar_status()
+    assert feitos[-1][0] == "praia" and feitos[-1][1].tipo == m.FOTO
+    # o proprio status e outra conversa nao
+    x.minha = True
+    assert not j._pode_recompartilhar(x)
+
+
+def test_atualizar_com_janela_aberta_cancela_ela_antes_de_fechar(j, monkeypatch):
+    ordem = []
+
+    class Modal(jm.wx.Dialog):
+        def __init__(self):
+            self.aberta = True
+
+        def IsModal(self):
+            return self.aberta
+
+        def EndModal(self, codigo):
+            self.aberta = False
+            ordem.append("cancelou")
+    modal = Modal()
+    monkeypatch.setattr(jm.wx, "GetTopLevelWindows", lambda: [modal],
+                        raising=False)
+    monkeypatch.setattr(jm.wx, "CallLater", lambda ms, f, *a: f(*a),
+                        raising=False)
+    monkeypatch.setattr(j, "Close", lambda: ordem.append("fechou") or True)
+    monkeypatch.setattr(jm.atualizador, "aplicar",
+                        lambda p, n: ordem.append("aplicou"))
+    j._atualizacao_pronta("nova", "", "prog")
+    assert ordem == ["cancelou", "fechou", "aplicou"]
+    # uma que nunca fecha nao trava o fim
+    ordem.clear()
+    modal.aberta = True
+    modal.EndModal = lambda c: ordem.append("cancelou")
+    j._depois_dos_modais(lambda: ordem.append("seguiu"), tentativas=2)
+    assert ordem == ["cancelou", "cancelou", "seguiu"]

@@ -119,6 +119,12 @@ SONS = {
     "nova_aberta": ([(0.0, "C6", 0.24, 0.8, 0.0)], "sino"),
     "nova_grupo": (sequencia(["G5", "E5"], 0.12, 0.38, 0.9, 0.25, True),
                    "sino"),
+    # um por tipo de conversa: sobe e abre (pessoa), grave e calmo (canal),
+    # tres toques que lembram o de grupo (comunidade)
+    "nova_pessoal": (sequencia(["A5", "C6"], 0.11, 0.40), "sino"),
+    "nova_canal": (sequencia(["A4", "E5"], 0.16, 0.48, 0.95), "grave"),
+    "nova_comunidade": (sequencia(["G5", "E5", "G5"], 0.11, 0.34, 0.9, 0.25,
+                                  True), "sino"),
     "enviada": (sequencia(["C5", "G5"], 0.08, 0.30), "sino"),
     "erro": ([(0.0, "E4", 0.38, 1.0, 0.0), (0.2, "C4", 0.62, 1.0, 0.0)],
              "grave"),

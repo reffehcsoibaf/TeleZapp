@@ -95,7 +95,8 @@ def pedir_credenciais_telegram(pai, validar):
         "Esta cópia do TeleZapp veio sem as credenciais do aplicativo no "
         "Telegram. Informe o api id e o api hash criados em "
         "my.telegram.org, na opção API development tools. Eles identificam "
-        "o aplicativo, não a sua conta, e ficam só neste computador.")
+        "o aplicativo, não a sua conta, e ficam só neste computador. Não "
+        "são o seu telefone nem o seu nome.")
     valores = ["", ""]
     while True:
         dlg = DialogoCampos(pai, titulo, explicacao, [
@@ -109,8 +110,9 @@ def pedir_credenciais_telegram(pai, validar):
             dlg.Destroy()
         if validar(*valores):
             return int(valores[0]), valores[1]
-        wx.MessageBox("O api id deve ter só números e o api hash pelo menos "
-                      "16 caracteres. Confira e tente de novo.", titulo,
+        wx.MessageBox("Isso não parece vir de my.telegram.org. O api id tem "
+                      "até 10 números e o api hash tem 32 letras e números. "
+                      "Não use o seu telefone nem o seu nome.", titulo,
                       wx.OK | wx.ICON_WARNING, pai)
 
 

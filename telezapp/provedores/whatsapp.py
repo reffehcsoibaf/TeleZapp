@@ -27,6 +27,7 @@ import sysconfig
 import threading
 import time
 import traceback
+import types
 import unicodedata
 import uuid
 
@@ -38,6 +39,7 @@ from telezapp.nucleo import enviar_contatos as cartoes
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import grupo as ng
 from telezapp.nucleo import localizacao
+from telezapp.provedores.base import APAGAR_PENDENTE
 from telezapp.nucleo import mencoes as nucleo_mencoes
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import previa_links
@@ -53,6 +55,10 @@ log = logging.getLogger("telezapp.whatsapp")
 # depender da ordem em que as coisas abrem. A DLL do TeleZapp tambem nasce com
 # o selo desligado; so "on" o liga.
 os.environ["NEONIZE_BOT_TAG"] = "off"
+
+class ColecaoFora(Exception):
+    """O estado do WhatsApp nao confere: o envio espera a copia do celular."""
+
 
 EMBRULHOS = ("deviceSentMessage", "ephemeralMessage", "viewOnceMessage",
              "viewOnceMessageV2", "viewOnceMessageV2Extension",
@@ -85,6 +91,12 @@ TEXTO_SESSAO_COM_DEFEITO = (
 MAX_GUARDADAS = 2000
 # Sem o aviso de fim da sincronia, os avisos voltam depois deste tempo
 TEMPO_MAX_SINCRONIA = 45
+# Oferta de chamada que veio na fila de quando o app estava fechado: mais velha
+# que isto (s) ja nao esta tocando. So vale antes do fim da fila, para um
+# relogio errado no computador nao calar as chamadas de verdade
+OFERTA_VELHA_S = 60
+# quanto a janela de chamada espera o evento com a data da oferta (s)
+ESPERA_DATA_DA_OFERTA_S = 1.0
 # espera (segundos) antes de cada nova tentativa de conexao; a ultima repete
 ESPERAS_RECONEXAO = (3, 10, 30, 60, 120)
 # Mensagem nao decifrada: depois de quantos segundos pedir ao celular que a
@@ -646,6 +658,12 @@ def estrutura_interativa(interna):
     return None
 
 
+def _de_comunidade(info):
+    """O grupo e uma comunidade ou faz parte de uma?"""
+    return bool(info.GroupParent.IsParent or
+                info.GroupLinkedParent.LinkedParentJID.User)
+
+
 def nome_verificado(info):
     """Nome verificado de empresa que vem junto da mensagem, ou ''."""
     try:
@@ -685,6 +703,85 @@ def _texto_do_produto(x):
         partes.append(p.URL)
     texto = ", ".join(p_.strip() for p_ in partes)
     return _partes_texto(texto, p.description, x.body)
+
+
+def _sem_marcadores(texto):
+    """O texto da Meta AI traz citacoes como {{chave}}trecho{{/chave}}."""
+    return re.sub(r"\{\{([^\s}]+)}}([\s\S]*?)\{\{/[^\s}]+}}", r"\2", texto or "")
+
+
+def _texto_de_primitivo(p):
+    """O que uma parte da resposta da Meta AI tem para ler. Partes sem texto
+    (ainda pensando, separador, publicacoes) ficam de fora."""
+    tipo = p.get("__typename", "")
+    if tipo in ("GenAIMarkdownTextUXPrimitive", "FOATextPrimitive"):
+        return _sem_marcadores(p.get("text"))
+    if tipo == "GenAIMetadataTextPrimitive":
+        return p.get("text") or ""
+    if tipo == "GenAICodeUXPrimitive":
+        return "".join(b.get("content") or "" for b in p.get("code_blocks") or [])
+    if tipo == "GenATableUXPrimitive":
+        return "\n".join(" | ".join(r.get("cells") or [])
+                         for r in p.get("rows") or [])
+    if tipo == "GenAILatexUXPrimitive":
+        return (p.get("item") or {}).get("latex_expression") or \
+            p.get("latex_expression") or ""
+    if tipo in ("GenAIProductItemCardPrimitive", "GenAITaskPrimitive"):
+        return p.get("title") or ""
+    if tipo in ("GenAIImagePrimitive", "GenAIImaginePrimitive"):
+        return "imagem gerada pela Meta AI"
+    return ""
+
+
+def _texto_da_resposta_unificada(dados):
+    """Resposta da Meta AI no formato novo: JSON com as secoes da tela."""
+    resposta = json.loads(bytes(dados).decode("utf-8"))
+    partes, tipos = [], set()
+    for secao in resposta.get("sections") or []:
+        modelo = secao.get("view_model") or {}
+        primitivos = modelo.get("primitives") or []
+        if modelo.get("primitive"):
+            primitivos = [modelo["primitive"]]
+        for p in primitivos:
+            tipos.add(p.get("__typename", "?"))
+            partes.append(_texto_de_primitivo(p))
+    texto = _partes_texto(*partes)
+    if not texto:
+        log.info("resposta da Meta AI sem texto; partes: %s",
+                 ", ".join(sorted(tipos)) or "nenhuma")
+    return texto
+
+
+def _texto_de_submensagem(s):
+    """Uma parte da resposta da Meta AI no formato antigo."""
+    if s.HasField("codeMetadata"):
+        return "".join(b.codeContent for b in s.codeMetadata.codeBlocks)
+    if s.HasField("tableMetadata"):
+        t = s.tableMetadata
+        return _partes_texto(t.title, *[" | ".join(r.items) for r in t.rows])
+    if s.HasField("latexMetadata"):
+        return s.latexMetadata.text
+    if s.HasField("imageMetadata"):
+        return s.imageMetadata.imageText or "imagem gerada pela Meta AI"
+    if s.HasField("gridImageMetadata"):
+        return "imagem gerada pela Meta AI"
+    if s.HasField("mapMetadata"):
+        return _partes_texto(*[_partes_texto(a.title, a.body)
+                               for a in s.mapMetadata.annotations])
+    return s.messageText
+
+
+def _texto_da_meta_ai(x):
+    """Texto de uma resposta da Meta AI, '' se nao der para ler nenhum."""
+    texto = ""
+    if x.unifiedResponse.data:
+        try:
+            texto = _texto_da_resposta_unificada(x.unifiedResponse.data)
+        except (ValueError, AttributeError, TypeError):
+            log.warning("resposta da Meta AI em formato desconhecido (%d bytes)",
+                        len(x.unifiedResponse.data))
+    return texto or _partes_texto(
+        *[_texto_de_submensagem(s) for s in x.submessages])
 
 
 def previa_do_whatsapp(interna):
@@ -819,6 +916,15 @@ def conteudo_de(interna):
         return m.OUTRO, _texto_do_evento(interna.eventMessage), 0, "", 0
     if "productMessage" in presentes:
         return m.OUTRO, _texto_do_produto(interna.productMessage), 0, "", 0
+    if "callLogMesssage" in presentes:      # assim mesmo, com tres s
+        x = interna.callLogMesssage
+        return m.OUTRO, ch.texto_do_registro(
+            x.isVideo, x.CallOutcome.Name(x.callOutcome), x.durationSecs,
+            x.CallType.Name(x.callType)), 0, "", 0
+    if "richResponseMessage" in presentes:
+        texto = _texto_da_meta_ai(interna.richResponseMessage)
+        if texto:
+            return m.TEXTO, texto, 0, "", 0
     texto = texto_estruturado(interna, presentes)
     if texto:
         return m.TEXTO, texto, 0, "", 0
@@ -1080,6 +1186,8 @@ class ProvedorWhatsApp(Provedor):
         self._desligada = False     # desconectada pelo celular
         self._pareando = False      # QR ou codigo em andamento
         self._chamadas = {}         # id da chamada -> dados (so aviso)
+        self._ofertas_velhas = set()  # chamadas que ja nao estao tocando
+        self._fila_entregue = False   # a fila offline desta conexao acabou
         self._voz = None            # ChamadasWhatsApp, se as chamadas estao ligadas
         self._destino_video = None  # f(cid, largura, altura, rgb), da janela
         self._disponivel = False    # presenca "disponivel" enviada
@@ -1116,7 +1224,13 @@ class ProvedorWhatsApp(Provedor):
         self._celular_mudo_ate = 0.0    # nao pedir midia ao celular ate entao
         self._midia_avisada_em = 0.0    # ultimo aviso de pedido ao celular
         self._recuperando = set()   # colecoes do estado em recuperacao
+        # um aviso de estado por vez: o whatsmeow nao trava o envio, e dois
+        # saindo da mesma versao batem no servidor (409)
+        self._trava_envio_estado = threading.Lock()
+        self._colecoes_fora = set()  # nao adianta enviar ate o celular responder
+        self._enviando_pendentes = False
         self._busca_ativa = False   # laco da busca periodica do estado
+        self._ultimas_posicoes = {}  # (conversa, quem) -> (lat, lon, quando)
         self._em_nova_tentativa = set()   # colecoes que o laco de novas tentativas cuida
         self._ultima_conferencia = 0.0
         self._sincronizando = False
@@ -1549,6 +1663,7 @@ class ProvedorWhatsApp(Provedor):
             fetch(nome, full_sync=forcar)
             if forcar:
                 log.info("estado %s baixado de novo", nome)
+            self._colecao_voltou(nome)
             return True
         except Exception as e:
             if "LTHash" not in str(e):
@@ -1560,6 +1675,53 @@ class ProvedorWhatsApp(Provedor):
                             nome)
                 return self._reparar_colecao(nome, forcar=True)
             return self._recuperar_colecao(nome)
+
+    def _colecao_voltou(self, nome):
+        """A colecao sincronizou: libera os envios e manda o que ficou
+        guardado, fora de quem chamou (pode estar com a trava de envio)."""
+        with self._trava:
+            self._colecoes_fora.discard(nome)
+        if nome == "regular_high" and self.banco.apagar_pendentes(self.conta.id):
+            threading.Thread(target=self._enviar_apagar_pendentes, daemon=True,
+                             name="apagar-pendentes").start()
+
+    PAUSA_ENTRE_EXCLUSOES = 0.25    # segundos: limpeza grande nao vira rajada
+
+    def apagar_varias_mensagens(self, itens):
+        for item in itens:
+            self.banco.guardar_apagar_pendente(self.conta.id, *item)
+        threading.Thread(target=self._enviar_apagar_pendentes, daemon=True,
+                         name="apagar-pendentes").start()
+        return len(itens)
+
+    def _enviar_apagar_pendentes(self):
+        """Um envio de cada vez, e so uma rodada. Para na primeira recusa: a
+        colecao saiu de sincronia de novo, e o resto fica guardado."""
+        with self._trava:
+            if self._enviando_pendentes:
+                return
+            self._enviando_pendentes = True
+        try:
+            self._rodada_de_pendentes()
+        finally:
+            with self._trava:
+                self._enviando_pendentes = False
+
+    def _rodada_de_pendentes(self):
+        pendentes = self.banco.apagar_pendentes(self.conta.id)
+        enviadas = 0
+        for cid, mid, minha, data, remetente in pendentes:
+            if self._parar.is_set() or self._apagar_para_mim(
+                    cid, mid, minha, data, remetente) is not True:
+                break
+            self.banco.tirar_apagar_pendente(self.conta.id, cid, mid)
+            enviadas += 1
+            self._parar.wait(self.PAUSA_ENTRE_EXCLUSOES)
+        if pendentes:
+            log.info("exclusões pendentes: %d de %d enviadas", enviadas,
+                     len(pendentes))
+        if enviadas:
+            self._avisar("Mensagens apagadas no celular: %d." % enviadas)
 
     ESPERA_DA_RECUPERACAO = 90      # segundos, no total
     PASSO_DA_RECUPERACAO = 5        # segundos entre as conferencias
@@ -1587,18 +1749,21 @@ class ProvedorWhatsApp(Provedor):
                         self.cliente.fetch_app_state(nome)
                         log.info("estado %s voltou a sincronizar "
                                  "(tentativa %d)", nome, n)
+                        self._colecao_voltou(nome)
                         return
                     except Exception as e:
                         if "LTHash" not in str(e):
                             log.warning("estado %s: %s", nome, e)
+                            self._colecoes_fora.discard(nome)
                             return
                     # ainda fora de sincronia: pede a copia de novo, agora que
                     # o WhatsApp do celular pode estar aberto
                     if self._recuperar_colecao(nome, reagendar=False):
                         return
                 log.warning("desisti de recuperar o estado %s depois de %d "
-                            "tentativas; reiniciar o TeleZapp tenta de novo",
+                            "tentativas; o próximo envio tenta de novo",
                             nome, self.TENTATIVAS_DE_NOVO)
+                self._colecoes_fora.discard(nome)
             finally:
                 with self._trava:
                     self._em_nova_tentativa.discard(nome)
@@ -1619,6 +1784,7 @@ class ProvedorWhatsApp(Provedor):
                 self.cliente.request_app_state_recovery(nome)
             except Exception as e:
                 log.warning("não consegui pedir a cópia do estado: %s", e)
+                self._colecoes_fora.discard(nome)
                 return False
             fim = time.time() + self.ESPERA_DA_RECUPERACAO
             while time.time() < fim:
@@ -1628,13 +1794,16 @@ class ProvedorWhatsApp(Provedor):
                     self.cliente.fetch_app_state(nome)
                     log.info("estado %s recuperado com a cópia do celular",
                              nome)
+                    self._colecao_voltou(nome)
                     return True
                 except Exception as e:
                     if "LTHash" not in str(e):
                         log.warning("estado %s: %s", nome, e)
+                        self._colecoes_fora.discard(nome)
                         return False
             log.warning("o celular não respondeu ao pedido do estado %s",
                         nome)
+            self._colecoes_fora.add(nome)
             if reagendar:
                 self._avisar(
                     "Para as mudanças do celular (favoritar, apagar, "
@@ -1665,6 +1834,7 @@ class ProvedorWhatsApp(Provedor):
             if not self._sincronizando:
                 return
             self._sincronizando = False
+            self._fila_entregue = True
             quantas = self._recebidas_na_sincronia
         log.info("sincronia inicial concluída (%d mensagens recebidas; o "
                  "WhatsApp anunciou %s e contou %s)", quantas,
@@ -1676,6 +1846,7 @@ class ProvedorWhatsApp(Provedor):
         # grupos renomeados com o app fechado: o WhatsApp so avisa na hora
         self._fila.put(self._atualizar_nomes_de_grupos)
         self._agendar_varreduras_automaticas()
+        self._fila.put(self._enviar_apagar_pendentes)
 
     def _ao_sair(self, cliente, e):
         self._conectada = False
@@ -1687,6 +1858,7 @@ class ProvedorWhatsApp(Provedor):
         if self._parar.is_set():
             return
         self._conectada = False
+        self._fila_entregue = False
         self._avisar_sincronia_interrompida()
         self._estado(ev.DESCONECTADA, "reconectando")
 
@@ -1868,6 +2040,32 @@ class ProvedorWhatsApp(Provedor):
         except Exception:
             log.exception("erro ao tratar o aviso de trancar")
 
+    def _mandar_estado(self, patch):
+        """Um envio por vez. Recusado por conflito, baixa a colecao e tenta
+        mais uma vez. Se ela nao confere, pede a copia ao celular em segundo
+        plano e levanta ColecaoFora; enquanto isso nem tenta."""
+        nome = COLECAO_DO_TIPO.get(int(patch.Type), "regular_high")
+        with self._trava_envio_estado:
+            if nome in self._colecoes_fora:
+                raise ColecaoFora(nome)
+            try:
+                self.cliente.send_app_state(patch)
+                return
+            except Exception as e:
+                if "LTHash" not in str(e) and "409" not in str(e):
+                    raise
+            try:
+                self.cliente.fetch_app_state(nome, full_sync=True)
+                self.cliente.send_app_state(patch)
+                return
+            except Exception as e:
+                if "LTHash" not in str(e) and "409" not in str(e):
+                    raise
+            self._colecoes_fora.add(nome)
+        threading.Thread(target=self._recuperar_colecao, args=(nome,),
+                         daemon=True, name="recuperar-estado").start()
+        raise ColecaoFora(nome)
+
     def _enviar_estado(self, indice, versao, tipo, valor, conversa_id,
                        extra=()):
         """Manda um aviso de estado (fixar, silenciar...) ao WhatsApp, como
@@ -1884,17 +2082,12 @@ class ProvedorWhatsApp(Provedor):
                     Index=[indice, "%s@%s" % (usuario, servidor),
                            *extra],
                     Version=versao, Value=valor)])
-            try:
-                self.cliente.send_app_state(patch)
-            except Exception as e:
-                # colecao fora de sincronia: baixa de novo e tenta mais uma
-                if "LTHash" not in str(e) and "409" not in str(e):
-                    raise
-                if not self._reparar_colecao(COLECAO_DO_TIPO.get(
-                        int(tipo), "regular_high")):
-                    raise
-                self.cliente.send_app_state(patch)
+            self._mandar_estado(patch)
             return True
+        except ColecaoFora as e:
+            log.warning("aviso %s não enviado: estado %s fora de sincronia",
+                        indice, e)
+            return False
         except Exception:
             log.exception("não consegui avisar o WhatsApp (%s)", indice)
             return False
@@ -1943,6 +2136,22 @@ class ProvedorWhatsApp(Provedor):
         """Apaga a conversa no celular, com as midias: manda o aviso de estado
         `deleteChat` (o mesmo que o celular manda aos outros aparelhos). Devolve True
         se o WhatsApp aceitou."""
+        if self._mudar_conversa_inteira(conversa_id, ultima, "deleteChat"):
+            with self._trava:
+                self._conversas.pop(conversa_id, None)
+            log.info("conversa apagada no celular a pedido do TeleZapp")
+            return True
+        return False
+
+    def limpar_conversa(self, conversa_id, ultima=None):
+        """Apaga as mensagens no celular, com as favoritas, e a conversa fica:
+        `clearChat`. Formato tirado do Baileys. True se o WhatsApp aceitou."""
+        ok = self._mudar_conversa_inteira(conversa_id, ultima, "clearChat")
+        if ok:
+            log.info("conversa limpa no celular a pedido do TeleZapp")
+        return ok
+
+    def _mudar_conversa_inteira(self, conversa_id, ultima, indice):
         if self.cliente is None or not self._conectada or \
                 "@" not in (conversa_id or ""):
             return False
@@ -1950,8 +2159,8 @@ class ProvedorWhatsApp(Provedor):
             from neonize.proto.Neonize_pb2 import MutationInfo, PatchInfo
             from neonize.proto.waCommon.WACommon_pb2 import MessageKey
             from neonize.proto.waSyncAction.WAWebProtobufSyncAction_pb2 import (
-                DeleteChatAction, SyncActionMessage, SyncActionMessageRange,
-                SyncActionValue)
+                ClearChatAction, DeleteChatAction, SyncActionMessage,
+                SyncActionMessageRange, SyncActionValue)
             usuario, servidor = jid_de_texto(conversa_id)
             jid = "%s@%s" % (usuario, servidor)
             agora = int(time.time())
@@ -1969,20 +2178,27 @@ class ProvedorWhatsApp(Provedor):
                     chave.participant = ultima.remetente
                 faixa.messages.append(SyncActionMessage(
                     key=chave, timestamp=quando))
+            if indice == "clearChat":
+                # o "1" apaga tambem as favoritas; o ultimo, as midias nao
+                pedido = ["clearChat", jid, "1", "0"]
+                valor = SyncActionValue(clearChatAction=ClearChatAction(
+                    messageRange=faixa))
+            else:
+                pedido = ["deleteChat", jid, "1"]
+                valor = SyncActionValue(deleteChatAction=DeleteChatAction(
+                    messageRange=faixa))
             patch = PatchInfo(
                 Timestamp=time.time_ns(), Type=PatchInfo.REGULAR_HIGH,
-                Mutations=[MutationInfo(
-                    Index=["deleteChat", jid, "1"], Version=6,
-                    Value=SyncActionValue(
-                        deleteChatAction=DeleteChatAction(
-                            messageRange=faixa)))])
-            self.cliente.send_app_state(patch)
-            with self._trava:
-                self._conversas.pop(conversa_id, None)
-            log.info("conversa apagada no celular a pedido do TeleZapp")
+                Mutations=[MutationInfo(Index=pedido, Version=6, Value=valor)])
+            self._mandar_estado(patch)
             return True
+        except ColecaoFora as e:
+            log.warning("%s não enviado: estado %s fora de sincronia", indice,
+                        e)
+            return False
         except Exception:
-            log.exception("não consegui apagar a conversa no celular")
+            log.exception("não consegui mudar a conversa no celular (%s)",
+                          indice)
             return False
 
     # ----------------------------------------- detalhes da conversa
@@ -2663,7 +2879,8 @@ class ProvedorWhatsApp(Provedor):
     def apagar_mensagem(self, mensagem, para_todos=False):
         """Apaga a mensagem no WhatsApp: para todos (so as minhas, o mesmo
         'apagar para todos' do celular) ou so para mim (aviso de estado
-        `deleteMessageForMe`). True se o WhatsApp aceitou."""
+        `deleteMessageForMe`). True se o WhatsApp aceitou; APAGAR_PENDENTE se
+        o estado esta fora de sincronia e o pedido ficou guardado para depois."""
         if self.cliente is None or not self._conectada:
             return False
         try:
@@ -2674,26 +2891,32 @@ class ProvedorWhatsApp(Provedor):
                     self._jid(mensagem.conversa_id),
                     self.cliente.get_me().JID, mensagem.id)
                 return True
-            from neonize.proto.Neonize_pb2 import PatchInfo
-            from neonize.proto.waSyncAction.WAWebProtobufSyncAction_pb2 import (
-                DeleteMessageForMeAction, SyncActionValue)
-            remetente = "0"
-            if not mensagem.minha and \
-                    mensagem.conversa_id.endswith("@g.us") and \
-                    mensagem.remetente:
-                remetente = mensagem.remetente
-            return self._enviar_estado(
-                "deleteMessageForMe", 3, PatchInfo.REGULAR_HIGH,
-                SyncActionValue(
-                    deleteMessageForMeAction=DeleteMessageForMeAction(
-                        deleteMedia=True,
-                        messageTimestamp=int(mensagem.data))),
-                mensagem.conversa_id,
-                extra=(mensagem.id, "1" if mensagem.minha else "0",
-                       remetente))
+            dados = (mensagem.conversa_id, mensagem.id, mensagem.minha,
+                     mensagem.data, mensagem.remetente)
+            if self._apagar_para_mim(*dados):
+                return True
+            if "regular_high" not in self._colecoes_fora:
+                return False
+            self.banco.guardar_apagar_pendente(self.conta.id, *dados)
+            log.info("exclusão guardada até o estado voltar a sincronizar")
+            return APAGAR_PENDENTE
         except Exception:
             log.exception("não consegui apagar a mensagem no WhatsApp")
             return False
+
+    def _apagar_para_mim(self, conversa_id, mensagem_id, minha, data,
+                         remetente):
+        from neonize.proto.Neonize_pb2 import PatchInfo
+        from neonize.proto.waSyncAction.WAWebProtobufSyncAction_pb2 import (
+            DeleteMessageForMeAction, SyncActionValue)
+        if minha or not conversa_id.endswith("@g.us") or not remetente:
+            remetente = "0"
+        return self._enviar_estado(
+            "deleteMessageForMe", 3, PatchInfo.REGULAR_HIGH,
+            SyncActionValue(
+                deleteMessageForMeAction=DeleteMessageForMeAction(
+                    deleteMedia=True, messageTimestamp=int(data))),
+            conversa_id, extra=(mensagem_id, "1" if minha else "0", remetente))
 
     def _ao_apagar_conversa(self, cliente, evento):
         """A conversa foi apagada no celular: sai das conversas do
@@ -2772,6 +2995,11 @@ class ProvedorWhatsApp(Provedor):
                 if conv is not None and nome and conv.nome != nome:
                     conv.nome = nome
                     mudou.append(conv)
+                if conv is not None and \
+                        bool(conv.comunidade) != _de_comunidade(g):
+                    conv.comunidade = _de_comunidade(g)
+                    if conv not in mudou:
+                        mudou.append(conv)
         log.info("conferi o nome de %d grupos: %d mudaram", len(grupos),
                  len(mudou))
         if mudou:
@@ -3630,6 +3858,15 @@ class ProvedorWhatsApp(Provedor):
         try:
             info = evento.GroupInfo
             self._renomear_grupo(jid_texto(info.JID), info.GroupName.Name)
+            cid = jid_texto(info.JID)
+            with self._trava:
+                conv = self._conversas.get(cid)
+                if conv is None or \
+                        bool(conv.comunidade) == _de_comunidade(info):
+                    return
+                conv.comunidade = _de_comunidade(info)
+            self.banco.atualizar_conversa(self.conta.id, cid,
+                                          comunidade=int(conv.comunidade))
         except Exception:
             log.exception("erro ao tratar entrada no grupo")
 
@@ -3663,11 +3900,48 @@ class ProvedorWhatsApp(Provedor):
         self._publicar_conversas()
 
     # ----------------------------------------------------------- mensagens
+    def _registrar_localizacao_ao_vivo(self, evento, repetida):
+        """Para saber como o WhatsApp entrega o movimento de uma localizacao
+        em tempo real. So a distancia vai para o log, nunca as coordenadas."""
+        try:
+            interna = desembrulhar(evento.Message)
+            presentes = set(campos(interna))
+            if "liveLocationMessage" in presentes:
+                x = interna.liveLocationMessage
+                extra = "seq=%s offset=%s " % (x.sequenceNumber, x.timeOffset)
+            elif "locationMessage" in presentes and \
+                    interna.locationMessage.isLive:
+                x = interna.locationMessage
+                extra = ""
+            else:
+                return
+            info = evento.Info
+            origem = info.MessageSource
+            cid = self._id_da_conversa(origem.Chat)
+            chave = (cid, jid_texto(origem.Sender))
+            agora = time.monotonic()
+            anterior = self._ultimas_posicoes.get(chave)
+            lat, lon = x.degreesLatitude, x.degreesLongitude
+            self._ultimas_posicoes[chave] = (lat, lon, agora)
+            movimento = "primeira" if anterior is None else "%.0f m em %.0f s" % (
+                localizacao.metros_entre(anterior[0], anterior[1], lat, lon),
+                agora - anterior[2])
+            log.info(
+                "localização ao vivo: id=%s conversa=%s minha=%s repetida=%s "
+                "campo=%s %stipo=%s edit=%s movimento=%s precisão=%s "
+                "velocidade=%s", info.ID, cid, bool(origem.IsFromMe), repetida,
+                x.DESCRIPTOR.name, extra, info.Type, info.Edit, movimento,
+                x.accuracyInMeters, x.speedInMps)
+        except Exception:
+            log.warning("não consegui registrar a localização ao vivo",
+                        exc_info=True)
+
     def _ao_receber(self, cliente, evento):
         try:
             info = evento.Info
             with self._trava:
                 repetida = info.ID in self._vistas
+            self._registrar_localizacao_ao_vivo(evento, repetida)
             if repetida:
                 log.info("mensagem repetida ignorada: id=%s", info.ID)
                 return
@@ -4441,30 +4715,83 @@ class ProvedorWhatsApp(Provedor):
 
     PODE_PUBLICAR_STATUS = True
 
-    def publicar_status(self, texto, anexo=None, publico="contatos"):
-        """Publica o status de texto, foto ou video. Quem ve e o que a conta
-        escolheu para o status no celular (contatos, exceto ou so alguns)."""
-        threading.Thread(target=self._publicar_status, args=(texto, anexo),
+    def publicar_status(self, texto, anexo=None, publico="contatos",
+                        mencoes=()):
+        """Publica o status de texto, foto, video ou voz. Quem ve e o que a
+        conta escolheu para o status no celular (contatos, exceto ou so
+        alguns), mais as pessoas de `mencoes`, que tambem recebem um aviso."""
+        threading.Thread(target=self._publicar_status,
+                         args=(texto, anexo, False, tuple(mencoes)),
                          daemon=True, name="whatsapp-status").start()
 
-    def _publicar_status(self, texto, anexo):
+    def _enviar_status_com_mencoes(self, mensagem, mencoes):
+        """-> (resposta, quantos avisos nao sairam). Na DLL, porque o neonize
+        nao deixa acrescentar ao envio o que a mencao precisa."""
+        funcao = self.cliente._NewClient__client.StatusComMencoes
+        texto = ctypes.c_char_p
+        funcao.argtypes = [texto, texto, ctypes.c_int, texto]
+        funcao.restype = texto
+        dados = mensagem.SerializeToString()
+        uuid = self.cliente.uuid
+        r = funcao(uuid if isinstance(uuid, bytes) else str(uuid).encode(),
+                   dados, len(dados), ",".join(mencoes).encode()).decode()
+        if not r.startswith("ok:"):
+            raise RuntimeError(r)
+        _, id_, quando, falhas = r.split(":")
+        return types.SimpleNamespace(ID=id_, Timestamp=int(quando)), int(falhas)
+
+    PODE_RECOMPARTILHAR_STATUS = True
+
+    def recompartilhar_status(self, texto, anexo=None):
+        """O conteudo do status de outra pessoa sai como status meu, com a
+        marca de recompartilhado."""
+        threading.Thread(target=self._publicar_status,
+                         args=(texto, anexo, True), daemon=True,
+                         name="whatsapp-status").start()
+
+    @staticmethod
+    def _contexto_de_recompartilhado():
+        from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import ContextInfo
+        ctx = ContextInfo(statusAttributionType=ContextInfo.RESHARED_FROM_POST)
+        marca = ctx.statusAttributions.add()
+        marca.type = marca.RESHARE
+        marca.statusReshare.source = marca.statusReshare.INTERNAL_RESHARE
+        return ctx
+
+    def _publicar_status(self, texto, anexo, recompartilhado=False,
+                         mencoes=()):
         from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (
             ExtendedTextMessage, Message)
+        ctx = self._contexto_de_recompartilhado() if recompartilhado else None
+        avisos_perdidos = 0
         try:
             if not self._conectada or self.cliente is None:
                 raise ConnectionError("sem conexão")
             destino = _jid_obj("status", "broadcast")
             if anexo is None:
-                resp = self.cliente.send_message(destino, Message(
-                    extendedTextMessage=ExtendedTextMessage(
-                        text=texto, textArgb=0xFFFFFFFF,
-                        backgroundArgb=0xFF1B8755, font=0)))
-            elif anexo.tipo == m.FOTO:
+                mensagem = Message(extendedTextMessage=ExtendedTextMessage(
+                    text=texto, textArgb=0xFFFFFFFF,
+                    backgroundArgb=0xFF1B8755, font=0))
+                if ctx is not None:
+                    mensagem.extendedTextMessage.contextInfo.MergeFrom(ctx)
+                if mencoes:
+                    resp, avisos_perdidos = self._enviar_status_com_mencoes(
+                        mensagem, mencoes)
+                else:
+                    resp = self.cliente.send_message(destino, mensagem)
+            elif anexo.tipo == m.FOTO and ctx is None and not mencoes:
                 resp = self.cliente.send_image(destino, anexo.caminho,
                                                caption=texto or None)
             else:
-                resp = self.cliente.send_message(
-                    destino, self._mensagem_de_midia(anexo, texto))
+                mensagem = self._com_contexto(
+                    self._mensagem_de_midia(anexo, texto), ctx)
+                if mensagem.HasField("audioMessage"):
+                    mensagem.audioMessage.backgroundArgb = 0xFF1B8755
+                if mencoes:
+                    resp, avisos_perdidos = self._enviar_status_com_mencoes(
+                        mensagem, mencoes)
+                else:
+                    resp = self.cliente.send_message(destino, mensagem)
         except Exception as e:
             log.warning("publicar status falhou: %s: %s", type(e).__name__,
                         str(e)[:300], exc_info=True)
@@ -4472,9 +4799,19 @@ class ProvedorWhatsApp(Provedor):
                 "erro do WhatsApp (%s)" % type(e).__name__
             self._avisar("Não consegui publicar o status: %s." % motivo)
             return
-        log.info("status publicado")
+        log.info("status publicado (recompartilhado: %s, %s)", recompartilhado,
+                 anexo.tipo if anexo is not None else "texto")
         self._guardar_meu_status(resp, texto, anexo)
-        self._avisar("Status publicado.")
+        if avisos_perdidos:
+            self._avisar("Status publicado, mas o aviso não chegou a %d das "
+                         "pessoas mencionadas." % avisos_perdidos)
+        elif mencoes:
+            self._avisar("Status publicado, com %d %s." % (
+                len(mencoes), "pessoa mencionada" if len(mencoes) == 1
+                else "pessoas mencionadas"))
+        else:
+            self._avisar("Status recompartilhado." if recompartilhado
+                         else "Status publicado.")
 
     def _guardar_meu_status(self, resp, texto, anexo):
         """O status que acabei de publicar entra em "Meu status"."""
@@ -5092,6 +5429,7 @@ class ProvedorWhatsApp(Provedor):
 
     def _preparar_chamadas(self):
         """Antes de conectar: liga o meowcaller no cliente, se a DLL tiver."""
+        self._fila_entregue = False
         if self._voz is not None:
             self._voz.parar()
             self._voz = None
@@ -5108,12 +5446,25 @@ class ProvedorWhatsApp(Provedor):
                 self._conversa_do_peer, self._nome_da_conversa,
                 self._destino_da_chamada)
             self._voz.destino_video = self._destino_video
+            self._voz.oferta_velha = self._oferta_velha
             self._voz.iniciar()
             log.info("chamadas de voz do WhatsApp ligadas (video: %s)",
                      "sim" if self._voz.suporta_video else "não")
         except Exception:
             log.exception("erro ao preparar as chamadas do WhatsApp")
             self._voz = None
+
+    def _oferta_velha(self, chamada):
+        """A DLL avisa a chamada por um caminho e a data dela vem por outro,
+        em `_ao_chamada`: espera um pouco por ela. Sem data, toca."""
+        fim = time.monotonic() + ESPERA_DATA_DA_OFERTA_S
+        while time.monotonic() < fim:
+            if chamada in self._ofertas_velhas:
+                return True
+            if chamada in self._chamadas:
+                return False
+            time.sleep(0.05)
+        return False
 
     def _conversa_do_peer(self, peer):
         usuario, servidor = jid_de_texto(peer)
@@ -5207,14 +5558,21 @@ class ProvedorWhatsApp(Provedor):
             video = self._tem_tag(e.data, "video")
             conv = self._conversa(cid, criador, "", False,
                                   float(meta.timestamp or time.time()))
+            inicio = float(meta.timestamp or time.time())
+            velha = not self._fila_entregue and \
+                time.time() - inicio > OFERTA_VELHA_S
+            if velha:
+                log.info("chamada %s veio da fila, de %d s atrás: não toca",
+                         chamada, time.time() - inicio)
+                self._ofertas_velhas.add(chamada)
             dados = {"cid": cid, "video": video, "nome": conv.nome,
-                     "inicio": float(meta.timestamp or time.time()),
-                     "atendida": 0.0}
+                     "inicio": inicio, "atendida": 0.0, "velha": velha}
             self._chamadas[chamada] = dados
             msg = m.Mensagem(
                 self.conta.id, cid, "chamada-" + chamada, autor=conv.nome,
                 data=dados["inicio"], tipo=m.OUTRO, remetente=cid,
-                texto=ch.texto_na_conversa(video, "tocando"))
+                texto=ch.texto_na_conversa(
+                    video, "encerrada" if velha else "tocando"))
             with self._trava:
                 conv.data = max(conv.data, msg.data)
                 conv.nao_lidas += 1
@@ -5225,7 +5583,7 @@ class ProvedorWhatsApp(Provedor):
             # sem o aviso de mensagem nova: a janela da chamada avisa
             self.barramento.publicar(ev.MensagemNova(msg, conv,
                                                      silenciosa=True))
-            if not self.suporta_chamadas:
+            if not self.suporta_chamadas and not velha:
                 self.barramento.publicar(ev.ChamadaWhatsApp(
                     self.conta.id, cid, conv.nome, video, "tocando",
                     chamada))
@@ -5259,6 +5617,8 @@ class ProvedorWhatsApp(Provedor):
                 x.texto = texto
             self._alterar(dados["cid"], "chamada-" + meta.callID, aplicar,
                           "chamada")
+            if dados["velha"]:
+                return                 # so a linha na conversa, sem aviso
             self.barramento.publicar(ev.ChamadaWhatsApp(
                 self.conta.id, dados["cid"], dados["nome"], dados["video"],
                 fase, meta.callID, segundos))

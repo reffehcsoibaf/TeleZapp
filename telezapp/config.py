@@ -193,18 +193,6 @@ OPCOES = (
           "conversas. Conversas com mais não lidas que isso mostram todas "
           "elas. No WhatsApp, o que vem do celular chega em até 50 de cada "
           "vez.", numero=MENSAGENS_POR_VEZ),
-    Opcao("digitar_na_lista", "Ao digitar uma letra numa lista", "Interface",
-          "pular",
-          "O que acontece quando você digita um caractere com o foco na lista "
-          "de mensagens ou na lista de conversas. Pular para o item com a "
-          "inicial é o comportamento das listas do Windows: o foco vai para "
-          "o próximo item que começa com o que você digitou. Ir para o campo "
-          "leva o foco ao campo de escrever a mensagem (na lista de "
-          "mensagens) ou ao campo de busca de conversas (na lista de "
-          "conversas) e coloca ali o que você digitou. Sem uma conversa "
-          "aberta, a lista de mensagens não tem campo e continua pulando.",
-          (("pular", "Pular para o item que começa com a letra"),
-           ("campo", "Ir direto para o campo de texto"))),
     Opcao("status_no_titulo",
           "Mostrar status de presença no título da janela",
           "Interface", True,
@@ -679,8 +667,20 @@ OPCOES = (
 # um arquivo de som (WAV, Ogg, MP3, FLAC...).
 EVENTOS_SOM = (
     ("nova", "mensagem recebida",
-     "Tocado quando chega uma mensagem nova numa conversa que não é a "
-     "aberta nem um grupo."),
+     "O som geral de mensagem nova numa conversa que não é a aberta. Os sons "
+     "de mensagem pessoal, de grupo, de canal e de comunidade seguem este "
+     "até receberem um som próprio."),
+    ("nova_pessoal", "mensagem pessoal recebida",
+     "Tocado quando chega uma mensagem numa conversa com uma pessoa que não "
+     "está aberta. Sem um som próprio no pacote, toca o de mensagem "
+     "recebida."),
+    ("nova_canal", "mensagem recebida num canal",
+     "Tocado quando chega uma mensagem num canal que não está aberto. Sem um "
+     "som próprio no pacote, toca o de mensagem recebida."),
+    ("nova_comunidade", "mensagem recebida numa comunidade",
+     "Tocado quando chega uma mensagem numa comunidade do WhatsApp ou num "
+     "grupo dela, sem estar aberta. Sem um som próprio no pacote, toca o de "
+     "mensagem recebida num grupo."),
     ("enviada", "mensagem enviada",
      "Tocado quando uma mensagem, um arquivo ou uma tarefa em segundo plano "
      "(salvar a conversa, fazer o backup) termina bem."),
@@ -800,12 +800,14 @@ def _sem_acento(texto):
 
 
 def buscar_opcoes(texto):
-    """Opcoes cujo nome, categoria ou descricao contem todas as palavras
-    buscadas (sem diferenca de acento ou maiusculas)."""
+    """Opcoes cujo nome, categoria, grupo, descricao ou escolhas contem todas
+    as palavras buscadas (sem diferenca de acento ou maiusculas)."""
     palavras = _sem_acento(texto).split()
     achadas = []
     for o in OPCOES:
-        alvo = _sem_acento(" ".join((o.rotulo, o.categoria, o.descricao)))
+        escolhas = [str(r) for _, r in o.escolhas or ()]
+        alvo = _sem_acento(" ".join((o.rotulo, o.categoria, o.grupo or "",
+                                     o.descricao, *escolhas)))
         if all(p in alvo for p in palavras):
             achadas.append(o)
     return achadas
@@ -816,6 +818,7 @@ PADROES.update({
     "estilo": 1,             # antigo "Como cada mensagem e lida"; so migra
     "atalhos": {},           # funcao -> combinacao escolhida ("" = sem atalho)
     "participantes_silenciados": {},  # ver nucleo/silenciados.py
+    "sons_de_conversa": {},  # "conta|conversa" -> arquivo em sons/conversas
     "ia_ordem": {},          # tarefa -> provedores ligados, na ordem de tentativa
     "ia_lista_modelos": {},  # provedor -> modelos que ele ofereceu
     "ia_modelos": {},        # provedor -> modelo escolhido ("" = o padrao)
@@ -868,6 +871,14 @@ class Config:
                     # ouvia ao separar em tres
                     self.dados["falar_novas_outras_conversas"] = True
                     self.dados["falar_novas_fora_do_telezapp"] = True
+                if self.dados.pop("digitar_na_lista", None) == "campo":
+                    # antes uma opcao so valia para as duas listas: cada uma
+                    # fica com o que a pessoa tinha
+                    for chave in ("lista_conversas", "lista_mensagens"):
+                        atual = self.dados[chave]
+                        self.dados[chave] = dict(
+                            atual if isinstance(atual, dict) else {},
+                            digitar="campo")
         except FileNotFoundError:
             pass
         except (OSError, ValueError) as e:
@@ -926,8 +937,11 @@ def ler_chaves(caminho):
 
 
 def credenciais_validas(api_id, api_hash):
+    """api id cabe em 32 bits (telefone nao cabe) e api hash tem 32 digitos
+    hexadecimais (nome nao tem): pegam quem digita os dados da pessoa."""
     try:
-        return int(api_id) > 0 and len(str(api_hash).strip()) >= 16
+        return 0 < int(api_id) <= 2147483647 and re.fullmatch(
+            "[0-9a-fA-F]{32}", str(api_hash).strip()) is not None
     except (TypeError, ValueError):
         return False
 

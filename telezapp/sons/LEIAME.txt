@@ -10,6 +10,9 @@ instante do arquivo e terminam em silêncio. O nome do arquivo é o do evento:
   nova              mensagem recebida
   nova_aberta       mensagem recebida na conversa aberta
   nova_grupo        mensagem recebida num grupo
+  nova_pessoal      mensagem pessoal recebida
+  nova_canal        mensagem recebida num canal
+  nova_comunidade   mensagem recebida numa comunidade
   enviada           mensagem enviada
   erro              erro
   falha_envio       mensagem ou arquivo que não saiu

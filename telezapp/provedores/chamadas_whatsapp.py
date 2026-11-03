@@ -292,6 +292,7 @@ class ChamadasWhatsApp:
         self.espera_s = espera_s
         self.espera_audio_s = espera_audio_s
         self.destino_video = None       # f(cid, largura, altura, rgb), da janela
+        self.oferta_velha = None        # f(call_id): ja nao esta tocando
         self.video = midia_video        # trocavel nos testes
         self.ligacoes = {}              # id da conversa -> _Ligacao
         self._trava = threading.RLock()
@@ -487,6 +488,9 @@ class ChamadasWhatsApp:
                    camera=lig.camera_nome)
 
     def _ao_receber(self, call_id, peer, video=False):
+        # sem desligar: a chamada pode seguir em outro aparelho
+        if self.oferta_velha is not None and self.oferta_velha(call_id):
+            return
         cid = self.conversa_do_peer(peer)
         with self._trava:
             ocupado = bool(self.ligacoes)
