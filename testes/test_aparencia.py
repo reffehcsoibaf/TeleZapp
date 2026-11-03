@@ -5,13 +5,24 @@ from telezapp import config
 from telezapp.nucleo import aparencia as ap
 
 
-def test_modo_automatico_segue_o_leitor_de_tela():
+def test_modo_visual_escondido_vale_sempre_o_leitor():
+    # decisao do responsavel (03/11/2026): o visual espera retorno
+    assert ap.MODO_VISUAL_DISPONIVEL is False
+    for escolha in ("automatico", "leitor", "visual", None):
+        assert ap.modo(escolha, leitor_ligado=False) == ap.LEITOR
+    chaves = [o.chave for o in config.OPCOES]
+    assert "modo_exibicao" not in chaves and "tamanho_letra" in chaves
+
+
+def test_modo_automatico_segue_o_leitor_de_tela(monkeypatch):
+    monkeypatch.setattr(ap, "MODO_VISUAL_DISPONIVEL", True)
     assert ap.modo("automatico", leitor_ligado=True) == ap.LEITOR
     assert ap.modo("automatico", leitor_ligado=False) == ap.VISUAL
     assert ap.modo("qualquer", leitor_ligado=True) == ap.LEITOR
 
 
-def test_modo_escolhido_vale_com_ou_sem_leitor():
+def test_modo_escolhido_vale_com_ou_sem_leitor(monkeypatch):
+    monkeypatch.setattr(ap, "MODO_VISUAL_DISPONIVEL", True)
     assert ap.modo("leitor", leitor_ligado=False) == ap.LEITOR
     assert ap.modo("visual", leitor_ligado=True) == ap.VISUAL
 
@@ -43,7 +54,8 @@ def test_rotulo_do_dia():
 
 def test_opcoes_na_aparencia():
     chaves = {o.chave: o for o in config.OPCOES}
-    assert chaves["modo_exibicao"].categoria == "Aparência"
-    assert chaves["modo_exibicao"].padrao == "automatico"
+    assert config.OPCAO_MODO_EXIBICAO.categoria == "Interface"
+    assert config.OPCAO_MODO_EXIBICAO.padrao == "automatico"
+    assert chaves["tamanho_letra"].categoria == "Interface"
     assert chaves["tamanho_letra"].padrao == 100
     assert [v for v, _ in chaves["tamanho_letra"].escolhas][0] == 100

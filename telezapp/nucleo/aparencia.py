@@ -32,9 +32,17 @@ def leitor_de_tela_ligado():
         return False
 
 
+# O modo visual esta pronto, mas fica escondido ate quem enxerga dar
+# retorno (decisao do responsavel, 03/11/2026): com False, vale sempre o
+# modo para leitor de tela e a opcao nao aparece nas Configuracoes.
+MODO_VISUAL_DISPONIVEL = False
+
+
 def modo(escolha, leitor_ligado=None):
     """O modo que vale: LEITOR ou VISUAL. `escolha` e a opcao guardada; no
     automatico (ou valor desconhecido), conta se ha leitor de tela ligado."""
+    if not MODO_VISUAL_DISPONIVEL:
+        return LEITOR
     if escolha in (LEITOR, VISUAL):
         return escolha
     if leitor_ligado is None:

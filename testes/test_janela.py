@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Logica da janela principal com um wx simulado (testes/wx_falso.py)."""
+import os
 import sys
 import time
 import types
@@ -7281,3 +7282,45 @@ def test_mencionar_todos_do_grupo_pelo_arroba(j, monkeypatch):
     j.contas.p.MENCIONA_TODOS = False          # Telegram: sem o item
     j._escolher_mencao([ana], 0)
     assert vistos[1] == [ana]
+
+
+def test_midia_que_falhou_pode_ser_enviada_de_novo(j, tmp_path):
+    # relato do Valmir (03/11/2026): a voz que o Telegram recusou se perdia
+    _abrir_com_caixa(j)
+    pdf = tmp_path / "r.pdf"
+    pdf.write_bytes(b"%PDF")
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._enviar_arquivo(str(pdf))
+    j.b.publicar(ev.EnvioFalhou("t1", "20", "", "falha nos servidores",
+                                devolver_texto=False, tipo=m.DOCUMENTO))
+    local = [x for x in j.cache[("t1", "20")] if x.id.startswith("local-")][0]
+    assert local.estado == m.FALHOU and j._pode_reenviar(local)
+    assert "Tentar enviar de novo" in ditas[-1]
+    antes = len([p for p in j.contas.p.pedidos if p[0] == "arquivo"])
+    j._reenviar(local)
+    assert local.estado == m.ENVIANDO
+    assert len([p for p in j.contas.p.pedidos if p[0] == "arquivo"]) == \
+        antes + 1
+    # o servico confirma: a local sai e nao ha mais o que reenviar
+    j.b.publicar(ev.MensagemNova(
+        m.Mensagem("t1", "20", "99", minha=True, data=AGORA + 99,
+                   tipo=m.DOCUMENTO, nome_arquivo="r.pdf"),
+        j.indice[("t1", "20")], enviada_daqui=True))
+    assert local.id not in j._anexos_locais
+
+
+def test_reenviar_sem_o_arquivo_avisa(j, tmp_path):
+    _abrir_com_caixa(j)
+    pdf = tmp_path / "r.pdf"
+    pdf.write_bytes(b"%PDF")
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._enviar_arquivo(str(pdf))
+    j.b.publicar(ev.EnvioFalhou("t1", "20", "", "x", devolver_texto=False,
+                                tipo=m.DOCUMENTO))
+    local = [x for x in j.cache[("t1", "20")] if x.id.startswith("local-")][0]
+    os.remove(j._anexos_locais[local.id][0].caminho)
+    j._reenviar(local)
+    assert local.estado == m.FALHOU
+    assert "não existe mais" in ditas[-1]

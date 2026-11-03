@@ -1896,3 +1896,16 @@ def test_fixada_na_busca_de_arquivadas_nao_fica_arquivada(ambiente):
         assert por_id["77"].arquivada
     finally:
         p.parar()
+
+
+def test_falha_do_servidor_do_telegram_tem_explicacao():
+    # relato do Valmir (03/11/2026): voz que falhou por InterdcCallError
+    # aparecia como "erro do Telegram (ValueError)"
+    from telethon import errors
+    from telezapp.provedores import telegram as tg
+    falha = errors.InterdcCallErrorError(request=None)
+    assert "falha nos servidores" in tg._motivo(falha)
+    generico = ValueError("Request was unsuccessful 6 time(s)")
+    assert "falha nos servidores" in tg._motivo(generico)
+    assert tg._motivo(ValueError("outra coisa")) == \
+        "erro do Telegram (ValueError)"

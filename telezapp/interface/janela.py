@@ -508,6 +508,8 @@ class Janela(wx.Frame):
         self._salvando = None     # a conversa sendo salva num .zip
         self.anexos = []          # midias coladas na caixa, a enviar com o Enter
         self.locais = 0               # contador de mensagens "enviando"
+        # local-N -> o que foi mandado, para tentar de novo se falhar
+        self._anexos_locais = {}
         self.sincronia = {}           # conta_id -> (percentual, quando)
         self.audio = None             # (chave, Reprodutor) tocando sem janela
         self.interrompidas = {}       # conta_id -> % em que a sincronia parou
@@ -3781,6 +3783,9 @@ class Janela(wx.Frame):
         texto = "Não foi possível enviar: %s." % e.motivo
         if chave == self.atual and e.devolver_texto:
             texto += " O texto voltou para a caixa de digitação."
+        elif self._pode_reenviar(achada):
+            texto += (" Para tentar de novo, use Tentar enviar de novo no "
+                      "menu de contexto da mensagem.")
         self.fala.falar(texto, interromper=True)
         self.SetStatusText(texto)
         log.info("envio falhou (%s)", e.motivo)
@@ -7855,6 +7860,8 @@ class Janela(wx.Frame):
         # transcrever/descrever e o primeiro item do menu; depois, abrir ou
         # reproduzir a midia (o Enter pode estar configurado para a IA)
         opcoes[0:0] = self._opcoes_ia(sel) + self._opcoes_midia(sel)
+        if self._pode_reenviar(sel):
+            opcoes.insert(0, ("Tentar enviar de novo", self._reenviar))
         for rotulo, tratador in opcoes:
             it = menu.Append(wx.ID_ANY, rotulo)
             self.Bind(wx.EVT_MENU, seguro(lambda e, t=tratador: t()), it)
@@ -8081,6 +8088,7 @@ class Janela(wx.Frame):
         achada = self._local_enviando(lista, texto, tipo)
         if achada is not None:
             lista.remove(achada)
+            self._anexos_locais.pop(achada.id, None)
         bipe("enviada")
         if self.cfg.get("confirmar_envio"):
             self.fala.falar("Enviada.")
@@ -8307,17 +8315,50 @@ class Janela(wx.Frame):
         mencoes = self.mencoes if legenda else []
         if legenda:
             self.mencoes = []
-        if resposta or mencoes:
-            p.enviar_arquivo(conversa_id, anexo, legenda, resposta,
-                             mencoes or None)
-        else:
-            p.enviar_arquivo(conversa_id, anexo, legenda)
+        self._anexos_locais[local.id] = (anexo, legenda, resposta,
+                                         mencoes or None)
+        self._mandar_anexo(p, conversa_id, local.id)
         if resposta and limpar_resposta:
             self.resposta_a = None
             self._rotular_caixa()
         log.info("arquivo (%s, %d bytes) enviado para a fila", anexo.tipo,
                  anexo.tamanho)
         return True
+
+    def _mandar_anexo(self, p, conversa_id, local_id):
+        anexo, legenda, resposta, mencoes = self._anexos_locais[local_id]
+        if resposta or mencoes:
+            p.enviar_arquivo(conversa_id, anexo, legenda, resposta, mencoes)
+        else:
+            p.enviar_arquivo(conversa_id, anexo, legenda)
+
+    def _pode_reenviar(self, x):
+        return x is not None and x.estado == m.FALHOU and             x.id in self._anexos_locais
+
+    def _reenviar(self, x=None):
+        """Midia que falhou: manda o mesmo arquivo de novo, do mesmo jeito
+        (legenda, resposta, mencoes). Relato do Valmir (03/11/2026): uma voz
+        que o Telegram recusou por falha dele so podia ser gravada de novo."""
+        x = x or self._mensagem_selecionada()
+        if not self._pode_reenviar(x):
+            return
+        anexo = self._anexos_locais[x.id][0]
+        if not os.path.isfile(anexo.caminho):
+            bipe("erro")
+            self.fala.falar("O arquivo desta mensagem não existe mais. "
+                            "Anexe ou grave de novo.", interromper=True)
+            return
+        p = self.contas.provedor(x.conta_id) if self.contas else None
+        if p is None or self.estados.get(x.conta_id) != ev.CONECTADA:
+            bipe("erro")
+            self.fala.falar("A conta não está conectada.", interromper=True)
+            return
+        x.estado = m.ENVIANDO
+        if (x.conta_id, x.conversa_id) == self.atual:
+            self._preencher_mensagens()
+        self.fala.falar("Enviando de novo.", interromper=True)
+        log.info("envio de %s repetido a pedido", anexo.tipo)
+        self._mandar_anexo(p, x.conversa_id, x.id)
 
     # ======================================================== colar midia
     def _ao_colar(self, evt):
