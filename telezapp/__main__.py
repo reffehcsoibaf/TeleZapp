@@ -406,6 +406,12 @@ def main():
     wx.CallAfter(janela.abrir_links_recebidos)
     app.MainLoop()
     janela.midias.parar()
+    # os._exit no fim nao roda o atexit: fecha o fluxo dos avisos aqui
+    try:
+        from telezapp.acessibilidade import fala as fala_sons
+        fala_sons.fechar_sons()
+    except Exception:
+        pass
     banco.fechar()
     config.limpar_temporarios()
     log.info("encerrado normalmente")
