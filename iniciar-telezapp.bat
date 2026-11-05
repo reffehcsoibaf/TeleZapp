@@ -1,6 +1,8 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
+git pull
+pause
 rem ============================================================
 rem  INICIAR O TELEZAPP
 rem  Na primeira vez (ou quando os componentes mudarem) cria o

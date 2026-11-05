@@ -69,6 +69,21 @@ def pasta_do_pacote(pacote_id):
     return os.path.join(pasta_dos_pacotes(), pacote_id[len(PREFIXO):])
 
 
+def arquivos_da_pasta(pacote_id):
+    """[(nome, caminho)] dos sons aceitos na pasta do pacote, em ordem. So os
+    pacotes personalizados tem pasta editavel: os da casa devolvem []."""
+    if not editavel(pacote_id):
+        return []
+    pasta = pasta_do_pacote(pacote_id)
+    if not os.path.isdir(pasta):
+        return []
+    nomes = [nome for nome in os.listdir(pasta)
+             if os.path.splitext(nome)[1].lower() in EXTENSOES
+             and os.path.isfile(os.path.join(pasta, nome))]
+    return [(nome, os.path.join(pasta, nome))
+            for nome in sorted(nomes, key=str.lower)]
+
+
 def listar():
     """[(id, nome)] dos pacotes que existem: os da casa e depois os
     personalizados, em ordem alfabetica."""

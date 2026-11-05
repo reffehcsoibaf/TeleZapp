@@ -6,6 +6,7 @@ Usa a DLL nvdaControllerClient que vem no pacote accessible-output2,
 carregada por ctypes (sem importar o pacote). Sem NVDA ou sem a DLL, a fala
 fica desligada e o motivo vai para o log.
 """
+import atexit
 import ctypes
 import importlib.util
 import logging
@@ -19,7 +20,6 @@ except ImportError:  # fora do Windows (testes)
     winsound = None
 
 log = logging.getLogger("telezapp.fala")
-_trava_som = threading.Lock()
 
 
 class Fala:
@@ -209,20 +209,14 @@ def _tocar_arquivo(tipo, caminho):
     """Toca o arquivo de som (as primeiras LIMITE_SEGUNDOS_ARQUIVO); se nao
     der, cai no som padrao do evento."""
     try:
-        import sounddevice as sd
         guardado = _pre_carregados.get(caminho)
         if guardado is not None and guardado[0] == os.path.getmtime(caminho):
             _, dados, taxa = guardado
         else:
             dados, taxa = _ler_som(caminho, LIMITE_SEGUNDOS_ARQUIVO)
-        # sd.play para o som anterior e abre o novo: duas threads juntas
-        # mexem no mesmo fluxo do PortAudio e derrubam o programa
-        dispositivo = _indice_dos_avisos()
-        with _trava_som:
-            if dispositivo is None:
-                sd.play(dados, taxa)
-            else:
-                sd.play(dados, taxa, device=dispositivo)
+        # o fluxo dos avisos fica aberto: tocar so troca as amostras (abrir o
+        # dispositivo a cada som era o que atrasava a reproducao)
+        _tocar_pelo_fluxo(dados, taxa, _indice_dos_avisos())
     except Exception as e:
         log.warning("não consegui tocar o som escolhido (%r); usando o "
                     "padrão", e)
@@ -294,9 +288,7 @@ def _tocar(tipo):
     try:
         dispositivo = _indice_dos_avisos()
         if dispositivo is not None:
-            import sounddevice as sd
-            with _trava_som:
-                sd.play(_onda(notas), TAXA_SINTETICA, device=dispositivo)
+            _tocar_pelo_fluxo(_onda(notas), TAXA_SINTETICA, dispositivo)
             return
     except Exception as e:
         log.warning("não consegui tocar o aviso no dispositivo escolhido "
@@ -308,3 +300,135 @@ def _tocar(tipo):
             winsound.Beep(freq, ms)
     except Exception:
         pass
+
+
+TAXA_DOS_AVISOS = TAXA_SINTETICA
+CANAIS_DOS_AVISOS = 2
+
+
+def _preparar_som(dados, taxa):
+    """Amostras float32 de dois canais na taxa do fluxo dos avisos."""
+    import numpy as np
+    dados = np.asarray(dados, dtype="float32")
+    if dados.ndim == 1:
+        dados = dados.reshape(-1, 1)
+    if dados.shape[1] == 1:
+        dados = np.repeat(dados, CANAIS_DOS_AVISOS, axis=1)
+    elif dados.shape[1] > CANAIS_DOS_AVISOS:
+        dados = dados[:, :CANAIS_DOS_AVISOS]
+    if len(dados) and taxa and taxa != TAXA_DOS_AVISOS:
+        n = max(1, int(round(len(dados) * TAXA_DOS_AVISOS / float(taxa))))
+        origem = np.arange(len(dados), dtype="float64")
+        destino = np.linspace(0, len(dados) - 1, n)
+        dados = np.stack([np.interp(destino, origem, dados[:, c])
+                          for c in range(dados.shape[1])], axis=1)
+    return np.ascontiguousarray(dados, dtype="float32")
+
+
+class _SaidaDosAvisos:
+    """Um fluxo de saida aberto uma vez para os avisos. Trocar de som so troca
+    as amostras que o callback entrega: o dispositivo nao e aberto e fechado a
+    cada aviso (era isso que atrasava o som)."""
+
+    def __init__(self):
+        self._trava = threading.Lock()         # fluxo e dispositivo
+        self._trava_dados = threading.Lock()   # amostras que o callback toca
+        self._fluxo = None
+        self._dispositivo = None
+        self._dados = None
+        self._pos = 0
+
+    def _callback(self, outdata, frames, tempo, status):
+        with self._trava_dados:
+            dados, pos = self._dados, self._pos
+            if dados is None or pos >= len(dados):
+                outdata.fill(0)
+                self._dados = None
+                return
+            n = min(frames, len(dados) - pos)
+            outdata[:n] = dados[pos:pos + n]
+            if n < frames:
+                outdata[n:] = 0
+            self._pos = pos + n
+            if self._pos >= len(dados):
+                self._dados = None
+
+    def _abrir(self, dispositivo):
+        import sounddevice as sd
+        parametros = dict(
+            samplerate=TAXA_DOS_AVISOS, channels=CANAIS_DOS_AVISOS,
+            dtype="float32", device=dispositivo, callback=self._callback)
+        try:
+            fluxo = sd.OutputStream(latency="low", **parametros)
+        except Exception:
+            # dispositivo que nao aceita a latencia baixa: usa a padrao
+            fluxo = sd.OutputStream(**parametros)
+        try:
+            fluxo.start()
+        except Exception:
+            try:
+                fluxo.close()
+            except Exception:
+                pass
+            raise
+        return fluxo
+
+    def _fechar(self):
+        fluxo, self._fluxo = self._fluxo, None
+        if fluxo is not None:
+            try:
+                fluxo.stop()
+            except Exception:
+                pass
+            try:
+                fluxo.close()
+            except Exception:
+                pass
+
+    def tocar(self, dados, taxa, dispositivo=None):
+        dados = _preparar_som(dados, taxa)
+        with self._trava:
+            if self._fluxo is not None and not getattr(
+                    self._fluxo, "active", True):
+                self._fechar()
+            if self._fluxo is None or self._dispositivo != dispositivo:
+                with self._trava_dados:
+                    self._dados = None
+                self._fechar()
+                self._fluxo = self._abrir(dispositivo)
+                self._dispositivo = dispositivo
+            with self._trava_dados:
+                self._dados, self._pos = dados, 0
+
+    def fechar(self):
+        with self._trava:
+            with self._trava_dados:
+                self._dados = None
+            self._fechar()
+
+
+_saida = None
+_trava_saida = threading.Lock()
+
+
+def _tocar_pelo_fluxo(dados, taxa, dispositivo=None):
+    """Toca pelo fluxo dos avisos, abrindo-o so na primeira vez."""
+    global _saida
+    if _saida is None:
+        # dois avisos ao mesmo tempo nao podem abrir dois fluxos
+        with _trava_saida:
+            if _saida is None:
+                _saida = _SaidaDosAvisos()
+    _saida.tocar(dados, taxa, dispositivo)
+
+
+def fechar_sons():
+    """Fecha o fluxo dos avisos (ao encerrar o programa)."""
+    global _saida
+    with _trava_saida:
+        if _saida is not None:
+            _saida.fechar()
+            _saida = None
+
+
+atexit.register(fechar_sons)

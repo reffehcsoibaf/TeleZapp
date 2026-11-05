@@ -53,6 +53,25 @@ def test_pacotes_da_casa_trazem_um_arquivo_por_evento(dados):
                 pacote, evento)
 
 
+def test_arquivos_da_pasta_lista_so_os_sons_do_pacote(dados):
+    assert pk.arquivos_da_pasta("telezapp") == []      # os da casa nao se editam
+    assert pk.arquivos_da_pasta("padrao") == []
+    assert pk.arquivos_da_pasta("p:Nao existe") == []
+
+    pacote_id, _ = pk.criar("Meu")
+    pasta = dados / "dados" / "sons" / "pacotes" / "Meu"
+    (pasta / "a.ogg").write_bytes(b"x")
+    (pasta / "b.WAV").write_bytes(b"x")               # extensao sem caixa
+    (pasta / "c.Mp3").write_bytes(b"x")
+    (pasta / "ignorar.txt").write_bytes(b"x")
+    (pasta / "d.wav").mkdir()                          # pasta nao e som
+
+    assert pk.arquivos_da_pasta(pacote_id) == [
+        ("a.ogg", str(pasta / "a.ogg")),
+        ("b.WAV", str(pasta / "b.WAV")),
+        ("c.Mp3", str(pasta / "c.Mp3"))]
+
+
 def test_mapa_de_cada_pacote_para_o_modulo_de_sons(dados):
     eventos = {e for e, _ in pk.eventos()}
     assert pk.mapa("padrao") == {

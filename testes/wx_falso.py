@@ -293,7 +293,7 @@ class Choice(Janela):
         return self.sel
 
     def SetSelection(self, i):
-        assert 0 <= i < len(self.itens), (i, len(self.itens))
+        assert -1 <= i < len(self.itens), (i, len(self.itens))
         self.sel = i
 
 

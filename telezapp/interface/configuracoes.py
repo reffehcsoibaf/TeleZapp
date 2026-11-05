@@ -398,8 +398,9 @@ class DialogoConfiguracoes(wx.Dialog):
     # ----------------------------------------------- pacotes de sons
     def _criar_sons(self):
         """Caixa de pacotes, lista de eventos (Enter ou Espaco ativa e
-        desativa) e, no evento, Ouvir som e, nos pacotes personalizados,
-        Procurar som. Os pacotes Padrao e TeleZapp nao se editam."""
+        desativa) e, no evento, Ouvir som, Procurar som e, nos pacotes
+        personalizados, a caixa com os arquivos que ja estao na pasta. Os
+        pacotes Padrao e TeleZapp nao se editam."""
         p, lay = self.painel, self.lay_painel
         lay.Add(wx.StaticText(p, label="Pacote de sons:"), 0,
                 wx.LEFT | wx.RIGHT | wx.TOP, 8)
@@ -416,6 +417,11 @@ class DialogoConfiguracoes(wx.Dialog):
                 wx.LEFT | wx.RIGHT | wx.TOP, 8)
         self.lista_sons = wx.ListBox(p, name="Eventos", size=(-1, 230))
         lay.Add(self.lista_sons, 1, wx.EXPAND | wx.ALL, 8)
+        self.lbl_arquivo_som = wx.StaticText(
+            p, label="Sons na pasta do pacote:")
+        lay.Add(self.lbl_arquivo_som, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        self.cx_arquivo_som = wx.Choice(p, name="Sons na pasta do pacote")
+        lay.Add(self.cx_arquivo_som, 0, wx.EXPAND | wx.ALL, 8)
         linha2 = wx.BoxSizer(wx.HORIZONTAL)
         self.btn_ouvir_som = wx.Button(p, label="Ouvir som")
         self.btn_procurar_som = wx.Button(p, label="Procurar som...")
@@ -423,6 +429,10 @@ class DialogoConfiguracoes(wx.Dialog):
         linha2.Add(self.btn_procurar_som, 0)
         lay.Add(linha2, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
         self.cx_pacote.Bind(wx.EVT_CHOICE, lambda e: self._sons_escolher_pacote())
+        self.lista_sons.Bind(wx.EVT_LISTBOX,
+                             lambda e: self._sons_mostrar_arquivo())
+        self.cx_arquivo_som.Bind(wx.EVT_CHOICE,
+                                 lambda e: self._sons_escolher_arquivo())
         self.btn_novo_pacote.Bind(wx.EVT_BUTTON, lambda e: self._sons_novo())
         self.btn_excluir_pacote.Bind(wx.EVT_BUTTON,
                                      lambda e: self._sons_excluir())
@@ -448,7 +458,33 @@ class DialogoConfiguracoes(wx.Dialog):
         custom = pacotes_de_som.editavel(est.ativo)
         self.btn_procurar_som.Show(custom)       # so nos personalizados
         self.btn_excluir_pacote.Enable(custom)
+        self.lbl_arquivo_som.Show(custom)
+        self.cx_arquivo_som.Show(custom)
+        self._sons_preencher_arquivos()
         self.painel.Layout()
+
+    def _sons_preencher_arquivos(self):
+        """A caixa lista os sons que ja estao na pasta do pacote ativo."""
+        est = self.modelo.sons
+        self._arquivos_som = pacotes_de_som.arquivos_da_pasta(est.ativo)
+        self.cx_arquivo_som.Set([nome for nome, _ in self._arquivos_som])
+        self._sons_mostrar_arquivo()
+
+    def _sons_mostrar_arquivo(self):
+        """Marca na caixa o arquivo do evento escolhido, se ele esta na pasta."""
+        evento, _ = self._sons_evento()
+        if evento is None:
+            return
+        est = self.modelo.sons
+        caminho = est.arquivo(est.ativo, evento)
+        indice = -1
+        if caminho:
+            for i, (_, arquivo) in enumerate(self._arquivos_som):
+                if os.path.normcase(os.path.abspath(arquivo)) == \
+                        os.path.normcase(os.path.abspath(caminho)):
+                    indice = i
+                    break
+        self.cx_arquivo_som.SetSelection(indice)
 
     def _sons_evento(self):
         i = self.lista_sons.GetSelection()
@@ -466,6 +502,22 @@ class DialogoConfiguracoes(wx.Dialog):
         if 0 <= i < len(self._ids_pacotes):
             self.modelo.sons.selecionar(self._ids_pacotes[i])
             self._sons_preencher_eventos()
+
+    def _sons_escolher_arquivo(self):
+        """O som escolhido na caixa vira o som do evento selecionado."""
+        evento, i = self._sons_evento()
+        est = self.modelo.sons
+        if evento is None or not pacotes_de_som.editavel(est.ativo):
+            return
+        j = self.cx_arquivo_som.GetSelection()
+        if not 0 <= j < len(self._arquivos_som):
+            return
+        nome, caminho = self._arquivos_som[j]
+        est.escolher(est.ativo, evento, caminho)
+        self._sons_atualizar_item(evento, i)
+        if self.fala is not None:
+            self.fala.falar("Som escolhido: %s. Aplique para importar para "
+                            "o pacote." % nome, interromper=True)
 
     def _sons_alternar(self):
         evento, i = self._sons_evento()
