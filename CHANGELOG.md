@@ -3,6 +3,10 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
+## 2026.11.07.0 (em preparo, ainda não publicada)
+
+- Atualizador, plano B: quando a consulta à API do GitHub falha (por exemplo, pelo limite de consultas por endereço), a janela de atualização mostrava só "As novidades estão na página da versão: <endereço>". Agora `_pelo_site` lê o texto das novidades da própria página da Release (`novidades_da_pagina`, a mesma resposta que já traz o endereço da versão) e o mostra por extenso; só se não achar a seção cai no aviso com o endereço. Testado com a página real da 2026.11.06.0 (25 itens, igual ao da API).
+
 ## 2026.11.06.0
 
 (inclui tudo o que estava em preparo como 2026.11.05.0, que não chegou a ser publicada)

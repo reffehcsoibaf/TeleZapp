@@ -2,6 +2,7 @@
 # Copyright (C) 2026 Fábio Scheffer Moraes
 """Consulta as Releases do GitHub para saber se ha versao nova. Nao baixa nem
 instala o programa. Sem dependencia de wxPython."""
+import html
 import json
 import logging
 import re
@@ -201,24 +202,50 @@ def motivo_da_falha(erro):
     return "a conexão com o GitHub falhou (%s)" % type(causa).__name__
 
 
+def novidades_da_pagina(pagina):
+    """O texto de `Novidades da versao X` da pagina HTML da Release (a que o
+    GitHub mostra no navegador), no mesmo formato de `novidades_do_corpo`
+    (um item por linha, com "- "), ou "" se a pagina nao tiver essa secao."""
+    achou = re.search(
+        r"<h2[^>]*>\s*Novidades da vers[^<]*</h2>(.*?)(?=<h2|</div>\s*$|\Z)",
+        str(pagina or ""), re.S | re.I)
+    if not achou:
+        return ""
+    itens = []
+    for item in re.findall(r"<li[^>]*>(.*?)</li>", achou.group(1), re.S):
+        texto = html.unescape(re.sub(r"<[^>]+>", "", item))
+        texto = " ".join(texto.split())
+        if texto:
+            itens.append("- " + texto)
+    return "\n".join(itens)
+
+
 def _pelo_site(tempo=10):
     """Plano B quando a consulta da API falha (por exemplo, pelo limite de
     consultas por endereco): o proprio site do GitHub leva da pagina da
     ultima Release comum para a pagina da versao, e dai saem os enderecos do
-    zip e do hash. Sem as notas (a pessoa as ve na pagina)."""
+    zip e do hash. As novidades saem da propria pagina da Release (a mesma
+    resposta); se nao der para le-las, a janela diz onde estao."""
     pedido = urllib.request.Request(
         URL_ULTIMA, headers={"User-Agent": "TeleZapp/" + VERSAO})
+    pagina = ""
     with abrir_url(pedido, tempo) as r:
         final = r.geturl()
+        try:
+            pagina = r.read().decode("utf-8", "replace")
+        except (AttributeError, OSError, ValueError):
+            pagina = ""
     achou = re.search(r"/releases/tag/([^/?#]+)$", final)
     versao = achou.group(1).lstrip("vV") if achou else ""
     if como_tupla(versao) is None:
         raise ValueError("pagina da ultima versao inesperada")
     base = "%s/releases/download/%s/" % (SITE, achou.group(1))
+    novidades = novidades_da_pagina(pagina)
     return Lancamento(
         versao, "", final, False, "TeleZapp.zip", base + "TeleZapp.zip",
         base + "TeleZapp.zip.sha256", 0,
-        [(versao, "As novidades estão na página da versão: " + final)])
+        [(versao, novidades or
+          "As novidades estão na página da versão: " + final)])
 
 
 def consultar(buscar=_buscar_json, pelo_site=None):
