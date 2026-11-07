@@ -5,6 +5,7 @@ Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 
 ## 2026.11.07.0 (em preparo, ainda não publicada)
 
+- Chamadas de vídeo, sem som do outro lado (relato do Alex, logs de 06/11): nas chamadas de vídeo a DLL entrega o áudio (274 a 863 quadros), mas o alto-falante toca só 13 a 77; na chamada só de voz toca todos (174 de 174). O laço `_receber` consome menos de 1 quadro por segundo quando há vídeo. Causa ainda não achada. Diagnóstico novo (`_DiagnosticoDoAltoFalante`): a cada 5 s registra quadros tocados e o tempo em leitura, retorno, escrita e referência do eco; se tocar menos de 20 quadros em 5 s, grava a pilha de cada thread (até 2 vezes por chamada). Pedir ao Alex uma nova chamada de vídeo e procurar `alto-falante da chamada` nos logs.
 - Atualizador, plano B: quando a consulta à API do GitHub falha (por exemplo, pelo limite de consultas por endereço), a janela de atualização mostrava só "As novidades estão na página da versão: <endereço>". Agora `_pelo_site` lê o texto das novidades da própria página da Release (`novidades_da_pagina`, a mesma resposta que já traz o endereço da versão) e o mostra por extenso; só se não achar a seção cai no aviso com o endereço. Testado com a página real da 2026.11.06.0 (25 itens, igual ao da API).
 
 ## 2026.11.06.0

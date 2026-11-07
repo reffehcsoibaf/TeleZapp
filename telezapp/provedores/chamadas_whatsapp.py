@@ -20,8 +20,10 @@ resto do aplicativo segue igual.
 import ctypes
 import json
 import logging
+import sys
 import threading
 import time
+import traceback
 
 from telezapp.nucleo import chamadas as ch
 from telezapp.midia import eco as midia_eco
@@ -38,6 +40,8 @@ ESPERA_ATENDER_S = 45            # chamando sem ninguem atender
 FIM_DA_CHAMADA = -2              # retorno da DLL: a chamada acabou
 LIMITE_DE_FALHAS = 20            # erros seguidos do som ate desistir
 ESPERA_AUDIO_S = 20              # atendida, mas sem som do outro lado
+PERIODO_DO_DIAGNOSTICO_S = 5     # janela do diagnostico do alto-falante
+MINIMO_DE_QUADROS_TOCADOS = 20   # em 5 s (o normal passa de 70)
 QUADROS_POR_REGISTRO = 83        # um registro do eco a cada 5 s (quadros de 60 ms)
 FASE_CONECTANDO = 3              # CallPhase do meowcaller: Connecting
 BYTES_DO_VIDEO = 512 * 1024      # uma unidade de acesso H.264 cabe com folga
@@ -194,6 +198,58 @@ class Ponte:
     def escrever_quadro(self, chamada, dados):
         return self.go.CallWriteAudio(self.uuid, chamada.encode(), dados,
                                       BYTES_POR_QUADRO) == 0
+
+
+class _DiagnosticoDoAltoFalante:
+    """A cada 5 s da chamada, registra quantos quadros o alto-falante tocou e
+    quanto tempo o laco gastou em cada etapa (ler da DLL, tirar o retorno,
+    escrever no dispositivo, passar a referencia ao eco). Se tocou muito
+    menos do que devia (o som do outro lado parado), grava tambem o que cada
+    thread do programa estava fazendo, para achar o que segura o laco."""
+
+    def __init__(self, call_id, agora=time.monotonic):
+        self.call_id = call_id
+        self._agora = agora
+        self._inicio = agora()
+        self.quadros = 0
+        self.leitura = self.retorno = self.escrita = self.referencia = 0.0
+        self.maior_escrita = 0.0
+        self.pilhas = 0
+
+    def tocou(self, retorno, escrita):
+        self.quadros += 1
+        self.retorno += retorno
+        self.escrita += escrita
+        self.maior_escrita = max(self.maior_escrita, escrita)
+
+    def periodo(self):
+        agora = self._agora()
+        if agora - self._inicio < PERIODO_DO_DIAGNOSTICO_S:
+            return
+        self._inicio = agora
+        log.info("alto-falante da chamada %s, %ds: tocou %d quadros; tempo em "
+                 "leitura=%.2fs retorno=%.2fs escrita=%.2fs (maior %.0f ms) "
+                 "referencia=%.2fs", self.call_id, PERIODO_DO_DIAGNOSTICO_S,
+                 self.quadros, self.leitura, self.retorno, self.escrita,
+                 self.maior_escrita * 1000, self.referencia)
+        if self.quadros < MINIMO_DE_QUADROS_TOCADOS and self.pilhas < 2:
+            self.pilhas += 1
+            log.warning("alto-falante da chamada %s tocou so %d quadros em "
+                        "%d s; threads:\n%s", self.call_id, self.quadros,
+                        PERIODO_DO_DIAGNOSTICO_S, pilhas_das_threads())
+        self.quadros = 0
+        self.leitura = self.retorno = self.escrita = self.referencia = 0.0
+        self.maior_escrita = 0.0
+
+
+def pilhas_das_threads():
+    """Texto com a pilha de cada thread (nome e as ultimas chamadas)."""
+    nomes = {t.ident: t.name for t in threading.enumerate()}
+    partes = []
+    for ident, quadro in sys._current_frames().items():
+        pilha = "".join(traceback.format_stack(quadro, limit=6))
+        partes.append("--- %s\n%s" % (nomes.get(ident, ident), pilha))
+    return "\n".join(partes)
 
 
 class Audio:
@@ -906,9 +962,11 @@ class ChamadasWhatsApp:
         """DLL -> alto-falante, com a mesma tolerancia a erros do envio."""
         fluxo, falhas, tocados = None, 0, 0
         ident = prioridade.thread_de_audio()
+        diag = _DiagnosticoDoAltoFalante(lig.call_id)
         try:
             while not lig.parar.is_set():
                 try:
+                    diag.periodo()
                     if fluxo is None or lig.trocar_saida.is_set():
                         self._fechar(fluxo)
                         fluxo = None
@@ -917,15 +975,22 @@ class ChamadasWhatsApp:
                             lig.eco.reiniciar()
                         fluxo = self._abrir(self.audio.abrir_saida,
                                             lig.saida, "alto-falante")
+                    t0 = time.perf_counter()
                     quadro = self.ponte.ler_quadro(lig.call_id, 100)
+                    t1 = time.perf_counter()
+                    diag.leitura += t1 - t0
                     if quadro is False:
                         break
                     if quadro:
                         quadro = self._sem_retorno(lig, quadro)
+                        t2 = time.perf_counter()
                         fluxo.write(quadro)
+                        t3 = time.perf_counter()
                         tocados += 1
+                        diag.tocou(t2 - t1, t3 - t2)
                         if lig.eco is not None:
                             lig.eco.referencia(quadro)
+                        diag.referencia += time.perf_counter() - t3
                     falhas = 0
                 except Exception:
                     falhas += 1
