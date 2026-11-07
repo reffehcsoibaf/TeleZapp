@@ -236,7 +236,12 @@ class DialogoConfiguracoes(wx.Dialog):
         self.lista_atalhos.SetFocus()
 
     def _focar_codigo(self, _):
-        self.controles["trancadas_exigir_codigo"].SetFocus()
+        c = self.controles.get("trancadas_exigir_codigo")
+        if c is not None:
+            c.SetFocus()                   # (a busca mostra a opcao solta)
+        else:
+            self._abrir_grupo("Privacidade", "Conversas trancadas",
+                              foco="trancadas_exigir_codigo")
 
     def _focar_privacidade(self, campo):
         """A leitura da conta pode estar em andamento, com as caixas apagadas:
@@ -716,9 +721,17 @@ class DialogoConfiguracoes(wx.Dialog):
         if b:
             b.SetFocus()
 
-    def _abrir_grupo(self, categoria, grupo):
+    def _abrir_grupo(self, categoria, grupo, foco=None):
         dlg = DialogoGrupoOpcoes(
             self, grupo, self.modelo.opcoes_do_grupo(categoria, grupo))
+        if foco == "codigo":
+            campos = dlg.campos_codigo
+            alvo = campos.get("atual") if campos.get("atual") and \
+                campos["atual"][2] else campos.get("novo")
+            if alvo is not None:
+                alvo[1].SetFocus()
+        elif foco in dlg.caixas:
+            dlg.caixas[foco].SetFocus()
         dlg.ShowModal()
         dlg.Destroy()
         b = self.controles.get("grupo:" + grupo)
@@ -975,35 +988,15 @@ class DialogoConfiguracoes(wx.Dialog):
 
     # ------------------------------------------- codigo das trancadas
     def _criar_campos_codigo(self):
-        """Campos do codigo secreto, logo depois da caixa: o codigo atual
-        (se ja existe) e o novo, duas vezes. Os novos so aparecem com a
-        caixa marcada."""
-        p = self.painel
-        guardado = bool(self.modelo.cfg.get("codigo_trancadas"))
-        self.campos_codigo = {}
-        for campo, rotulo, existe in (
-                ("atual", "Código atual", guardado),
-                ("novo", "Novo código (4 a 12 números)", True),
-                ("repita", "Repita o novo código", True)):
-            rot = wx.StaticText(p, label=rotulo + ":")
-            ctrl = wx.TextCtrl(p, name=rotulo, style=wx.TE_PASSWORD,
-                               size=(240, -1))
-            ctrl.SetValue(self.modelo.codigo[campo])
-            ctrl.Bind(wx.EVT_TEXT, lambda e, k=campo, c=ctrl:
-                      self.modelo.definir_codigo(k, c.GetValue()))
-            self.lay_painel.Add(rot, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
-            self.lay_painel.Add(ctrl, 0, wx.ALL, 8)
-            self.campos_codigo[campo] = (rot, ctrl, existe)
+        """Campos do codigo secreto, logo depois da caixa (so na busca, onde
+        a opcao aparece solta). Fora dela ficam na janela Conversas
+        trancadas."""
+        self.campos_codigo = criar_campos_do_codigo(
+            self.painel, self.lay_painel, self.modelo)
         self._mostrar_campos_codigo()
 
     def _mostrar_campos_codigo(self):
-        marcada = bool(self.modelo.valor("trancadas_exigir_codigo"))
-        for campo, (rot, ctrl, existe) in self.campos_codigo.items():
-            # o atual aparece sempre que ha codigo (ele e pedido tambem para
-            # desligar); os novos, so com a exigencia marcada
-            visivel = existe if campo == "atual" else marcada
-            rot.Show(visivel)
-            ctrl.Show(visivel)
+        mostrar_campos_do_codigo(self.campos_codigo, self.modelo)
         self.painel.Layout()
         self.painel.FitInside()
 
@@ -1102,6 +1095,9 @@ class DialogoConfiguracoes(wx.Dialog):
             alvo = campos.get("atual" if "atual" in erro else "novo")
             if alvo is not None:
                 alvo[1].SetFocus()
+            else:
+                self._abrir_grupo("Privacidade", "Conversas trancadas",
+                                  foco="codigo")
             return False
         self._confirmar_numeros()
         self.modelo.aplicar(self.aplicador)
@@ -1129,6 +1125,38 @@ class DialogoConfiguracoes(wx.Dialog):
             self.EndModal(wx.ID_OK)
 
 
+def criar_campos_do_codigo(janela, lay, modelo):
+    """Os campos do codigo secreto das trancadas: o codigo atual (se ja
+    existe) e o novo, duas vezes. Devolve {campo: (rotulo, controle,
+    existe)}; use `mostrar_campos_do_codigo` para mostrar so o que cabe."""
+    guardado = bool(modelo.cfg.get("codigo_trancadas"))
+    campos = {}
+    for campo, rotulo, existe in (
+            ("atual", "Código atual", guardado),
+            ("novo", "Novo código (4 a 12 números)", True),
+            ("repita", "Repita o novo código", True)):
+        rot = wx.StaticText(janela, label=rotulo + ":")
+        ctrl = wx.TextCtrl(janela, name=rotulo, style=wx.TE_PASSWORD,
+                           size=(240, -1))
+        ctrl.SetValue(modelo.codigo[campo])
+        ctrl.Bind(wx.EVT_TEXT, lambda e, k=campo, c=ctrl:
+                  modelo.definir_codigo(k, c.GetValue()))
+        lay.Add(rot, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        lay.Add(ctrl, 0, wx.ALL, 8)
+        campos[campo] = (rot, ctrl, existe)
+    return campos
+
+
+def mostrar_campos_do_codigo(campos, modelo):
+    marcada = bool(modelo.valor("trancadas_exigir_codigo"))
+    for campo, (rot, ctrl, existe) in campos.items():
+        # o atual aparece sempre que ha codigo (ele e pedido tambem para
+        # desligar); os novos, so com a exigencia marcada
+        visivel = existe if campo == "atual" else marcada
+        rot.Show(visivel)
+        ctrl.Show(visivel)
+
+
 class DialogoGrupoOpcoes(wx.Dialog):
     """As opcoes de um grupo (caixas de marcar), numa janela propria. O que
     for marcado vale como pendente na janela de configuracoes: so entra ao
@@ -1139,15 +1167,19 @@ class DialogoGrupoOpcoes(wx.Dialog):
         self.pai = pai
         self._em_foco = None
         self.caixas = {}
+        self.campos_codigo = {}
         lay = wx.BoxSizer(wx.VERTICAL)
         for o in opcoes:
             c = wx.CheckBox(self, label=o.rotulo, name=o.rotulo)
             c.SetValue(bool(pai.modelo.valor(o.chave)))
-            c.Bind(wx.EVT_CHECKBOX, lambda e, o=o, c=c:
-                   pai.modelo.definir(o.chave, c.GetValue()))
+            c.Bind(wx.EVT_CHECKBOX, lambda e, o=o, c=c: self._ao_marcar(o, c))
             c.Bind(wx.EVT_SET_FOCUS, lambda e, o=o: self._ao_focar(e, o))
             lay.Add(c, 0, wx.ALL, 8)
             self.caixas[o.chave] = c
+            if o.chave == "trancadas_exigir_codigo":
+                self.campos_codigo = criar_campos_do_codigo(
+                    self, lay, pai.modelo)
+                self._mostrar_campos_codigo()
         fechar = wx.Button(self, wx.ID_OK, "Fechar")
         fechar.SetDefault()
         lay.Add(fechar, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
@@ -1155,6 +1187,16 @@ class DialogoGrupoOpcoes(wx.Dialog):
         self.SetSizerAndFit(lay)
         self.Bind(wx.EVT_CHAR_HOOK, self._ao_tecla)
         self.CentreOnParent()
+
+    def _ao_marcar(self, opcao, caixa):
+        self.pai.modelo.definir(opcao.chave, caixa.GetValue())
+        if opcao.chave == "trancadas_exigir_codigo":
+            self._mostrar_campos_codigo()
+
+    def _mostrar_campos_codigo(self):
+        mostrar_campos_do_codigo(self.campos_codigo, self.pai.modelo)
+        self.Layout()
+        self.Fit()
 
     def _ao_focar(self, evento, opcao):
         evento.Skip()
