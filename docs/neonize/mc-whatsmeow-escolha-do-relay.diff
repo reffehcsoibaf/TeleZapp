@@ -1,0 +1,85 @@
+diff --git "a/C:\\Users\\fabio\\AppData\\Local\\Temp/engine.go.antes" b/engine.go
+index eb5e6e1..6609bb4 100644
+--- "a/C:\\Users\\fabio\\AppData\\Local\\Temp/engine.go.antes"
++++ b/engine.go
+@@ -1575,6 +1575,7 @@ type relayEndpoint struct {
+ 	relayName   string
+ 	tokenID     uint32
+ 	authTokenID uint32
++	c2rRTT      uint32
+ 	isFNA       bool
+ 	addresses   []relayAddress
+ }
+@@ -1714,6 +1715,7 @@ func parseRelayData(node *waBinary.Node) *relayData {
+ 			relayName:   child.AttrGetter().String("relay_name"),
+ 			tokenID:     attrUint(child, "token_id"),
+ 			authTokenID: attrUint(child, "auth_token_id"),
++			c2rRTT:      attrUint(child, "c2r_rtt"),
+ 			isFNA:       child.AttrGetter().String("is_fna") == "1",
+ 			addresses: []relayAddress{{
+ 				ipv4: fmt.Sprintf("%d.%d.%d.%d", ab[0], ab[1], ab[2], ab[3]),
+@@ -1736,6 +1738,12 @@ func getMediaRelayEndpoint(rd *relayData, inbound bool) *relayEndpoint {
+ 				return e
+ 			}
+ 		}
++		// TeleZapp (meowcaller#40): oferta sem nenhum <te2 is_fna="1">. O relay "proprio"
++		// (auth_token_id != 0) nao repassa o uplink de quem chamou; o do chamador e um dos
++		// outros, e o de menor c2r_rtt e o mais provavel. Heuristica de poucos casos.
++		if e := relayDoChamadorSemFNA(rd); e != nil {
++			return e
++		}
+ 	}
+ 	for i := range rd.endpoints {
+ 		if e := &rd.endpoints[i]; !e.isFNA && e.authTokenID != 0 {
+@@ -1753,6 +1761,37 @@ func getMediaRelayEndpoint(rd *relayData, inbound bool) *relayEndpoint {
+ 	return nil
+ }
+ 
++// relayDoChamadorSemFNA devolve, numa oferta recebida sem endpoint is_fna, o endpoint nao proprio
++// (auth_token_id == 0) de menor c2r_rtt, ou nil se nao ha candidato. TeleZapp (meowcaller#40).
++func relayDoChamadorSemFNA(rd *relayData) *relayEndpoint {
++	for i := range rd.endpoints {
++		if rd.endpoints[i].isFNA {
++			return nil
++		}
++	}
++	var melhor *relayEndpoint
++	for i := range rd.endpoints {
++		e := &rd.endpoints[i]
++		if e.authTokenID != 0 || e.c2rRTT == 0 {
++			continue
++		}
++		if melhor == nil || e.c2rRTT < melhor.c2rRTT {
++			melhor = e
++		}
++	}
++	return melhor
++}
++
++// descreverRelaysDaOferta resume os endpoints da oferta para o log (nunca enderecos nem tokens):
++// nome, is_fna, token_id, auth_token_id e c2r_rtt. TeleZapp.
++func descreverRelaysDaOferta(rd *relayData) string {
++	partes := make([]string, 0, len(rd.endpoints))
++	for _, e := range rd.endpoints {
++		partes = append(partes, fmt.Sprintf("%s(fna=%v tok=%d auth=%d rtt=%d)", e.relayName, e.isFNA, e.tokenID, e.authTokenID, e.c2rRTT))
++	}
++	return strings.Join(partes, " ")
++}
++
+ // logControleDaChamada registra o nome e os atributos (nunca o conteudo) de uma mensagem de
+ // controle da chamada. Os atributos de chave de criptografia nao existem aqui: a chave viaja
+ // cifrada nos filhos, que nao sao lidos. TeleZapp.
+
+diff --git "a/C:\\Users\\fabio\\AppData\\Local\\Temp/engine_media.go.antes" b/engine_media.go
+index 210cc2b..5e75c1d 100644
+--- "a/C:\\Users\\fabio\\AppData\\Local\\Temp/engine_media.go.antes"
++++ b/engine_media.go
+@@ -119,6 +119,8 @@ func (e *engine) connectAndAllocate(ctx context.Context, rd *relayData, streamSs
+ 	}
+ 	addr := &net.UDPAddr{IP: net.ParseIP(ep.addresses[0].ipv4), Port: int(ep.addresses[0].port)}
+ 	log.Info().Str("relay_name", ep.relayName).Str("addr", addr.String()).Msg("connecting media transport to relay")
++	log.Info().Bool("inbound", inbound).Str("ofertas", descreverRelaysDaOferta(rd)).Str("escolhido", ep.relayName).
++		Bool("sem_fna_heuristica", inbound && relayDoChamadorSemFNA(rd) == ep).Msg("TeleZapp: relays da oferta e o escolhido para a midia")
+ 	e.c.diag.Emit("relay", map[string]any{
+ 		"event": "endpoint", "relay_name": ep.relayName,
+ 		"ipv4": ep.addresses[0].ipv4, "port": ep.addresses[0].port, "token_id": ep.tokenID,
