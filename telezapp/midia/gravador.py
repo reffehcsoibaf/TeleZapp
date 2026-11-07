@@ -40,17 +40,17 @@ class ErroGravacao(Exception):
 
 @dataclass
 class Gravacao:
-    caminho: str            # Ogg/Opus (mono) ou MP3 (estereo), pronto
+    caminho: str            # Ogg/Opus (mono) ou M4A/AAC (estereo), pronto
     segundos: float
     pico_db: float
-    # Em estereo o arquivo e MP3 e vai como audio comum, nao como mensagem de
-    # voz: e o unico formato estereo que o iPhone toca (testado: Opus e AAC
-    # estereo, como voz, nao tocam).
+    # Estereo: M4A (AAC-LC, 48 kHz, moov no comeco). O iPhone nao toca
+    # mensagem de voz estereo em Opus, mas toca em AAC, com o controle de
+    # velocidade (o mesmo que o WinZapp faz). O Telegram so trata como
+    # mensagem de voz o Opus: la o estereo vai como audio comum.
     estereo: bool = False
 
-    @property
-    def como_voz(self):
-        return not self.estereo
+    def como_voz_em(self, servico):
+        return not self.estereo or servico == "whatsapp"
 
     @property
     def silenciosa(self):
@@ -398,10 +398,10 @@ class Gravador:
             raise ErroGravacao("Nada foi gravado.")
         estereo = self._canais == 2
         destino = self._wav[:-4].replace("gravando-", "voz-") + (
-            ".mp3" if estereo else ".ogg")
+            ".m4a" if estereo else ".ogg")
         try:
             if estereo:
-                converter_mp3(self._wav, destino, self.kbps_usados)
+                converter_m4a(self._wav, destino, self.kbps_usados)
             else:
                 converter(self._wav, destino, self.kbps_usados)
         except Exception as e:
@@ -490,32 +490,26 @@ class Gravador:
             self._pronto.set()
 
 
-TAXAS_DO_MP3 = {8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100,
-                48000}
-
-
-def converter_mp3(wav, destino, kbps=None):
-    """WAV estereo -> MP3 de dois canais, para enviar como audio comum: o
-    iPhone nao toca mensagem de voz estereo (Opus ou AAC), so o MP3. Sem
-    etiquetas nem capitulos (o iPhone nao baixa audio com eles)."""
+def converter_m4a(wav, destino, kbps=None):
+    """WAV estereo -> M4A (AAC-LC, 48 kHz, dois canais, `moov` no comeco) para
+    enviar como mensagem de voz: e o formato estereo que o iPhone toca como
+    voz, com o controle de velocidade. O `moov` no comeco (faststart) deixa o
+    iPhone comecar a tocar sem baixar tudo. Sem etiquetas nem capitulos."""
     import av
     import numpy as np
     import soundfile as sf
     with sf.SoundFile(wav) as entrada:
-        taxa = entrada.samplerate
-        if taxa not in TAXAS_DO_MP3:
-            taxa = TAXA              # a taxa rara vira 48 kHz
-        saida = av.open(destino, "w", format="mp3")
+        saida = av.open(destino, "w", format="ipod",
+                        options={"movflags": "+faststart"})
         try:
-            fluxo = saida.add_stream("libmp3lame", rate=taxa,
-                                     layout="stereo")
+            fluxo = saida.add_stream("aac", rate=TAXA, layout="stereo")
             fluxo.bit_rate = int((kbps or 128) * 1000)
             fonte = entrada.samplerate
             for bloco in entrada.blocks(blocksize=fonte, dtype="float32"):
                 if bloco.ndim == 1:
                     bloco = estereo_de(bloco)
-                if fonte != taxa:
-                    n = int(round(len(bloco) * taxa / float(fonte)))
+                if fonte != TAXA:
+                    n = int(round(len(bloco) * TAXA / float(fonte)))
                     xs = np.linspace(0, len(bloco) - 1, n)
                     bloco = np.stack([np.interp(xs, np.arange(len(bloco)),
                                                 bloco[:, i])
@@ -523,7 +517,7 @@ def converter_mp3(wav, destino, kbps=None):
                 quadro = av.AudioFrame.from_ndarray(
                     np.ascontiguousarray(bloco[:, :2].T.astype("float32")),
                     format="fltp", layout="stereo")
-                quadro.sample_rate = taxa
+                quadro.sample_rate = TAXA
                 for pacote in fluxo.encode(quadro):
                     saida.mux(pacote)
             for pacote in fluxo.encode(None):

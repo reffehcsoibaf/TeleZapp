@@ -4549,3 +4549,25 @@ def test_todos_digitado_vai_como_all(amb):
     msg = amb.p._mensagem_de_texto("120363@g.us", "@todos bom dia", "")
     ext = msg.extendedTextMessage
     assert ext.text == "@all bom dia" and ext.contextInfo.nonJIDMentions == 1
+
+
+def test_enviar_voz_estereo_m4a_vai_como_ptt_com_mime_mp4(amb, dados_midia,
+                                                          tmp_path):
+    """Voz estereo: M4A (AAC) como mensagem de voz, mimetype audio/mp4 (o
+    iPhone toca e mostra o controle de velocidade)."""
+    import numpy as np
+    import soundfile as sf
+    from telezapp.midia import envio, gravador
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    cid = "5551988887777@s.whatsapp.net"
+    wav = tmp_path / "e.wav"
+    sf.write(str(wav), np.zeros((48000, 2), dtype="float32"), 48000)
+    m4a = tmp_path / "voz-2.m4a"
+    gravador.converter_m4a(str(wav), str(m4a))
+    voz = envio.preparar(str(m4a), voz=True, temporario=True)
+    amb.p.enviar_arquivo(cid, voz)
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.mensagem.tipo == m.VOZ
+    audio = amb.c.enviadas[-1][1].audioMessage
+    assert audio.PTT and audio.mimetype == "audio/mp4"

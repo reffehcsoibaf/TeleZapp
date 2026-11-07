@@ -17,6 +17,8 @@ from telezapp.nucleo import modelos as m
 LIMITE_BYTES = 2000 * 1048576      # 2 GB: o teto dos dois servicos
 EXT_FOTO_ENVIAVEL = {".jpg", ".jpeg", ".png", ".webp"}
 MIME_VOZ = "audio/ogg; codecs=opus"
+# mensagem de voz estereo: M4A (AAC-LC); o iPhone nao toca Opus estereo
+MIME_VOZ_ESTEREO = "audio/mp4"
 # o WhatsApp so toca como audio AAC, AMR, MP3, MP4 e Ogg/Opus: um WAV ou FLAC
 # enviado como audio aparece como enviado e nao chega ao destino
 EXT_AUDIO_QUE_O_WHATSAPP_NAO_TOCA = {".wav", ".flac"}
@@ -104,6 +106,20 @@ def _duracao_audio(caminho):
     return 0
 
 
+def _duracao_m4a(caminho):
+    """Segundos de um M4A (0 se nao der para ler)."""
+    try:
+        return max(1, int(round(mp4.ler(caminho).segundos)))
+    except (mp4.NaoEMp4, OSError, ValueError):
+        pass
+    try:
+        import av
+        with av.open(caminho) as arq:
+            return max(1, int(round(float(arq.duration) / 1e6)))
+    except Exception:
+        return 0
+
+
 EXT_OGG = {".ogg", ".opus", ".oga"}
 
 
@@ -158,6 +174,12 @@ def _preparar(caminho, voz, temporario, como_documento):
         return Anexo(caminho, m.DOCUMENTO, nome, _mime(caminho), tamanho,
                      temporario=temporario)
 
+    if voz and ext == ".m4a":
+        segundos = _duracao_m4a(caminho)
+        if not segundos:
+            raise ErroEnvio("A gravação não está em M4A (AAC).")
+        return Anexo(caminho, m.VOZ, nome, MIME_VOZ_ESTEREO, tamanho,
+                     segundos, temporario=temporario)
     if voz:
         try:
             segundos = int(round(opus.duracao_arquivo(caminho)))
