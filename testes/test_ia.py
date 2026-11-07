@@ -20,7 +20,8 @@ def pedido(provedor, midia, modelo="m", perfil="medio"):
 
 def test_cada_tarefa_tem_provedores_e_so_o_gemini_recebe_o_video_inteiro():
     assert {c for c, _ in cat.provedores_da_tarefa("video")} == {
-        "gemini", "openai", "claude", "groq", "mistral", "openrouter"}
+        "gemini", "openai", "claude", "groq", "mistral", "openrouter",
+        }
     assert [c for c in cat.PROVEDORES if cat.video_nativo(c)] == ["gemini"]
     assert {c for c, _ in cat.provedores_da_tarefa("audio")} == {
         "gemini", "openai", "groq", "mistral"}
@@ -474,7 +475,7 @@ def test_video_por_quadros_e_fala_a_parte(tmp_path):
 
 
 # ------------------------------------------------ redigir, resumir, corrigir
-def test_todo_provedor_faz_a_tarefa_de_texto():
+def test_todo_provedor_com_chave_faz_a_tarefa_de_texto():
     assert {c for c, _ in cat.provedores_da_tarefa("texto")} == set(
         cat.PROVEDORES)
     assert "texto" in cat.TAREFAS and cat.NOMES_DE_TAREFA["texto"]
@@ -559,3 +560,46 @@ def test_tom_e_traducao_entram_na_instrucao():
     assert "direct" in instr
     assert {t for t, _ in cat.TONS} >= {"natural", "formal"}
     assert ("English", "Inglês") in cat.IDIOMAS
+
+
+
+def test_meta_ai_nao_e_provedor_de_ia():
+    """A Meta AI exige aceitar termos pelo celular: fora das tarefas."""
+    assert "meta_ai" not in cat.PROVEDORES
+    assert not cat.aceita("meta_ai", "audio")
+
+
+
+
+def test_meta_primeiro_responde_sem_chamar_os_provedores(tmp_path):
+    from telezapp.nucleo.ia import servico
+    img = tmp_path / "foto.png"
+    img.write_bytes(servico.PNG_MINIMO)
+    chamadas = []
+    r = servico.executar_em_ordem(
+        "imagem", str(img), ["gemini"], lambda p: "chave", {}, "medio",
+        enviar=lambda pedido: chamadas.append(pedido) or {},
+        meta=lambda midia, inst, perg: " Um gato. ")
+    assert r.texto == "Um gato." and r.provedor == "Meta AI"
+    assert chamadas == []
+
+
+def test_meta_que_falha_cai_nos_provedores_da_ordem(tmp_path, monkeypatch):
+    from telezapp.nucleo.ia import servico
+    img = tmp_path / "foto.png"
+    img.write_bytes(servico.PNG_MINIMO)
+
+    def meta(midia, inst, perg):
+        raise servico.ErroIA("provedor", "pede os termos")
+    monkeypatch.setattr(servico, "executar",
+                        lambda *a, **k: servico.Resultado(
+                            "Um cachorro.", "Google Gemini", "m", False))
+    r = servico.executar_em_ordem("imagem", str(img), ["gemini"],
+                                  lambda p: "chave", {}, "medio", meta=meta)
+    assert r.texto == "Um cachorro."
+
+
+def test_meta_primeiro_e_opcao_desmarcada_por_padrao():
+    from telezapp import config
+    o = [o for o in config.OPCOES if o.chave == "ia_meta_primeiro"]
+    assert o and o[0].padrao is False

@@ -219,3 +219,92 @@ def test_sem_microfone_a_mistura_grava_so_o_som_e_avisa(tmp_path):
     time.sleep(0.3)
     r = g.parar()
     assert r.segundos > 0.2
+
+
+# ------------------------------------------- estereo, qualidade e volume
+class FonteEstereoFalsa(FonteFalsa):
+    """Dois canais diferentes: 440 Hz na esquerda, 660 Hz na direita."""
+    canais = 2
+
+    def ler(self):
+        mono = super().ler()
+        n = len(mono)
+        t = (np.arange(n) + self._n - n) / self.taxa
+        direita = (self.amplitude * np.sin(2 * np.pi * 660 * t)).astype(
+            "float32")
+        return np.stack([mono, direita], axis=1)
+
+
+def test_estereo_vira_mp3_e_vai_como_audio_nao_como_voz(tmp_path):
+    """Relato do responsavel (06/11/2026): gravacao em estereo nao tocava no
+    iPhone. O WhatsApp do iPhone so toca mensagem de voz (Opus) em mono; em
+    estereo o arquivo e M4A (AAC) e deve ir como audio comum."""
+    import av
+    fonte = FonteEstereoFalsa(taxa=44100)
+    g = Gravador(str(tmp_path), fabrica_fonte=lambda: fonte,
+                 kbps=(64, 128))
+    g.iniciar()
+    time.sleep(0.6)
+    r = g.parar()
+    assert r.estereo and r.caminho.endswith(".mp3")
+    assert g.canais == 2 and g.kbps_usados == 128
+    with av.open(r.caminho) as arq:
+        s = arq.streams.audio[0]
+        assert s.codec_context.name.startswith("mp3") and s.channels == 2
+        assert s.rate == 44100
+        assert 0.3 < float(arq.duration) / 1e6 < 1.3
+    # preparado como audio comum (nao voz) para o envio
+    a = envio.preparar(r.caminho, voz=False, temporario=True)
+    assert a.tipo == "audio" and a.mime == "audio/mpeg"
+    assert [p.suffix for p in tmp_path.iterdir()] == [".mp3"]
+
+
+def test_mono_continua_ogg_opus_de_mensagem_de_voz(tmp_path):
+    g, _, r = gravar_por(tmp_path, 0.4)
+    assert not r.estereo and r.caminho.endswith(".ogg")
+
+
+def test_volume_da_gravacao_aumenta_e_limita(tmp_path):
+    fonte = FonteFalsa(amplitude=0.2)
+    g = Gravador(str(tmp_path), fabrica_fonte=lambda: fonte, ganho=2.0)
+    g.iniciar()
+    time.sleep(0.4)
+    r = g.parar()
+    assert -9 < r.pico_db < -6            # 0,4 de pico: o dobro de 0,2
+    alto = gravador.aplicar_ganho(np.array([0.8, -0.8], "float32"), 4.0)
+    assert list(alto) == [1.0, -1.0]
+
+
+def test_kbps_viram_o_nivel_de_compressao_medido():
+    n = gravador.nivel_de_compressao
+    assert n(256, 1) == pytest.approx(0.0, abs=0.01)
+    assert n(64, 1) == pytest.approx(0.768, abs=0.01)
+    assert n(128, 2) == n(64, 1)          # o total e dividido pelos canais
+    assert n(32, 2) == pytest.approx(0.96, abs=0.01)
+
+
+def test_qualidade_muda_o_tamanho_do_arquivo(tmp_path):
+    taxa = 48000
+    t = np.arange(taxa * 4) / taxa
+    rng = np.random.default_rng(1)
+    sinal = (0.3 * np.sin(2 * np.pi * 300 * t) +
+             0.1 * rng.standard_normal(len(t))).astype("float32")
+    wav = str(tmp_path / "a.wav")
+    sf.write(wav, sinal, taxa)
+    tamanhos = {}
+    for kbps in (32, 64, 256):
+        destino = str(tmp_path / ("%d.ogg" % kbps))
+        gravador.converter(wav, destino, kbps)
+        tamanhos[kbps] = (tmp_path / ("%d.ogg" % kbps)).stat().st_size
+        medido = tamanhos[kbps] * 8 / 4 / 1000
+        assert kbps * 0.6 < medido < kbps * 1.4, (kbps, medido)
+    assert tamanhos[32] < tamanhos[64] < tamanhos[256]
+
+
+def test_misturar_microfone_no_som_em_estereo():
+    som = np.zeros((4, 2), "float32")
+    mic = np.array([0.1, 0.2, 0.3, 0.4], "float32")
+    r = gravador.misturar(som, mic)
+    assert r.shape == (4, 2)
+    assert np.allclose(r[:, 0], mic) and np.allclose(r[:, 1], mic)
+

@@ -405,31 +405,65 @@ def oferecer_backup(pai, cfg_dados, copiar_banco=None, pasta_inicial=""):
     return True
 
 
+def perguntar_apagar_dados(pai=None):
+    """True: apagar os dados; False: guardar; None: desistiu."""
+    r = wx.MessageBox(
+        "Apagar também os seus dados (contas, sessões, conversas, mídias e "
+        "configurações, em %s)? Isso não pode ser desfeito.\n\nSim apaga; "
+        "Não guarda os dados para uma instalação futura." %
+        ins.dados_do_computador(), NOME,
+        wx.YES_NO | wx.CANCEL | wx.NO_DEFAULT | wx.ICON_WARNING, pai)
+    if r == wx.CANCEL:
+        return None
+    return r == wx.YES
+
+
+def outro_aberto():
+    """True se o TeleZapp esta aberto (talvez escondido na bandeja)."""
+    unico = wx.SingleInstanceChecker("TeleZapp-" + os.environ.get(
+        "USERNAME", ""), config.pasta())
+    return unico.IsAnotherRunning()
+
+
 def desinstalar_pelo_aplicativo():
     """`TeleZapp.exe --desinstalar` (Aplicativos instalados). Devolve o codigo
     de saida."""
     app = wx.App(False)       # precisa continuar referenciado
+    try:
+        config.configurar_registro()
+    except Exception:
+        pass
+    log.info("desinstalação por Aplicativos instalados, versão %s, em %s",
+             VERSAO, ins.pasta_do_programa())
     if ins.modo() != "instalado":
         wx.MessageBox("Esta cópia do %s não é uma instalação." % NOME, NOME,
                       wx.OK | wx.ICON_INFORMATION)
         return 1
-    if wx.MessageBox("Desinstalar o %s? As suas contas e conversas ficam "
-                     "guardadas, a menos que você peça para apagá-las na "
-                     "próxima pergunta." % NOME, NOME,
+    while outro_aberto():
+        # aberto, ele seguraria a pasta do programa e a dos dados
+        if wx.MessageBox(
+                "O %s está aberto, talvez escondido na área de notificação. "
+                "Feche-o pelo menu Sair e escolha OK para continuar." % NOME,
+                NOME, wx.OK | wx.CANCEL | wx.ICON_WARNING) != wx.OK:
+            return 0
+    if wx.MessageBox("Desinstalar o %s? Antes, você pode fazer um backup e "
+                     "escolher se apaga os seus dados." % NOME, NOME,
                      wx.YES_NO | wx.ICON_QUESTION) != wx.YES:
         return 0
     if not oferecer_backup(None, config.Config().dados):
         return 0
-    apagar = wx.MessageBox(
-        "Apagar também os seus dados (contas, sessões, conversas e mídias)? "
-        "Isso não pode ser desfeito.", NOME,
-        wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING) == wx.YES
+    apagar = perguntar_apagar_dados()
+    if apagar is None:
+        return 0
     try:
         ins.desinstalar(apagar_dados=apagar)
     except Exception as e:
+        log.exception("não consegui desinstalar")
         wx.MessageBox("Não consegui desinstalar: %s" % e, NOME,
                       wx.OK | wx.ICON_ERROR)
         return 1
-    wx.MessageBox("O %s foi desinstalado." % NOME, NOME,
+    wx.MessageBox("O %s foi desinstalado. O que ainda estava em uso é "
+                  "apagado em seguida." % NOME, NOME,
                   wx.OK | wx.ICON_INFORMATION)
+    logging.shutdown()        # solta o arquivo de log para a pasta sair
     return 0

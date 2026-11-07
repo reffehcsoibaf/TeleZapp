@@ -33,6 +33,7 @@ class DialogoBusca(wx.Dialog):
         self.ao_ver = ao_ver or (lambda achado: None)
         self.falar = falar or (lambda texto: None)
         self.achados = []
+        self.textos = []
         self.escolhido = None           # o Achado aberto, ao fechar com OK
         self.criterios = None           # os criterios da ultima busca
         self.grupos = []                # (caixa, [controles])
@@ -127,7 +128,11 @@ class DialogoBusca(wx.Dialog):
         self.b_fechar = wx.Button(self, wx.ID_CANCEL, "&Fechar")
         self.rotulo_resultados = wx.StaticText(
             self, label="Resultados: ainda não buscou.")
-        self.lista = wx.ListBox(self, name="Resultados da busca")
+        self.lista = wx.ListBox(self, name="Resultados da busca (Control "
+                                "Espaço marca; Control C copia)")
+        # selecao multipla: Control Espaco marca, Control C copia os marcados
+        from telezapp.interface.marcas import Marcas
+        self.marcas = Marcas(self.lista, falar, chave=id, dono=self)
 
         lay = wx.BoxSizer(wx.VERTICAL)
         lay.Add(painel, 3, wx.EXPAND)
@@ -330,7 +335,8 @@ class DialogoBusca(wx.Dialog):
         for campo in (self.seg_min, self.seg_max, self.tam_min, self.tam_max):
             campo.Enable(False)
         self.achados = []
-        self.lista.Set([])
+        self.marcas.desfazer(falar=False)
+        self.lista.Set(self.marcas.rotulos([], []))
         self.b_ver.Enable(False)
         self.rotulo_resultados.SetLabel("Resultados: ainda não buscou.")
         self.falar("Critérios limpos.")
@@ -351,8 +357,10 @@ class DialogoBusca(wx.Dialog):
             return
         self.achados = busca.buscar(self.banco, c)
         nomes = dict(self.contas)
-        self.lista.Set([a.texto_da_lista(lambda cid: nomes.get(cid, cid))
-                        for a in self.achados])
+        self.marcas.desfazer(falar=False)
+        self.textos = [a.texto_da_lista(lambda cid: nomes.get(cid, cid))
+                       for a in self.achados]
+        self.lista.Set(self.marcas.rotulos(self.textos, self.achados))
         n = len(self.achados)
         if n == 0:
             texto = "Nada encontrado."
@@ -371,7 +379,28 @@ class DialogoBusca(wx.Dialog):
         i = self.lista.GetSelection()
         return self.achados[i] if 0 <= i < len(self.achados) else None
 
+    def copiar_marcados(self):
+        """Copia, uma por linha, os resultados marcados (ou o em foco)."""
+        escolhidos = self.marcas.escolhidos()
+        if not escolhidos:
+            return
+        por_objeto = {id(a): t for a, t in zip(self.achados, self.textos)}
+        linhas = [por_objeto.get(id(a), "") for a in escolhidos]
+        if wx.TheClipboard.Open():
+            try:
+                wx.TheClipboard.SetData(wx.TextDataObject("\r\n".join(linhas)))
+            finally:
+                wx.TheClipboard.Close()
+            self.falar("1 resultado copiado." if len(linhas) == 1
+                       else "%d resultados copiados." % len(linhas))
+
     def _tecla_da_lista(self, evt):
+        if self.marcas.tecla(evt):
+            return
+        if evt.GetKeyCode() == ord("C") and evt.ControlDown() and not (
+                evt.AltDown() or evt.ShiftDown()):
+            self.copiar_marcados()
+            return
         if evt.GetKeyCode() in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) and \
                 not (evt.AltDown() or evt.ControlDown() or evt.ShiftDown()):
             self._ver()

@@ -189,12 +189,15 @@ def test_gerador_cria_sons_curtos_estereo_que_comecam_logo(tmp_path):
         assert np.abs(dados[-40:]).max() < 0.01, c               # termina mudo
 
 
-def test_tom_de_chamando_do_pacote_padrao_dura_um_segundo_e_meio(monkeypatch):
+def test_tom_de_chamando_do_pacote_padrao_e_o_do_telefone_1s_de_tom(monkeypatch):
     tons = []
     monkeypatch.setattr(fala, "winsound", types.SimpleNamespace(
         Beep=lambda freq, ms: tons.append((freq, ms))))
     fala._tocar("chamando")
-    assert tons == [(425, 1500)]
+    assert tons == [(425, 1000)]
+    # repete a cada 5 s (1 s de tom, 4 s de silencio); o toque, a cada 3 s
+    assert fala.INTERVALO_TOM_DE_CHAMADA_MS == 5000
+    assert fala.INTERVALO_TOQUE_MS == 3000
     tons.clear()
     fala._tocar("toque")                      # o toque de quem recebe segue
     assert len(tons) == 4 and all(ms == 120 for _, ms in tons)

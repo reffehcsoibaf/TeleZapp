@@ -48,7 +48,7 @@ class VistaVideo(wx.Panel):
 class DialogoChamada(wx.Dialog):
     def __init__(self, pai, chamada, acoes, falar, microfones=(), saidas=(),
                  microfone="", saida="", ao_fechar=None, cameras=(),
-                 camera=""):
+                 camera="", ao_ocultar=None):
         """acoes: dict com atender(), recusar(), desligar(), silenciar(bool),
         tempo(), trocar(microfone, saida), camera() e trocar_camera(nome).
         `falar(texto)` fala sem interromper o que ja esta sendo dito."""
@@ -57,6 +57,7 @@ class DialogoChamada(wx.Dialog):
         self.acoes = acoes
         self.falar = falar
         self._ao_fechar_cb = ao_fechar
+        self._ao_ocultar = ao_ocultar
         self.situacao = wx.StaticText(self, label="", name="Situação")
         self.b_atender = wx.Button(self, wx.ID_ANY, "&Atender")
         self.b_silenciar = wx.Button(self, wx.ID_ANY, "&Silenciar o microfone")
@@ -65,6 +66,8 @@ class DialogoChamada(wx.Dialog):
         self.b_desligar = wx.Button(self, wx.ID_ANY, "&Desligar")
         self.b_fechar = wx.Button(self, wx.ID_ANY, "&Fechar")
         self.b_camera = wx.Button(self, wx.ID_ANY, "Ligar a &câmera")
+        # esconde a janela sem encerrar a chamada (Ctrl+Shift+O traz de volta)
+        self.b_ocultar = wx.Button(self, wx.ID_ANY, "&Ocultar a janela")
         self.botoes = {
             ch.ATENDER: self.b_atender, ch.SILENCIAR: self.b_silenciar,
             ch.CAMERA: self.b_camera,
@@ -99,7 +102,7 @@ class DialogoChamada(wx.Dialog):
         lay.Add(self.situacao, 0, wx.ALL, 12)
         self.lay = lay
         linha = wx.BoxSizer(wx.HORIZONTAL)
-        for b in self.botoes.values():
+        for b in list(self.botoes.values()) + [self.b_ocultar]:
             linha.Add(b, 0, wx.RIGHT, 6)
         lay.Add(linha, 0, wx.ALL, 12)
         for rotulo, escolha in ((self.rot_mic, self.escolha_mic),
@@ -118,6 +121,7 @@ class DialogoChamada(wx.Dialog):
         self.b_silenciar.Bind(wx.EVT_BUTTON, self._silenciar)
         self.b_tempo.Bind(wx.EVT_BUTTON, lambda e: acoes["tempo"]())
         self.b_fechar.Bind(wx.EVT_BUTTON, lambda e: self.fechar())
+        self.b_ocultar.Bind(wx.EVT_BUTTON, lambda e: self.ocultar())
         self.escolha_mic.Bind(wx.EVT_CHOICE, self._dispositivo)
         self.escolha_saida.Bind(wx.EVT_CHOICE, self._dispositivo)
         self.Bind(wx.EVT_CHAR_HOOK, self._tecla)
@@ -134,6 +138,7 @@ class DialogoChamada(wx.Dialog):
         visiveis = set(a.botoes)
         for nome, b in self.botoes.items():
             b.Show(nome in visiveis)
+        self.b_ocultar.Show(bool(c.ativa))
         self.b_silenciar.SetLabel(ch.rotulo_silenciar(c.mudo))
         self.b_camera.SetLabel(ch.rotulo_camera(c))
         mostrar_camera = c.suporta_video and bool(self.cameras) and \
@@ -197,9 +202,16 @@ class DialogoChamada(wx.Dialog):
         elif e in (ch.CHAMANDO, ch.CONECTANDO):
             self.acoes["desligar"]()
         elif e == ch.EM_CHAMADA:
-            self.falar("Em chamada. Para encerrar, use o botão Desligar.")
+            self.ocultar()          # Esc esconde; encerrar e so pelo Desligar
         else:
             self.fechar()
+
+    def ocultar(self):
+        """Esconde a janela com a chamada em andamento."""
+        if self._ao_ocultar is not None:
+            self._ao_ocultar(self)
+        else:
+            self.Hide()
 
     def _ao_fechar(self, _evt):
         if self.chamada.ativa:

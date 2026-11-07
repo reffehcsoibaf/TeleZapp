@@ -1909,3 +1909,55 @@ def test_falha_do_servidor_do_telegram_tem_explicacao():
     assert "falha nos servidores" in tg._motivo(generico)
     assert tg._motivo(ValueError("outra coisa")) == \
         "erro do Telegram (ValueError)"
+
+
+def _provedor_de_topicos(resposta=None, erro=None):
+    import asyncio
+    from telethon.tl import types as T
+    pedidos = []
+
+    class Cliente:
+        async def __call__(self, req):
+            pedidos.append(req)
+            if erro:
+                raise erro
+            return resposta
+
+    p = tg.ProvedorTelegram.__new__(tg.ProvedorTelegram)
+    p.cliente = Cliente()
+    atualizou = []
+
+    async def entidade(chat):
+        return "peer-" + chat
+
+    async def atualizar():
+        atualizou.append(True)
+    p._entidade = entidade
+    p._atualizar_conversas = atualizar
+    return p, pedidos, atualizou, asyncio, T
+
+
+def test_criar_topico_manda_o_pedido_e_devolve_o_id_do_topico():
+    from telethon.tl import types as T
+    acao = T.MessageActionTopicCreate(title="Avisos", icon_color=0)
+    resposta = types.SimpleNamespace(updates=[
+        types.SimpleNamespace(message=types.SimpleNamespace(id=77,
+                                                            action=acao))])
+    p, pedidos, atualizou, asyncio, _ = _provedor_de_topicos(resposta)
+    assert p.PODE_CRIAR_TOPICO
+    ok, texto, cid = asyncio.run(p._criar_topico("-100555#1", "  Avisos  "))
+    assert ok and cid == "-100555#77"
+    assert type(pedidos[0]).__name__ == "CreateForumTopicRequest"
+    assert pedidos[0].title == "Avisos" and pedidos[0].peer == "peer--100555"
+    assert atualizou == [True]
+
+
+def test_criar_topico_sem_permissao_explica_e_titulo_vazio_nao_pede():
+    from telethon import errors
+    p, pedidos, _, asyncio, _ = _provedor_de_topicos(
+        erro=errors.ChatAdminRequiredError(None))
+    ok, texto, cid = asyncio.run(p._criar_topico("-100555", "Avisos"))
+    assert not ok and "permissão" in texto and cid == ""
+    pedidos.clear()
+    ok, texto, _ = asyncio.run(p._criar_topico("-100555", "   "))
+    assert not ok and "nome" in texto and pedidos == []

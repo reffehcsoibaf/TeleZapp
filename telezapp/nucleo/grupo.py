@@ -48,7 +48,16 @@ def extensao_da_imagem(dados):
 
 def pasta_das_fotos():
     """Onde ficam, so por um tempo, as fotos de perfil que a pessoa pediu
-    para ver ou descrever."""
+    para ver ou descrever. Na pasta temporaria do TeleZapp, nao no %temp% do
+    Windows (onde ficavam ate a 2026.11.03.0, ver pasta_antiga_das_fotos):
+    nada do programa fica espalhado pelo sistema."""
+    from telezapp import config
+    return os.path.join(config.pasta_temporaria(), "fotos")
+
+
+def pasta_antiga_das_fotos():
+    """Onde as versoes ate a 2026.11.03.0 guardavam as fotos; a
+    desinstalacao a apaga."""
     return os.path.join(tempfile.gettempdir(), "TeleZapp-fotos")
 
 

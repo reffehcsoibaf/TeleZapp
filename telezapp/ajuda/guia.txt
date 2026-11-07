@@ -283,6 +283,8 @@ Ctrl+ponto insere um emoji na mensagem e também no texto da janela Novo status,
 
 A busca também acha por sinônimos e termos equivalentes: "kkk" ou "gargalhada" acham 😂 e 🤣, "aniversário" acha 🎂 e "tchau" acha 👋. Não precisa de acento, o plural vale, e várias palavras estreitam o resultado, como rosto chorando. Quem casa com o nome vem antes de quem casa só por um sinônimo.
 
+Na janela de emojis, a caixa Categoria mostra um grupo de cada vez (Carinhas e emoções, Pessoas e corpo, Animais e natureza, Comidas e bebidas, Viagens e lugares, Atividades, Objetos, Símbolos e Bandeiras), e dá para buscar dentro da categoria. Ao escrever, Ctrl+Espaço marca vários emojis, Espaço marca e desmarca, Ctrl+A marca todos, Esc desfaz, e Enter insere todos os marcados na ordem em que foram marcados.
+
 Nos emojis que têm tons de pele, como joinha, mão e pessoas, as setas para a esquerda e para a direita trocam o item pelo tom anterior ou pelo próximo: primeiro o emoji sem tom, depois do mais claro ao mais escuro, e de volta ao começo. O leitor de tela diz qual tom ficou. Isso vale na lista curta de reações e na busca de emojis, e Enter escolhe o que estiver na tela.
 
 # Corretor ortográfico

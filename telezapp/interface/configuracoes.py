@@ -162,6 +162,7 @@ class DialogoConfiguracoes(wx.Dialog):
                 self._criar_botao_grupo(categoria, grupo)
         if categoria == "Interface" and not self.modelo.busca.strip():
             self._criar_botao_lista_conversas()
+            self._criar_botao_aviso_nova()
         if categoria == "Mensagens" and not self.modelo.busca.strip():
             self._criar_botao_lista_mensagens()
         if categoria == "Privacidade" and self.privacidade is not None \
@@ -195,9 +196,12 @@ class DialogoConfiguracoes(wx.Dialog):
     def _ir_para(self, destino, indice=None):
         """Janelas das listas abrem por cima dos resultados, para seguir
         neles depois; o resto fica numa categoria, e a busca sai da frente."""
-        if destino.tipo in ("lista_conversas", "lista_mensagens"):
+        if destino.tipo in ("lista_conversas", "lista_mensagens",
+                            "aviso_nova"):
             if destino.tipo == "lista_conversas":
                 self._abrir_lista_conversas(destino.alvo)
+            elif destino.tipo == "aviso_nova":
+                self._abrir_aviso_nova(destino.alvo)
             else:
                 self._abrir_lista_mensagens(destino.alvo)
             b = self.controles.get("destino:%s" % indice)
@@ -598,6 +602,31 @@ class DialogoConfiguracoes(wx.Dialog):
         self.lay_painel.Add(b, 0, wx.ALL, 8)
         self.controles["lista_conversas"] = b
 
+    def _criar_botao_aviso_nova(self):
+        """Botao que abre o que o aviso falado de mensagem nova diz."""
+        b = wx.Button(self.painel, label="Aviso falado de mensagem nova")
+        b.Bind(wx.EVT_BUTTON, lambda e: self._abrir_aviso_nova())
+        self.lay_painel.Add(b, 0, wx.ALL, 8)
+        self.controles["aviso_nova"] = b
+
+    def _abrir_aviso_nova(self, foco=None):
+        from telezapp.interface.lista_conversas import DialogoListaConversas
+        from telezapp.nucleo import aviso_de_nova as an
+        dlg = DialogoListaConversas(
+            self, self.modelo.aviso_em_uso, self.modelo.aviso_definir,
+            self.fala, nucleo=an, titulo="Aviso falado de mensagem nova",
+            explicacao="O que o TeleZapp fala quando chega uma mensagem "
+                       "nova, e em que ordem. Pelo menos um item fica "
+                       "ativado.",
+            foco=foco)
+        try:
+            dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+        b = self.controles.get("aviso_nova")
+        if b:
+            b.SetFocus()
+
     def _criar_botao_lista_mensagens(self):
         """Botao que abre o que a lista de mensagens mostra e a ordem."""
         b = wx.Button(self.painel, label="Lista de mensagens")
@@ -717,6 +746,7 @@ class DialogoConfiguracoes(wx.Dialog):
                 pass         # a categoria foi trocada e os botoes sumiram
 
     def _configurar_provedor_ia(self, provedor):
+        from telezapp.nucleo.ia import catalogo
         dlg = DialogoProvedorIA(self, provedor, self.ia, self.fala,
                                 self.modelo.ia_modelos.get(
                                     provedor, self.ia.modelo(provedor)),
@@ -1021,9 +1051,26 @@ class DialogoConfiguracoes(wx.Dialog):
             if alvo is not None:
                 alvo[1].SetFocus()
             return False
+        self._confirmar_numeros()
         self.modelo.aplicar(self.aplicador)
         self._depois_de_aplicar_ia()
         return True
+
+    def _confirmar_numeros(self):
+        """O campo de numero do Windows so confirma o que foi digitado ao
+        perder o foco: Enter (OK) direto no campo levava o valor de antes.
+        Aqui o texto digitado vale."""
+        tipo = getattr(wx, "SpinCtrl", None)
+        for chave, c in getattr(self, "controles", {}).items():
+            if tipo is None or not isinstance(c, tipo):
+                continue
+            texto = c.GetTextValue() if hasattr(c, "GetTextValue") else ""
+            try:
+                valor = int(str(texto).strip()) if str(texto).strip() \
+                    else c.GetValue()
+            except ValueError:
+                valor = c.GetValue()
+            self.modelo.definir(chave, valor)
 
     def _ao_ok(self, evento):
         if self._aplicar():

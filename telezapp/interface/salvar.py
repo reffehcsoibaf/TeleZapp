@@ -22,6 +22,25 @@ def guarda_direto():
                 and _cfg.get("salvar_direto"))
 
 
+def escolher_pasta(pai, titulo, pasta=""):
+    """Pasta onde gravar varios arquivos, ou None se a pessoa cancelar. Com
+    "salvar direto" ligado, a pasta das configuracoes, sem perguntar."""
+    if guarda_direto():
+        try:
+            import os
+            os.makedirs(pasta_definida(), exist_ok=True)
+            return pasta_definida()
+        except OSError:
+            pass
+    dlg = wx.DirDialog(pai, titulo, defaultPath=pasta_definida() or pasta)
+    try:
+        if dlg.ShowModal() != wx.ID_OK:
+            return None
+        return dlg.GetPath()
+    finally:
+        dlg.Destroy()
+
+
 def escolher(pai, titulo, nome, wildcard="", pasta=""):
     """Caminho onde gravar, ou None se a pessoa cancelar. `pasta`: onde a janela
     comeca quando nao ha pasta definida nas configuracoes."""

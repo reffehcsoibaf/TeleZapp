@@ -165,6 +165,10 @@ class GerenciadorContatos(wx.Dialog):
         lay.Add(self.trazer, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
         self.lista = wx.ListBox(self, name="Contatos", size=(520, 260))
         lay.Add(self.lista, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        # selecao multipla (Control Espaco): Remover vale para os marcados
+        from telezapp.interface.marcas import Marcas
+        self.marcas = Marcas(self.lista, falar, chave=lambda c: (c[0], c[1]),
+                             dono=self)
         linha = wx.BoxSizer(wx.HORIZONTAL)
         self.botoes = {}
         for chave, rotulo in (("add", "&Adicionar..."),
@@ -188,6 +192,7 @@ class GerenciadorContatos(wx.Dialog):
         self.ocultar.Bind(wx.EVT_CHECKBOX, self._ao_ocultar)
         self.trazer.Bind(wx.EVT_CHECKBOX, self._ao_trazer)
         self.busca.Bind(wx.EVT_CHAR_HOOK, self._tecla_na_busca)
+        self.Bind(wx.EVT_CHAR_HOOK, self._tecla)
         self._preencher()
         self.busca.SetFocus()
 
@@ -198,6 +203,10 @@ class GerenciadorContatos(wx.Dialog):
     def _chave_selecionada(self):
         c = self._selecionado()
         return (c[0], c[1]) if c else None
+
+    def _tecla(self, evt):
+        if not self.marcas.tecla(evt):
+            evt.Skip()
 
     def _tecla_na_busca(self, evt):
         """Seta para baixo na busca leva ao primeiro contato achado."""
@@ -229,9 +238,9 @@ class GerenciadorContatos(wx.Dialog):
                 entre_contas=True)
         self._itens = [c for c in todos
                        if not busca or self._casa_busca(c, busca)]
-        self.lista.Set([
+        self.lista.Set(self.marcas.rotulos([
             rotulo_contato(c, m.SERVICOS.get(por_id[c[0]][0], ""),
-                           por_id[c[0]][1]) for c in self._itens]
+                           por_id[c[0]][1]) for c in self._itens], self._itens)
             or ["Nenhum contato encontrado" if todos
                 else "Nenhum contato ainda"])
         if self._itens:
@@ -281,17 +290,22 @@ class GerenciadorContatos(wx.Dialog):
                      self.falar)
 
     def _remover(self):
-        c = self._selecionado()
-        if c is None:
+        escolhidos = self.marcas.escolhidos()
+        if not escolhidos:
             return
+        quem = escolhidos[0][2] if len(escolhidos) == 1 else             "os %d contatos marcados" % len(escolhidos)
         if wx.MessageBox("Remover %s dos contatos do TeleZapp? A pessoa "
                          "continua na conta; só o nome dado aqui some."
-                         % c[2], "Contatos",
+                         % quem, "Contatos",
                          wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
                          self) != wx.YES:
             return
-        self.banco.remover_contato(c[0], c[1])
-        self._mudou(None, "Contato %s removido." % c[2])
+        for c in escolhidos:
+            self.banco.remover_contato(c[0], c[1])
+        self.marcas.esquecer(escolhidos)
+        self._mudou(None, "Contato %s removido." % escolhidos[0][2]
+                    if len(escolhidos) == 1 else
+                    "%d contatos removidos." % len(escolhidos))
 
     def _ao_trazer(self, _evt=None):
         """Marcar guarda a escolha e traz os contatos agora, para a pessoa

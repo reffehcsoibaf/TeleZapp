@@ -46,8 +46,19 @@ TIPOS_DE_MENSAGEM = (
     (m.DOCUMENTO, "Documento"),
     (m.FIGURINHA, "Figurinha"),
     ("enquete", "Enquete"),
+    ("chamada", "Chamada"),
     (m.OUTRO, "Outros"),
 )
+
+# A linha que uma chamada deixa na conversa (nucleo.chamadas) e uma mensagem
+# do tipo "outro" que comeca assim
+PREFIXOS_DE_CHAMADA = ("Chamada de ", "Chamada agendada", "Conversa de voz")
+
+
+def e_chamada(x):
+    """A mensagem e o registro de uma chamada (perdida, recusada, atendida...)."""
+    return x.tipo == m.OUTRO and (x.texto or "").startswith(
+        PREFIXOS_DE_CHAMADA)
 
 # Caracteristicas da mensagem (todas as marcadas precisam valer)
 CARACTERISTICAS = (
@@ -266,6 +277,8 @@ def _tipo_confere(tipos, x, extras):
     if not tipos:
         return True
     if "enquete" in tipos and extras["enquete"]:
+        return True
+    if "chamada" in tipos and e_chamada(x):
         return True
     return x.tipo in tipos
 

@@ -86,8 +86,11 @@ HERDA = {"nova_aberta": "nova", "nova_grupo": "nova",
          "voto_enviado": "enviada"}
 
 
-# O tom de "chamando" (eu liguei e espero atender), em milissegundos
-DURACAO_TOM_DE_CHAMADA_MS = 1500
+# O tom de "chamando" (eu liguei e espero atender) e o de controle de chamada
+# do telefone brasileiro: 425 Hz, 1 s ligado e 4 s desligado (5 s no total)
+DURACAO_TOM_DE_CHAMADA_MS = 1000
+INTERVALO_TOM_DE_CHAMADA_MS = 5000
+INTERVALO_TOQUE_MS = 3000        # o toque de quem recebe repete mais rapido
 
 
 def tom_padrao(tipo):
@@ -239,8 +242,8 @@ NOTAS = {
     "conectado": ((523, 110), (659, 110), (784, 110), (1047, 110)),
     # chamada recebida: dois pares de notas, repetido pela janela
     "toque": ((784, 120), (988, 120), (784, 120), (988, 120)),
-    # chamada que eu fiz: um tom grave e longo, como o de espera de um
-    # telefone (a janela repete a cada 3 s)
+    # chamada que eu fiz: o tom de espera do telefone (a janela repete a
+    # cada 5 s: 1 s de tom e 4 s de silencio)
     "chamando": ((425, DURACAO_TOM_DE_CHAMADA_MS),),
     # conta que caiu: dois tons descendo, mais graves que o de chamada
     "desconectada": ((440, 150), (330, 150)),

@@ -71,6 +71,7 @@ EMBRULHOS = ("deviceSentMessage", "ephemeralMessage", "viewOnceMessage",
 # Campos sem conteudo para a pessoa (chaves, controle): a mensagem e ignorada
 SO_CONTROLE = {"senderKeyDistributionMessage", "messageContextInfo",
                "protocolMessage", "reactionMessage", "pollUpdateMessage",
+               "encReactionMessage",
                "keepInChatMessage", "pinInChatMessage",
                # cabecalho de album (as fotos e videos chegam um a um),
                # aviso de grupo mencionado em status e aviso de historico
@@ -130,6 +131,30 @@ LIMITE_AUTOMATICAS = 40
 RODADAS_AUTOMATICAS = 20
 # Status de mensagem no historico (WebMessageInfo.Status)
 HIST_ENTREGUE, HIST_LIDA, HIST_OUVIDA = 3, 4, 5
+# A Meta AI: o endereco conhecido (o numero muda a cada conversa)
+META_AI = "867051314767696@bot"
+CONVERSAS_META_AI = (META_AI, "13135550002@s.whatsapp.net")
+
+
+def e_aviso_de_termos(texto):
+    """O aviso da Meta AI pedindo para aceitar os termos pelo celular (nao
+    e resposta). O texto exato varia: procura os sinais."""
+    t = (texto or "").lower()
+    pede = any(p in t for p in ("termos", "terms", "términos"))
+    celular = any(p in t for p in ("celular", "telefone", "phone",
+                                   "teléfono", "aparelho", "dispositivo",
+                                   "aplicativo", "app"))
+    aceitar = any(p in t for p in ("aceit", "accept", "acept", "concord",
+                                   "continuar", "continue"))
+    return pede and (celular or aceitar) and len(t) < 600
+
+
+def e_conversa_de_robo_meta(cid):
+    """A Meta AI usa um numero que muda a cada conversa: qualquer endereco
+    @bot (ou o telefone antigo) e ela."""
+    cid = cid or ""
+    return cid.endswith("@bot") or cid in CONVERSAS_META_AI
+
 # Conversas que nao sao conversas para a pessoa
 IGNORAR_CONVERSAS = ("status@broadcast",)
 # Cada pessoa com status vira uma "conversa" de tipo status, `status:<jid>`,
@@ -153,7 +178,6 @@ OPCOES_HISTORICO = {
     "tudo": ("Todo o histórico (pode demorar e ocupar bastante espaço)",
              3650),
 }
-
 
 
 @contextlib.contextmanager
@@ -2969,6 +2993,23 @@ class ProvedorWhatsApp(Provedor):
             log.exception("não consegui apagar a mensagem no WhatsApp")
             return False
 
+    def apagar_lote(self, mensagens, para_todos=False):
+        """Muitas de uma vez: as minhas "para todos" uma a uma; o resto "so
+        para mim" pela fila com pausas da limpeza (apagar_varias_mensagens),
+        que espera quando o WhatsApp pede calma, em vez de um envio por
+        mensagem ao mesmo tempo."""
+        revogar = [x for x in mensagens if para_todos and x.minha]
+        para_mim = [(x.conversa_id, x.id, bool(x.minha), x.data, x.remetente)
+                    for x in mensagens if not (para_todos and x.minha)
+                    and not x.id.startswith("local-")]
+        aceitas, pendentes, recusadas = super().apagar_lote(revogar, True)
+        if para_mim:
+            if self.cliente is None or not self._conectada:
+                recusadas += len(para_mim)
+            else:
+                pendentes += self.apagar_varias_mensagens(para_mim)
+        return aceitas, pendentes, recusadas
+
     def _apagar_para_mim(self, conversa_id, mensagem_id, minha, data,
                          remetente):
         from neonize.proto.Neonize_pb2 import PatchInfo
@@ -4068,6 +4109,8 @@ class ProvedorWhatsApp(Provedor):
                 if len(self._vistas) > MAX_GUARDADAS:
                     self._vistas = set(list(self._vistas)[-MAX_GUARDADAS // 2:])
             self._enriquecer_mencoes(msg)
+            if e_conversa_de_robo_meta(cid) and not msg.minha:
+                self._resposta_da_meta_ai(msg, cid)
             if grupo and not msg.minha and (
                     self._cita_voce(msg) or self._responde_a_mim(msg)):
                 m.atualizar_extras(msg, citou_voce=True)
@@ -4217,21 +4260,11 @@ class ProvedorWhatsApp(Provedor):
         presentes = set(campos(interna))
         if "reactionMessage" in presentes:
             r = interna.reactionMessage
-            alvo = r.key.ID
-            quem_id = jid_texto(origem.Sender)
-            quem = "Você" if origem.IsFromMe else self._nome_contato(
-                origem.Sender, info.Pushname or nome_verificado(info))
-            emoji = r.text
-
-            def aplicar(x):
-                reacoes = [y for y in m.extras_de(x)["reacoes"]
-                           if y.get("id") != quem_id]
-                if emoji:
-                    reacoes.append({"id": quem_id, "quem": quem,
-                                    "emoji": emoji,
-                                    "minha": bool(origem.IsFromMe)})
-                m.atualizar_extras(x, reacoes=reacoes)
-            self._alterar(cid, alvo, aplicar, "reacao", quem, emoji)
+            self._aplicar_reacao(cid, r.key.ID, r.text, info, origem)
+            return True
+        if "encReactionMessage" in presentes:
+            self._tratar_reacao_cifrada(
+                interna.encReactionMessage, cid, info, origem)
             return True
         if "pinInChatMessage" in presentes:
             p = interna.pinInChatMessage
@@ -4340,6 +4373,53 @@ class ProvedorWhatsApp(Provedor):
                                 "emoji": emoji, "minha": True})
             m.atualizar_extras(x, reacoes=reacoes)
         self._alterar(cid, msg.id, aplicar, "reacao", "Você", emoji)
+
+    def _aplicar_reacao(self, cid, alvo, emoji, info, origem):
+        """A reacao de quem enviou o evento a mensagem `alvo` ("" tira)."""
+        quem_id = jid_texto(origem.Sender)
+        quem = "Você" if origem.IsFromMe else self._nome_contato(
+            origem.Sender, info.Pushname or nome_verificado(info))
+
+        def aplicar(x):
+            reacoes = [y for y in m.extras_de(x)["reacoes"]
+                       if y.get("id") != quem_id]
+            if emoji:
+                reacoes.append({"id": quem_id, "quem": quem,
+                                "emoji": emoji,
+                                "minha": bool(origem.IsFromMe)})
+            m.atualizar_extras(x, reacoes=reacoes)
+        self._alterar(cid, alvo, aplicar, "reacao", quem, emoji)
+
+    def _tratar_reacao_cifrada(self, enc, cid, info, origem):
+        """Reacao cifrada (comunidades): decifra com o segredo da mensagem
+        original, que a sessao guarda, e aplica como uma reacao comum. Sem o
+        segredo (mensagem de antes do pareamento) ou se falhar, so ignora."""
+        from telezapp.nucleo import reacao_cifrada as rc
+        from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import ReactionMessage
+        chave = enc.targetMessageKey
+        alvo = chave.ID
+        segredo, guardado = rc.segredo_guardado(
+            caminho_sessao(self.pasta_sessoes, self.conta.id), alvo)
+        if segredo is None:
+            log.info("reação cifrada sem o segredo da mensagem (%s)", alvo)
+            return
+        autores = []
+        if chave.fromMe:
+            autores.append(jid_texto(origem.Sender))
+        autores += [chave.participant, chave.remoteJID, guardado]
+        reagiu = [jid_texto(origem.Sender), jid_texto(origem.SenderAlt)]
+        claro = rc.decifrar(segredo, alvo, [a for a in autores if a],
+                            [q for q in reagiu if q], enc.encIV,
+                            enc.encPayload)
+        if claro is None:
+            log.info("reação cifrada que não consegui decifrar (%s)", alvo)
+            return
+        try:
+            r = ReactionMessage.FromString(claro)
+        except Exception:
+            log.info("reação cifrada ilegível (%s)", alvo)
+            return
+        self._aplicar_reacao(cid, alvo, r.text, info, origem)
 
     def _tratar_voto(self, evento, cid, info, origem, interna):
         """Voto numa enquete: o WhatsApp o manda cifrado com o segredo da
@@ -5264,6 +5344,87 @@ class ProvedorWhatsApp(Provedor):
         return msg
 
     # ------------------------------------------------------ arquivos
+    def endereco_meta_ai(self):
+        """Endereco da conversa com a Meta AI: a ultima de que veio
+        resposta, senao uma conversa @bot ja existente (a mais recente),
+        senao o endereco conhecido. O numero muda a cada conversa."""
+        achado = getattr(self, "_meta_ai_jid", None)
+        if achado:
+            return achado
+        with self._trava:
+            robos = [c for c in self._conversas.values()
+                     if (c.id or "").endswith("@bot")]
+        if robos:
+            return max(robos, key=lambda c: c.data).id
+        return META_AI
+
+    def _resposta_da_meta_ai(self, msg, cid=None):
+        """Uma resposta da Meta AI chegou: guarda o endereco desta vez e
+        entrega a quem esta esperando (perguntar_meta_ai)."""
+        if cid and cid.endswith("@bot"):
+            self._meta_ai_jid = cid
+        espera = getattr(self, "_espera_meta_ai", None)
+        if espera is None:
+            return
+        texto = m.texto_visivel(msg) or msg.texto or ""
+        with self._trava:
+            espera["respostas"].append(texto)
+            espera["ultima"] = time.monotonic()
+        espera["chegou"].set()
+
+    def perguntar_meta_ai(self, caminho, voz, pergunta, tempo=120,
+                          calma=4.0):
+        """Manda o arquivo (e a pergunta) a conversa com a Meta AI e espera
+        a resposta. Bloqueia: chamar fora da janela. A resposta pode vir em
+        partes; depois da primeira, espera `calma` segundos sem nada novo.
+        Devolve o texto, ou levanta RuntimeError com o motivo."""
+        from telezapp.midia import envio
+        if self.cliente is None or not self._conectada:
+            raise RuntimeError("a conta do WhatsApp não está conectada")
+        if getattr(self, "_espera_meta_ai", None) is not None:
+            raise RuntimeError("já há um pedido à Meta AI em andamento")
+        espera = {"respostas": [], "ultima": 0.0,
+                  "chegou": threading.Event()}
+        self._espera_meta_ai = espera
+        try:
+            anexo = envio.preparar(caminho, voz=voz, temporario=False)
+            destino = self.endereco_meta_ai()
+            # a voz nao tem legenda: a pergunta vai numa mensagem depois
+            self._enviar_arquivo(destino, anexo, "" if voz else pergunta,
+                                 "", None)
+            if voz:
+                self._enviar_texto_agora(destino, pergunta)
+            log.info("pedido enviado à Meta AI (%s)", anexo.tipo)
+            if not espera["chegou"].wait(tempo):
+                raise RuntimeError("a Meta AI não respondeu a tempo")
+            while time.monotonic() - espera["ultima"] < calma:
+                time.sleep(0.5)
+            with self._trava:
+                partes = [t for t in espera["respostas"] if t.strip()]
+            log.info("resposta da Meta AI: %d partes", len(partes))
+            for t in partes:
+                log.info("texto da Meta AI: %s", t[:300])
+            if any(e_aviso_de_termos(t) for t in partes):
+                raise RuntimeError(
+                    "a Meta AI pede que você aceite os termos de uso pelo "
+                    "celular")
+            return "\n\n".join(partes)
+        finally:
+            self._espera_meta_ai = None
+
+    def _enviar_texto_agora(self, conversa_id, texto):
+        """Envia texto e so volta depois do envio (a fila normal e
+        assincrona)."""
+        feito = threading.Event()
+
+        def enviar():
+            try:
+                self._enviar(conversa_id, texto, "")
+            finally:
+                feito.set()
+        self._fila.put(enviar)
+        feito.wait(60)
+
     def enviar_arquivo(self, conversa_id, anexo, legenda="", resposta_a="",
                        mencoes=None):
         # thread propria: um upload grande nao pode travar a fila de texto

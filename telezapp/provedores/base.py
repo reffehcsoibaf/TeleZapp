@@ -9,7 +9,10 @@ Para pedir algo a pessoa durante o login (telefone, codigo, senha), o
 provedor chama `pedir(etapa, erro)`, que bloqueia so a thread do provedor e
 devolve o texto digitado, ou None se a pessoa cancelar.
 """
+import logging
 from abc import ABC, abstractmethod
+
+log = logging.getLogger("telezapp.provedor")
 
 # Etapas de login que o provedor pode pedir a interface
 PEDIR_TELEFONE = "telefone"
@@ -91,6 +94,25 @@ class Provedor(ABC):
         """Apaga a mensagem na conta do servico (para todos, ou so para
         mim). True se o servico foi avisado."""
         return False
+
+    def apagar_lote(self, mensagens, para_todos=False):
+        """Apaga muitas mensagens na conta, uma por vez (os servicos que
+        sabem apagar em lote trocam isto). `para_todos` vale so para as
+        minhas. Devolve (aceitas, pendentes, recusadas). Roda fora da janela."""
+        aceitas = pendentes = recusadas = 0
+        for x in mensagens:
+            try:
+                ok = self.apagar_mensagem(x, para_todos and x.minha)
+            except Exception:
+                log.exception("erro ao apagar uma mensagem na conta")
+                ok = False
+            if ok == APAGAR_PENDENTE:
+                pendentes += 1
+            elif ok:
+                aceitas += 1
+            else:
+                recusadas += 1
+        return aceitas, pendentes, recusadas
 
     # True nos servicos em que a mensagem favorita tambem vale na conta
     FAVORITA_NA_CONTA = False
@@ -372,6 +394,14 @@ class Provedor(ABC):
         (onde o servico tem). Espera o servico (thread propria). Devolve
         (ok, texto, conversa_id); o id e "" quando nao se sabe."""
         return False, "Esta conta não cria grupos, canais ou comunidades.", ""
+
+    # True nos servicos com grupos divididos em topicos (Telegram)
+    PODE_CRIAR_TOPICO = False
+
+    def criar_topico(self, conversa_id, titulo):
+        """Cria um topico no grupo com topicos. Espera o servico. Devolve
+        (ok, texto, conversa_id_do_topico)."""
+        return False, "Esta conta não cria tópicos.", ""
 
     def previa_do_convite(self, msg, acao):
         """Dados do grupo ou canal de um convite (acao do tipo "entrar"):
