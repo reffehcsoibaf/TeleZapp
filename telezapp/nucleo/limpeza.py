@@ -159,6 +159,26 @@ def apagar_mensagem(banco, conta_id, conversa_id, mensagem_id):
     return liberados
 
 
+def apagar_mensagens(banco, chaves):
+    """Como apagar_mensagem, para muitas de uma vez: os arquivos uma a um,
+    o banco numa transacao so (uma por mensagem levava minutos com mil e
+    tantas, com a janela parada). Devolve os bytes liberados."""
+    chaves = [tuple(k) for k in chaves]
+    liberados = 0
+    for chave in chaves:
+        reg = banco.midia(*chave)
+        if reg:
+            try:
+                liberados += _tamanho(*reg)
+                _apagar_arquivo(reg[0])
+            except OSError:
+                pass
+    if chaves:
+        banco.apagar_mensagens(chaves)
+        banco.registrar_limpeza(chaves, "mensagem")
+    return liberados
+
+
 def apagar_midia_da_mensagem(banco, conta_id, conversa_id, mensagem_id):
     """O autor apagou a mensagem para todos: o arquivo baixado sai daqui, mas
     a mensagem fica (marcada como apagada). Devolve os bytes liberados."""

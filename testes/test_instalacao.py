@@ -282,18 +282,60 @@ def test_desinstalar_tira_atalhos_registro_e_pasta(mundo, monkeypatch):
     monkeypatch.setattr(ins, "_caminhos_dos_atalhos",
                         lambda: (str(lnk), str(tmp / "nao-existe.lnk")))
     monkeypatch.setattr(ins, "_desregistrar", lambda: chamadas.append(1))
+    # nada de mexer no registro de verdade de quem roda os testes
+    from telezapp.nucleo import protocolos
+    monkeypatch.setattr(protocolos, "remover", lambda: True)
+    monkeypatch.setattr(ins, "_tirar_da_inicializacao", lambda p: None)
+    # o resto que o programa espalha: sobras de atualizacao ao lado da pasta,
+    # fotos de grupo no %temp% (versoes antigas), pasta do instalador
+    import tempfile
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp / "temp"))
+    espalhadas = [prog + ".atualizacao", prog + ".antiga", prog + ".nova",
+                  str(tmp / "temp" / "TeleZapp-fotos"),
+                  str(tmp / "LOCALAPPDATA" / "TeleZapp-instalador")]
+    for p in espalhadas:
+        os.makedirs(os.path.join(p, "sub"))
+    with open(prog + ".nao-atualizou", "w") as f:
+        f.write("falhou")
+    vizinho = tmp / "portatil" / "OutroPrograma"
+    vizinho.mkdir()
     dados = tmp / "dados-a-apagar"
     dados.mkdir()
     (dados / "a.db").write_text("x")
     with open(os.path.join(prog, "instalado.txt"), "w") as f:
         f.write("sim")
+    # um arquivo aberto (o log do programa que ainda esta fechando) segura a
+    # pasta de dados: ela sai depois, junto com a do programa
+    aberto = open(str(dados / "telezapp.log"), "w")
     ins.desinstalar(prog, apagar_dados=True, dados=str(dados))
-    assert not lnk.exists() and chamadas == [1] and not dados.exists()
-    for _ in range(100):                  # a pasta sai em segundo plano
-        if not os.path.exists(prog):
+    assert not lnk.exists() and chamadas == [1]
+    assert dados.exists()
+    aberto.close()
+    for _ in range(150):                  # as pastas saem em segundo plano
+        if not os.path.exists(prog) and not dados.exists():
             break
         time.sleep(0.2)
-    assert not os.path.exists(prog)
+    assert not os.path.exists(prog) and not dados.exists()
+    assert not [p for p in espalhadas if os.path.exists(p)]
+    assert not os.path.exists(prog + ".nao-atualizou")
+    assert vizinho.exists()                     # o que nao e dele fica
+
+
+def test_reiniciar_espera_o_processo_antigo(monkeypatch):
+    """A abertura nova espera a antiga terminar; sem isso ela a achava ainda
+    aberta (na bandeja) e so a mostrava de novo, sem o backup restaurado."""
+    import subprocess
+    import time
+    if os.name != "nt":
+        pytest.skip("Windows")
+    from telezapp import __main__ as m
+    filho = subprocess.Popen([sys.executable, "-c",
+                              "import time; time.sleep(1.5)"])
+    inicio = time.monotonic()
+    m.esperar_processo(["--esperar-pid", str(filho.pid)])
+    assert time.monotonic() - inicio >= 1 and filho.poll() is not None
+    m.esperar_processo([])                       # sem o argumento: segue
+    m.esperar_processo(["--esperar-pid", "x"])   # argumento ruim: segue
 
 
 # ----------------------------------------------------- barra de progresso

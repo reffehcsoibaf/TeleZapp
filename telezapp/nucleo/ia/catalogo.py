@@ -131,9 +131,9 @@ def cadeia_de_modelos(provedor, modelos):
     """Os modelos a tentar, em ordem: so o escolhido pela pessoa, ou (modo
     automatico, campo vazio) o padrao e depois os alternativos."""
     escolhido = (modelos or {}).get(provedor, "").strip()
+    p = PROVEDORES[provedor]
     if escolhido:
         return [escolhido]
-    p = PROVEDORES[provedor]
     return [p.modelo, *p.alternativos]
 
 

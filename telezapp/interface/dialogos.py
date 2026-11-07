@@ -245,7 +245,7 @@ def mostrar_texto(pai, titulo, texto, rotulo, links=(), botoes=(),
 
 
 def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
-               microfone=None):
+               microfone=None, ao_terminar=None, ocultar=None):
     """Deixa gravar, pausar, ouvir e devolve a Gravacao que a pessoa quer
     enviar, ou None se ela descartar.
 
@@ -256,7 +256,13 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
     (usado tambem em "Gravar de novo"). `microfone` (True ou False) mostra a
     caixa "Gravar também o microfone" com esse valor inicial, que liga e
     desliga o microfone ate durante a gravacao (so na gravacao do som do
-    computador); None = sem caixa."""
+    computador); None = sem caixa.
+
+    Sem `ao_terminar` a janela e modal (espera e devolve a Gravacao). Com
+    `ao_terminar(gravacao_ou_None)`, ela abre sem travar o programa e volta
+    na hora com a janela; o resultado chega por essa funcao. Nesse modo,
+    `ocultar(dlg)` liga o botao "Ocultar a janela": a gravacao segue, e a
+    pessoa usa o TeleZapp ate trazer a janela de volta."""
     dlg = wx.Dialog(pai, title=titulo, style=wx.DEFAULT_DIALOG_STYLE)
     explicacao = wx.StaticText(dlg, label=instrucao)
     explicacao.Wrap(420)
@@ -273,6 +279,9 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
     b_ouvir = wx.Button(dlg, wx.ID_ANY, "&Ouvir")
     b_refazer = wx.Button(dlg, wx.ID_ANY, "Gravar de &novo")
     b_descartar = wx.Button(dlg, wx.ID_CANCEL, "&Descartar")
+    b_ocultar = None
+    if ao_terminar is not None and ocultar is not None:
+        b_ocultar = wx.Button(dlg, wx.ID_ANY, "Ocul&tar a janela")
     lay = wx.BoxSizer(wx.VERTICAL)
     lay.Add(explicacao, 0, wx.ALL, 10)
     if c_microfone is not None:
@@ -280,14 +289,33 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
     lay.Add(situacao, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
     linha = wx.BoxSizer(wx.HORIZONTAL)
     for b in (b_gravar, b_parar, b_pausar, b_enviar, b_ouvir, b_refazer,
-              b_descartar):
-        linha.Add(b, 0, wx.RIGHT, 6)
+              b_descartar, b_ocultar):
+        if b is not None:
+            linha.Add(b, 0, wx.RIGHT, 6)
     lay.Add(linha, 0, wx.ALL, 10)
     dlg.SetSizer(lay)
     dlg.SetEscapeId(b_descartar.GetId())
     temporizador = wx.Timer(dlg)
     est = {"gravador": None, "gravacao": None, "player": None,
-           "fase": "inicio"}
+           "fase": "inicio", "feito": False}
+
+    def encerrar(ok):
+        """Termina: no modo modal fecha o dialogo; sem travar, limpa, fecha e
+        entrega o resultado a `ao_terminar`."""
+        if ao_terminar is None:
+            dlg.EndModal(wx.ID_OK if ok else wx.ID_CANCEL)
+            return
+        if est["feito"]:
+            return
+        est["feito"] = True
+        temporizador.Stop()
+        fechar_player()
+        resultado = est["gravacao"] if ok else None
+        if est["gravador"] is not None and \
+                est["fase"] in ("gravando", "pausada"):
+            est["gravador"].cancelar()
+        dlg.Destroy()
+        ao_terminar(resultado)
 
     def mostrar(fase):
         """fase: inicio, gravando, pausada ou pronta."""
@@ -384,7 +412,7 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
             est["gravador"] = None
             bipe("erro")
             wx.MessageBox(str(e), titulo, wx.OK | wx.ICON_WARNING, dlg)
-            dlg.EndModal(wx.ID_CANCEL)
+            encerrar(False)
             return
         bipe("gravacao_parada")
         r = est["gravacao"]
@@ -440,12 +468,12 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
         elif est["gravacao"] is not None:
             _apagar(est["gravacao"].caminho)
             est["gravacao"] = None
-        dlg.EndModal(wx.ID_CANCEL)
+        encerrar(False)
 
     def enviar(_e=None):
         temporizador.Stop()
         fechar_player()
-        dlg.EndModal(wx.ID_OK)
+        encerrar(True)
 
     if c_microfone is not None:
         c_microfone.Bind(wx.EVT_CHECKBOX, microfone_mudou)
@@ -456,9 +484,17 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
     b_refazer.Bind(wx.EVT_BUTTON, refazer)
     b_descartar.Bind(wx.EVT_BUTTON, descartar)
     b_enviar.Bind(wx.EVT_BUTTON, enviar)
+    if b_ocultar is not None:
+        b_ocultar.Bind(wx.EVT_BUTTON, lambda e: ocultar(dlg))
     dlg.Bind(wx.EVT_TIMER, quando_o_tempo_passa)
     dlg.Bind(wx.EVT_CLOSE, descartar)
     resultado = None
+    if ao_terminar is not None:
+        mostrar("inicio")
+        dlg.CentreOnParent()
+        dlg.Show()
+        dlg.Raise()
+        return dlg
     try:
         mostrar("inicio")
         dlg.CentreOnParent()

@@ -1928,6 +1928,47 @@ class ProvedorTelegram(Provedor):
         return True, aviso.strip(), (
             id_do_topico(cid, TOPICO_GERAL) if grupo and topicos else cid)
 
+    PODE_CRIAR_TOPICO = True
+
+    def criar_topico(self, conversa_id, titulo):
+        return self._sincrono(self._criar_topico(conversa_id, titulo),
+                              60) or (False, "O Telegram não respondeu.", "")
+
+    async def _criar_topico(self, conversa_id, titulo):
+        from telethon.tl import functions, types
+        chat = separar_topico(conversa_id)[0]
+        titulo = " ".join((titulo or "").split())[:128]
+        if not titulo:
+            return False, "Escreva o nome do tópico.", ""
+        try:
+            ent = await self._entidade(chat)
+            r = await self.cliente(functions.messages.CreateForumTopicRequest(
+                peer=ent, title=titulo))
+        except Exception as e:
+            nome = type(e).__name__
+            texto = str(e).upper()
+            log.warning("criar tópico falhou: %s", nome)
+            if "ADMIN" in texto or "RIGHT" in texto or "FORBIDDEN" in texto:
+                return False, ("Você não tem permissão para criar tópicos "
+                               "neste grupo."), ""
+            if "FORUM" in texto or "TOPIC" in texto:
+                return False, ("Este grupo não está dividido em tópicos, ou "
+                               "o Telegram recusou o nome."), ""
+            return False, "O Telegram não deixou criar o tópico (%s)." % nome, ""
+        topico = None
+        for u in getattr(r, "updates", []):
+            msg = getattr(u, "message", None)
+            if isinstance(getattr(msg, "action", None),
+                          types.MessageActionTopicCreate):
+                topico = msg.id
+                break
+        try:
+            await self._atualizar_conversas()
+        except Exception:
+            log.info("lista de conversas nao atualizou depois do topico")
+        log.info("tópico criado pelo TeleZapp")
+        return True, "", (id_do_topico(chat, topico) if topico else "")
+
     @staticmethod
     def _canal_silenciado(cheio):
         try:
@@ -3321,6 +3362,35 @@ class ProvedorTelegram(Provedor):
     async def _apagar_mensagem(self, mensagem, ident, para_todos):
         ent = await self._entidade(mensagem.conversa_id)
         await self.cliente.delete_messages(ent, [ident], revoke=para_todos)
+
+    def apagar_lote(self, mensagens, para_todos=False):
+        """Um pedido por conversa com todos os ids (o Telethon os manda de
+        100 em 100), em vez de um por mensagem. Num canal em que a conta nao
+        administra, o Telegram recusa: a mensagem sai so daqui."""
+        por_conversa = {}
+        recusadas = 0
+        for x in mensagens:
+            try:
+                ident = int(x.id)
+            except ValueError:
+                recusadas += 1
+                continue
+            por_conversa.setdefault(
+                (x.conversa_id, bool(para_todos and x.minha)), []).append(
+                    ident)
+        for (conversa, revogar), ids in por_conversa.items():
+            self._agendar(self._apagar_lote(conversa, ids, revogar))
+        return sum(len(v) for v in por_conversa.values()), 0, recusadas
+
+    async def _apagar_lote(self, conversa, ids, revogar):
+        try:
+            ent = await self._entidade(conversa)
+            await self.cliente.delete_messages(ent, ids, revoke=revogar)
+            log.info("apagadas na conta: %d mensagens de uma conversa",
+                     len(ids))
+        except Exception as e:
+            log.warning("o Telegram não apagou %d mensagens: %s", len(ids),
+                        e.__class__.__name__)
 
     async def _ao_conteudo_lido(self, upd):
         """Voz ou audio tocado em outro aparelho: passa a constar ouvido."""

@@ -76,3 +76,42 @@ def test_janela_fechada_ignora_avancos_e_cancelar_chama_uma_vez():
     sem = nova()                         # sem cancelamento possivel
     sem.cancelar()
     assert not sem.cancelada
+
+
+def test_atualizar_depois_que_a_janela_dona_fechou_nao_quebra():
+    """Log de 05/11/2026: 'wrapped C/C++ object of type Gauge has been
+    deleted' quando os detalhes fechavam com o download em andamento."""
+    class Morta:
+        def SetValue(self, v):
+            raise RuntimeError("wrapped C/C++ object has been deleted")
+    j = nova()
+    j.barra = Morta()
+    j.atualizar(50)                  # nao levanta
+    assert j._fechada and j.aberta is False
+    j.atualizar(60)                  # e as proximas sao ignoradas
+
+
+def test_ocultar_pede_a_janela_principal_ou_so_esconde(monkeypatch):
+    from telezapp.interface import progresso as prog
+    escondida = []
+
+    class Principal:
+        def _ocultar_janela(self, janela, nome):
+            escondida.append((janela, nome))
+
+    class App:
+        def __init__(self, topo):
+            self.topo = topo
+
+        def GetTopWindow(self):
+            return self.topo
+    j = nova()
+    j.GetTitle = lambda: "Baixando as mídias"
+    j.Hide = lambda: escondida.append("hide")
+    monkeypatch.setattr(prog.wx, "GetApp", lambda: App(Principal()),
+                        raising=False)
+    j.ocultar()
+    assert escondida == [(j, "Baixando as mídias")]
+    monkeypatch.setattr(prog.wx, "GetApp", lambda: None, raising=False)
+    j.ocultar()
+    assert escondida[-1] == "hide"

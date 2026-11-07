@@ -98,7 +98,7 @@ class DialogoPublicarStatus(wx.Dialog):
         evt.Skip()
 
     def _inserir_emoji(self):
-        simbolo = escolher_emoji(self, fala=self.fala)
+        simbolo = escolher_emoji(self, fala=self.fala, varios=True)
         self.texto.SetFocus()
         if not simbolo:
             return

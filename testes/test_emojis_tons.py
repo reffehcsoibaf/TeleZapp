@@ -137,3 +137,81 @@ def test_setas_nao_mexem_em_outro_emoji_nem_em_tirar():
     tecla = Tecla(wx_falso.WXK_LEFT)
     dlg._tecla(tecla)
     assert tecla.pulou
+
+
+def test_a_janela_de_emojis_mostra_uma_categoria_de_cada_vez():
+    fala = Fala()
+    dlg = ui.DialogoEmoji(None, fala=fala)
+    assert dlg._categorias[0] == (None, "Todas")
+    assert len(dlg._achados) == 400                  # sem categoria: o corte
+    i = [c for c, _ in dlg._categorias].index("bandeiras")
+    dlg.categoria.SetSelection(i)
+    dlg._ao_trocar_categoria()
+    assert len(dlg._achados) > 200                   # a categoria inteira
+    assert all(emojis.categoria_de(e.simbolo) == "bandeiras"
+               for e in dlg._achados)
+    assert fala.ditas[-1].startswith("Bandeiras, ") and \
+        fala.ditas[-1].endswith(" emojis.")
+    dlg.busca.SetValue("brasil")
+    dlg._preencher()
+    assert [e.simbolo for e in dlg._achados] == ["🇧🇷"]
+
+
+class TeclaMarca:
+    def __init__(self, codigo, ctrl=False):
+        self.codigo, self.ctrl, self.pulou = codigo, ctrl, False
+
+    def GetKeyCode(self):
+        return self.codigo
+
+    def ControlDown(self):
+        return self.ctrl
+
+    def AltDown(self):
+        return False
+
+    def ShiftDown(self):
+        return False
+
+    def Skip(self):
+        self.pulou = True
+
+
+def test_escrever_varios_emojis_de_uma_vez_na_ordem_marcada():
+    """Pedido do responsavel: selecao multipla em todas as listas possiveis.
+    Na busca para escrever, Control Espaco marca e Enter insere todos."""
+    dlg = ui.DialogoEmoji(None, fala=Fala(), varios=True)
+    dlg.lista.SetFocus()
+    dlg.busca.SetValue("joinha")
+    dlg._preencher()
+    primeiro = dlg._achados[0].simbolo
+    dlg.lista.SetSelection(0)
+    assert dlg.marcas.tecla(TeclaMarca(wx_falso.WXK_SPACE, ctrl=True))
+    dlg.busca.SetValue("coração")
+    dlg._preencher()
+    segundo = dlg._achados[0].simbolo
+    dlg.lista.SetSelection(0)
+    dlg.marcas.tecla(TeclaMarca(wx_falso.WXK_SPACE))          # modo ligado
+    assert dlg.lista.itens[0].startswith("Marcado: ")
+    dlg._escolher()
+    assert dlg.escolhido == primeiro + segundo
+    # sem marcas, Enter escolhe so o emoji em foco, como sempre
+    outra = ui.DialogoEmoji(None, fala=Fala(), varios=True)
+    outra.lista.SetSelection(0)
+    outra._escolher()
+    assert outra.escolhido == outra._achados[0].simbolo
+    # a reacao (varios=False) nao tem selecao multipla
+    assert ui.DialogoEmoji(None, fala=Fala()).marcas is None
+
+
+def test_marca_acompanha_o_emoji_quando_ele_troca_de_tom():
+    dlg = ui.DialogoEmoji(None, fala=Fala(), varios=True)
+    dlg.lista.SetFocus()
+    dlg.busca.SetValue("joinha")
+    dlg._preencher()
+    dlg.lista.SetSelection(0)
+    dlg.marcas.tecla(TeclaMarca(wx_falso.WXK_SPACE, ctrl=True))
+    assert dlg.passo_de_tom(1)
+    assert dlg.lista.itens[0].startswith("Marcado: ")
+    dlg._escolher()
+    assert dlg.escolhido == dlg._achados[0].simbolo and dlg.escolhido != "👍"

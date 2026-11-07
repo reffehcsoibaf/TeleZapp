@@ -242,24 +242,24 @@ def exibir(canon):
 NOMES_FORA_DO_ACELERADOR = ("Up", "Down", "Left", "Right", "Space")
 
 
-def no_fim_do_texto(canon):
-    """True se o nome da combinacao nao pode ir depois do Tab do menu."""
-    return bool(canon) and canon.split("+")[-1] in NOMES_FORA_DO_ACELERADOR
+# As teclas de edicao do Windows num campo de texto: mover e selecionar por
+# letra, palavra, linha e texto, apagar palavra, copiar, colar. Num campo
+# editavel elas valem como no Windows, mesmo que um atalho do TeleZapp use a
+# mesma combinacao (pedido do responsavel: Control Shift setas tocavam o
+# controle do audio em vez de selecionar palavras).
+TECLAS_DE_EDICAO = frozenset(
+    [normalizar("+".join(m + [t]))
+     for t in ("Left", "Right", "Up", "Down", "Home", "End")
+     for m in ([], ["Shift"], ["Ctrl"], ["Ctrl", "Shift"])] +
+    [normalizar(c) for c in (
+        "PgUp", "PgDn", "Shift+PgUp", "Shift+PgDn", "Ctrl+Backspace",
+        "Ctrl+Delete", "Shift+Delete", "Shift+Insert", "Ctrl+Insert",
+        "Ctrl+A", "Ctrl+C", "Ctrl+V", "Ctrl+X", "Ctrl+Z", "Ctrl+Y")])
 
 
-# teclas cujo nome em portugues o wx nao entende depois do Tab do menu: o
-# nome vai entre parenteses, no fim do texto do item
-NOMES_FORA_DO_ACELERADOR = ("Up", "Down", "Left", "Right", "Space")
-
-
-def no_fim_do_texto(canon):
-    """True se o nome da combinacao nao pode ir depois do Tab do menu."""
-    return bool(canon) and canon.split("+")[-1] in NOMES_FORA_DO_ACELERADOR
-
-
-# teclas cujo nome em portugues o wx nao entende depois do Tab do menu: o
-# nome vai entre parenteses, no fim do texto do item
-NOMES_FORA_DO_ACELERADOR = ("Up", "Down", "Left", "Right", "Space")
+def e_de_edicao(canon):
+    """True se a combinacao e uma tecla de edicao do Windows."""
+    return normalizar(canon or "") in TECLAS_DE_EDICAO
 
 
 def no_fim_do_texto(canon):

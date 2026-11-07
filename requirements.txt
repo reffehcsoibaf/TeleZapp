@@ -14,3 +14,6 @@ livekit>=1.1,<2
 emoji>=2.14
 opencv-python-headless>=5.0
 truststore>=0.10
+winrt-runtime>=3.2
+winrt-Windows.Foundation>=3.2
+winrt-Windows.Security.Credentials.UI>=3.2

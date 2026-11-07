@@ -74,3 +74,38 @@ def test_sem_o_arquivo_do_cldr_a_busca_segue_com_o_resto(monkeypatch):
     monkeypatch.setattr(emojis, "_familias", {})
     assert achados("joinha", 1) == ["👍"]
     assert "😂" in achados("rindo")
+
+
+# ------------------------------------------------------------ categorias
+def test_toda_categoria_tem_emojis_e_todo_emoji_tem_categoria():
+    """Pedido do Wesley: categorias nos emojis. As do Unicode (emoji-test),
+    na ordem do Unicode; nenhum emoji da lista fica de fora."""
+    nomes = dict(emojis.categorias())
+    assert list(nomes.values())[:3] == ["Carinhas e emoções",
+                                        "Pessoas e corpo",
+                                        "Animais e natureza"]
+    assert len(nomes) == 9
+    soma = 0
+    for chave in nomes:
+        da = emojis.da_categoria(chave)
+        assert da, chave
+        soma += len(da)
+    assert soma == len(emojis.todos())
+    assert emojis.categoria_de("😀") == "rostos"
+    assert emojis.categoria_de("🐶") == "animais"
+    assert emojis.categoria_de("🇧🇷") == "bandeiras"
+    assert emojis.categoria_de("♻️") == "simbolos"     # com ou sem FE0F
+    assert emojis.categoria_de("♻") == "simbolos"
+    assert emojis.categoria_de("❤️") == "rostos"       # corações: emoção
+
+
+def test_buscar_dentro_de_uma_categoria():
+    sem_texto = emojis.buscar("", 0, "animais")
+    assert sem_texto[0].simbolo == "🐵"        # a ordem do Unicode
+    assert {emojis.categoria_de(e.simbolo) for e in sem_texto} == {"animais"}
+    gatos = emojis.buscar("gato", 50, "animais")
+    assert gatos and all(emojis.categoria_de(e.simbolo) == "animais"
+                         for e in gatos)
+    # "gato" sem categoria acha tambem de outras (rosto de gato, por ex.)
+    todos = emojis.buscar("gato", 400)
+    assert len(todos) > len(gatos)

@@ -130,6 +130,12 @@ class GerenciadorBloqueados(wx.Dialog):
         self.lista = wx.ListBox(self, name="Contatos bloqueados",
                                 size=(520, 260))
         lay.Add(self.lista, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        # selecao multipla (Control Espaco): Desbloquear vale para os marcados
+        from telezapp.interface.marcas import Marcas
+        self.marcas = Marcas(self.lista, falar, chave=lambda c: (c[0], c[1]),
+                             dono=self)
+        self.Bind(wx.EVT_CHAR_HOOK, lambda e: None if self.marcas.tecla(e)
+                  else e.Skip())
         linha = wx.BoxSizer(wx.HORIZONTAL)
         self.botoes = {}
         for chave, rotulo in (("desbloquear", "&Desbloquear"),
@@ -169,11 +175,14 @@ class GerenciadorBloqueados(wx.Dialog):
             return
         por_id = {c: (s, n) for c, s, n in self.contas.lista()}
         self._itens = sorted(itens, key=lambda c: (c[2].lower(), c[0]))
-        self.lista.Set([
+        self.marcas.esquecer([d for d in self.marcas.lista_de_marcados()
+                              if (d[0], d[1]) not in
+                              {(c[0], c[1]) for c in self._itens}])
+        self.lista.Set(self.marcas.rotulos([
             rotulo_bloqueado(nome, tel, m.SERVICOS.get(
                 por_id.get(conta, ("", ""))[0], ""),
                 por_id.get(conta, ("", conta))[1])
-            for conta, _, nome, tel in self._itens]
+            for conta, _, nome, tel in self._itens], self._itens)
             or ["Nenhum contato bloqueado"])
         if self._itens:
             i = 0
@@ -196,7 +205,11 @@ class GerenciadorBloqueados(wx.Dialog):
 
     # --------------------------------------------------------- acoes
     def _desbloquear(self):
-        c = self._selecionado()
+        escolhidos = self.marcas.escolhidos()
+        if len(escolhidos) > 1:
+            self._desbloquear_varios(escolhidos)
+            return
+        c = escolhidos[0] if escolhidos else None
         if c is None:
             return
         conta_id, id_, nome, _ = c
@@ -205,6 +218,31 @@ class GerenciadorBloqueados(wx.Dialog):
             return
         self.falar("Desbloqueando %s." % nome)
         mudar_bloqueio(prov, id_, nome, False, self._mudou)
+
+    def _desbloquear_varios(self, escolhidos):
+        """Desbloqueia os marcados um a um, numa thread, e conta no fim."""
+        if wx.MessageBox("Desbloquear os %d contatos marcados?" %
+                         len(escolhidos), "Contatos bloqueados",
+                         wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
+                         self) != wx.YES:
+            return
+        self.falar("Desbloqueando %d contatos." % len(escolhidos))
+
+        def trabalho():
+            feitos = 0
+            for conta_id, id_, nome, _ in escolhidos:
+                prov = self.contas.provedor(conta_id)
+                try:
+                    if prov is not None:
+                        prov.bloquear(id_, False)
+                        feitos += 1
+                except Exception:
+                    log.exception("desbloquear um dos marcados")
+            texto = "%d de %d contatos desbloqueados." % (
+                feitos, len(escolhidos))
+            wx.CallAfter(self._mudou, True, texto)
+        threading.Thread(target=trabalho, daemon=True,
+                         name="desbloquear-varios").start()
 
     def _bloquear(self):
         escolha = self.escolher_pessoa()

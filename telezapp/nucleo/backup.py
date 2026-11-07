@@ -62,7 +62,11 @@ def parte_da_opcao(chave):
 # secreto (trocar o arquivo nao pode abrir as conversas trancadas), o modo
 # de depuracao (guarda dados das mensagens) e abrir ao entrar no Windows (e
 # uma entrada do computador, com o caminho do programa dele)
-OPCOES_FORA = {"trancadas_exigir_codigo", "depuracao", "iniciar_com_windows"}
+# A protecao ao entrar tambem: ligar pede um PIN novo, e a marca sem o
+# arquivo da trava (seguranca.json, que nunca vai no backup) trancaria a
+# pessoa para fora
+OPCOES_FORA = {"trancadas_exigir_codigo", "depuracao", "iniciar_com_windows",
+               "seguranca_ao_entrar"}
 # O que a parte "contas" leva do config.json
 CHAVES_CONTAS = ("contas", "telegram_api_id", "telegram_api_hash",
                  "codigo_trancadas", "trancadas_locais",
@@ -93,7 +97,7 @@ class Manifesto:
 # de IA e os modelos; as chaves so em backup com senha, ver CHAVES_IA)
 EXTRAS = ("ia_ordem", "ia_modelos", "pacote_de_sons", "sons_desativados",
           "sons_de_conversa",
-          "atalhos", "lista_conversas", "lista_mensagens",
+          "atalhos", "lista_conversas", "lista_mensagens", "aviso_nova",
           "participantes_silenciados")
 
 

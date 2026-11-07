@@ -31,14 +31,20 @@ class Destino:
     termos: str = ""  # outras palavras que acham este destino
 
 
+def _aviso():
+    from telezapp.nucleo import aviso_de_nova
+    return aviso_de_nova
+
+
 def _destinos_da_lista(tipo, titulo, nucleo):
     ajuda = "Abre a janela %s neste item." % titulo
     itens = [Destino("%s: %s" % (titulo, r), tipo, c, ajuda)
              for c, r in nucleo.ITENS]
-    itens.append(Destino(
-        "%s: ao digitar uma letra nesta lista" % titulo, tipo, "digitar",
-        ajuda, " ".join(r for _, r in nucleo.ESCOLHAS_DIGITAR) +
-        " caractere tecla"))
+    if hasattr(nucleo, "ESCOLHAS_DIGITAR"):
+        itens.append(Destino(
+            "%s: ao digitar uma letra nesta lista" % titulo, tipo, "digitar",
+            ajuda, " ".join(r for _, r in nucleo.ESCOLHAS_DIGITAR) +
+            " caractere tecla"))
     if hasattr(nucleo, "ROTULO_SO_QUANDO_MUDA"):
         itens.append(Destino("%s: %s" % (titulo, nucleo.ROTULO_SO_QUANDO_MUDA),
                              tipo, "so_muda", ajuda))
@@ -142,6 +148,7 @@ class ModeloConfiguracoes:
         self.atalhos_pendentes = None    # personalizados ainda nao aplicados
         self.lista_pendente = None       # lista de conversas ainda nao aplicada
         self.lista_msg_pendente = None   # lista de mensagens, idem
+        self.aviso_pendente = None       # aviso de mensagem nova, idem
 
     # ------------------------------------------------------------ consulta
     def lista_de_categorias(self):
@@ -173,6 +180,8 @@ class ModeloConfiguracoes:
         achados = [d for d in (
             _destinos_da_lista("lista_conversas", "Lista de conversas", lc) +
             _destinos_da_lista("lista_mensagens", "Lista de mensagens", lm) +
+            _destinos_da_lista("aviso_nova", "Aviso de mensagem nova",
+                               _aviso()) +
             _destinos_dos_sons(self.sons) + _destinos_da_privacidade() +
             _destinos_do_codigo() + _destinos_da_ia())
             if casa(d.rotulo, d.descricao, d.termos)]
@@ -439,9 +448,27 @@ class ModeloConfiguracoes:
         else:
             self.lista_msg_pendente = valor
 
+    def aviso_em_uso(self):
+        """O que o aviso de mensagem nova diz, com o que ainda nao foi
+        aplicado."""
+        from telezapp.nucleo import aviso_de_nova as an
+        if self.aviso_pendente is not None:
+            return self.aviso_pendente
+        return an.normalizar(self.cfg.get("aviso_nova"))
+
+    def aviso_definir(self, valor):
+        from telezapp.nucleo import aviso_de_nova as an
+        valor = an.normalizar(valor)
+        if valor == an.normalizar(self.cfg.get("aviso_nova")):
+            self.aviso_pendente = None
+        else:
+            self.aviso_pendente = valor
+
     def aplicar(self, aplicador):
         """Entrega cada mudanca ao aplicador(chave, valor) e zera."""
         feitas = self.mudancas()
+        aviso = self.aviso_pendente
+        self.aviso_pendente = None
         atalhos = self.atalhos_pendentes
         self.atalhos_pendentes = None
         lista = self.lista_pendente
@@ -476,6 +503,9 @@ class ModeloConfiguracoes:
         if lista_msg is not None:
             aplicador("lista_mensagens", lista_msg)
             feitas.append(("lista_mensagens", lista_msg))
+        if aviso is not None:
+            aplicador("aviso_nova", aviso)
+            feitas.append(("aviso_nova", aviso))
         if atalhos is not None:
             aplicador("atalhos", atalhos)
             feitas.append(("atalhos", atalhos))

@@ -27,3 +27,13 @@ def _leitor_de_tela_fixo(monkeypatch):
     (a lista de sempre). Quem testa o modo visual escolhe o modo."""
     from telezapp.nucleo import aparencia
     monkeypatch.setattr(aparencia, "leitor_de_tela_ligado", lambda: True)
+
+
+@pytest.fixture(autouse=True)
+def _lista_sem_espera(monkeypatch):
+    """Os testes mandam eventos um atras do outro e olham a lista logo em
+    seguida: sem o intervalo que junta as rajadas (os testes da rajada o
+    ligam). So mexe se a janela ja foi importada (com o wx falso)."""
+    jm = sys.modules.get("telezapp.interface.janela")
+    if jm is not None:
+        monkeypatch.setattr(jm.Janela, "INTERVALO_DA_LISTA", 0)

@@ -38,12 +38,16 @@ class JanelaDeProgresso(wx.Dialog):
         self.barra = wx.Gauge(self, range=100, size=(380, 24), name=titulo)
         lay.Add(self.barra, 0, wx.LEFT | wx.RIGHT | wx.EXPAND, 10)
         self.botao = None
+        linha = wx.BoxSizer(wx.HORIZONTAL)
+        # esconde a janela e o trabalho segue; Ctrl+Shift+O traz de volta
+        self.b_ocultar = wx.Button(self, wx.ID_ANY, "&Ocultar")
+        self.b_ocultar.Bind(wx.EVT_BUTTON, lambda e: self.ocultar())
+        linha.Add(self.b_ocultar, 0, wx.RIGHT, 8)
         if ao_cancelar is not None:
             self.botao = wx.Button(self, wx.ID_CANCEL, "&Cancelar")
             self.botao.Bind(wx.EVT_BUTTON, lambda e: self.cancelar())
-            lay.Add(self.botao, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
-        else:
-            lay.AddSpacer(10)
+            linha.Add(self.botao, 0)
+        lay.Add(linha, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
         self.SetSizerAndFit(lay)
         self.SetEscapeId(wx.ID_CANCEL)
         self.Bind(wx.EVT_CLOSE, self._ao_fechar)
@@ -69,15 +73,30 @@ class JanelaDeProgresso(wx.Dialog):
         é falada, quando ela é outra (nunca a cada avanço da barra)."""
         if self._fechada:
             return
-        if texto and texto != self._etapa:
-            self._etapa = texto
-            self.rotulo.SetLabel(texto)
-            if self._falar is not None:
-                self._falar(texto)
-        if percentual is None:
-            self.barra.Pulse()
+        try:
+            if texto and texto != self._etapa:
+                self._etapa = texto
+                self.rotulo.SetLabel(texto)
+                if self._falar is not None:
+                    self._falar(texto)
+            if percentual is None:
+                self.barra.Pulse()
+            else:
+                self.barra.SetValue(max(0, min(100, int(percentual))))
+        except RuntimeError:
+            # a janela dona fechou e levou a barra junto (fechar os detalhes
+            # com o download em andamento): o resto das atualizacoes e ignorado
+            self._fechada = True
+
+    def ocultar(self):
+        """Esconde a janela sem cancelar nada: quem abriu segue atualizando,
+        e a janela fecha sozinha quando o trabalho termina."""
+        app = wx.GetApp()
+        topo = app.GetTopWindow() if app else None
+        if topo is not None and hasattr(topo, "_ocultar_janela"):
+            topo._ocultar_janela(self, self.GetTitle())
         else:
-            self.barra.SetValue(max(0, min(100, int(percentual))))
+            self.Hide()
 
     def cancelar(self):
         if self._cancelada or self._ao_cancelar is None:

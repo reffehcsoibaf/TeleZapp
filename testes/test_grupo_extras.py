@@ -228,10 +228,13 @@ def test_foto_do_contato_sem_foto_fala_de_contato(tmp_path):
 def test_fotos_temporarias_sao_apagadas(tmp_path, monkeypatch):
     import os
     import tempfile
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path / "dados"))
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
     assert ng.limpar_fotos_temporarias() == 0         # sem a pasta: nada
     pasta = ng.pasta_das_fotos()
-    assert pasta == str(tmp_path / "TeleZapp-fotos")
+    # na pasta temporaria do TeleZapp, nada no %temp% do Windows
+    assert pasta == str(tmp_path / "dados" / "temp" / "fotos")
+    assert ng.pasta_antiga_das_fotos() == str(tmp_path / "TeleZapp-fotos")
     os.makedirs(pasta)
     for nome in ("contato-1.jpg", "grupo-2.png"):
         with open(os.path.join(pasta, nome), "wb") as f:

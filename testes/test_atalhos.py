@@ -120,3 +120,14 @@ def test_falado_nao_traz_nomes_em_ingles():
     for ingles in ("Left", "Right", "Up", "Down"):
         for c in (ingles,):
             assert ingles not in at.texto_falado("Ctrl+" + c).split()
+
+
+def test_teclas_de_edicao_do_windows():
+    """Num campo editavel, Control Shift setas e as outras teclas de edicao
+    valem como no Windows, nao como atalho do TeleZapp."""
+    from telezapp.nucleo import atalhos as at
+    for c in ("Ctrl+Shift+Left", "Ctrl+Shift+Right", "Shift+End",
+              "Ctrl+Backspace", "Ctrl+Home", "Ctrl+V"):
+        assert at.e_de_edicao(c), c
+    for c in ("Ctrl+Shift+P", "Alt+Left", "Ctrl+Alt+Right", "F5", None):
+        assert not at.e_de_edicao(c), c

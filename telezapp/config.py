@@ -181,6 +181,9 @@ class Opcao:
     grupo: str = ""          # botao da categoria que abre estas opcoes juntas
     texto: bool = False      # texto digitado
     pasta: bool = False      # o texto e uma pasta: ganha o botao de escolher
+    # so vale quando o TeleZapp abre de novo: ao dar OK nas configuracoes
+    # com uma destas mudada, ele oferece reiniciar
+    reabrir: bool = False
 
 
 MENSAGENS_POR_VEZ = (50, 5000)
@@ -198,7 +201,8 @@ OPCAO_MODO_EXIBICAO = Opcao(
           escolhas=(("automatico", "Automático, conforme haja leitor de "
                      "tela ligado"),
                     ("leitor", "Para leitor de tela"),
-                    ("visual", "Visual")))
+                    ("visual", "Visual")),
+          reabrir=True)
 
 OPCOES = (
     Opcao("mensagens_por_vez", "Quantas mensagens buscar por vez", "Mensagens",
@@ -286,6 +290,23 @@ OPCOES = (
           "(e confere ao abrir, para o que venceu com ele fechado). "
           "Desmarcada, as mensagens ficam guardadas aqui, marcadas como "
           "vencidas. O que o TeleZapp apaga não volta numa nova sincronia."),
+    Opcao("seguranca_ao_entrar", "Pedir autenticação ao abrir o TeleZapp",
+          "Privacidade", False,
+          "Protege o TeleZapp contra o uso por outra pessoa. Ao marcar e dar "
+          "OK, você cria um PIN do TeleZapp. Depois, ao abrir, neste "
+          "computador vale o Windows Hello (digital, rosto ou o PIN do "
+          "Windows), se ele estiver configurado; senão, o PIN do TeleZapp. "
+          "Se a pasta do TeleZapp for copiada ou levada para outro "
+          "computador, lá vale só o PIN do TeleZapp. Para desmarcar, o "
+          "TeleZapp pede a autenticação. Guarde o PIN: sem ele não dá para "
+          "abrir. A proteção vale para o uso do programa; os arquivos da "
+          "pasta de dados não são cifrados."),
+    Opcao("seguranca_usar_hello",
+          "Usar o Windows Hello para entrar, quando disponível",
+          "Privacidade", True,
+          "Com a autenticação ao abrir ligada, usa o Windows Hello deste "
+          "computador em vez de pedir o PIN do TeleZapp. Desmarcada, pede "
+          "sempre o PIN do TeleZapp."),
     Opcao("manter_apagadas",
           "Manter as mensagens que quem enviou apagar para todos",
           "Privacidade", False,
@@ -444,7 +465,7 @@ OPCOES = (
           "para não esperar atrás dos outros programas que abrem junto, "
           "como ao ligar o computador. Se o TeleZapp demora a responder "
           "quando é aberto depois de outros aplicativos, deixe marcada. "
-          "Vale na próxima abertura."),
+          "Vale na próxima abertura.", reabrir=True),
     Opcao("barra_abre_comandos",
           "Barra na caixa de digitar abre os comandos do robô",
           "Mensagens", True,
@@ -498,6 +519,42 @@ OPCOES = (
           "grava só o som do computador. O atalho Control Shift S grava sempre "
           "só o som do computador, e o Control Shift B grava sempre o som do "
           "computador com o microfone."),
+    Opcao("gravar_microfone_estereo", "Gravar o microfone em estéreo",
+          "Mídias", False,
+          "Grava o microfone em dois canais, se ele tiver dois (muitos "
+          "microfones têm um só: aí a gravação continua mono). Desmarcada, "
+          "grava em mono, o formato comum das mensagens de voz. Uma "
+          "gravação em estéreo é enviada como áudio (arquivo MP3), não como "
+          "mensagem de voz: o MP3 é o único formato estéreo que o iPhone "
+          "toca, mas nele o iPhone não mostra o controle de velocidade. A "
+          "gravação em mono é sempre mensagem de voz."),
+    Opcao("gravar_som_estereo", "Gravar o som do computador em estéreo",
+          "Mídias", False,
+          "Grava em dois canais o que o computador toca, como música e "
+          "vídeos, também quando o microfone entra junto. Desmarcada, grava "
+          "em mono. Uma gravação em estéreo é enviada como áudio (arquivo "
+          "MP3), não como mensagem de voz: o MP3 é o único formato estéreo "
+          "que o iPhone toca, mas nele o iPhone não mostra o controle de "
+          "velocidade."),
+    Opcao("qualidade_gravacao_mono", "Qualidade da gravação em mono",
+          "Mídias", 64,
+          "Quantos kbps a mensagem de voz gravada em mono usa. Mais kbps, "
+          "som melhor e arquivo maior. 64 kbps é bom para voz.",
+          escolhas=tuple((k, "%d kbps" % k) for k in
+                         (32, 48, 64, 96, 128, 160, 192, 256))),
+    Opcao("qualidade_gravacao_estereo", "Qualidade da gravação em estéreo",
+          "Mídias", 128,
+          "Quantos kbps a gravação em estéreo usa, somando os dois canais. "
+          "128 kbps é bom para música.",
+          escolhas=tuple((k, "%d kbps" % k) for k in
+                         (32, 48, 64, 96, 128, 160, 192, 256))),
+    Opcao("volume_gravacao", "Volume da gravação, em porcentagem",
+          "Mídias", 100,
+          "Aumenta ou diminui o volume do que é gravado: microfone, som do "
+          "computador ou os dois. 100 grava como chega; 200 grava com o "
+          "dobro do volume; 50, com a metade. Um volume alto demais pode "
+          "distorcer o som.",
+          numero=(10, 400)),
     Opcao("barra_de_progresso",
           "Janela com barra de progresso em downloads e envios longos",
           "Mídias", True,
@@ -814,10 +871,29 @@ def _opcoes_de_ia():
               "Inteligência artificial", True, "Nas conversas em que você "
               "ligou a transcrição e descrição automáticas, descreve as "
               "fotos e figurinhas que chegam. A mídia é baixada sozinha."),
+        Opcao("ia_meta_primeiro", "Tentar primeiro pela Meta AI",
+              "Inteligência artificial", False, "Marcada, a transcrição de "
+              "voz e áudio e a descrição de imagens, figurinhas e vídeos "
+              "tentam primeiro a Meta AI, pela conversa dela na sua conta do "
+              "WhatsApp, sem abrir janela. Se ela não responder, ou pedir "
+              "para aceitar os termos pelo celular, vale a ordem dos "
+              "provedores abaixo, como sempre. O arquivo vai para a Meta, e "
+              "o pedido aparece na conversa com a Meta AI. Desmarcada, nada "
+              "muda."),
     )
 
 
 OPCOES = OPCOES + _opcoes_de_ia()
+
+
+def precisa_reabrir(chave):
+    """True se a opcao so vale quando o TeleZapp abre de novo."""
+    for o in OPCOES + (OPCAO_MODO_EXIBICAO,):
+        if o.chave == chave:
+            return o.reabrir
+    return False
+
+
 def _sem_acento(texto):
     return "".join(c for c in unicodedata.normalize("NFD", texto.lower())
                    if unicodedata.category(c) != "Mn")
@@ -870,6 +946,10 @@ PADROES.update({
     "telegram_api_hash": "",
     "filtro_conversas": "todas",   # tipo escolhido na janela principal
     "filtro_conta": "todas",       # servico ou conta escolhido nela
+    # o que o aviso falado de mensagem nova diz (nucleo/aviso_de_nova.py)
+    "aviso_nova": {"ordem": ["inicio", "conversa", "servico", "conta",
+                             "autor", "hora", "conteudo"],
+                   "ocultos": ["servico", "conta"]},
 })
 
 

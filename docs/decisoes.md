@@ -456,6 +456,15 @@ automáticos): a lista do que falta testar fica na memória do projeto.
 - **Desinstalar e backup**: antes de desinstalar (menu ou Aplicativos
   instalados) o programa pergunta se quer o backup de sempre; se o backup
   falhar ou a pessoa desistir de escolher o arquivo, nada é desinstalado.
+  Depois, os dois caminhos perguntam se apaga os dados (Sim, Não, Cancelar).
+  O menu fecha o programa de verdade, mesmo com "Continuar em segundo plano"
+  ligado (05/11/2026: antes ia para a bandeja e segurava as pastas), e o que
+  estava em uso é apagado por um processo separado, fora das pastas.
+  Princípio (do responsável, desde o início; reforçado em 06/11/2026):
+  desinstalar não deixa partes do aplicativo espalhadas pelo sistema. Fica
+  só o que a pessoa escolher guardar (os dados) e os backups que ela salvou.
+  Nada novo pode gravar fora da pasta do programa e da pasta de dados sem
+  entrar na lista do que `nucleo.instalacao.desinstalar` apaga.
 - **Tela de boas-vindas**: ao abrir o executável de uma cópia não
   instalada, sem `dados` e sem `sem-boas-vindas.txt`, aparece um texto
   curto sobre o programa e os botões Instalar, Criar cópia portátil, Guia de

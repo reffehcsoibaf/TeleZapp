@@ -7,8 +7,14 @@ Nas duas, o foco vai direto para a lista ou para a busca, Enter escolhe e
 Esc fecha. Cada item e "emoji nome", que o leitor de tela le por inteiro. Num
 emoji que tem tons de pele, as setas para a esquerda e para a direita trocam o
 item pelo tom anterior ou pelo proximo (o sem tom, depois do claro ao escuro),
-e a fala diz qual ficou."""
+e a fala diz qual ficou.
+
+Na busca completa para escrever, Control Espaco marca varios emojis (Espaco
+marca e desmarca, Control A marca todos, Esc desfaz) e Enter insere todos os
+marcados, na ordem em que foram marcados."""
 import wx
+
+from telezapp.interface.marcas import Marcas
 
 from telezapp.nucleo import emojis
 
@@ -20,10 +26,11 @@ class DialogoEmoji(wx.Dialog):
     """Digite parte do nome (joinha, coração, bolo...) e use as setas; Enter
     escolhe."""
 
-    def __init__(self, pai, titulo="Inserir emoji", fala=None):
+    def __init__(self, pai, titulo="Inserir emoji", fala=None, varios=False):
         super().__init__(pai, title=titulo,
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.escolhido = ""
+        self.marcas = None
         self._achados = []
         self.fala = fala
         lay = wx.BoxSizer(wx.VERTICAL)
@@ -32,10 +39,25 @@ class DialogoEmoji(wx.Dialog):
         self.busca = wx.TextCtrl(self, name="Buscar emoji pelo nome",
                                  size=(380, -1))
         lay.Add(self.busca, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        lay.Add(wx.StaticText(self, label="&Categoria"), 0,
+                wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self._categorias = [(None, "Todas")] + emojis.categorias()
+        self.categoria = wx.Choice(self, name="Categoria",
+                                   choices=[n for _, n in self._categorias])
+        self.categoria.SetSelection(0)
+        lay.Add(self.categoria, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
         lay.Add(wx.StaticText(self, label="&Emojis"), 0,
                 wx.LEFT | wx.RIGHT | wx.TOP, 10)
-        self.lista = wx.ListBox(self, name="Emojis", size=(380, 260))
+        self.lista = wx.ListBox(self, name="Emojis" + (
+            " (Control Espaço marca vários)" if varios else ""),
+            size=(380, 260))
         lay.Add(self.lista, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        if varios:
+            self.marcas = Marcas(
+                self.lista,
+                (lambda t: fala.falar(t, interromper=True)) if fala
+                else None, chave=lambda e: e.simbolo, dono=self)
+            self.Bind(wx.EVT_CHAR_HOOK, self._hook)
         botoes = wx.BoxSizer(wx.HORIZONTAL)
         ok = wx.Button(self, wx.ID_OK, "OK")
         cancelar = wx.Button(self, wx.ID_CANCEL, "Cancelar")
@@ -46,6 +68,7 @@ class DialogoEmoji(wx.Dialog):
         self.SetSizerAndFit(lay)
         self.SetEscapeId(wx.ID_CANCEL)
         self.busca.Bind(wx.EVT_TEXT, lambda e: self._preencher())
+        self.categoria.Bind(wx.EVT_CHOICE, self._ao_trocar_categoria)
         self.busca.Bind(wx.EVT_KEY_DOWN, self._tecla_busca)
         self.lista.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self._escolher())
         self.lista.Bind(wx.EVT_KEY_DOWN, self._tecla_lista)
@@ -54,12 +77,37 @@ class DialogoEmoji(wx.Dialog):
         self._preencher()
         self.busca.SetFocus()
 
+    def _chave_da_categoria(self):
+        i = self.categoria.GetSelection()
+        return self._categorias[i][0] if 0 <= i < len(
+            self._categorias) else None
+
+    def _ao_trocar_categoria(self, _evento=None):
+        self._preencher()
+        if self.fala is not None:
+            n = len(self._achados)
+            self.fala.falar("%s, %s." % (
+                self._categorias[self.categoria.GetSelection()][1],
+                "nenhum emoji" if not n else "1 emoji" if n == 1
+                else "%d emojis" % n), interromper=True)
+
     def _preencher(self):
-        self._achados = emojis.buscar(self.busca.GetValue(), 400)
-        self.lista.Set(["%s %s" % (e.simbolo, e.nome)
-                        for e in self._achados] or ["Nenhum emoji achado."])
+        # sem texto numa categoria, todos os dela (sem o corte da busca)
+        categoria = self._chave_da_categoria()
+        self._achados = emojis.buscar(
+            self.busca.GetValue(), 0 if categoria else 400, categoria)
+        textos = ["%s %s" % (e.simbolo, e.nome) for e in self._achados]
+        if self.marcas is not None:
+            textos = self.marcas.rotulos(textos, self._achados)
+        self.lista.Set(textos or ["Nenhum emoji achado."])
         if self._achados:
             self.lista.SetSelection(0)
+
+    def _hook(self, evento):
+        """As teclas da selecao multipla, antes de o dialogo tratar o Esc."""
+        if self.marcas is not None and self.marcas.tecla(evento):
+            return
+        evento.Skip()
 
     def _tecla_busca(self, evento):
         """Seta para baixo na busca leva ao primeiro emoji achado."""
@@ -89,13 +137,22 @@ class DialogoEmoji(wx.Dialog):
             return False
         self._achados[i] = novo
         texto = "%s %s" % (novo.simbolo, novo.nome)
-        self.lista.SetString(i, texto)
+        if self.marcas is not None:
+            self.marcas.substituir(i, novo, texto)
+        else:
+            self.lista.SetString(i, texto)
         self.lista.SetSelection(i)
         if self.fala is not None:
             self.fala.falar(texto, interromper=True)
         return True
 
     def _escolher(self):
+        if self.marcas is not None and self.marcas.marcados:
+            # todos os marcados, na ordem em que foram marcados
+            self.escolhido = "".join(
+                e.simbolo for e in self.marcas.marcados.values())
+            self.EndModal(wx.ID_OK)
+            return
         i = self.lista.GetSelection()
         if not (0 <= i < len(self._achados)):
             return
@@ -103,10 +160,11 @@ class DialogoEmoji(wx.Dialog):
         self.EndModal(wx.ID_OK)
 
 
-def escolher_emoji(pai, titulo="Inserir emoji", fala=None):
+def escolher_emoji(pai, titulo="Inserir emoji", fala=None, varios=False):
     """O emoji escolhido na busca completa, ou "" se a pessoa desistiu.
-    `fala`, se houver, diz o tom de pele escolhido com as setas."""
-    dlg = DialogoEmoji(pai, titulo, fala)
+    `fala`, se houver, diz o tom de pele escolhido com as setas. `varios`:
+    deixa marcar varios (Control Espaco); o resultado e a juncao deles."""
+    dlg = DialogoEmoji(pai, titulo, fala, varios)
     try:
         return dlg.escolhido if dlg.ShowModal() == wx.ID_OK else ""
     finally:

@@ -174,7 +174,30 @@ def _vigiar_o_fim():
     threading.Thread(target=vigia, daemon=True, name="vigia-do-fim").start()
 
 
+def esperar_processo(argumentos, segundos=60):
+    """`--esperar-pid N` (reinicio): espera o processo N, o TeleZapp que
+    pediu para abrir de novo, terminar. Sem isso esta abertura o acharia
+    ainda fechando, so pediria a ele que mostrasse a janela e sairia."""
+    if "--esperar-pid" not in argumentos:
+        return
+    try:
+        pid = int(argumentos[argumentos.index("--esperar-pid") + 1])
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        k32.OpenProcess.restype = ctypes.c_void_p
+        h = k32.OpenProcess(0x00100000, False, pid)      # SYNCHRONIZE
+        if not h:
+            return                                      # ja terminou
+        try:
+            k32.WaitForSingleObject(ctypes.c_void_p(h), int(segundos * 1000))
+        finally:
+            k32.CloseHandle(ctypes.c_void_p(h))
+    except Exception:
+        pass
+
+
 def main():
+    esperar_processo(sys.argv[1:])
     # Sem terminal (pythonw), stdout e stderr nao existem: bibliotecas que
     # escrevem neles nao podem falhar por isso.
     if sys.stdout is None:
@@ -304,6 +327,25 @@ def main():
                       "O que havia antes está na pasta antes-da-restauracao, "
                       "dentro da pasta de dados. Detalhes no log:\n%s"
                       % (NOME, arquivo_log))
+
+    # seguranca ao entrar: antes de abrir o banco e as contas
+    try:
+        from telezapp.interface import seguranca as ui_seg
+        if not ui_seg.verificar_ao_abrir(config.Config(),
+                                         config.pasta_dados()):
+            log.info("abertura: sem autenticação; saindo")
+            if marca:
+                try:
+                    os.remove(marca)
+                except OSError:
+                    pass
+            return 0
+    except Exception:
+        log.error("falha na seguranca ao entrar:\n%s", traceback.format_exc())
+        caixa_de_erro("O %s não conseguiu conferir a proteção ao entrar e "
+                      "não vai abrir. Detalhes no log:\n%s" % (NOME,
+                                                                arquivo_log))
+        return 1
 
     try:
         cfg = config.Config()

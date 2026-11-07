@@ -402,18 +402,59 @@ def criar_portatil(programa, pasta_destino, levar_dados_de=None,
 
 
 # --------------------------------------------------------------- desinstalar
+def _tirar_da_inicializacao(programa):
+    """A entrada de abrir ao entrar no Windows, se for desta instalacao (a de
+    uma copia portatil fica)."""
+    try:
+        from telezapp.nucleo import inicializacao
+        if os.path.normcase(programa) in os.path.normcase(
+                inicializacao.linha_atual()):
+            inicializacao.definir(False)
+    except Exception:
+        log.warning("não consegui tirar o %s da inicialização do Windows",
+                    NOME)
+
+
+def _apagar_depois(pastas, arquivos):
+    """Um processo separado apaga o que este nao conseguiu: a pasta do
+    programa (o executavel esta em uso) e, se pedido, a de dados (o banco e
+    o log estao abertos). Tenta por 2 minutos, ate o programa terminar de
+    fechar. Roda fora dessas pastas: a pasta atual de um processo nao pode
+    ser apagada, e a do programa e a pasta atual de quem abriu pelo atalho."""
+    comandos = ['del /f /q "%s" 2>nul' % a for a in arquivos]
+    comandos += ['rmdir /s /q "%s" 2>nul' % p for p in pastas]
+    # no cmd, o `if` engole o resto da linha: cada um vai entre parenteses
+    falta = " & ".join('(if exist "%s" set f=1)' % p for p in pastas)
+    # `timeout` volta na hora sem console; `ping` espera de verdade
+    linha = ('for /l %%i in (1,1,60) do (ping -n 3 127.0.0.1 >nul & %s & '
+             'set "f=" & %s & (if not defined f exit))' % (
+                 " & ".join(comandos), falta))
+    fora = os.environ.get("SystemRoot") or os.path.expanduser("~")
+    subprocess.Popen(
+        'cmd /v:off /c "%s"' % linha, cwd=fora,
+        # sem DETACHED_PROCESS: com ele o laco `for` do cmd nao roda
+        creationflags=(
+            getattr(subprocess, "CREATE_NO_WINDOW", 0) |
+            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)))
+
+
 def desinstalar(programa=None, apagar_dados=False, dados=None):
-    """Tira os atalhos e o registro e, se pedido, apaga os dados. A pasta do
-    programa (o executavel esta em uso) e apagada por um processo separado
-    logo depois que este terminar."""
+    """Tira os atalhos, o registro, a abertura com o Windows e, se pedido,
+    os dados. O que estiver em uso (a pasta do programa, os dados do
+    programa aberto) e apagado por um processo separado logo depois que este
+    terminar: quem chama precisa fechar o programa de verdade em seguida."""
     programa = programa or pasta_do_programa()
     if not programa or modo(programa) != "instalado":
         raise ErroInstalacao("Isto não é uma instalação do %s." % NOME)
+    sobras = []
     for lnk in _caminhos_dos_atalhos():
         try:
             os.remove(lnk)
-        except OSError:
+        except FileNotFoundError:
             pass
+        except OSError as e:
+            log.warning("não consegui apagar o atalho %s: %s", lnk, e)
+            sobras.append(lnk)
     try:
         _desregistrar()
     except Exception:
@@ -421,15 +462,32 @@ def desinstalar(programa=None, apagar_dados=False, dados=None):
     from telezapp.nucleo import protocolos
     if not protocolos.remover():
         log.warning("não consegui tirar o registro dos links")
+    _tirar_da_inicializacao(programa)
+    pastas = [programa]
+    # o resto do que o programa cria fora das duas pastas: sobras de uma
+    # atualizacao ao lado da pasta do programa, as fotos de grupo no %temp% e
+    # a pasta de trabalho do instalador de um arquivo so
+    from telezapp.nucleo import atualizador, grupo
+    for p in (atualizador.pasta_de_espera(programa),
+              atualizador.pasta_antiga(programa),
+              programa.rstrip("\\/") + ".nova",
+              grupo.pasta_antiga_das_fotos(),
+              os.path.join(os.environ.get("LOCALAPPDATA") or
+                           os.path.expanduser("~"), "TeleZapp-instalador")):
+        shutil.rmtree(p, ignore_errors=True)
+        if os.path.exists(p):
+            pastas.append(p)
+    try:
+        os.remove(atualizador.marca_de_falha(programa))
+    except FileNotFoundError:
+        pass
+    except OSError:
+        sobras.append(atualizador.marca_de_falha(programa))
     if apagar_dados:
-        shutil.rmtree(dados or dados_do_computador(), ignore_errors=True)
-    # `timeout` volta na hora sem console; `ping` espera de verdade. Tenta ate
-    # o programa soltar a pasta (ele ainda esta fechando).
-    subprocess.Popen(
-        'for /l %%i in (1,1,30) do (ping -n 2 127.0.0.1 >nul & '
-        'rmdir /s /q "%s" 2>nul & if not exist "%s" exit)' % (
-            programa, programa),
-        # sem DETACHED_PROCESS: com ele o laco `for` do cmd nao roda
-        shell=True, creationflags=(
-            getattr(subprocess, "CREATE_NO_WINDOW", 0) |
-            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)))
+        dados = dados or dados_do_computador()
+        shutil.rmtree(dados, ignore_errors=True)
+        if os.path.exists(dados):
+            pastas.append(dados)
+    log.info("desinstalado (dados %s); a pasta do programa sai quando ele "
+             "fechar", "apagados" if apagar_dados else "mantidos")
+    _apagar_depois(pastas, sobras)

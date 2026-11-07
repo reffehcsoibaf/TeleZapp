@@ -182,21 +182,60 @@ def _casa(palavras_do_emoji, digitadas):
                for p in digitadas)
 
 
-def buscar(texto, limite=300):
+_grupos = None      # chave do emoji (sem FE0F) -> (categoria, posicao)
+
+
+def categorias():
+    """[(chave, nome)] das categorias, na ordem do Unicode."""
+    from telezapp.nucleo import emojis_grupos
+    return list(emojis_grupos.GRUPOS)
+
+
+def _mapa_de_grupos():
+    global _grupos
+    if _grupos is None:
+        from telezapp.nucleo import emojis_grupos
+        _grupos = {}
+        for chave, simbolos in emojis_grupos.EMOJIS.items():
+            for pos, s in enumerate(simbolos.split()):
+                _grupos[s] = (chave, pos)
+    return _grupos
+
+
+def categoria_de(simbolo):
+    """A chave da categoria do emoji (ou None se o Unicode ainda nao o
+    classificou)."""
+    achado = _mapa_de_grupos().get(simbolo.replace("️", ""))
+    return achado[0] if achado else None
+
+
+def da_categoria(categoria):
+    """Os emojis da categoria, na ordem do Unicode."""
+    mapa = _mapa_de_grupos()
+    achados = [(mapa[e.simbolo.replace("️", "")][1], e)
+               for e in todos()
+               if mapa.get(e.simbolo.replace("️", ""),
+                           (None,))[0] == categoria]
+    return [e for _, e in sorted(achados, key=lambda par: par[0])]
+
+
+def buscar(texto, limite=300, categoria=None):
     """Os emojis cujo nome, apelido, sinonimo ou palavra-chave tem todas as
     palavras digitadas (sem diferenca de acento ou maiusculas). Sem texto,
     todos. Primeiro vem quem tem as palavras digitadas inteiras (uma busca
     por "oi" acha antes o "oi" que o "oito"); depois, quem casa com o nome,
     com apelidos e sinonimos e, por ultimo, so com as palavras-chave do CLDR;
-    dentro de cada grupo, a ordem do Unicode."""
+    dentro de cada grupo, a ordem do Unicode. `categoria`: so os emojis
+    dela (sem texto, todos os dela, na ordem do Unicode)."""
     digitadas = _sem_acento(texto or "").split()
+    base = da_categoria(categoria) if categoria else todos()
     if not digitadas:
-        return todos()[:limite] if limite else todos()
+        return base[:limite] if limite else base
     inteiras = set(digitadas)
     achados = [((0 if inteiras <= set(e.palavras) else 1,
                  0 if _casa(e.palavras_nome, digitadas)
                  else 1 if _casa(e.palavras_base, digitadas) else 2), e)
-               for e in todos() if _casa(e.palavras, digitadas)]
+               for e in base if _casa(e.palavras, digitadas)]
     achados.sort(key=lambda par: par[0])        # estavel: mantem a ordem
     achados = [e for _, e in achados]
     return achados[:limite] if limite else achados

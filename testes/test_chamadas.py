@@ -554,3 +554,25 @@ def test_formato_desconhecido_de_quadro_nao_quebra():
         await s.chamadas._ao_quadro(None, ruim)
     rodar(cena())
     assert s.quadros == []
+
+
+def test_esc_na_chamada_em_andamento_esconde_a_janela_sem_encerrar():
+    """Pedido do responsavel: poder ocultar a janela da chamada e seguir
+    usando o aplicativo. Encerrar continua sendo so pelo Desligar."""
+    from types import SimpleNamespace
+    from telezapp.interface.chamada import DialogoChamada
+    from telezapp.nucleo import chamadas as ch
+    d = DialogoChamada.__new__(DialogoChamada)
+    escondida, desligou = [], []
+    d.chamada = SimpleNamespace(estado=ch.EM_CHAMADA, ativa=True)
+    d.acoes = {"desligar": lambda: desligou.append(1),
+               "recusar": lambda: desligou.append(2)}
+    d._ao_ocultar = escondida.append
+    d._escape()
+    assert escondida == [d] and desligou == []
+    # tocando ainda recusa, chamando ainda desliga
+    d.chamada = SimpleNamespace(estado=ch.TOCANDO, ativa=True)
+    d._escape()
+    d.chamada = SimpleNamespace(estado=ch.CHAMANDO, ativa=True)
+    d._escape()
+    assert desligou == [2, 1] and escondida == [d]

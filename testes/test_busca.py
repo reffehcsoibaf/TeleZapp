@@ -204,3 +204,19 @@ def test_resumo_fala_o_que_foi_pedido():
     assert "reunião" in r and "WhatsApp" in r and "arquivada" in r
     assert "enviadas por você" in r and "01/10/2026" in r
     assert busca.Criterios().resumo() == "sem critérios"
+
+
+def test_tipo_chamada_acha_so_o_registro_das_chamadas(banco):
+    banco.salvar_mensagens([
+        msg("w1", "ana", 90, "Chamada de voz perdida", dias=1, tipo=m.OUTRO),
+        msg("w1", "ana", 91, "Chamada de vídeo atendida, durou 2 minutos",
+            dias=2, tipo=m.OUTRO),
+        msg("w1", "ana", 92, "Conversa de voz", dias=3, tipo=m.OUTRO),
+        msg("w1", "ana", 93, "2 contatos: A, B", dias=4, tipo=m.OUTRO),
+        msg("w1", "ana", 94, "Chamada de voz perdida", dias=5),   # texto comum
+    ])
+    achados = busca.buscar(banco, busca.Criterios(
+        tipos_de_mensagem={"chamada"}))
+    assert [a.mensagem.id for a in achados] == ["90", "91", "92"]
+    assert "chamada" in busca.Criterios(
+        tipos_de_mensagem={"chamada"}).resumo()

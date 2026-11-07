@@ -242,17 +242,53 @@ def _video_inteiro(provedor, caminho):
 
 def executar_em_ordem(genero, caminho, ordem, chave_de, modelos, perfil,
                       enviar=enviar_pela_rede, ao_tentar=None,
-                      ordem_audio=()):
+                      ordem_audio=(), meta=None):
     """Tenta os provedores na ordem em que a pessoa os organizou, ate um
     funcionar. `chave_de(provedor)` devolve a chave ("" = sem chave, pula).
     `modelos` e o dicionario ia_modelos. Devolve o Resultado; se nenhum
-    funcionou, levanta o erro do ultimo que foi tentado."""
-    r = _executar_em_ordem(genero, caminho, ordem, chave_de, modelos, perfil,
-                           enviar, ao_tentar)
+    funcionou, levanta o erro do ultimo que foi tentado. `meta`, se dado, e
+    tentado antes de todos: meta(midia, instrucoes, pergunta) -> texto (a
+    Meta AI, pela conta do WhatsApp); se falhar, vale a ordem."""
+    r = None
+    if meta is not None:
+        try:
+            r = executar_meta(genero, caminho, perfil, meta)
+        except ErroIA as e:
+            log.info("Meta AI falhou (%s); seguindo a ordem dos provedores",
+                     e.codigo)
+        except Exception:
+            log.exception("Meta AI")
+    if r is None:
+        r = _executar_em_ordem(genero, caminho, ordem, chave_de, modelos,
+                               perfil, enviar, ao_tentar)
     if genero == "video" and r.via_quadros and ordem_audio:
         r.texto += "\n\n" + _fala_do_video(
             caminho, ordem_audio, chave_de, modelos, perfil, enviar)
     return r
+
+
+def executar_meta(genero, caminho, perfil, meta, mime=None):
+    """Como `executar`, mas pela Meta AI (sem chave nem modelo): `meta`
+    recebe a midia, as instrucoes e a pergunta e devolve o texto. Video vai
+    por quadros, numa imagem so."""
+    if genero not in ("audio", "imagem", "figurinha", "video"):
+        raise ErroIA("nao_aceita", "A Meta AI não faz isso com este tipo de "
+                                   "arquivo.")
+    quadros = 0
+    if genero == "video":
+        jpeg, tempos = quadros_de_video.grade_de_quadros(caminho, perfil)
+        quadros = len(tempos)
+        midia = Midia("imagem", "image/jpeg", jpeg, "quadros.jpg")
+        instrucoes = prompts.instrucoes("video", perfil, quadros=quadros)
+        pergunta = prompts.primeira_pergunta("video", quadros)
+    else:
+        midia = carregar_midia(caminho, genero, mime)
+        instrucoes = prompts.instrucoes(genero, perfil)
+        pergunta = prompts.primeira_pergunta(genero)
+    texto = meta(midia, instrucoes, pergunta)
+    if not (texto or "").strip():
+        raise ErroIA("vazia", "A Meta AI não respondeu.")
+    return Resultado(texto.strip(), "Meta AI", "", bool(quadros))
 
 
 def _fala_do_video(caminho, ordem_audio, chave_de, modelos, perfil, enviar):

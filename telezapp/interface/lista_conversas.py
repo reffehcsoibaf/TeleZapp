@@ -44,14 +44,18 @@ class DialogoListaConversas(wx.Dialog):
             lay.Add(self.so_muda, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
             self.so_muda.Bind(wx.EVT_CHECKBOX,
                               lambda e: self.mudar_so_quando_muda())
-        rotulo = "&Ao digitar uma letra nesta lista:"
-        lay.Add(wx.StaticText(self, label=rotulo), 0, wx.LEFT | wx.RIGHT, 10)
-        self.digitar = wx.Choice(
-            self, choices=[r for _, r in nucleo.ESCOLHAS_DIGITAR],
-            name=rotulo.replace("&", ""))
-        lay.Add(self.digitar, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
-        self._mostrar_digitar()
-        self.digitar.Bind(wx.EVT_CHOICE, lambda e: self.mudar_digitar())
+        self.digitar = None
+        if hasattr(nucleo, "ESCOLHAS_DIGITAR"):    # o aviso falado nao tem
+            rotulo = "&Ao digitar uma letra nesta lista:"
+            lay.Add(wx.StaticText(self, label=rotulo), 0,
+                    wx.LEFT | wx.RIGHT, 10)
+            self.digitar = wx.Choice(
+                self, choices=[r for _, r in nucleo.ESCOLHAS_DIGITAR],
+                name=rotulo.replace("&", ""))
+            lay.Add(self.digitar, 0,
+                    wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+            self._mostrar_digitar()
+            self.digitar.Bind(wx.EVT_CHOICE, lambda e: self.mudar_digitar())
         linha = wx.WrapSizer(wx.HORIZONTAL)
         self.botoes = {}
         for chave, rotulo in (("cima", "Mover para &cima"),
@@ -80,7 +84,7 @@ class DialogoListaConversas(wx.Dialog):
         ordem = self.lc.normalizar(self.ler())["ordem"]
         if foco in ordem:
             self.preencher(ordem.index(foco))
-        elif foco == "digitar":
+        elif foco == "digitar" and self.digitar is not None:
             self.digitar.SetFocus()
         elif foco == "so_muda" and self.so_muda is not None:
             self.so_muda.SetFocus()
@@ -149,6 +153,8 @@ class DialogoListaConversas(wx.Dialog):
             "ativado" if ligado else "desativado"))
 
     def _mostrar_digitar(self):
+        if self.digitar is None:
+            return
         modos = [c for c, _ in self.lc.ESCOLHAS_DIGITAR]
         self.digitar.SetSelection(modos.index(self.lc.digitar(self.ler())))
 

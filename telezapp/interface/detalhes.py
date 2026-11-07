@@ -59,16 +59,37 @@ class DialogoTexto(wx.Dialog):
         self.Layout()
 
 
+def _chave_do_item(dado):
+    """O que identifica um item da lista entre uma recarga e outra: o id da
+    mensagem, o proprio texto/numero, ou (sem nada melhor) o objeto."""
+    if isinstance(dado, (str, int)):
+        return dado
+    ident = getattr(dado, "id", None)
+    return ident if ident is not None else id(dado)
+
+
 class DialogoLista(wx.Dialog):
-    """Lista com filtro opcional e menu de contexto por item."""
+    """Lista com filtro opcional, menu de contexto por item e selecao
+    multipla: Control Espaco liga o modo de selecao e marca o item; no modo,
+    Espaco marca e desmarca; Control A marca todos (ou desmarca, se ja
+    estao); Esc desfaz a selecao. Com itens marcados, o menu de contexto traz
+    as acoes para todos eles (`ao_menu_varios`)."""
 
     def __init__(self, pai, titulo, rotulo_lista, filtros=(), ao_filtrar=None,
-                 ao_menu=None):
+                 ao_menu=None, ao_menu_varios=None, falar=None,
+                 chave=_chave_do_item):
         """filtros: [(chave, rotulo)]; ao_filtrar(chave) -> [(texto, dado)];
-        ao_menu(dado) -> [(rotulo, funcao)] (o primeiro item roda no Enter)."""
+        ao_menu(dado) -> [(rotulo, funcao)] (o primeiro item roda no Enter);
+        ao_menu_varios(dados) -> [(rotulo, funcao)] para os marcados;
+        falar(texto): o que dizer ao marcar (sem ele, nada e dito)."""
         super().__init__(pai, title=titulo, size=(640, 520),
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.ao_filtrar, self.ao_menu = ao_filtrar, ao_menu
+        self.ao_menu_varios = ao_menu_varios
+        self.chave = chave
+        self.falar = falar or (lambda texto: None)
+        self.modo_selecao = False
+        self.marcados = {}            # chave -> dado, na ordem marcada
         self.filtros = list(filtros)
         self.itens = []
         lay = wx.BoxSizer(wx.VERTICAL)
@@ -101,32 +122,134 @@ class DialogoLista(wx.Dialog):
             return None
         return self.filtros[max(self.escolha.GetSelection(), 0)][0]
 
+    def _rotulo(self, texto, dado):
+        marcado = self.chave(dado) in self.marcados
+        return ("Marcado: " + texto) if marcado else texto
+
     def recarregar(self, manter=True):
         anterior = self.lista.GetSelection()
         self.itens = self.ao_filtrar(self.chave_do_filtro())
-        self.lista.Set([t for t, _ in self.itens] or ["Nenhum item."])
+        self.lista.Set([self._rotulo(t, d) for t, d in self.itens]
+                       or ["Nenhum item."])
         if self.itens:
             self.lista.SetSelection(min(max(anterior, 0) if manter else 0,
                                         len(self.itens) - 1))
+
+    def _redesenhar_item(self, i):
+        texto, dado = self.itens[i]
+        self.lista.SetString(i, self._rotulo(texto, dado))
 
     def _dado(self):
         i = self.lista.GetSelection()
         return self.itens[i][1] if 0 <= i < len(self.itens) else None
 
+    def dados_marcados(self):
+        """Os marcados, na ordem da lista (os de outro filtro no fim)."""
+        na_lista = [d for _, d in self.itens if self.chave(d) in self.marcados]
+        vistos = {self.chave(d) for d in na_lista}
+        return na_lista + [d for k, d in self.marcados.items()
+                           if k not in vistos]
+
+    @staticmethod
+    def _contagem(n):
+        return "nenhum marcado" if n == 0 else \
+            "1 marcado" if n == 1 else "%d marcados" % n
+
+    def alternar_marca(self):
+        """Marca ou desmarca o item em foco (e liga o modo de selecao)."""
+        i = self.lista.GetSelection()
+        if not 0 <= i < len(self.itens):
+            return
+        dado = self.itens[i][1]
+        self.modo_selecao = True
+        marcado = self.chave(dado) not in self.marcados
+        if marcado:
+            self.marcados[self.chave(dado)] = dado
+        else:
+            self.marcados.pop(self.chave(dado), None)
+        self._redesenhar_item(i)
+        self.falar("%s, %s." % ("Marcado" if marcado else "Desmarcado",
+                                self._contagem(len(self.marcados))))
+
+    def marcar_todos(self):
+        """Marca todos os itens da lista; com todos marcados, desmarca."""
+        if not self.itens:
+            return
+        self.modo_selecao = True
+        todos = {self.chave(d): d for _, d in self.itens}
+        if set(todos) <= set(self.marcados):
+            for k in todos:
+                self.marcados.pop(k, None)
+        else:
+            self.marcados.update(todos)
+        for i in range(len(self.itens)):
+            self._redesenhar_item(i)
+        self.falar(self._contagem(len(self.marcados)).capitalize() + ".")
+
+    def esquecer(self, dados):
+        """Tira das marcas o que saiu (foi apagado); sem marcas, sai do
+        modo de selecao."""
+        for d in dados:
+            self.marcados.pop(self.chave(d), None)
+        if not self.marcados:
+            self.modo_selecao = False
+
+    def sair_da_selecao(self):
+        self.modo_selecao = False
+        self.marcados = {}
+        for i in range(len(self.itens)):
+            self._redesenhar_item(i)
+        self.falar("Seleção desfeita.")
+
+    def copiar_marcados(self):
+        """Copia o texto dos itens marcados, um por linha."""
+        textos = {self.chave(d): t for t, d in self.itens}
+        linhas = [textos.get(self.chave(d), str(d)) for d in self.dados_marcados()]
+        if wx.TheClipboard.Open():
+            try:
+                wx.TheClipboard.SetData(wx.TextDataObject("\r\n".join(linhas)))
+            finally:
+                wx.TheClipboard.Close()
+            self.falar("1 item copiado." if len(linhas) == 1 else
+                       "%d itens copiados." % len(linhas))
+
     def _opcoes(self):
+        if self.marcados:
+            dados = self.dados_marcados()
+            opcoes = list(self.ao_menu_varios(dados)) \
+                if self.ao_menu_varios is not None else []
+            opcoes.append(("Copiar os marcados", self.copiar_marcados))
+            opcoes.append(("Desfazer a seleção", self.sair_da_selecao))
+            return opcoes
         dado = self._dado()
         if dado is None or self.ao_menu is None:
             return []
         return self.ao_menu(dado)
 
     def _primeiro(self):
-        opcoes = self._opcoes()
+        dado = self._dado()
+        if dado is None or self.ao_menu is None:
+            return
+        opcoes = self.ao_menu(dado)       # Enter: sempre o item em foco
         if opcoes:
             opcoes[0][1]()
 
     def _tecla(self, evt):
-        if evt.GetKeyCode() in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) and \
-                self.FindFocus() is self.lista:
+        k = evt.GetKeyCode()
+        na_lista = self.FindFocus() is self.lista
+        ctrl, outros = evt.ControlDown(), evt.AltDown() or evt.ShiftDown()
+        if na_lista and k == wx.WXK_SPACE and not outros and \
+                (ctrl or self.modo_selecao):
+            self.alternar_marca()
+            return
+        if na_lista and k == ord("A") and ctrl and not outros:
+            self.marcar_todos()
+            return
+        if k == wx.WXK_ESCAPE and not (ctrl or outros) and \
+                self.modo_selecao:
+            self.sair_da_selecao()
+            return
+        if k in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) and na_lista:
             self._primeiro()
             return
         evt.Skip()
@@ -694,10 +817,123 @@ class ControleDetalhes:
             return [(det.rotulo_do_item(x), x) for x in itens]
         dlg = DialogoLista(
             self.dlg, "Mídias de %s" % self.conv.nome,
-            "Mídias (Menu abre as ações)", filtros, filtrar,
-            self._menu_midia)
+            "Mídias (Menu abre as ações; Control Espaço marca)", filtros,
+            filtrar, self._menu_midia, self._menu_midias_marcadas,
+            self._falar)
         self._lista_midias = dlg
         self._sub(dlg)
+
+    def _falar(self, texto):
+        self.jan.fala.falar(texto, interromper=True)
+
+    def _menu_midias_marcadas(self, dados):
+        n = len(dados)
+        quantas = "1 mídia" if n == 1 else "%d mídias" % n
+        opcoes = []
+        if any(x.tipo in det.BAIXAVEIS_TIPOS for x in dados):
+            opcoes.append(("Salvar as marcadas numa pasta (%s)..." % quantas,
+                           lambda: self.salvar_varias(dados)))
+        opcoes.append(("Apagar as marcadas (%s)..." % quantas,
+                       lambda: self._apagar_varias(dados)))
+        return opcoes
+
+    def salvar_varias(self, dados):
+        """Salva as midias marcadas numa pasta; as que ainda nao estao neste
+        computador sao baixadas antes (com a barra de progresso)."""
+        jan = self.jan
+        arquivos = [x for x in dados if x.tipo in det.BAIXAVEIS_TIPOS]
+        if not arquivos or jan.midias is None:
+            self._falar("Nenhuma das marcadas tem arquivo para salvar.")
+            return
+        from telezapp.interface import salvar as ui_salvar
+        pasta = ui_salvar.escolher_pasta(
+            self._pai_atual(), "Pasta onde salvar as %d mídias" %
+            len(arquivos))
+        if not pasta:
+            return
+        faltam = [x for x in arquivos if not jan.midias.caminho(x)]
+        if not faltam:
+            self._copiar_para(pasta, arquivos)
+            return
+        if wx.MessageBox(
+                "%d das marcadas ainda não estão neste computador. Baixar "
+                "antes de salvar? (Sem baixar, só as outras %d são salvas.)"
+                % (len(faltam), len(arquivos) - len(faltam)),
+                "Salvar as mídias", wx.YES_NO | wx.ICON_QUESTION,
+                self._pai_atual()) != wx.YES:
+            self._copiar_para(pasta, arquivos)
+            return
+        from telezapp.interface.progresso import JanelaDeProgresso
+        lote = []
+        barra = JanelaDeProgresso(
+            self._pai_atual(), "Baixando as mídias marcadas",
+            "Baixando para salvar",
+            ao_cancelar=lambda: lote and lote[0].cancelar(),
+            falar=jan.fala.falar)
+        barra.mostrar()
+
+        def andou(feitas, total):
+            barra.atualizar(100 * feitas / total if total else 100)
+
+        def acabou(resultado):
+            barra.fechar()
+            self._copiar_para(pasta, arquivos)
+        lote.append(jan.midias.baixar_lote(faltam, andou, acabou))
+
+    def _pai_atual(self):
+        lista = getattr(self, "_lista_midias", None)
+        try:
+            if lista is not None and lista.IsShown():
+                return lista
+        except RuntimeError:
+            pass
+        return self.dlg
+
+    def _copiar_para(self, pasta, arquivos):
+        """Copia os arquivos que estao neste computador para a pasta, sem
+        sobrescrever nada, e diz quantos foram."""
+        import shutil
+        from telezapp.interface.visualizadores import nome_para_salvar
+        from telezapp.nucleo import pasta_salvar
+        salvos = faltaram = 0
+        for x in arquivos:
+            origem = self.jan.midias.caminho(x)
+            if not origem:
+                faltaram += 1
+                continue
+            try:
+                shutil.copy2(origem, pasta_salvar.caminho_livre(
+                    pasta, nome_para_salvar(x, origem)))
+                salvos += 1
+            except OSError:
+                log.exception("salvar uma das mídias marcadas")
+                faltaram += 1
+        texto = ("Nenhuma mídia salva." if not salvos else
+                 "1 mídia salva em %s." % pasta if salvos == 1 else
+                 "%d mídias salvas em %s." % (salvos, pasta))
+        if faltaram:
+            texto += " %d não foram salvas (não estão neste computador ou " \
+                     "deram erro)." % faltaram
+        self._falar(texto)
+
+    def _apagar_varias(self, dados):
+        """Apaga as marcadas com uma pergunta so (como na conversa)."""
+        n = len(dados)
+        quantas = "1 mensagem" if n == 1 else "%d mensagens" % n
+        if not self.jan._apagar_varias_mensagens(list(dados), quantas):
+            return
+        ids = {x.id for x in dados}
+        self.mensagens = [y for y in self.mensagens if y.id not in ids]
+        self.est = det.estatisticas(
+            self.mensagens, self.jan.banco.midias(self.conv.conta_id,
+                                                  self.conv.id))
+        lista = getattr(self, "_lista_midias", None)
+        if lista is not None:
+            try:
+                lista.esquecer(dados)
+                lista.recarregar()
+            except RuntimeError:
+                pass
 
     def _menu_midia(self, x):
         jan = self.jan
@@ -796,8 +1032,9 @@ class ControleDetalhes:
                     for x in det.favoritas(self.mensagens)]
         dlg = DialogoLista(
             self.dlg, "Mensagens favoritas de %s" % self.conv.nome,
-            "Mensagens favoritas (Menu abre as ações)", (), filtrar,
-            self._menu_favorita)
+            "Mensagens favoritas (Menu abre as ações; Control Espaço marca)",
+            (), filtrar, self._menu_favorita, self._menu_favoritas_marcadas,
+            self._falar)
         self._lista_favoritas = dlg
         self._sub(dlg)
 
@@ -808,6 +1045,30 @@ class ControleDetalhes:
             opcoes.append((rotulo, lambda t=tipo, v=valor:
                            self.jan._copiar_conteudo(x, t, v)))
         return opcoes
+
+    def _menu_favoritas_marcadas(self, dados):
+        n = len(dados)
+        return [("Desfavoritar as marcadas (%d)" % n,
+                 lambda: self._em_lote(dados, self._desfavoritar,
+                                       "_lista_favoritas",
+                                       "desfavoritadas"))]
+
+    def _em_lote(self, dados, acao, lista, verbo):
+        """Faz `acao` em cada item marcado, esquece as marcas e diz quantos
+        foram."""
+        for x in list(dados):
+            acao(x)
+        alvo = getattr(self, lista, None)
+        try:
+            if alvo is not None:
+                alvo.esquecer(dados)
+                alvo.recarregar()
+        except RuntimeError:
+            pass
+        n = len(dados)
+        self._falar("%s %s." % ("1 mensagem" if n == 1
+                                else "%d mensagens" % n, verbo
+                                if n > 1 else verbo[:-1]))
 
     def _desfavoritar(self, x):
         """Tira a marca (no TeleZapp e, no WhatsApp, na conta) e a mensagem
@@ -845,12 +1106,27 @@ class ControleDetalhes:
                           key=lambda c: c[0].casefold())
         dlg = DialogoLista(
             self.dlg, "Participantes silenciados de %s" % self.conv.nome,
-            "Participantes silenciados (Enter volta a mostrar as mensagens)",
+            "Participantes silenciados (Enter volta a mostrar as mensagens; "
+            "Control Espaço marca)",
             (), itens, lambda id_: [
                 ("Voltar a ver as mensagens",
-                 lambda: self._tirar_silencio(id_))])
+                 lambda: self._tirar_silencio(id_))],
+            lambda ids: [("Voltar a ver as mensagens das marcadas (%d)" %
+                          len(ids), lambda: self._tirar_silencio_de(ids))],
+            self._falar)
         self._lista_silenciados = dlg
         self._sub(dlg)
+
+    def _tirar_silencio_de(self, ids):
+        for id_ in list(ids):
+            self._tirar_silencio(id_)
+        lista = getattr(self, "_lista_silenciados", None)
+        try:
+            if lista is not None:
+                lista.esquecer(ids)
+                lista.recarregar()
+        except RuntimeError:
+            pass
 
     def _tirar_silencio(self, id_):
         nome = self._pessoas_silenciadas().get(id_, {}).get("nome") or id_
@@ -905,8 +1181,9 @@ class ControleDetalhes:
                     for x in self._lista_de_fixadas()]
         dlg = DialogoLista(
             self.dlg, "Mensagens fixadas de %s" % self.conv.nome,
-            "Mensagens fixadas (Menu abre as ações)", (), filtrar,
-            self._menu_fixada)
+            "Mensagens fixadas (Menu abre as ações; Control Espaço marca)",
+            (), filtrar, self._menu_fixada, self._menu_fixadas_marcadas,
+            self._falar)
         self._lista_fixadas = dlg
         self._sub(dlg)
 
@@ -922,6 +1199,11 @@ class ControleDetalhes:
             opcoes.append((rotulo, lambda t=tipo, v=valor:
                            self.jan._copiar_conteudo(x, t, v)))
         return opcoes
+
+    def _menu_fixadas_marcadas(self, dados):
+        return [("Desafixar as marcadas (%d)" % len(dados),
+                 lambda: self._em_lote(dados, self._desafixar,
+                                       "_lista_fixadas", "desafixadas"))]
 
     def _desafixar(self, x):
         """Pede ao servico e tira da lista; se ele recusar, o aviso e falado
@@ -979,8 +1261,9 @@ class ControleDetalhes:
                 return ", ".join(partes)
             return [(rotulo(p), p) for p in gente]
         dlg = DialogoLista(self.dlg, "Membros de %s" % self.conv.nome,
-                           "Membros (Menu abre as ações)", (), itens,
-                           self._menu_membro)
+                           "Membros (Menu abre as ações; Control Espaço "
+                           "marca para copiar)", (), itens,
+                           self._menu_membro, None, self._falar)
         self._sub(dlg)
 
     def _menu_membro(self, p):
