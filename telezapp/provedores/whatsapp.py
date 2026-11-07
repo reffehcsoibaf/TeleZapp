@@ -5529,7 +5529,7 @@ class ProvedorWhatsApp(Provedor):
         voz = anexo.tipo == m.VOZ
         return Message(audioMessage=AudioMessage(
             seconds=anexo.segundos, PTT=voz,
-            mimetype="audio/ogg; codecs=opus" if voz else
+            mimetype=(anexo.mime or "audio/ogg; codecs=opus") if voz else
             (anexo.mime or "audio/mpeg"), **comum))
 
     def _anexo_que_o_whatsapp_toca(self, anexo):

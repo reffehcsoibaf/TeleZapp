@@ -524,19 +524,17 @@ OPCOES = (
           "Mídias", False,
           "Grava o microfone em dois canais, se ele tiver dois (muitos "
           "microfones têm um só: aí a gravação continua mono). Desmarcada, "
-          "grava em mono, o formato comum das mensagens de voz. Uma "
-          "gravação em estéreo é enviada como áudio (arquivo MP3), não como "
-          "mensagem de voz: o MP3 é o único formato estéreo que o iPhone "
-          "toca, mas nele o iPhone não mostra o controle de velocidade. A "
-          "gravação em mono é sempre mensagem de voz."),
+          "grava em mono, o formato comum das mensagens de voz. No WhatsApp "
+          "a gravação em estéreo também é mensagem de voz (arquivo M4A, "
+          "AAC), que toca no iPhone, com o controle de velocidade. No "
+          "Telegram, a gravação em estéreo vai como áudio comum."),
     Opcao("gravar_som_estereo", "Gravar o som do computador em estéreo",
           "Mídias", False,
           "Grava em dois canais o que o computador toca, como música e "
           "vídeos, também quando o microfone entra junto. Desmarcada, grava "
-          "em mono. Uma gravação em estéreo é enviada como áudio (arquivo "
-          "MP3), não como mensagem de voz: o MP3 é o único formato estéreo "
-          "que o iPhone toca, mas nele o iPhone não mostra o controle de "
-          "velocidade."),
+          "em mono. No WhatsApp a gravação em estéreo também é mensagem de "
+          "voz (arquivo M4A, AAC), que toca no iPhone, com o controle de "
+          "velocidade. No Telegram, vai como áudio comum."),
     Opcao("qualidade_gravacao_mono", "Qualidade da gravação em mono",
           "Mídias", 64,
           "Quantos kbps a mensagem de voz gravada em mono usa. Mais kbps, "

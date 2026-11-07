@@ -235,10 +235,11 @@ class FonteEstereoFalsa(FonteFalsa):
         return np.stack([mono, direita], axis=1)
 
 
-def test_estereo_vira_mp3_e_vai_como_audio_nao_como_voz(tmp_path):
-    """Relato do responsavel (06/11/2026): gravacao em estereo nao tocava no
-    iPhone. O WhatsApp do iPhone so toca mensagem de voz (Opus) em mono; em
-    estereo o arquivo e M4A (AAC) e deve ir como audio comum."""
+def test_estereo_vira_m4a_aac_e_vai_como_mensagem_de_voz(tmp_path):
+    """06/11/2026: Opus estereo nao toca no iPhone, mas AAC-LC estereo em M4A
+    (48 kHz, moov no comeco) toca como mensagem de voz, com controle de
+    velocidade (o formato da mensagem de voz estereo do WinZapp, 07/11)."""
+    import struct
     import av
     fonte = FonteEstereoFalsa(taxa=44100)
     g = Gravador(str(tmp_path), fabrica_fonte=lambda: fonte,
@@ -246,22 +247,38 @@ def test_estereo_vira_mp3_e_vai_como_audio_nao_como_voz(tmp_path):
     g.iniciar()
     time.sleep(0.6)
     r = g.parar()
-    assert r.estereo and r.caminho.endswith(".mp3")
+    assert r.estereo and r.caminho.endswith(".m4a")
     assert g.canais == 2 and g.kbps_usados == 128
     with av.open(r.caminho) as arq:
         s = arq.streams.audio[0]
-        assert s.codec_context.name.startswith("mp3") and s.channels == 2
-        assert s.rate == 44100
+        assert s.codec_context.name == "aac" and s.channels == 2
+        assert s.codec_context.profile == "LC"
+        assert s.rate == 48000               # a fonte de 44,1 kHz vira 48
         assert 0.3 < float(arq.duration) / 1e6 < 1.3
-    # preparado como audio comum (nao voz) para o envio
-    a = envio.preparar(r.caminho, voz=False, temporario=True)
-    assert a.tipo == "audio" and a.mime == "audio/mpeg"
-    assert [p.suffix for p in tmp_path.iterdir()] == [".mp3"]
+    # estrutura: ftyp, moov ANTES do mdat (faststart)
+    dados = open(r.caminho, "rb").read()
+    caixas, i = [], 0
+    while i + 8 <= len(dados):
+        n = struct.unpack(">I", dados[i:i + 4])[0]
+        caixas.append(dados[i + 4:i + 8])
+        if n < 8:
+            break
+        i += n
+    assert caixas[0] == b"ftyp"
+    assert caixas.index(b"moov") < caixas.index(b"mdat")
+    # no WhatsApp vai como voz; no Telegram, como audio comum
+    assert r.como_voz_em("whatsapp") and not r.como_voz_em("telegram")
+    a = envio.preparar(r.caminho, voz=True, temporario=True)
+    assert a.tipo == "voz" and a.mime == "audio/mp4" and a.segundos >= 1
+    b = envio.preparar(r.caminho, voz=False, temporario=True)
+    assert b.tipo == "audio"
+    assert [p.suffix for p in tmp_path.iterdir()] == [".m4a"]
 
 
 def test_mono_continua_ogg_opus_de_mensagem_de_voz(tmp_path):
     g, _, r = gravar_por(tmp_path, 0.4)
     assert not r.estereo and r.caminho.endswith(".ogg")
+    assert r.como_voz_em("whatsapp") and r.como_voz_em("telegram")
 
 
 def test_volume_da_gravacao_aumenta_e_limita(tmp_path):

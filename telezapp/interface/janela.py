@@ -8708,9 +8708,9 @@ class Janela(wx.Frame):
         if gravacao.silenciosa:
             self.fala.falar("Atenção: a gravação saiu quase em silêncio.",
                             interromper=True)
-        # estereo (MP3) vai como audio comum, nao como mensagem de voz
-        self._enviar_arquivo(gravacao.caminho, voz=gravacao.como_voz,
-                             temporario=True)
+        # estereo (M4A) e mensagem de voz no WhatsApp; no Telegram, audio
+        self._enviar_arquivo(gravacao.caminho, temporario=True,
+                             voz=gravacao.como_voz_em(self._servico_do_envio()))
 
     def _gravar(self, origem):
         if self._so_texto_no_status():
@@ -8767,7 +8767,7 @@ class Janela(wx.Frame):
         if gravacao is None:
             return
         log.info("gravação (%s) de %.0fs pronta para enviar%s", origem,
-                 gravacao.segundos, " (estéreo, como áudio)"
+                 gravacao.segundos, " (estéreo, M4A)"
                  if gravacao.estereo else "")
         if self.atual != chave:
             conv = self.indice.get(chave)
@@ -8781,8 +8781,13 @@ class Janela(wx.Frame):
                     pass
                 return
             self._abrir_conversa_de(conv)      # diz "Conversa com ..."
-        self._enviar_arquivo(gravacao.caminho, voz=gravacao.como_voz,
-                             temporario=True)
+        self._enviar_arquivo(gravacao.caminho, temporario=True,
+                             voz=gravacao.como_voz_em(self._servico_do_envio()))
+
+    def _servico_do_envio(self):
+        """"whatsapp" ou "telegram", da conversa que vai receber o envio."""
+        destino = self._destino_do_envio()
+        return getattr(destino[2], "servico", "") if destino else ""
 
     def _enviar_arquivo(self, caminho, voz=False, temporario=False,
                         como_documento=False):
