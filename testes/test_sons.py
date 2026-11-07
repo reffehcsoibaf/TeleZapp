@@ -362,3 +362,47 @@ def test_callback_do_fluxo_entrega_o_som_e_depois_silencio(monkeypatch):
     assert not terceiro.any()
     assert saida._dados is None
 
+
+
+def test_fluxo_dos_avisos_fecha_depois_de_ficar_ocioso(monkeypatch):
+    import numpy as np
+    fabrica = _SaidaFalsa()
+    monkeypatch.setitem(sys.modules, "sounddevice",
+                        types.SimpleNamespace(OutputStream=fabrica))
+    saida = fala._SaidaDosAvisos()
+    relogio = [100.0]
+    saida._agora = lambda: relogio[0]
+    som = np.zeros((10, 2), dtype="float32")
+    saida.tocar(som, fala.TAXA_DOS_AVISOS)
+    assert saida._ocioso is not None and saida._ocioso.daemon
+
+    relogio[0] += fala.TEMPO_OCIOSO_DOS_AVISOS_S - 5
+    saida._fechar_ocioso()                       # ainda nao deu o tempo
+    assert not fabrica.fluxos[0].fechado
+
+    fabrica.fluxos[0].callback(np.zeros((20, 2), dtype="float32"), 20,
+                               None, None)       # o som acabou de sair
+    relogio[0] += 10
+    saida._fechar_ocioso()                       # deu: fecha o fluxo
+    assert fabrica.fluxos[0].parado and fabrica.fluxos[0].fechado
+    assert saida._fluxo is None
+
+    saida.tocar(som, fala.TAXA_DOS_AVISOS)       # o proximo aviso reabre
+    assert len(fabrica.fluxos) == 2 and fabrica.fluxos[1].iniciado
+    saida.fechar()
+    assert saida._ocioso is None
+
+
+def test_fluxo_dos_avisos_nao_fecha_com_som_ainda_tocando(monkeypatch):
+    import numpy as np
+    fabrica = _SaidaFalsa()
+    monkeypatch.setitem(sys.modules, "sounddevice",
+                        types.SimpleNamespace(OutputStream=fabrica))
+    saida = fala._SaidaDosAvisos()
+    relogio = [0.0]
+    saida._agora = lambda: relogio[0]
+    saida.tocar(np.zeros((10, 2), dtype="float32"), fala.TAXA_DOS_AVISOS)
+    relogio[0] = fala.TEMPO_OCIOSO_DOS_AVISOS_S + 1
+    saida._fechar_ocioso()                       # o som nao acabou de sair
+    assert not fabrica.fluxos[0].fechado
+    saida.fechar()
