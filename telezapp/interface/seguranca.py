@@ -34,6 +34,10 @@ def autenticar(pai, trava, motivo="Entrar no %s" % NOME):
             log.info("autenticação: Windows Hello")
             return True
         log.info("autenticação: Windows Hello %s; pedindo o PIN", r)
+        if r == seg.HELLO_SEM_RESPOSTA:
+            # o Windows nao mostrou a janela: nao vale insistir a cada
+            # abertura, e o PIN sempre funciona
+            trava.definir_hello(False)
     texto = "Digite o PIN do %s." % NOME
     if not trava.deste_computador():
         texto = ("Este computador ainda não é conhecido pelo %s. Digite o "

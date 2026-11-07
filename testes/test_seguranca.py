@@ -83,3 +83,30 @@ def test_dpapi_de_verdade_deste_windows(tmp_path):
     t = seg.Trava(str(tmp_path))
     t.ligar("4321")
     assert seg.Trava(str(tmp_path)).deste_computador()
+
+
+def test_hello_que_nunca_responde_cai_no_pin_depois_do_tempo():
+    import threading
+    from telezapp.nucleo import seguranca as seg
+    parar = threading.Event()
+    r = seg.pedir_hello("x", tempo=0.2, pedir=lambda m: parar.wait(5))
+    parar.set()
+    assert r == seg.HELLO_SEM_RESPOSTA
+    assert seg.pedir_hello("x", tempo=2, pedir=lambda m: seg.HELLO_OK) == \
+        seg.HELLO_OK
+
+
+def test_hello_sem_resposta_desliga_o_hello_e_pede_o_pin(tmp_path, monkeypatch):
+    import sys
+    from testes import wx_falso
+    sys.modules.setdefault("wx", wx_falso)
+    from telezapp.interface import seguranca as ui
+    from telezapp.nucleo import seguranca as seg
+    trava = seg.Trava(str(tmp_path))
+    trava.ligar("1234", True)
+    monkeypatch.setattr(seg, "hello_disponivel", lambda: True)
+    monkeypatch.setattr(seg, "pedir_hello",
+                        lambda m: seg.HELLO_SEM_RESPOSTA)
+    monkeypatch.setattr(ui, "_pedir_pin", lambda pai, texto, titulo="": "1234")
+    assert ui.autenticar(None, trava) is True
+    assert not seg.Trava(str(tmp_path)).usar_hello()      # nao insiste
