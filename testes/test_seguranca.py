@@ -85,28 +85,36 @@ def test_dpapi_de_verdade_deste_windows(tmp_path):
     assert seg.Trava(str(tmp_path)).deste_computador()
 
 
-def test_hello_que_nunca_responde_cai_no_pin_depois_do_tempo():
-    import threading
-    from telezapp.nucleo import seguranca as seg
-    parar = threading.Event()
-    r = seg.pedir_hello("x", tempo=0.2, pedir=lambda m: parar.wait(5))
-    parar.set()
-    assert r == seg.HELLO_SEM_RESPOSTA
-    assert seg.pedir_hello("x", tempo=2, pedir=lambda m: seg.HELLO_OK) == \
-        seg.HELLO_OK
-
-
-def test_hello_sem_resposta_desliga_o_hello_e_pede_o_pin(tmp_path, monkeypatch):
+def _autenticar_com(tmp_path, monkeypatch, resposta_do_hello, pin="1234"):
     import sys
     from testes import wx_falso
     sys.modules.setdefault("wx", wx_falso)
     from telezapp.interface import seguranca as ui
-    from telezapp.nucleo import seguranca as seg
     trava = seg.Trava(str(tmp_path))
     trava.ligar("1234", True)
+    pedidos = []
     monkeypatch.setattr(seg, "hello_disponivel", lambda: True)
-    monkeypatch.setattr(seg, "pedir_hello",
-                        lambda m: seg.HELLO_SEM_RESPOSTA)
-    monkeypatch.setattr(ui, "_pedir_pin", lambda pai, texto, titulo="": "1234")
-    assert ui.autenticar(None, trava) is True
-    assert not seg.Trava(str(tmp_path)).usar_hello()      # nao insiste
+    monkeypatch.setattr(ui, "pedir_hello",
+                        lambda pai, motivo: resposta_do_hello)
+    monkeypatch.setattr(ui, "_pedir_pin",
+                        lambda pai, texto, titulo="": pedidos.append(texto)
+                        or pin)
+    return ui.autenticar(None, trava), pedidos
+
+
+def test_hello_verificado_entra_sem_pedir_o_pin(tmp_path, monkeypatch):
+    ok, pedidos = _autenticar_com(tmp_path, monkeypatch, seg.HELLO_OK)
+    assert ok is True and pedidos == []
+
+
+def test_hello_recusado_ou_trocado_pelo_pin_pede_o_pin(tmp_path, monkeypatch):
+    for resposta in (seg.HELLO_CANCELADO, seg.HELLO_INDISPONIVEL, "usar_pin"):
+        ok, pedidos = _autenticar_com(tmp_path, monkeypatch, resposta)
+        assert ok is True and len(pedidos) == 1
+
+
+def test_guid_do_hello_tem_a_ordem_do_windows():
+    from telezapp.nucleo import hello_janela as h
+    g = h._guid(h.IID_INTEROP)
+    assert (g.a, g.b, g.c) == (0x39E050C3, 0x4E74, 0x441A)
+    assert bytes(g.d) == bytes.fromhex("8DC0B81104DF949C")

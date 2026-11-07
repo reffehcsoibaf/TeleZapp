@@ -7,6 +7,7 @@ import logging
 import wx
 
 from telezapp import NOME
+from telezapp.nucleo import hello_janela
 from telezapp.nucleo import seguranca as seg
 
 log = logging.getLogger("telezapp.seguranca")
@@ -24,20 +25,69 @@ def _pedir_pin(pai, texto, titulo="Entrar no %s" % NOME):
         dlg.Destroy()
 
 
+HELLO_USAR_PIN = "usar_pin"      # a pessoa preferiu o PIN do TeleZapp
+
+
+def pedir_hello(pai, motivo):
+    """Pede o Windows Hello numa janela do TeleZapp (dona do aviso do
+    Windows, que sem ela nao aparece), com o botao Usar o PIN do TeleZapp
+    sempre a mao. Devolve um HELLO_* de `nucleo.seguranca` ou HELLO_USAR_PIN."""
+    dlg = wx.Dialog(pai, title=motivo)
+    caixa = wx.BoxSizer(wx.VERTICAL)
+    caixa.Add(wx.StaticText(
+        dlg, label="Confirme no aviso do Windows Hello (digital, rosto ou o "
+        "PIN do Windows). Para usar o PIN do %s, escolha o botão abaixo, ou "
+        "aperte Esc." % NOME), 0, wx.ALL, 12)
+    botao = wx.Button(dlg, wx.ID_CANCEL, "Usar o PIN do %s" % NOME)
+    caixa.Add(botao, 0, wx.ALL | wx.ALIGN_CENTER, 12)
+    dlg.SetSizerAndFit(caixa)
+    dlg.CentreOnScreen()
+    try:
+        pedido = hello_janela.PedidoDeHello(dlg.GetHandle(), motivo)
+    except Exception:
+        log.exception("Windows Hello nao abriu; pedindo o PIN")
+        dlg.Destroy()
+        return seg.HELLO_INDISPONIVEL
+    achado = []
+    tempo = wx.Timer(dlg)
+
+    def olhar(evento):
+        resposta = pedido.estado()
+        if resposta is not None:
+            achado.append(resposta)
+            tempo.Stop()
+            dlg.EndModal(wx.ID_OK)
+    dlg.Bind(wx.EVT_TIMER, olhar, tempo)
+    tempo.Start(150)
+    try:
+        dlg.Raise()
+        dlg.ShowModal()
+    finally:
+        tempo.Stop()
+        if not achado:
+            pedido.cancelar()
+        pedido.fechar()
+        dlg.Destroy()
+    if not achado:
+        return HELLO_USAR_PIN
+    resposta = achado[0]
+    if resposta == hello_janela.VERIFICADO:
+        return seg.HELLO_OK
+    if resposta in (hello_janela.DISPOSITIVO_AUSENTE,
+                    hello_janela.NAO_CONFIGURADO, hello_janela.DESATIVADO):
+        return seg.HELLO_INDISPONIVEL
+    return seg.HELLO_CANCELADO
+
+
 def autenticar(pai, trava, motivo="Entrar no %s" % NOME):
     """Pede o Windows Hello (neste computador, se der) ou o PIN do
     TeleZapp. True se a pessoa provou quem e."""
-    if trava.deste_computador() and trava.usar_hello() and \
-            seg.hello_disponivel():
-        r = seg.pedir_hello(motivo)
+    if trava.deste_computador() and trava.usar_hello() and             seg.hello_disponivel():
+        r = pedir_hello(pai, motivo)
         if r == seg.HELLO_OK:
             log.info("autenticação: Windows Hello")
             return True
         log.info("autenticação: Windows Hello %s; pedindo o PIN", r)
-        if r == seg.HELLO_SEM_RESPOSTA:
-            # o Windows nao mostrou a janela: nao vale insistir a cada
-            # abertura, e o PIN sempre funciona
-            trava.definir_hello(False)
     texto = "Digite o PIN do %s." % NOME
     if not trava.deste_computador():
         texto = ("Este computador ainda não é conhecido pelo %s. Digite o "
