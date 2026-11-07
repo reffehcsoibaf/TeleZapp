@@ -1,0 +1,38 @@
+package meowcaller
+
+import "testing"
+
+func TestRelayDoChamadorSemFNA(t *testing.T) {
+	// oferta sem is_fna (meowcaller#40): o proprio (auth_token_id=1) nao serve; vence o
+	// nao proprio de menor c2r_rtt
+	rd := &relayData{endpoints: []relayEndpoint{
+		{relayName: "poa1c01", authTokenID: 1, c2rRTT: 21},
+		{relayName: "gru3c01", authTokenID: 0, c2rRTT: 62},
+		{relayName: "mia1c01", authTokenID: 0, c2rRTT: 120},
+	}}
+	if got := getMediaRelayEndpoint(rd, true); got == nil || got.relayName != "gru3c01" {
+		t.Fatalf("recebida sem fna: quis gru3c01, veio %v", got)
+	}
+	// saida: nada muda (nao proprio com token)
+	if got := getMediaRelayEndpoint(rd, false); got == nil || got.relayName != "poa1c01" {
+		t.Fatalf("saida: quis poa1c01, veio %v", got)
+	}
+	// com is_fna, o FNA continua valendo
+	rd.endpoints = append(rd.endpoints, relayEndpoint{relayName: "fna1", isFNA: true})
+	if got := getMediaRelayEndpoint(rd, true); got == nil || got.relayName != "fna1" {
+		t.Fatalf("com fna: quis fna1, veio %v", got)
+	}
+	if relayDoChamadorSemFNA(rd) != nil {
+		t.Fatal("com fna nao ha heuristica")
+	}
+	// sem candidato com rtt: cai no comportamento antigo (primeiro nao FNA com token)
+	rd2 := &relayData{endpoints: []relayEndpoint{
+		{relayName: "a", authTokenID: 1}, {relayName: "b", authTokenID: 0},
+	}}
+	if got := getMediaRelayEndpoint(rd2, true); got == nil || got.relayName != "a" {
+		t.Fatalf("sem rtt: quis a, veio %v", got)
+	}
+	if s := descreverRelaysDaOferta(rd); s == "" {
+		t.Fatal("descricao vazia")
+	}
+}
