@@ -1,5 +1,5 @@
 diff --git "a/C:\\Users\\fabio\\AppData\\Local\\Temp/engine.go.antes" b/engine.go
-index eb5e6e1..6609bb4 100644
+index eb5e6e1..be893a8 100644
 --- "a/C:\\Users\\fabio\\AppData\\Local\\Temp/engine.go.antes"
 +++ b/engine.go
 @@ -1575,6 +1575,7 @@ type relayEndpoint struct {
@@ -69,6 +69,41 @@ index eb5e6e1..6609bb4 100644
  // logControleDaChamada registra o nome e os atributos (nunca o conteudo) de uma mensagem de
  // controle da chamada. Os atributos de chave de criptografia nao existem aqui: a chave viaja
  // cifrada nos filhos, que nao sao lidos. TeleZapp.
+@@ -1766,4 +1805,34 @@ func (e *engine) logControleDaChamada(callNode *waBinary.Node, filho waBinary.No
+ 		Str("atributos", strings.Join(attrs, " ")).
+ 		Int("filhos", len(filho.GetChildren())).
+ 		Msg("controle da chamada recebido: " + filho.Tag) // a mensagem entra na chave de repeticao do log
++	if filho.Tag == "offer" {
++		e.logOfertaRecebida(callNode, filho)
++	}
++}
++
++// logOfertaRecebida registra o que a oferta recebida diz de quem chama: os atributos do no <call>
++// (platform, version, e, t...) e, de cada filho da oferta, so o nome e os NOMES dos atributos
++// (nunca valores nem conteudo: ha chaves de criptografia nos filhos). Serve para comparar ofertas
++// que funcionam com as que ficam sem som e ver se algo identifica a versao do chamador. TeleZapp.
++func (e *engine) logOfertaRecebida(callNode *waBinary.Node, oferta waBinary.Node) {
++	stanza := make([]string, 0, len(callNode.Attrs))
++	for k, v := range callNode.Attrs {
++		if k == "id" || k == "from" || k == "to" || k == "notify" || k == "participant" {
++			continue
++		}
++		stanza = append(stanza, fmt.Sprintf("%s=%v", k, v))
++	}
++	sort.Strings(stanza)
++	filhos := make([]string, 0, len(oferta.GetChildren()))
++	for _, c := range oferta.GetChildren() {
++		chaves := make([]string, 0, len(c.Attrs))
++		for k := range c.Attrs {
++			chaves = append(chaves, k)
++		}
++		sort.Strings(chaves)
++		filhos = append(filhos, c.Tag+"["+strings.Join(chaves, ",")+"]")
++	}
++	e.c.log.Info().Str("stanza", strings.Join(stanza, " ")).
++		Str("filhos_da_oferta", strings.Join(filhos, " ")).
++		Msg("TeleZapp: oferta recebida, stanza e filhos")
+ }
 
 diff --git "a/C:\\Users\\fabio\\AppData\\Local\\Temp/engine_media.go.antes" b/engine_media.go
 index 210cc2b..5e75c1d 100644
