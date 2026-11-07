@@ -312,3 +312,41 @@ def test_plano_b_le_a_versao_do_endereco_da_ultima_release(monkeypatch):
                         Resposta(at.SITE + "/releases"))   # sem tag
     with pytest.raises(ValueError):
         at._pelo_site()
+
+
+PAGINA_DA_RELEASE = (
+    '<div class="markdown-body"><blockquote><p>Aviso &amp; mais</p>'
+    "</blockquote>\n<h2>Novidades da versão 2026.11.06.0</h2>\n<ul>\n"
+    "<li>Telegram: <code>Novo tópico</code> no menu &quot;Novo&quot;.</li>\n"
+    "<li>Corrigido:  uma\n   coisa.</li>\n</ul>\n<h2>Como usar</h2>\n"
+    "<ol><li>Baixe o programa.</li></ol></div>")
+
+
+def test_novidades_da_pagina_da_release():
+    texto = at.novidades_da_pagina(PAGINA_DA_RELEASE)
+    assert texto == ('- Telegram: Novo tópico no menu "Novo".\n'
+                     "- Corrigido: uma coisa.")
+    assert at.novidades_da_pagina("<html>sem nada</html>") == ""
+    assert at.novidades_da_pagina(None) == ""
+
+
+def test_plano_b_traz_as_novidades_por_extenso(monkeypatch):
+    class Resposta:
+        def geturl(self):
+            return at.SITE + "/releases/tag/2026.11.06.0"
+
+        def read(self):
+            return PAGINA_DA_RELEASE.encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+    monkeypatch.setattr(at.urllib.request, "urlopen",
+                        lambda p, timeout=0, context=None: Resposta())
+    lanc = at._pelo_site()
+    versao, texto = lanc.historico[0]
+    assert versao == "2026.11.06.0"
+    assert texto.startswith("- Telegram: Novo tópico")
+    assert "página da versão" not in texto
