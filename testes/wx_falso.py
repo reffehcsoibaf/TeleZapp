@@ -36,6 +36,8 @@ EVT_LIST_ITEM_ACTIVATED = object()
 EVT_CLOSE = EVT_CHAR_HOOK = EVT_MENU = EVT_LISTBOX_DCLICK = object()
 EVT_CONTEXT_MENU = EVT_KEY_DOWN = EVT_BUTTON = EVT_LISTBOX = object()
 EVT_CHAR = object()
+EVT_SET_FOCUS = object()
+TE_PASSWORD = 2048
 EVT_CHOICE = EVT_TEXT = EVT_CHECKBOX = object()
 DefaultPosition = (-1, -1)
 mensagens = []          # o que passou por MessageBox

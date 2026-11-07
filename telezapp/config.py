@@ -280,7 +280,8 @@ OPCOES = (
           "você digita, no campo de busca de conversas, o código secreto "
           "que definiu em Conversas, Código secreto das conversas "
           "trancadas. Sem código definido elas ficam escondidas. Desmarcada, "
-          "o tipo Trancadas no celular aparece sempre."),
+          "o tipo Trancadas no celular aparece sempre.",
+          grupo="Conversas trancadas"),
     Opcao("temporarias_apagar_aqui",
           "Apagar daqui as mensagens temporárias quando o prazo acabar",
           "Privacidade", True,
