@@ -40,8 +40,6 @@ ESPERA_S = 30
 HELLO_OK = "ok"
 HELLO_CANCELADO = "cancelado"
 HELLO_INDISPONIVEL = "indisponivel"
-HELLO_SEM_RESPOSTA = "sem_resposta"     # a janela nunca apareceu
-TEMPO_DO_HELLO_S = 20
 
 
 class ErroSeguranca(Exception):
@@ -239,49 +237,3 @@ def hello_disponivel():
     except Exception:
         log.info("Windows Hello indisponível")
         return False
-
-
-def _pedir_hello_agora(mensagem):
-    """Pede o Windows Hello e espera a resposta (pode demorar para sempre se
-    o Windows nao mostrar a janela)."""
-    try:
-        import asyncio
-        from winrt.windows.security.credentials.ui import (
-            UserConsentVerificationResult, UserConsentVerifier)
-
-        async def pedir():
-            return await UserConsentVerifier.request_verification_async(
-                mensagem)
-        r = asyncio.run(pedir())
-    except Exception:
-        log.exception("Windows Hello falhou")
-        return HELLO_INDISPONIVEL
-    if r == UserConsentVerificationResult.VERIFIED:
-        return HELLO_OK
-    if r == UserConsentVerificationResult.CANCELED:
-        return HELLO_CANCELADO
-    log.info("Windows Hello: resultado %s", r)
-    return HELLO_INDISPONIVEL if r in (
-        UserConsentVerificationResult.DEVICE_NOT_PRESENT,
-        UserConsentVerificationResult.NOT_CONFIGURED_FOR_USER,
-        UserConsentVerificationResult.DISABLED_BY_POLICY)         else HELLO_CANCELADO
-
-
-def pedir_hello(mensagem, tempo=None, pedir=None):
-    """Pede a verificacao do Windows Hello (a janela e do Windows). Um
-    programa sem janela propria nem sempre ve o Windows mostrar essa janela,
-    e a espera nao acabaria: depois de `tempo` segundos devolve
-    HELLO_SEM_RESPOSTA e quem chamou segue para o PIN."""
-    import threading
-    tempo = TEMPO_DO_HELLO_S if tempo is None else tempo
-    pedir = pedir or _pedir_hello_agora
-    achado = []
-    t = threading.Thread(target=lambda: achado.append(pedir(mensagem)),
-                         name="windows-hello", daemon=True)
-    t.start()
-    t.join(tempo)
-    if achado:
-        return achado[0]
-    log.warning("Windows Hello sem resposta em %s s; seguindo para o PIN",
-                tempo)
-    return HELLO_SEM_RESPOSTA
