@@ -51,14 +51,15 @@ def test_acao_do_som(tmp_path):
     fala.definir_sons({})
 
 
-def test_arquivo_de_som_toca_pelo_sounddevice(tmp_path, monkeypatch):
+def test_arquivo_de_som_toca_pelo_fluxo(tmp_path, monkeypatch):
     tocados = []
-    falso = types.SimpleNamespace(
-        play=lambda dados, taxa: tocados.append((dados.shape, taxa)))
-    monkeypatch.setitem(sys.modules, "sounddevice", falso)
+    monkeypatch.setattr(fala, "_indice_dos_avisos", lambda: None)
+    monkeypatch.setattr(fala, "_tocar_pelo_fluxo",
+                        lambda dados, taxa, dispositivo=None:
+                        tocados.append((dados.shape, taxa, dispositivo)))
     fala._tocar_arquivo("nova", wav(tmp_path / "a.wav", segundos=30))
-    (quadros, canais), taxa = tocados[0]
-    assert taxa == 8000 and canais == 1
+    (quadros, canais), taxa, dispositivo = tocados[0]
+    assert taxa == 8000 and canais == 1 and dispositivo is None
     assert quadros == 8000 * fala.LIMITE_SEGUNDOS_ARQUIVO     # so o comeco
 
 
@@ -222,11 +223,11 @@ def test_eventos_novos_herdam_o_som_certo_e_tem_bip_proprio():
         assert fala.tom_padrao(evento) == evento
 
 
-def test_aviso_no_dispositivo_escolhido_toca_pelo_sounddevice(monkeypatch):
+def test_aviso_no_dispositivo_escolhido_toca_pelo_fluxo(monkeypatch):
     tocados, beeps = [], []
-    monkeypatch.setitem(sys.modules, "sounddevice", types.SimpleNamespace(
-        play=lambda dados, taxa, device=None: tocados.append(
-            (len(dados), taxa, device))))
+    monkeypatch.setattr(fala, "_tocar_pelo_fluxo",
+                        lambda dados, taxa, dispositivo=None:
+                        tocados.append((len(dados), taxa, dispositivo)))
     monkeypatch.setattr(fala, "winsound", types.SimpleNamespace(
         Beep=lambda f, ms: beeps.append(f)))
     monkeypatch.setattr(fala, "_indice_dos_avisos", lambda: 7)
@@ -249,8 +250,9 @@ def test_aviso_sem_dispositivo_escolhido_segue_no_winsound(monkeypatch):
 def test_arquivo_de_aviso_vai_para_o_dispositivo_escolhido(tmp_path,
                                                            monkeypatch):
     tocados = []
-    monkeypatch.setitem(sys.modules, "sounddevice", types.SimpleNamespace(
-        play=lambda dados, taxa, device=None: tocados.append(device)))
+    monkeypatch.setattr(fala, "_tocar_pelo_fluxo",
+                        lambda dados, taxa, dispositivo=None:
+                        tocados.append(dispositivo))
     monkeypatch.setattr(fala, "_indice_dos_avisos", lambda: 3)
     fala._tocar_arquivo("nova", wav(tmp_path / "a.wav"))
     assert tocados == [3]
@@ -268,3 +270,95 @@ def test_dispositivo_dos_avisos_guarda_e_nao_mexe_nos_outros():
         assert dispositivos.notificacao() == ""
     finally:
         dispositivos.definir("", "", "")
+
+
+def test_preparar_som_vira_estereo_na_taxa_dos_avisos():
+    import numpy as np
+    mono = np.zeros((800, 1), dtype="float32")
+    pronto = fala._preparar_som(mono, 8000)
+    assert pronto.shape == (4410, 2)                # 0,1 s a 44100 Hz
+    assert pronto.dtype == np.float32
+    assert np.array_equal(pronto[:, 0], pronto[:, 1])   # mono nos dois canais
+
+    tres = np.zeros((100, 3), dtype="float32")
+    assert fala._preparar_som(tres, fala.TAXA_DOS_AVISOS).shape == (100, 2)
+
+    um = np.zeros(100, dtype="float32")             # 1-D vira dois canais
+    assert fala._preparar_som(um, fala.TAXA_DOS_AVISOS).shape == (100, 2)
+
+
+class _FluxoFalso:
+    def __init__(self, **parametros):
+        self.parametros = parametros
+        self.callback = parametros["callback"]
+        self.active = True
+        self.iniciado = self.parado = self.fechado = False
+
+    def start(self):
+        self.iniciado = True
+
+    def stop(self, *a):
+        self.active = False
+        self.parado = True
+
+    def close(self, *a):
+        self.fechado = True
+
+
+class _SaidaFalsa:
+    def __init__(self):
+        self.fluxos = []
+
+    def __call__(self, **parametros):
+        fluxo = _FluxoFalso(**parametros)
+        self.fluxos.append(fluxo)
+        return fluxo
+
+
+def test_fluxo_dos_avisos_abre_uma_vez_e_troca_o_som(monkeypatch):
+    import numpy as np
+    fabrica = _SaidaFalsa()
+    monkeypatch.setitem(sys.modules, "sounddevice",
+                        types.SimpleNamespace(OutputStream=fabrica))
+    saida = fala._SaidaDosAvisos()
+    som = np.zeros((100, 2), dtype="float32")
+    saida.tocar(som, fala.TAXA_DOS_AVISOS)
+    saida.tocar(som, fala.TAXA_DOS_AVISOS)
+    assert len(fabrica.fluxos) == 1                 # nao reabriu o dispositivo
+    assert fabrica.fluxos[0].iniciado
+    assert fabrica.fluxos[0].parametros["latency"] == "low"
+    assert fabrica.fluxos[0].parametros["channels"] == 2
+
+    saida.tocar(som, fala.TAXA_DOS_AVISOS, dispositivo=3)
+    assert len(fabrica.fluxos) == 2                 # trocou de dispositivo
+    assert fabrica.fluxos[0].parado and fabrica.fluxos[0].fechado
+    assert fabrica.fluxos[1].parametros["device"] == 3
+
+    saida.fechar()
+    assert fabrica.fluxos[1].parado and fabrica.fluxos[1].fechado
+
+
+def test_callback_do_fluxo_entrega_o_som_e_depois_silencio(monkeypatch):
+    import numpy as np
+    fabrica = _SaidaFalsa()
+    monkeypatch.setitem(sys.modules, "sounddevice",
+                        types.SimpleNamespace(OutputStream=fabrica))
+    saida = fala._SaidaDosAvisos()
+    som = np.arange(6, dtype="float32").reshape(-1, 1) + np.zeros((6, 2))
+    saida.tocar(som, fala.TAXA_DOS_AVISOS)
+    callback = fabrica.fluxos[0].callback
+
+    primeiro = np.zeros((4, 2), dtype="float32")
+    callback(primeiro, 4, None, None)
+    assert np.array_equal(primeiro, som[:4])
+
+    segundo = np.zeros((4, 2), dtype="float32")
+    callback(segundo, 4, None, None)
+    assert np.array_equal(segundo[:2], som[4:])     # o resto do som
+    assert np.array_equal(segundo[2:], np.zeros((2, 2), dtype="float32"))
+
+    terceiro = np.zeros((4, 2), dtype="float32")
+    callback(terceiro, 4, None, None)               # acabou: so silencio
+    assert not terceiro.any()
+    assert saida._dados is None
+
