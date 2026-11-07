@@ -69,9 +69,14 @@ def Point(x, y):
     return (x, y)
 
 
+criados = []         # controles na ordem de criacao (a ordem que o leitor
+#                      de tela usa para achar o rotulo de cada caixa)
+
+
 class Janela:
     def __init__(self, *a, **k):
         self.vivo = True
+        criados.append(self)
 
     def Bind(self, *a, **k):
         # guarda o tratador de cada evento, para os testes o chamarem
@@ -230,6 +235,9 @@ class Dialog(Frame):
 
     def Show(self, v=True):
         self.mostrado = v
+
+    def CreateStdDialogButtonSizer(self, flags):
+        return None
 
     def SetSizerAndFit(self, s):
         pass

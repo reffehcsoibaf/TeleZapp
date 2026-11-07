@@ -16,35 +16,35 @@ class DialogoDispositivos(wx.Dialog):
         self.itens_mic, pos_mic = dispositivos.opcoes(microfones, microfone)
         self.itens_saida, pos_saida = dispositivos.opcoes(saidas, saida)
         self.itens_aviso, pos_aviso = dispositivos.opcoes(saidas, notificacao)
-        self.escolha_saida = wx.Choice(self, choices=self.itens_saida,
-                                       name="Saída de som")
-        self.escolha_mic = wx.Choice(self, choices=self.itens_mic,
-                                     name="Microfone")
-        self.escolha_aviso = wx.Choice(self, choices=self.itens_aviso,
-                                       name="Saída dos sons de aviso")
-        self.escolha_saida.SetSelection(pos_saida)
-        self.escolha_mic.SetSelection(pos_mic)
-        self.escolha_aviso.SetSelection(pos_aviso)
-
         lay = wx.BoxSizer(wx.VERTICAL)
         lay.Add(wx.StaticText(
             self, label="Vale para tocar áudios, gravar e chamadas."),
             0, wx.ALL, 12)
-        for rotulo, escolha in (
-                (wx.StaticText(self, label="Saída de &som (alto-falantes ou "
-                                           "fone):"), self.escolha_saida),
-                (wx.StaticText(self, label="&Microfone:"), self.escolha_mic),
-                (wx.StaticText(self, label="Saída dos sons de a&viso do "
-                                           "TeleZapp (mensagens novas, "
-                                           "toques, bipes):"),
-                 self.escolha_aviso)):
-            lay.Add(rotulo, 0, wx.LEFT | wx.RIGHT, 12)
-            lay.Add(escolha, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
+        # Cada rotulo e criado logo antes da sua caixa: o leitor de tela
+        # associa a caixa ao texto que vem imediatamente antes dela, na ordem
+        # de criacao (rotulos criados depois das caixas ficavam sem dono).
+        self.escolha_saida = self._campo(
+            lay, "Saída de &som (alto-falantes ou fone):",
+            self.itens_saida, pos_saida, "Saída de som")
+        self.escolha_mic = self._campo(
+            lay, "&Microfone:", self.itens_mic, pos_mic, "Microfone")
+        self.escolha_aviso = self._campo(
+            lay, "Saída dos sons de a&viso do TeleZapp (mensagens novas, "
+                 "toques, bipes):", self.itens_aviso, pos_aviso,
+            "Saída dos sons de aviso")
         botoes = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
         if botoes is not None:
             lay.Add(botoes, 0, wx.EXPAND | wx.ALL, 12)
         self.SetSizerAndFit(lay)
         self.escolha_saida.SetFocus()
+
+    def _campo(self, lay, rotulo, itens, posicao, nome):
+        """Rotulo e caixa combinada, nesta ordem."""
+        lay.Add(wx.StaticText(self, label=rotulo), 0, wx.LEFT | wx.RIGHT, 12)
+        escolha = wx.Choice(self, choices=itens, name=nome)
+        escolha.SetSelection(posicao)
+        lay.Add(escolha, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
+        return escolha
 
     def escolhidos(self):
         """(microfone, saida, aviso): o nome, ou vazio para o padrão do
