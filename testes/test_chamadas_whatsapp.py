@@ -655,3 +655,37 @@ def test_camera_para_quando_a_chamada_acaba(mundo_video):
     assert esperar(lambda: v.video.cameras_abertas)
     ponte.fila.put({"ev": "end", "call": "C1", "reason": ""})
     assert esperar(lambda: getattr(v.video, "camera_parada", False))
+
+
+def test_diagnostico_do_alto_falante_registra_e_grava_pilhas(caplog):
+    import logging
+    from telezapp.provedores import chamadas_whatsapp as cw
+    relogio = [0.0]
+    d = cw._DiagnosticoDoAltoFalante("C1", agora=lambda: relogio[0])
+    with caplog.at_level(logging.INFO):
+        d.periodo()                       # ainda dentro dos 5 s: nada
+        assert not caplog.records
+        for _ in range(3):
+            d.tocou(0.01, 0.02)
+        d.leitura = 1.5
+        relogio[0] = 6.0
+        d.periodo()
+    textos = [r.getMessage() for r in caplog.records]
+    assert any("tocou 3 quadros" in t and "leitura=1.50s" in t
+               for t in textos)
+    assert any("tocou so 3 quadros" in t and "threads:" in t
+               for t in textos)
+    assert d.quadros == 0 and d.pilhas == 1
+
+
+def test_diagnostico_do_alto_falante_sem_pilhas_quando_toca_normal(caplog):
+    import logging
+    from telezapp.provedores import chamadas_whatsapp as cw
+    relogio = [0.0]
+    d = cw._DiagnosticoDoAltoFalante("C2", agora=lambda: relogio[0])
+    for _ in range(80):
+        d.tocou(0.0, 0.0)
+    relogio[0] = 5.5
+    with caplog.at_level(logging.INFO):
+        d.periodo()
+    assert not any("threads:" in r.getMessage() for r in caplog.records)
