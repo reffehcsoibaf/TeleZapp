@@ -512,12 +512,12 @@ class DialogoConfiguracoes(wx.Dialog):
         j = self.cx_arquivo_som.GetSelection()
         if not 0 <= j < len(self._arquivos_som):
             return
-        nome, caminho = self._arquivos_som[j]
+        caminho = self._arquivos_som[j][1]
         est.escolher(est.ativo, evento, caminho)
         self._sons_atualizar_item(evento, i)
-        if self.fala is not None:
-            self.fala.falar("Som escolhido: %s. Aplique para importar para "
-                            "o pacote." % nome, interromper=True)
+        # toca o som escolhido no combobox; quem fala o item e o NVDA (ele le
+        # o item selecionado do controle) e nao o programa
+        bipe(evento, est.valor_para_ouvir(est.ativo, evento))
 
     def _sons_alternar(self):
         evento, i = self._sons_evento()
