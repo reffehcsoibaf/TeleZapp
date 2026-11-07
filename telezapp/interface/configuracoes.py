@@ -1158,9 +1158,9 @@ def mostrar_campos_do_codigo(campos, modelo):
 
 
 class DialogoGrupoOpcoes(wx.Dialog):
-    """As opcoes de um grupo (caixas de marcar), numa janela propria. O que
-    for marcado vale como pendente na janela de configuracoes: so entra ao
-    apertar OK ou Aplicar la."""
+    """As opcoes de um grupo (caixas de marcar e caixas combinadas), numa
+    janela propria. O que for mudado vale como pendente na janela de
+    configuracoes: so entra ao apertar OK ou Aplicar la."""
 
     def __init__(self, pai, titulo, opcoes):
         super().__init__(pai, title=titulo, style=wx.DEFAULT_DIALOG_STYLE)
@@ -1170,6 +1170,23 @@ class DialogoGrupoOpcoes(wx.Dialog):
         self.campos_codigo = {}
         lay = wx.BoxSizer(wx.VERTICAL)
         for o in opcoes:
+            if o.escolhas:
+                # o rotulo nasce logo antes da caixa combinada: e o texto
+                # que o leitor de tela usa como nome dela
+                lay.Add(wx.StaticText(self, label=o.rotulo + ":"), 0,
+                        wx.LEFT | wx.RIGHT | wx.TOP, 8)
+                escolhas = pai.modelo.escolhas(o)
+                c = wx.Choice(self, choices=[r for _, r in escolhas],
+                              name=o.rotulo)
+                c.SetSelection(pai.modelo.indice_da_escolha(o))
+                c.Bind(wx.EVT_CHOICE, lambda e, o=o, c=c, esc=escolhas:
+                       pai.modelo.definir(o.chave,
+                                          esc[c.GetSelection()][0]))
+                c.Bind(wx.EVT_SET_FOCUS,
+                       lambda e, o=o: self._ao_focar(e, o))
+                lay.Add(c, 0, wx.ALL, 8)
+                self.caixas[o.chave] = c
+                continue
             c = wx.CheckBox(self, label=o.rotulo, name=o.rotulo)
             c.SetValue(bool(pai.modelo.valor(o.chave)))
             c.Bind(wx.EVT_CHECKBOX, lambda e, o=o, c=c: self._ao_marcar(o, c))

@@ -616,7 +616,8 @@ OPCOES = (
           (("sim", "Tocar todos os áudios da conversa em sequência"),
            ("bloco", "Tocar só os áudios seguidos, até uma mensagem que "
                      "não seja áudio"),
-           ("nao", "Parar quando o áudio terminar"))),
+           ("nao", "Parar quando o áudio terminar")),
+          grupo="Sequência de áudio"),
     Opcao("audio_passo_velocidade", "Quanto a velocidade do áudio muda a cada vez", "Mídias",
           0.25,
           "De quanto em quanto a velocidade de reprodução do áudio muda "
@@ -643,39 +644,46 @@ OPCOES = (
           "A cada áudio que começa na sequência, fala Próximo áudio antes "
           "do resto. Só vale quando um áudio toca depois do outro; o "
           "primeiro segue a opção Ao tocar o primeiro áudio, falar de "
-          "quem é e a duração."),
+          "quem é e a duração.",
+          grupo="Sequência de áudio"),
     Opcao("seq_falar_tipo",
           "Na sequência de áudios, falar se é mensagem de voz ou áudio",
           "Mídias", False,
           "Fala Tocando mensagem de voz, ou Tocando áudio, a cada áudio da "
-          "sequência."),
+          "sequência.",
+          grupo="Sequência de áudio"),
     Opcao("seq_falar_quem", "Na sequência de áudios, falar de quem é",
           "Mídias", False,
           "Fala o nome de quem enviou cada áudio da sequência. Em áudio "
-          "seu, fala seu ou sua."),
+          "seu, fala seu ou sua.",
+          grupo="Sequência de áudio"),
     Opcao("seq_falar_duracao", "Na sequência de áudios, falar a duração",
           "Mídias", False,
           "Fala quanto dura cada áudio da sequência, por exemplo 12 "
-          "segundos."),
+          "segundos.",
+          grupo="Sequência de áudio"),
     Opcao("seq_falar_velocidade",
           "Na sequência de áudios, falar a velocidade",
           "Mídias", False,
           "Fala a velocidade, por exemplo a 1,5x, quando ela não é a "
           "normal. Desmarcando todas as opções da sequência, nada é falado "
-          "entre um áudio e outro."),
+          "entre um áudio e outro.",
+          grupo="Sequência de áudio"),
     Opcao("seq_falar_fim", "Na sequência de áudios, falar Fim da sequência",
           "Mídias", False,
           "Quando o último áudio da sequência termina e não há outro para "
           "tocar, fala Fim da sequência. Só vale se pelo menos dois áudios "
           "tocaram em sequência; um áudio sozinho não anuncia nada. "
-          "Interromper o áudio com Esc também não anuncia."),
+          "Interromper o áudio com Esc também não anuncia.",
+          grupo="Sequência de áudio"),
     Opcao("seq_acompanhar", "Na sequência de áudios, o cursor acompanha o "
           "áudio que toca", "Mídias", False,
           "Quando um áudio da sequência começa a tocar, a seleção da lista de "
           "mensagens passa para ele, sem tirar o foco de onde você está. "
           "Assim, ao voltar para a lista, você já está no áudio que tocou por "
           "último. Desmarcada, a seleção fica onde você deixou. Só vale se a "
-          "conversa dos áudios estiver aberta."),
+          "conversa dos áudios estiver aberta.",
+          grupo="Sequência de áudio"),
     Opcao("chamada_eco", "Cancelar o eco nas chamadas de voz", "Mídias", True,
           "Quando você ouve a chamada pelo alto-falante, o microfone capta "
           "a voz da outra pessoa e ela se ouve de volta. Marcada, o TeleZapp "
