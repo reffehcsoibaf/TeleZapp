@@ -13,6 +13,7 @@ import logging
 import os
 import struct
 import threading
+import time
 
 try:
     import winsound
@@ -304,6 +305,9 @@ def _tocar(tipo):
 
 TAXA_DOS_AVISOS = TAXA_SINTETICA
 CANAIS_DOS_AVISOS = 2
+# sem aviso por este tempo, o fluxo fecha (o dispositivo nao fica ocupado
+# a toa e o proximo aviso abre o dispositivo padrao do momento)
+TEMPO_OCIOSO_DOS_AVISOS_S = 60
 
 
 def _preparar_som(dados, taxa):
@@ -337,6 +341,9 @@ class _SaidaDosAvisos:
         self._dispositivo = None
         self._dados = None
         self._pos = 0
+        self._ocioso = None                    # temporizador do fechamento
+        self._ultimo = 0.0                     # quando tocou pela ultima vez
+        self._agora = time.monotonic
 
     def _callback(self, outdata, frames, tempo, status):
         with self._trava_dados:
@@ -399,8 +406,35 @@ class _SaidaDosAvisos:
                 self._dispositivo = dispositivo
             with self._trava_dados:
                 self._dados, self._pos = dados, 0
+            self._ultimo = self._agora()
+            self._armar_fechamento()
+
+    def _armar_fechamento(self):
+        """(Re)arma o fechamento do fluxo para daqui a TEMPO_OCIOSO s."""
+        anterior = self._ocioso
+        if anterior is not None:
+            anterior.cancel()
+        t = threading.Timer(TEMPO_OCIOSO_DOS_AVISOS_S, self._fechar_ocioso)
+        t.daemon = True
+        self._ocioso = t
+        t.start()
+
+    def _fechar_ocioso(self):
+        """Fecha o fluxo se faz TEMPO_OCIOSO s que nada toca."""
+        with self._trava:
+            if self._fluxo is None:
+                return
+            if self._agora() - self._ultimo < TEMPO_OCIOSO_DOS_AVISOS_S:
+                return                         # tocou de novo: outro timer
+            with self._trava_dados:
+                if self._dados is not None:
+                    return                     # ainda tocando
+            self._fechar()
 
     def fechar(self):
+        anterior, self._ocioso = self._ocioso, None
+        if anterior is not None:
+            anterior.cancel()
         with self._trava:
             with self._trava_dados:
                 self._dados = None
