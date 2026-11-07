@@ -3,9 +3,10 @@
 Para o usuário, veja `telezapp/ajuda/novidades.html`. Versões no formato
 `ano.mês.dia.dígito`. Mais novas primeiro.
 
-## 2026.11.07.0 (em preparo, ainda não publicada)
+## 2026.11.07.0
 
-- Chamadas de vídeo, sem som do outro lado (relato do Alex, logs de 06/11): nas chamadas de vídeo a DLL entrega o áudio (274 a 863 quadros), mas o alto-falante toca só 13 a 77; na chamada só de voz toca todos (174 de 174). O laço `_receber` consome menos de 1 quadro por segundo quando há vídeo. Causa ainda não achada. Diagnóstico novo (`_DiagnosticoDoAltoFalante`): a cada 5 s registra quadros tocados e o tempo em leitura, retorno, escrita e referência do eco; se tocar menos de 20 quadros em 5 s, grava a pilha de cada thread (até 2 vezes por chamada). Pedir ao Alex uma nova chamada de vídeo e procurar `alto-falante da chamada` nos logs.
+- Contribuição de Tadeu Júnior (tadeujrtec, PR #53): fluxo de saída aberto para os sons de aviso (`_SaidaDosAvisos`, menos atraso; medido aqui: de cerca de 246 ms para 131 a 141 ms entre pedir o som e ele sair, estimado pela latência do dispositivo) e caixa "Sons na pasta do pacote" em Configurações, Sons (`pacotes_de_som.arquivos_da_pasta`). Ajuste nosso por cima: o fluxo fecha depois de `TEMPO_OCIOSO_DOS_AVISOS_S` (60 s) sem som e reabre no aviso seguinte, no dispositivo padrão do momento.
+- Chamadas de vídeo, sem som do outro lado (relato de um usuário, logs de 06/11): nas chamadas de vídeo a DLL entrega o áudio (274 a 863 quadros), mas o alto-falante toca só 13 a 77; na chamada só de voz toca todos (174 de 174). O laço `_receber` consome menos de 1 quadro por segundo quando há vídeo. Causa ainda não achada. Diagnóstico novo (`_DiagnosticoDoAltoFalante`): a cada 5 s registra quadros tocados e o tempo em leitura, retorno, escrita e referência do eco; se tocar menos de 20 quadros em 5 s, grava a pilha de cada thread (até 2 vezes por chamada). Pedir a ele uma nova chamada de vídeo e procurar `alto-falante da chamada` nos logs.
 - Atualizador, plano B: quando a consulta à API do GitHub falha (por exemplo, pelo limite de consultas por endereço), a janela de atualização mostrava só "As novidades estão na página da versão: <endereço>". Agora `_pelo_site` lê o texto das novidades da própria página da Release (`novidades_da_pagina`, a mesma resposta que já traz o endereço da versão) e o mostra por extenso; só se não achar a seção cai no aviso com o endereço. Testado com a página real da 2026.11.06.0 (25 itens, igual ao da API).
 
 ## 2026.11.06.0
