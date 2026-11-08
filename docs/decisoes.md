@@ -309,6 +309,13 @@ automáticos): a lista do que falta testar fica na memória do projeto.
   DPAPI na hora de gravar, e na restauração da parte de configurações voltam
   ao cofre cifradas de novo pelo DPAPI do usuário e do computador de destino
   (20/10/2026, a pedido do responsável).
+- **Qual versão está em vigor** (07/11/2026): antes de escrever no CHANGELOG ou
+  em `novidades.html`, ou de numerar uma versão, conferir no GitHub e não no
+  clone local: `git fetch --tags`, `gh release list -L 3` (a marcada Latest
+  é a em vigor; ver se não é rascunho nem pré-lançamento) e `VERSAO` em
+  `telezapp/__init__.py`. Mudança feita depois da publicação vai em "Próxima
+  versão (ainda sem número)"; o número (o dígito sobe se já saiu versão no
+  mesmo dia) só se dá no lançamento.
 - **Distribuição**: `ferramentas/publicar.py` monta zip, hash e notas;
   Ajuda, Verificar atualizações só avisa. Instalar, portátil e atualizador
   ficam para perto do lançamento (decisão do responsável). Aviso de software
@@ -995,3 +1002,28 @@ O responsável testou muitas das melhorias do dia, sem dar retorno item a item e
 ## Retorno de usuária: backup e restauração
 
 - **Duda Ferreira (03/11/2026), repassado pelo responsável:** fez o backup e "deu certo". Não disse a versão, se usou senha ou partes, nem se chegou a restaurar; vale como primeira confirmação de alguém além do responsável de que o backup funciona.
+
+## Chamadas recebidas sem som e o que o WinZapp tem (07/11/2026)
+
+- **O que o WinZapp (Gabriel) já resolveu com a mesma base** (neonize + meowcaller, lido em `upstream/main` e nas issues #689 e #654 dele): saída individual, voz nos dois sentidos numa recebida segundo um usuário, ordenação autenticada e codec negociado, vídeo, grupo e histórico de chamadas. **Não resolveu** a recebida sem som de quem liga (meowcaller#40 e #37): só pôs diagnóstico dos relays. Eles próprios escrevem que não há prova de paridade nem aceitação ao vivo.
+- **Logs de um usuário do WinZapp (07/11, `Backup/_logs_chamada_winzapp_0711`):** das chamadas recebidas e atendidas, quase todas com 0 quadros do outro lado (a de 16:16 teve 3), e o microfone de quem atendeu não foi ouvido pelo Android; oferta com dois relays, nenhum `is_fna` e nenhum relay próprio. O mesmo contato Android, 43 s depois, recebeu uma ligação do WinZapp e ouviu normalmente. O mesmo padrão do Luis (relato nosso).
+- **Hipótese do responsável, ainda não provada:** o problema é de Android ligando para um aplicativo com Neonize. O que sustenta: o caso do mesmo contato, as ofertas do Luis com `device_class` de um cliente Android e o iPhone atendido bem em 21/10. O que falta: a plataforma de quem liga nas ofertas que falham (o nosso log registra, o do WinZapp não) e um teste Android e iPhone para a mesma conta.
+- **Nossa correção do `is_fna` (`relayDoChamadorSemFNA`) talvez não dispare** em ofertas assim, porque nenhum relay tem `auth_token_id` (exige `auth == 0` e `c2r_rtt`). Hipótese a testar: preferir o relay `token=1`. Decisão do responsável: só oferecer a correção ao Gabriel e ao meowcaller depois de confirmada ao vivo.
+- **Patches trazidos:** ver o item de chamadas, DLL, no CHANGELOG ("Próxima versão"). Crédito do 0005 a Muhammet Enes Senovali.
+
+## Verificado ao vivo pelo responsável: código de 07 e 08/11/2026, ainda sem publicar
+
+- **Esc limpa a busca (08/11/2026):** funcionou. A troca de filtro limpando a busca não foi comentada à parte.
+- **Enter numa conversa com não lidas (08/11/2026):** não percebeu mais a fala extra do leitor de tela ao entrar (a lista de conversas só é refeita depois que o foco passa para as mensagens).
+- **Envio de vários arquivos (08/11/2026):** funcionou, mas os arquivos chegaram **fora de ordem**. Causa provável: cada arquivo sobe em uma thread própria (`enviar_arquivo` do WhatsApp), então chega primeiro quem sobe mais rápido. Ele já vê isso em outros aplicativos e não estranhou; correção (enviar em fila, um depois do outro) não pedida. Falhas de leitura (atalhos `.gdoc`, `.gsheet`, `.gslides` do Google Drive, de 193 bytes) são recusadas com aviso; não foi dito se o aviso apareceu.
+- **Tom de chamada feita (08/11/2026):** o responsável ouviu e aprovou ("ficou bom"). O tom antigo era um sino, não um tom de telefone. Agora são dois tons gerados, numa caixa combinada "Tom de chamada feita" na aba Sons (não é mais um evento da lista de sons): **Europa** (425 Hz, 1 s de tom e 3 s de silêncio) é o padrão e **EUA** (440 e 480 Hz, 2 s de tom e 4 s de silêncio) é opcional. O tom toca ao escolher na caixa. Consequência aceita: não dá mais para desligar esse tom por pacote; uma escolha "Sem tom" só se alguém pedir.
+- **Telefone com e sem o 9 (08/11/2026):** o aplicativo tenta o número brasileiro com e sem o 9 depois do DDD e só avisa "não está registrado no WhatsApp" se nenhuma das formas existir. Falta ele confirmar ao vivo com um número real.
+- **Janela de atalhos, Shift F1 (08/11/2026):** o responsável testou e aprovou ("ficou bom"). A lista mostra os atalhos em uso agora (de fábrica e os que ele mudou), Enter ou Espaço numa função a executa e o botão "Personalizar atalhos" abre Configurações, Atalhos. Código ainda sem publicar.
+- **Redefinir aos padrões de fábrica, Configurações, Avançado (08/11/2026):** o responsável testou e aprovou. Fez o backup das configurações, redefiniu, conferiu que tudo voltou ao padrão e restaurou o backup para voltar ao que era; funcionou nos três passos. Código ainda sem publicar.
+- **Falar o ponto do áudio ao avançar ou voltar (08/11/2026):** o responsável testou com a opção desmarcada e confirmou que o áudio avança em silêncio ao usar o comando de avançar. Código ainda sem publicar.
+- **Estado da última mensagem na lista de conversas (08/11/2026):** o responsável testou e confirmou que o estado da mensagem enviada por ele já aparece na lista de conversas. Código ainda sem publicar.
+- **Testes de chamada com o participante (08/11/2026, DLL da neonize 0.10.0):** um segundo número de teste, pareado como aparelho vinculado e rodando a mesma biblioteca (`neonize-build\participante`), foi a outra ponta. Voz do TeleZapp para ele, vídeo do TeleZapp para ele (a chamada começou como voz e passou a vídeo; 273 quadros decodificados em 640x360, áudio sem perda) e voz dele para o TeleZapp funcionaram, com som nos dois sentidos confirmado pelo responsável (ele ouviu o tom contínuo; o tom veio 1 a 2 s depois de atender). As ofertas do próprio TeleZapp saem sem `is_fna` e a heurística escolheu o relay certo. Dos pacotes do começo da chamada recebida pelo participante, 35 foram recusados por chegarem antes da chave (menos de 1 s), sem efeito depois.
+- **Celular segue tocando (08/11/2026):** com o participante ligando para a conta do responsável, o aviso `terminate accepted_elsewhere` foi enviado aos três outros aparelhos e o servidor confirmou cada um, mas o celular continuou tocando, até depois do fim da chamada, nas duas tentativas. Causa não achada: a hipótese é que o oficial faça isso de outro modo. Um teste possível (aparelho vinculado escutando enquanto o WhatsApp oficial liga e outro aparelho atende) não foi feito; o responsável disse que, para ele, está bom assim.
+- **Nome de quem liga (08/11/2026):** o TeleZapp fala o nome de quem está chamando com a janela em primeiro plano; em segundo plano (atendendo por atalho global) o responsável não ouviu o nome, e disse que assim está bom.
+- **Chamadas recebidas ocultas com o aviso desligado (08/11/2026):** testado com o participante ligando para a conta do responsável, com "Avisar chamadas do WhatsApp" desmarcada e a janela em primeiro plano. O TeleZapp ficou em silêncio total, sem tocar, falar nem abrir janela ("quietinho quietinho"); a chamada tocou 40 s no lado de quem ligava. Ele não relatou se o celular tocou nem se a conversa ganhou alguma linha. Código ainda sem publicar.
+- **Chamadas ocultas, complemento (08/11/2026):** o responsável confirmou que nada apareceu no TeleZapp (nem linha na conversa) e que o celular tocou por uns 30 a 40 segundos e parou sozinho, como esperado: o TeleZapp não recusa a chamada. Aprovado.

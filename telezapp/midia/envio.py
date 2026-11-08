@@ -158,6 +158,11 @@ def preparar(caminho, voz=False, temporario=False, como_documento=False,
     return anexo
 
 
+EXT_ATALHO_GOOGLE = frozenset((".gdoc", ".gsheet", ".gslides", ".gdraw",
+                               ".gform", ".gsite", ".gmap", ".gtable",
+                               ".gjam", ".gscript"))
+
+
 def _preparar(caminho, voz, temporario, como_documento):
     if not caminho or not os.path.isfile(caminho):
         raise ErroEnvio("O arquivo não foi encontrado.")
@@ -169,6 +174,22 @@ def _preparar(caminho, voz, temporario, como_documento):
                         m.tamanho_legivel(tamanho))
     nome = os.path.basename(caminho)
     ext = os.path.splitext(nome)[1].lower()
+    if ext in EXT_ATALHO_GOOGLE:
+        # o Google Drive para computador mostra Docs, Planilhas e
+        # Apresentacoes como atalhos de ~200 bytes que o Windows nao le
+        raise ErroEnvio(
+            "%s é um atalho do Google Drive, não um arquivo de verdade. "
+            "Abra-o no Google, baixe como PDF ou Word e envie o baixado."
+            % nome)
+    try:
+        with open(caminho, "rb") as f:
+            f.read(1)
+    except OSError:
+        # ex.: arquivo so na nuvem ou em uso por outro programa; melhor
+        # avisar aqui do que falhar depois, ja na fila de envio
+        raise ErroEnvio("Não consegui ler o arquivo. Se ele está só na "
+                        "nuvem (Google Drive, OneDrive) ou aberto em outro "
+                        "programa, baixe-o ou feche-o e tente de novo.")
 
     if como_documento and not voz:
         return Anexo(caminho, m.DOCUMENTO, nome, _mime(caminho), tamanho,

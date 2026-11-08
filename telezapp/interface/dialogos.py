@@ -143,7 +143,7 @@ def rotulo_mencao(men):
 
 
 def mostrar_texto(pai, titulo, texto, rotulo, links=(), botoes=(),
-                  mencoes=(), acoes=(), botoes_extra=()):
+                  mencoes=(), acoes=(), botoes_extra=(), comandos=None):
     """Texto longo somente leitura, navegavel pelas setas.
 
     Depois do texto vem, so quando existirem, uma lista de Links, uma de
@@ -159,7 +159,10 @@ def mostrar_texto(pai, titulo, texto, rotulo, links=(), botoes=(),
     acoes: [(rotulo, e_opcao_de_lista)] que podem ser tocados.
     botoes_extra: [(rotulo, funcao(janela))], botoes logo depois do texto
     (por exemplo, quem recebeu); a funcao recebe a janela, para abrir uma
-    lista por cima dela ou fecha-la."""
+    lista por cima dela ou fecha-la.
+    comandos: (rotulo da lista, [textos], funcao(indice, janela)): uma lista
+    em que Enter ou Espaco chama a funcao, que decide se fecha a janela. O
+    foco comeca nela."""
     dlg = wx.Dialog(pai, title=titulo, size=(620, 520),
                     style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
     rot = wx.StaticText(dlg, label=rotulo)
@@ -205,6 +208,13 @@ def mostrar_texto(pai, titulo, texto, rotulo, links=(), botoes=(),
                   [com_endereco(r_, u) for r_, u in botoes],
                   lambda i: abrir_link(botoes[i][1])
                   if 0 <= i < len(botoes) else None)
+    foco_inicial = [caixa]
+    if comandos:
+        rotulo_cmd, itens_cmd, executar = comandos
+        adicionar(rotulo_cmd, itens_cmd,
+                  lambda i: executar(i, dlg) if 0 <= i < len(itens_cmd)
+                  else None)
+        foco_inicial[0] = listas[-1][0]
     if acoes:
         def tocar(i):
             if 0 <= i < len(acoes):
@@ -238,7 +248,7 @@ def mostrar_texto(pai, titulo, texto, rotulo, links=(), botoes=(),
     lay.Add(ok, 0, wx.ALL | wx.ALIGN_RIGHT, 8)
     dlg.SetSizer(lay)
     dlg.SetEscapeId(wx.ID_OK)
-    caixa.SetFocus()
+    foco_inicial[0].SetFocus()
     dlg.ShowModal()
     dlg.Destroy()
     return escolhida[0]
@@ -517,20 +527,37 @@ def _apagar(caminho):
         pass
 
 
+_FILTROS_ARQUIVO = ("Fotos, vídeos, áudios e documentos|*.*|"
+                    "Fotos|*.jpg;*.jpeg;*.png;*.webp|"
+                    "Vídeos|*.mp4;*.mov;*.m4v;*.3gp|"
+                    "Áudios|*.ogg;*.opus;*.mp3;*.m4a;*.wav|"
+                    "Todos os arquivos|*.*")
+
+
 def escolher_arquivo(pai, pasta=""):
     """Janela do Windows para escolher o arquivo a enviar; None se cancelar."""
-    filtros = ("Fotos, vídeos, áudios e documentos|*.*|"
-               "Fotos|*.jpg;*.jpeg;*.png;*.webp|"
-               "Vídeos|*.mp4;*.mov;*.m4v;*.3gp|"
-               "Áudios|*.ogg;*.opus;*.mp3;*.m4a;*.wav|"
-               "Todos os arquivos|*.*")
     dlg = wx.FileDialog(pai, "Escolha o arquivo para enviar",
-                        defaultDir=pasta, wildcard=filtros,
+                        defaultDir=pasta, wildcard=_FILTROS_ARQUIVO,
                         style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST)
     try:
         if dlg.ShowModal() != wx.ID_OK:
             return None
         return dlg.GetPath()
+    finally:
+        dlg.Destroy()
+
+
+def escolher_arquivos(pai, pasta=""):
+    """Como escolher_arquivo, mas aceita varios (Shift ou Ctrl na janela do
+    Windows). Devolve a lista de caminhos; vazia se cancelar."""
+    dlg = wx.FileDialog(pai, "Escolha os arquivos para enviar",
+                        defaultDir=pasta, wildcard=_FILTROS_ARQUIVO,
+                        style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST
+                        | wx.FD_MULTIPLE)
+    try:
+        if dlg.ShowModal() != wx.ID_OK:
+            return []
+        return list(dlg.GetPaths())
     finally:
         dlg.Destroy()
 

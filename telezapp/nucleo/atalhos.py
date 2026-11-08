@@ -204,6 +204,28 @@ class Registro:
         return achadas
 
 
+def lista_dos_atalhos(registro):
+    """[(chave, "Categoria: Funcao: Tecla")] dos atalhos em uso agora (os de
+    fabrica e os mudados pela pessoa), so de quem tem tecla."""
+    return [(acao.chave, "%s: %s: %s" % (acao.categoria, acao.rotulo,
+                                          exibir(canon)))
+            for acao, canon in registro.todos() if canon]
+
+
+def texto_dos_atalhos(registro):
+    """Os atalhos em uso agora (os de fabrica e os mudados pela pessoa),
+    por categoria, so de quem tem tecla: "Categoria" e, abaixo, "Funcao:
+    Tecla"."""
+    por_categoria = {}
+    for acao, canon in registro.todos():
+        if canon:
+            por_categoria.setdefault(acao.categoria, []).append(
+                "%s: %s" % (acao.rotulo, exibir(canon)))
+    blocos = ["%s\n%s\n" % (cat.upper(), "\n".join(linhas))
+              for cat, linhas in por_categoria.items()]
+    return "\n".join(blocos)
+
+
 def _sem_acento(texto):
     import unicodedata
     return "".join(c for c in unicodedata.normalize("NFD", texto.lower())

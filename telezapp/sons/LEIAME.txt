@@ -29,7 +29,6 @@ instante do arquivo e terminam em silêncio. O nome do arquivo é o do evento:
   escondido         janela escondida em segundo plano
   voltou            janela trazida de volta
   toque             toque de chamada recebida
-  chamando          tom de chamada feita
   desligada         chamada encerrada
   download_pronto   download de mídia concluído
   tarefa_pronta     backup, restauração ou conversa salva

@@ -1029,11 +1029,12 @@ def opcoes_de_conta(contas):
     return opcoes
 
 
-def rotulo_conversa(c, lista=None, previa="", reacoes=0, quem_reagiu=()):
+def rotulo_conversa(c, lista=None, previa="", reacoes=0, quem_reagiu=(),
+                    autor="", estado=""):
     """A linha da conversa na lista (ver nucleo/lista_conversas.py)."""
     from telezapp.nucleo import lista_conversas
     return lista_conversas.rotulo(c, lista, previa, reacoes,
-                                  quem_reagiu)
+                                  quem_reagiu, autor, estado)
 
 
 _LINK = re.compile(r"(?:https?://|www\.)[^\s<>\"']+", re.IGNORECASE)
@@ -1266,3 +1267,22 @@ def normalizar_telefone(texto, ddi_padrao="55"):
     if not 8 <= len(digitos) <= 15:
         return None
     return "+" + digitos
+
+
+def formas_do_telefone(digitos):
+    """As formas de escrever o mesmo telefone no WhatsApp, a digitada
+    primeiro. No Brasil, celulares antigos seguem registrados sem o 9 depois
+    do DDD (55 DDD 8xxx-xxxx) e os novos com ele (55 DDD 9 8xxx-xxxx): um
+    numero de 13 digitos com 9 depois do DDD tambem vale sem o 9, e um de 12
+    (celular, comeca com 6 a 9) tambem vale com o 9. Outros: so a digitada."""
+    digitos = re.sub(r"\D", "", digitos or "")
+    if not digitos:
+        return []
+    formas = [digitos]
+    if digitos.startswith("55"):
+        ddd, resto = digitos[2:4], digitos[4:]
+        if len(digitos) == 13 and resto.startswith("9"):
+            formas.append("55" + ddd + resto[1:])
+        elif len(digitos) == 12 and resto[:1] in ("6", "7", "8", "9"):
+            formas.append("55" + ddd + "9" + resto)
+    return formas

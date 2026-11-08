@@ -88,9 +88,15 @@ HERDA = {"nova_aberta": "nova", "nova_grupo": "nova",
 
 
 # O tom de "chamando" (eu liguei e espero atender) e o de controle de chamada
-# do telefone brasileiro: 425 Hz, 1 s ligado e 4 s desligado (5 s no total)
-DURACAO_TOM_DE_CHAMADA_MS = 1000
-INTERVALO_TOM_DE_CHAMADA_MS = 5000
+# do telefone: (frequencias em Hz, duracao do tom em ms, intervalo entre o
+# inicio de um tom e o do seguinte em ms). Europa e o padrao; EUA e o que o
+# WhatsApp Desktop usa nos Estados Unidos. A pessoa escolhe em Sons.
+TONS_DE_CHAMADA = {
+    "europa": ((425,), 1000, 4000),
+    "eua": ((440, 480), 2000, 6000),
+}
+TOM_DE_CHAMADA_PADRAO = "europa"
+_tom_de_chamada = TOM_DE_CHAMADA_PADRAO
 INTERVALO_TOQUE_MS = 3000        # o toque de quem recebe repete mais rapido
 
 
@@ -107,6 +113,43 @@ LIMITE_SEGUNDOS_PRE_CARGA = 2
 _pre_carregados = {}
 _geracao_pre_carga = 0
 _thread_pre_carga = None
+
+
+def definir_tom_de_chamada(tom):
+    """Escolhe o tom de chamada feita (chave de TONS_DE_CHAMADA)."""
+    global _tom_de_chamada
+    _tom_de_chamada = tom if tom in TONS_DE_CHAMADA else TOM_DE_CHAMADA_PADRAO
+
+
+def intervalo_do_tom_de_chamada():
+    """Ms entre um tom e o seguinte, no tom escolhido."""
+    return TONS_DE_CHAMADA[_tom_de_chamada][2]
+
+
+def tocar_tom_de_chamada(tom=None):
+    """Toca uma vez o tom de chamada feita, o escolhido ou o dado (para
+    ouvir antes de aplicar). Numa thread a parte."""
+    tom = tom if tom in TONS_DE_CHAMADA else _tom_de_chamada
+    threading.Thread(target=_tocar_tom, args=(tom,), daemon=True).start()
+
+
+def _tocar_tom(tom):
+    freqs, ms, _ = TONS_DE_CHAMADA[tom]
+    try:
+        dispositivo = _indice_dos_avisos()
+        if dispositivo is not None:
+            _tocar_pelo_fluxo(_onda(((freqs, ms),)), TAXA_SINTETICA,
+                              dispositivo)
+            return
+    except Exception as e:
+        log.warning("não consegui tocar o tom de chamada no dispositivo "
+                    "escolhido (%r); usando o padrão do Windows", e)
+    if winsound is None:
+        return
+    try:
+        winsound.Beep(freqs[0], ms)       # o Beep so faz uma frequencia
+    except Exception:
+        pass
 
 
 def definir_sons(mapa):
@@ -193,6 +236,9 @@ def bipe(tipo="nova", valor=None):
     chamadas, toque, chamando e desligada. Cada um pode ser desligado ou
     trocado por um arquivo de som (opcoes som_*). Tocam numa thread a parte
     para nao travar a janela."""
+    if tipo == "chamando":
+        tocar_tom_de_chamada()
+        return
     acao, caminho = acao_do_som(tipo, valor)
     if acao == "nenhum":
         return
@@ -237,9 +283,6 @@ NOTAS = {
     "conectado": ((523, 110), (659, 110), (784, 110), (1047, 110)),
     # chamada recebida: dois pares de notas, repetido pela janela
     "toque": ((784, 120), (988, 120), (784, 120), (988, 120)),
-    # chamada que eu fiz: o tom de espera do telefone (a janela repete a
-    # cada 5 s: 1 s de tom e 4 s de silencio)
-    "chamando": ((425, DURACAO_TOM_DE_CHAMADA_MS),),
     # conta que caiu: dois tons descendo, mais graves que o de chamada
     "desconectada": ((440, 150), (330, 150)),
     "download_pronto": ((740, 70), (988, 70)),
@@ -274,7 +317,8 @@ def _onda(notas):
     for freq, ms in notas:
         n = int(TAXA_SINTETICA * ms / 1000)
         t = np.arange(n) / TAXA_SINTETICA
-        onda = 0.3 * np.sin(2 * np.pi * freq * t)
+        freqs = freq if isinstance(freq, (tuple, list)) else (freq,)
+        onda = 0.3 * sum(np.sin(2 * np.pi * f * t) for f in freqs) / len(freqs)
         rampa = min(n // 2, int(TAXA_SINTETICA * 0.004))
         if rampa:
             subida = np.linspace(0.0, 1.0, rampa)

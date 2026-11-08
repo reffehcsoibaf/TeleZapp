@@ -3587,8 +3587,8 @@ def test_buscar_mensagens_que_faltam_pede_ao_celular_e_guarda_a_resposta(
         amb, monkeypatch):
     monkeypatch.setattr(wa, "ESPERA_ENTRE_RODADAS", 0)
     pedidos = []
-    amb.p.cliente.request_history_sync = lambda info, n: pedidos.append(
-        (info.ID, n))
+    amb.p.cliente.request_history_sync = (
+        lambda chat, id_, meu, hora, n: pedidos.append((id_, n)))
     cid = "5551988887777@s.whatsapp.net"
     assert "não está conectada" in amb.p.buscar_mensagens_que_faltam(cid)
     amb.p._conectada = True
@@ -3718,7 +3718,7 @@ def test_movimento_da_localizacao_ao_vivo_vai_ao_log_sem_coordenadas(
 
 def _pedir_historico_de_teste(amb, monkeypatch, espera):
     monkeypatch.setattr(wa, "ESPERA_DO_HISTORICO", espera)
-    amb.p.cliente.request_history_sync = lambda info, n: None
+    amb.p.cliente.request_history_sync = lambda chat, id_, meu, hora, n: None
     cid = "5551988887777@s.whatsapp.net"
     amb.p._conectada = True
     amb.f["Message"](amb.c, evento("H5", E.Message(conversation="atual")))
@@ -3899,7 +3899,8 @@ def _preparar_varredura(amb, monkeypatch, local=("L5",), maximo=60):
     monkeypatch.setattr(wa, "ESPERA_ENTRE_RODADAS", 0)
     monkeypatch.setattr(wa, "RODADAS_MAXIMAS", maximo)
     pedidos = []
-    amb.c.request_history_sync = lambda info, n: pedidos.append(info.ID)
+    amb.c.request_history_sync = (
+        lambda chat, id_, meu, hora, n: pedidos.append(id_))
     amb.p._conectada = True
     cid = "5551988887777@s.whatsapp.net"
     for k, i in enumerate(local):
@@ -4019,7 +4020,8 @@ def _reconectar_com_atrasadas(amb, monkeypatch, antes=("OLD", TS - 3600),
     amb.f["Connected"](amb.c, N.Connected())
     esperar(amb.fila, ev.ContaPronta)
     pedidos = []
-    amb.c.request_history_sync = lambda info, n: pedidos.append(info.ID)
+    amb.c.request_history_sync = (
+        lambda chat, id_, meu, hora, n: pedidos.append(id_))
     for i, ts in entregues:
         amb.f["Message"](amb.c, evento(i, E.Message(conversation="y"), ts=ts))
         esperar(amb.fila, ev.MensagemNova)
@@ -4571,3 +4573,84 @@ def test_enviar_voz_estereo_m4a_vai_como_ptt_com_mime_mp4(amb, dados_midia,
     assert nova.mensagem.tipo == m.VOZ
     audio = amb.c.enviadas[-1][1].audioMessage
     assert audio.PTT and audio.mimetype == "audio/mp4"
+
+
+# ------------------------------------------- telefone com e sem o 9 (Brasil)
+@pytest.mark.parametrize("digitado,formas", [
+    ("5562983220258", ["5562983220258", "556283220258"]),    # com 9: tenta sem
+    ("556283220258", ["556283220258", "5562983220258"]),     # sem 9: tenta com
+    ("551133334444", ["551133334444"]),                      # fixo: so a digitada
+    ("14155550123", ["14155550123"]),                        # fora do Brasil
+    ("", []),
+])
+def test_formas_do_telefone(digitado, formas):
+    assert m.formas_do_telefone(digitado) == formas
+
+
+def _prov_com_consulta(respostas, erro=None):
+    """Provedor minimo, so com o cliente simulado de is_on_whatsapp."""
+    p = object.__new__(wa.ProvedorWhatsApp)
+    p._conectada = True
+    consultados = []
+
+    def is_on_whatsapp(*numeros):
+        consultados.append(numeros)
+        if erro:
+            raise erro
+        return [N.IsOnWhatsAppResponse(Query=q, IsIn=ok, JID=jid(q.lstrip("+")))
+                for q, ok in respostas if q in numeros]
+    p.cliente = types.SimpleNamespace(is_on_whatsapp=is_on_whatsapp)
+    return p, consultados
+
+
+def test_confirmar_telefone_usa_a_forma_sem_o_9_quando_so_ela_existe():
+    p, consultados = _prov_com_consulta([("+5562983220258", False),
+                                         ("+556283220258", True)])
+    assert p.confirmar_telefone("+5562983220258") == (
+        "556283220258@s.whatsapp.net", "")
+    assert consultados == [("+5562983220258", "+556283220258")]
+
+
+def test_confirmar_telefone_prefere_a_forma_digitada_se_as_duas_existem():
+    p, _ = _prov_com_consulta([("+5562983220258", True),
+                               ("+556283220258", True)])
+    assert p.confirmar_telefone("+5562983220258")[0] == \
+        "5562983220258@s.whatsapp.net"
+
+
+def test_confirmar_telefone_so_diz_que_nao_existe_se_nenhuma_forma_existe():
+    p, _ = _prov_com_consulta([("+5562983220258", False),
+                               ("+556283220258", False)])
+    id_, motivo = p.confirmar_telefone("+5562983220258")
+    assert id_ == "" and "não está registrado no WhatsApp" in motivo
+
+
+def test_confirmar_telefone_com_erro_na_rede_vale_o_digitado():
+    p, _ = _prov_com_consulta([], erro=RuntimeError("rede"))
+    assert p.confirmar_telefone("+5562983220258") == (
+        "5562983220258@s.whatsapp.net", "")
+    p._conectada = False        # sem conexao: nem consulta
+    assert p.confirmar_telefone("+5562983220258")[1] == ""
+
+
+def test_chamada_recebida_some_por_completo_com_o_aviso_desligado(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.p._ao_fim_sincronia(None, None)
+    wa.config.Config().set("avisar_chamadas_whatsapp", False)
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "O1", video=True))
+    amb.f["CallAccept"](amb.c, _chamada("atendida", "O1", ts=TS + 5))
+    amb.f["CallTerminate"](amb.c, _chamada("fim", "O1", ts=TS + 30))
+    # nem aviso, nem linha na conversa, nem nao lida, e o motor de voz ignora
+    assert not any(isinstance(x, (ev.ChamadaWhatsApp, ev.MensagemNova,
+                                  ev.MensagemAtualizada))
+                   for x in list(amb.fila.queue))
+    assert amb.banco.mensagem("w1", "5551988887777@s.whatsapp.net",
+                              "chamada-O1") is None
+    assert amb.p._oferta_velha("O1")
+    assert amb.p._chamadas_ocultas == set()      # o fim limpou
+    # ligando o aviso de novo, a proxima chamada volta ao normal
+    wa.config.Config().set("avisar_chamadas_whatsapp", True)
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "O2"))
+    assert esperar(amb.fila, ev.MensagemNova).mensagem.id == "chamada-O2"
+    assert esperar(amb.fila, ev.ChamadaWhatsApp).chamada_id == "O2"

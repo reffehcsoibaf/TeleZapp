@@ -2954,7 +2954,8 @@ class ProvedorTelegram(Provedor):
                         type(e).__name__)
             self.barramento.publicar(ev.EnvioFalhou(
                 self.conta.id, conversa_id, legenda, _motivo(e),
-                devolver_texto=False, tipo=anexo.tipo))
+                devolver_texto=False, tipo=anexo.tipo,
+                nome_arquivo=anexo.nome))
             return
         log.info("%s enviado em %.2fs (%d bytes)", anexo.tipo,
                  time.perf_counter() - inicio, anexo.tamanho)

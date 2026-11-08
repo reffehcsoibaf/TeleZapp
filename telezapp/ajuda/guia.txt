@@ -688,6 +688,7 @@ As mudanças só valem ao apertar OK ou Aplicar. Cancelar e Esc descartam. As me
 Algumas categorias:
 Interface: o status de presença no título da janela, o aviso de chamadas do WhatsApp e o botão Conteúdo falado, que abre uma janela com tudo o que o leitor de tela fala: mensagens novas, mensagem enviada, reações, quantas conversas há ao trocar de filtro e a descrição de cada opção.
 Mensagens: prévia de links, quantas ficam na lista, corretor ortográfico e a tecla Enter da caixa de digitar.
+Avançado: o modo de depuração, o registro técnico do WhatsApp e o botão "Redefinir as configurações aos padrões de fábrica", que volta as opções, as listas, os atalhos e o pacote de sons ao padrão (contas, chaves de IA, privacidade e pacotes de sons que você criou não mudam; só vale ao apertar OK ou Aplicar).
 Mídias, Atalhos, Sons e as demais.
 
 "Como me chamar nas mensagens", na categoria Interface, troca a palavra Você pelo nome que preferir quando o autor é você: nas mensagens, na lista de conversas, nas reações, nos votos, na busca e nas conversas salvas. Vale só neste computador; quem recebe as suas mensagens não vê este nome. Frases como "Você saiu do grupo" continuam iguais. Vazio, fica Você.

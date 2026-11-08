@@ -232,8 +232,12 @@ OPCOES = (
           "está chamando e se é por voz ou por vídeo, com os botões OK e "
           "Conversar. Vale quando o TeleZapp não consegue atender a chamada "
           "(sem o componente de chamadas): atenda em outro dispositivo. "
-          "Desmarcada, a chamada só fica registrada na lista de mensagens "
-          "da conversa."),
+          "Desmarcada, o TeleZapp ignora as chamadas recebidas do WhatsApp "
+          "por completo: sem janela, som nem fala, sem a linha da chamada "
+          "na conversa e sem contar como mensagem não lida, como se ela não "
+          "tivesse acontecido. Ele não recusa a chamada: o celular e os "
+          "outros aparelhos continuam tocando. Vale para as chamadas que "
+          "chegarem depois de desmarcar."),
     Opcao("como_me_chamar", "Como me chamar nas mensagens", "Interface", "",
           "O nome que aparece no lugar de Você quando o autor é você: nas "
           "mensagens, na lista de conversas, nas reações, nos votos, na busca "
@@ -373,21 +377,24 @@ OPCOES = (
           "o link para montar uma prévia. Nos detalhes da mensagem (Alt "
           "Enter) a prévia aparece sempre.",
           (("completa", "Título e descrição"), ("titulo", "Só o título"),
-           ("nenhuma", "Não ler a prévia"))),
+           ("nenhuma", "Não ler a prévia")),
+          grupo="Prévia de links"),
     Opcao("previa_receber", "Buscar a prévia dos links recebidos",
           "Mensagens", False,
           "Quando chega uma mensagem com um link sem prévia, o TeleZapp abre "
           "a página para ler o título e a descrição. O site fica sabendo do "
           "IP deste computador e de que o link foi aberto. Só vale para "
           "mensagens que chegam com o programa aberto; endereços da rede "
-          "local nunca são abertos."),
+          "local nunca são abertos.",
+          grupo="Prévia de links"),
     Opcao("previa_enviar", "Gerar a prévia dos links que eu envio",
           "Mensagens", False,
           "No WhatsApp, o TeleZapp abre o primeiro link da mensagem que você "
           "envia e manda junto o título e a descrição, para quem recebe ver a "
           "prévia (o envio espera até 5 segundos). No Telegram, desmarcada, "
           "a mensagem sai sem a prévia de link. O site fica sabendo do IP "
-          "deste computador.", ),
+          "deste computador.",
+          grupo="Prévia de links"),
     Opcao("ortografia_idioma", "Idioma do corretor ortográfico", "Mensagens",
           "pt-BR",
           "O idioma do dicionário que Verificar ortografia (F7, menu "
@@ -519,7 +526,8 @@ OPCOES = (
           "desligar o microfone durante a gravação. Desmarcada, a janela "
           "grava só o som do computador. O atalho Control Shift S grava sempre "
           "só o som do computador, e o Control Shift B grava sempre o som do "
-          "computador com o microfone."),
+          "computador com o microfone.",
+          grupo="Gravação"),
     Opcao("gravar_microfone_estereo", "Gravar o microfone em estéreo",
           "Mídias", False,
           "Grava o microfone em dois canais, se ele tiver dois (muitos "
@@ -527,33 +535,38 @@ OPCOES = (
           "grava em mono, o formato comum das mensagens de voz. No WhatsApp "
           "a gravação em estéreo também é mensagem de voz (arquivo M4A, "
           "AAC), que toca no iPhone, com o controle de velocidade. No "
-          "Telegram, a gravação em estéreo vai como áudio comum."),
+          "Telegram, a gravação em estéreo vai como áudio comum.",
+          grupo="Gravação"),
     Opcao("gravar_som_estereo", "Gravar o som do computador em estéreo",
           "Mídias", False,
           "Grava em dois canais o que o computador toca, como música e "
           "vídeos, também quando o microfone entra junto. Desmarcada, grava "
           "em mono. No WhatsApp a gravação em estéreo também é mensagem de "
           "voz (arquivo M4A, AAC), que toca no iPhone, com o controle de "
-          "velocidade. No Telegram, vai como áudio comum."),
+          "velocidade. No Telegram, vai como áudio comum.",
+          grupo="Gravação"),
     Opcao("qualidade_gravacao_mono", "Qualidade da gravação em mono",
           "Mídias", 64,
           "Quantos kbps a mensagem de voz gravada em mono usa. Mais kbps, "
           "som melhor e arquivo maior. 64 kbps é bom para voz.",
           escolhas=tuple((k, "%d kbps" % k) for k in
-                         (32, 48, 64, 96, 128, 160, 192, 256))),
+                         (32, 48, 64, 96, 128, 160, 192, 256)),
+          grupo="Gravação"),
     Opcao("qualidade_gravacao_estereo", "Qualidade da gravação em estéreo",
           "Mídias", 128,
           "Quantos kbps a gravação em estéreo usa, somando os dois canais. "
           "128 kbps é bom para música.",
           escolhas=tuple((k, "%d kbps" % k) for k in
-                         (32, 48, 64, 96, 128, 160, 192, 256))),
+                         (32, 48, 64, 96, 128, 160, 192, 256)),
+          grupo="Gravação"),
     Opcao("volume_gravacao", "Volume da gravação, em porcentagem",
           "Mídias", 100,
           "Aumenta ou diminui o volume do que é gravado: microfone, som do "
           "computador ou os dois. 100 grava como chega; 200 grava com o "
           "dobro do volume; 50, com a metade. Um volume alto demais pode "
           "distorcer o som.",
-          numero=(10, 400)),
+          numero=(10, 400),
+          grupo="Gravação"),
     Opcao("barra_de_progresso",
           "Janela com barra de progresso em downloads e envios longos",
           "Mídias", True,
@@ -571,14 +584,16 @@ OPCOES = (
           "quieta. "
           "Desmarcada, o avanço só aparece no título, na barra de situação "
           "e na fala. Atualizar, instalar e fazer backup sempre mostram a "
-          "barra."),
+          "barra.",
+          grupo="Download de mídias"),
     Opcao("audio_janela", "Ao tocar um áudio ou mensagem de voz", "Mídias",
           "sem",
           "Só tocar começa a tocar sem abrir janela: Enter de novo pausa e "
           "continua, e Esc para. O player em janela tem avançar, voltar e "
           "posição.",
           (("sem", "Só tocar, sem janela"),
-           ("janela", "Abrir a janela do player"))),
+           ("janela", "Abrir a janela do player")),
+          grupo="Reprodução de áudio"),
     Opcao("enter_audio", "O que o Enter faz numa mensagem de voz ou áudio", "Mídias",
           "abrir", "O que o Enter faz numa mensagem de voz ou áudio. "
           "Transcrever usa os provedores de Inteligência artificial e, se a "
@@ -586,27 +601,31 @@ OPCOES = (
           "Control B sempre só baixa.",
           (("abrir", "Reproduzir (baixa antes, se preciso)"),
            ("baixar", "Só baixar"),
-           ("ia", "Transcrever (ou mostrar a transcrição)"))),
+           ("ia", "Transcrever (ou mostrar a transcrição)")),
+          grupo="Enter nas mídias"),
     Opcao("enter_imagem", "O que o Enter faz numa foto ou figurinha", "Mídias", "abrir",
           "O que o Enter faz numa foto ou figurinha. Descrever usa os "
           "provedores de Inteligência artificial e, se a descrição já "
           "existe, só a mostra.",
           (("abrir", "Abrir (baixa antes, se preciso)"),
            ("baixar", "Só baixar"),
-           ("ia", "Descrever (ou mostrar a descrição)"))),
+           ("ia", "Descrever (ou mostrar a descrição)")),
+          grupo="Enter nas mídias"),
     Opcao("enter_video", "O que o Enter faz num vídeo", "Mídias", "abrir",
           "O que o Enter faz num vídeo. Descrever usa o provedor de "
           "Inteligência artificial que aceita vídeo e, se a descrição já "
           "existe, só a mostra.",
           (("abrir", "Abrir (baixa antes, se preciso)"),
            ("baixar", "Só baixar"),
-           ("ia", "Descrever (ou mostrar a descrição)"))),
+           ("ia", "Descrever (ou mostrar a descrição)")),
+          grupo="Enter nas mídias"),
     Opcao("enter_pdf", "O que o Enter faz num PDF", "Mídias", "abrir",
           "O que o Enter faz num documento PDF. Converter usa os provedores "
           "de Inteligência artificial e, se o texto já existe, só o mostra.",
           (("abrir", "Abrir (baixa antes, se preciso)"),
            ("baixar", "Só baixar"),
-           ("ia", "Converter em texto acessível (ou mostrar o texto)"))),
+           ("ia", "Converter em texto acessível (ou mostrar o texto)")),
+          grupo="Enter nas mídias"),
     Opcao("audio_sequencia", "Sequência de áudios", "Mídias", "sim",
           "O que acontece quando um áudio ou mensagem de voz termina (sem "
           "janela). Todos da conversa: toca o próximo áudio, pulando as "
@@ -624,21 +643,33 @@ OPCOES = (
           "quando você a aumenta ou diminui.",
           ((0.25, "De 0,25 em 0,25 (de 0,25x até 3x)"),
            (0.5, "De 0,5 em 0,5 (de 0,5x até 3x)"),
-           (1.0, "De 1 em 1 (1x, 2x e 3x)"))),
+           (1.0, "De 1 em 1 (1x, 2x e 3x)")),
+          grupo="Reprodução de áudio"),
     Opcao("audio_velocidade", "Velocidade do áudio", "Mídias", 1.0,
           "Velocidade de reprodução de áudios e mensagens de voz, de 0,25x a "
           "3x, sem mudar o tom da voz. Os valores disponíveis dependem do "
           "passo escolhido.",
           tuple((v, ("%g" % v).replace(".", ",") + "x") for v in (
               0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75,
-              3.0))),
+              3.0)),
+          grupo="Reprodução de áudio"),
+    Opcao("falar_pulo_audio",
+          "Falar o ponto do áudio ao avançar ou voltar com as teclas",
+          "Mídias", True,
+          "Ao avançar ou voltar um áudio ou mensagem de voz com as teclas "
+          "(as setas do player e os atalhos do menu Mídias), fala em que "
+          "ponto ele ficou, por exemplo 0:35 de 1:10. Desmarcada, o áudio "
+          "pula em silêncio. Os botões Voltar e Avançar do player sempre "
+          "falam.",
+          grupo="Reprodução de áudio"),
     Opcao("falar_quem_toca",
           "Ao tocar o primeiro áudio, falar de quem é e a duração",
           "Mídias", False,
           "Quando um áudio ou mensagem de voz começa a tocar, fala o que é, "
           "de quem e quanto dura. Desmarcada, não fala nada: o próprio áudio começa a tocar. Vale para o "
           "primeiro áudio; os que tocam depois dele, na sequência, seguem as "
-          "opções \"Na sequência de áudios\" logo abaixo."),
+          "opções \"Na sequência de áudios\" logo abaixo.",
+          grupo="Reprodução de áudio"),
     Opcao("seq_falar_proximo", "Na sequência de áudios, falar Próximo áudio",
           "Mídias", False,
           "A cada áudio que começa na sequência, fala Próximo áudio antes "
@@ -690,26 +721,30 @@ OPCOES = (
           "tira esse eco do que envia, também quando ele volta atrasado "
           "por uma mesa de som com retorno. Use fone para o melhor "
           "resultado. Vale a partir da próxima chamada. Desmarque se a "
-          "outra pessoa disser que sua voz sai cortada ou abafada."),
+          "outra pessoa disser que sua voz sai cortada ou abafada.",
+          grupo="Chamadas de voz e vídeo"),
     Opcao("chamada_ruido", "Reduzir o ruído do microfone nas chamadas de "
           "voz", "Mídias", True,
           "Diminui ruídos constantes captados pelo microfone, como "
           "ventilador, ar-condicionado e chiado. Vale a partir da próxima "
-          "chamada."),
+          "chamada.",
+          grupo="Chamadas de voz e vídeo"),
     Opcao("video_camera_ao_atender", "Ligar a câmera ao atender uma chamada "
           "de vídeo", "Mídias", False,
           "Desmarcada, ao atender uma chamada de vídeo a sua câmera fica "
           "desligada: você ouve e vê a outra pessoa, mas ela não vê você, e "
           "a câmera pode ser ligada na janela da chamada. Marcada, a câmera "
           "liga junto com a chamada. Quem liga uma chamada de vídeo sempre "
-          "começa com a câmera ligada."),
+          "começa com a câmera ligada.",
+          grupo="Chamadas de voz e vídeo"),
     Opcao("chamada_retornar_sem_audio", "Ligar de volta quando a chamada "
           "recebida ficar sem som", "Mídias", True,
           "Às vezes você atende uma chamada do WhatsApp e o som da outra "
           "pessoa não chega. Marcada, depois de 20 segundos sem som o "
           "TeleZapp encerra a chamada e liga de volta para a mesma pessoa, "
           "o que costuma funcionar. A pessoa verá a chamada cair e receberá "
-          "outra. Desmarcada, o TeleZapp só encerra e avisa."),
+          "outra. Desmarcada, o TeleZapp só encerra e avisa.",
+          grupo="Chamadas de voz e vídeo"),
     Opcao("chamada_retorno", "Tirar das chamadas de voz o retorno da minha "
           "voz", "Mídias", True,
           "Quando a outra pessoa usa uma mesa de som com retorno (monitor) "
@@ -718,16 +753,19 @@ OPCOES = (
           "TeleZapp mede se isso está acontecendo e, só então, tira esse "
           "retorno do que você ouve. Sem retorno, a voz dela passa "
           "intacta. Vale a partir da próxima chamada. A solução de verdade "
-          "é do lado dela: um retorno sem a sua voz (mix-minus)."),
+          "é do lado dela: um retorno sem a sua voz (mix-minus).",
+          grupo="Chamadas de voz e vídeo"),
     Opcao("midias_baixar", "Quando baixar as mídias", "Mídias", "demanda",
           "Sob demanda baixa só quando você abre a mídia. Automático baixa "
           "ao receber, até o limite escolhido.",
           (("demanda", "Só quando eu abrir"),
-           ("automatico", "Automaticamente ao receber"))),
+           ("automatico", "Automaticamente ao receber")),
+          grupo="Download de mídias"),
     Opcao("midias_limite_auto_mb", "Tamanho máximo do download automático", "Mídias",
           20, "Mídias maiores que isto (em MB) não baixam sozinhas.",
           ((5, "5 MB"), (10, "10 MB"), (20, "20 MB"), (50, "50 MB"),
-           (100, "100 MB"))),
+           (100, "100 MB")),
+          grupo="Download de mídias"),
     Opcao("midias_passo_progresso", "Falar o avanço do download",
           "Mídias", 25,
           "De quanto em quanto o avanço de um download pedido por você, ou "
@@ -737,12 +775,14 @@ OPCOES = (
           "inteira de uma vez, sem porcentagens no meio. A barra de situação "
           "e o título da janela mostram o avanço mesmo com a fala desligada.",
           ((25, "A cada 25%"), (20, "A cada 20%"), (10, "A cada 10%"),
-           (5, "A cada 5%"), (1, "A cada 1%"), (0, "Não falar o avanço"))),
+           (5, "A cada 5%"), (1, "A cada 1%"), (0, "Não falar o avanço")),
+          grupo="Download de mídias"),
     Opcao("midias_confirmar_mb", "Perguntar antes de baixar arquivos a partir de", "Mídias", 100,
           "Pergunta antes de baixar, a seu pedido, uma mídia maior que isto "
           "(em MB).",
           ((50, "50 MB"), (100, "100 MB"), (500, "500 MB"),
-           (100000, "Nunca perguntar"))),
+           (100000, "Nunca perguntar")),
+          grupo="Download de mídias"),
 )
 
 from telezapp.nucleo import aparencia as _aparencia  # noqa: E402
@@ -782,8 +822,6 @@ EVENTOS_SOM = (
      "Tocado quando o QR Code do pareamento é trocado por um novo."),
     ("toque", "toque de chamada recebida",
      "Repetido enquanto uma chamada está tocando para você."),
-    ("chamando", "tom de chamada feita",
-     "Repetido enquanto você espera a outra pessoa atender."),
     ("desligada", "chamada encerrada",
      "Tocado quando uma chamada termina."),
     ("nova_aberta", "mensagem recebida na conversa aberta",
@@ -892,6 +930,18 @@ def _opcoes_de_ia():
 
 OPCOES = OPCOES + _opcoes_de_ia()
 
+# Fica na tela de Sons (uma caixa so, que toca o tom ao escolher); aqui para
+# a busca achar. O tom e feito pelo programa, nao e um arquivo do pacote.
+OPCOES = OPCOES + (
+    Opcao("tom_de_chamada", "Tom de chamada feita", "Sons", "europa",
+          "O tom que você ouve enquanto espera a outra pessoa atender, "
+          "repetido até ela atender. Europa: 425 Hz, 1 segundo de tom e 3 de "
+          "silêncio. EUA: 440 e 480 Hz juntos, 2 segundos de tom e 4 de "
+          "silêncio.",
+          escolhas=(("europa", "Europa (425 Hz, 1 s de tom e 3 s de silêncio)"),
+                    ("eua", "EUA (440 e 480 Hz, 2 s de tom e 4 s de silêncio)"))),
+)
+
 
 def precisa_reabrir(chave):
     """True se a opcao so vale quando o TeleZapp abre de novo."""
@@ -932,8 +982,8 @@ PADROES.update({
     "pacote_de_sons": "padrao",   # padrao, telezapp ou p:<nome>
     "sons_desativados": {},      # pacote -> eventos sem som
     "lista_conversas": {"ordem": ["nome", "servico", "nao_lidas", "previa",
-                                  "reacoes", "quem_reagiu"],
-                        "ocultos": ["previa", "reacoes",
+                                  "estado", "reacoes", "quem_reagiu"],
+                        "ocultos": ["previa", "estado", "reacoes",
                                     "quem_reagiu"]},  # o que cada linha mostra
     "lista_mensagens": {"ordem": ["autor", "hora", "conteudo", "marcas",
                                   "links", "previa", "ia", "reacoes",

@@ -25,7 +25,7 @@ def test_todo_evento_tem_um_som_nos_pacotes_da_casa():
     from telezapp.nucleo import pacotes_de_som as pk
     eventos = {nome for nome, _, _ in config.EVENTOS_SOM}
     assert eventos == {"nova", "enviada", "erro", "conectado", "pronto",
-                       "atualizado", "toque", "chamando", "desligada",
+                       "atualizado", "toque", "desligada",
                        "nova_aberta", "nova_grupo", "nova_pessoal",
                        "nova_canal", "nova_comunidade", "desconectada",
                        "reconectada", "falha_envio", "download_pronto",
@@ -190,18 +190,51 @@ def test_gerador_cria_sons_curtos_estereo_que_comecam_logo(tmp_path):
         assert np.abs(dados[-40:]).max() < 0.01, c               # termina mudo
 
 
-def test_tom_de_chamando_do_pacote_padrao_e_o_do_telefone_1s_de_tom(monkeypatch):
+def test_tom_de_chamada_padrao_e_o_da_europa_e_o_eua_e_opcional(monkeypatch):
     tons = []
     monkeypatch.setattr(fala, "winsound", types.SimpleNamespace(
         Beep=lambda freq, ms: tons.append((freq, ms))))
-    fala._tocar("chamando")
+    monkeypatch.setattr(fala, "_indice_dos_avisos", lambda: None)
+    assert config.PADROES["tom_de_chamada"] == "europa"
+    assert fala.TONS_DE_CHAMADA["europa"] == ((425,), 1000, 4000)
+    assert fala.TONS_DE_CHAMADA["eua"] == ((440, 480), 2000, 6000)
+    fala.definir_tom_de_chamada("europa")
+    fala._tocar_tom("europa")
     assert tons == [(425, 1000)]
-    # repete a cada 5 s (1 s de tom, 4 s de silencio); o toque, a cada 3 s
-    assert fala.INTERVALO_TOM_DE_CHAMADA_MS == 5000
-    assert fala.INTERVALO_TOQUE_MS == 3000
+    assert fala.intervalo_do_tom_de_chamada() == 4000     # 1 s de tom + 3 s
+    fala.definir_tom_de_chamada("eua")
+    assert fala.intervalo_do_tom_de_chamada() == 6000     # 2 s de tom + 4 s
+    fala.definir_tom_de_chamada("qualquer")                # invalido: padrao
+    assert fala.intervalo_do_tom_de_chamada() == 4000
+    assert fala.INTERVALO_TOQUE_MS == 3000       # o toque de quem recebe segue
     tons.clear()
-    fala._tocar("toque")                      # o toque de quem recebe segue
+    fala._tocar("toque")
     assert len(tons) == 4 and all(ms == 120 for _, ms in tons)
+
+
+def test_tom_de_chamada_do_eua_junta_as_duas_frequencias():
+    import numpy as np
+    onda = fala._onda((((440, 480), 2000),))
+    assert len(onda) == fala.TAXA_SINTETICA * 2
+    espectro = np.abs(np.fft.rfft(onda))
+    freqs = np.fft.rfftfreq(len(onda), 1 / fala.TAXA_SINTETICA)
+    picos = sorted(freqs[np.argsort(espectro)[-2:]])
+    assert [round(f) for f in picos] == [440, 480]
+    assert np.abs(onda).max() <= 0.31
+
+
+def test_chamando_nao_e_mais_um_evento_de_som_do_pacote():
+    assert "chamando" not in {n for n, _, _ in config.EVENTOS_SOM}
+
+
+def test_bipe_chamando_toca_o_tom_escolhido_mesmo_com_som_antigo(monkeypatch):
+    tocados = []
+    monkeypatch.setattr(fala, "tocar_tom_de_chamada",
+                        lambda tom=None: tocados.append(tom))
+    fala.definir_sons({"chamando": "desligado"})   # escolha antiga, ignorada
+    fala.bipe("chamando")
+    fala.definir_sons({})
+    assert tocados == [None]
 
 
 def test_som_curto_fica_pre_carregado_e_o_longo_nao(tmp_path):

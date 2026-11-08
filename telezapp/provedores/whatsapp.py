@@ -1233,6 +1233,7 @@ class ProvedorWhatsApp(Provedor):
         self._pareando = False      # QR ou codigo em andamento
         self._chamadas = {}         # id da chamada -> dados (so aviso)
         self._ofertas_velhas = set()  # chamadas que ja nao estao tocando
+        self._chamadas_ocultas = set()   # ignoradas (opcao de avisar desligada)
         self._fila_entregue = False   # a fila offline desta conexao acabou
         self._voz = None            # ChamadasWhatsApp, se as chamadas estao ligadas
         self._destino_video = None  # f(cid, largura, altura, rgb), da janela
@@ -3382,6 +3383,38 @@ class ProvedorWhatsApp(Provedor):
     def id_do_telefone(self, telefone):
         digitos = re.sub(r"\D", "", telefone or "")
         return digitos + "@s.whatsapp.net" if digitos else ""
+
+    def confirmar_telefone(self, telefone):
+        """(id, motivo) do telefone digitado, conferindo no WhatsApp quais
+        formas estao registradas: no Brasil, muitos contatos antigos ficam
+        sem o 9 depois do DDD e o envio para a forma errada falha com "no
+        LID found". Com resposta clara: (id da forma registrada, "") ou
+        ("", "nao esta no WhatsApp"). Sem conexao ou com erro na consulta,
+        vale o que foi digitado, como antes."""
+        digitos = re.sub(r"\D", "", telefone or "")
+        formas = m.formas_do_telefone(digitos)
+        if not formas or self.cliente is None or not self._conectada:
+            return self.id_do_telefone(telefone), ""
+        try:
+            respostas = self.cliente.is_on_whatsapp(
+                *["+" + f for f in formas])
+        except Exception as e:
+            log.info("não consegui conferir o telefone no WhatsApp: %s",
+                     type(e).__name__)
+            return self.id_do_telefone(telefone), ""
+        registrados = {}
+        for r in respostas:
+            if r.IsIn and r.JID.User:
+                registrados[re.sub(r"\D", "", r.Query)] = r.JID.User
+        for f in formas:                      # a digitada vale primeiro
+            if f in registrados:
+                if f != digitos:
+                    log.info("telefone registrado na outra forma "
+                             "(com ou sem o 9 depois do DDD)")
+                return registrados[f] + "@s.whatsapp.net", ""
+        if registrados:                       # a Query veio em outra forma
+            return next(iter(registrados.values())) + "@s.whatsapp.net", ""
+        return "", "Este número não está registrado no WhatsApp."
 
     def contatos_da_conta(self):
         """[(id, nome, telefone)] da agenda sincronizada com a conta (os
@@ -5591,7 +5624,8 @@ class ProvedorWhatsApp(Provedor):
                 "erro do WhatsApp (%s)" % type(e).__name__
             self.barramento.publicar(ev.EnvioFalhou(
                 self.conta.id, conversa_id, original, motivo,
-                devolver_texto=False, tipo=anexo.tipo))
+                devolver_texto=False, tipo=anexo.tipo,
+                nome_arquivo=anexo.nome))
             return
         log.info("%s enviado em %.2fs (%d bytes, %s, %ds)", anexo.tipo,
                  time.perf_counter() - inicio, anexo.tamanho, anexo.mime,
@@ -5713,9 +5747,19 @@ class ProvedorWhatsApp(Provedor):
             log.exception("erro ao preparar as chamadas do WhatsApp")
             self._voz = None
 
+    @staticmethod
+    def _ocultar_chamadas():
+        """Com "Avisar chamadas do WhatsApp" desmarcada, a chamada recebida
+        nao aparece em lugar nenhum: sem janela, som, fala nem linha na
+        conversa, como se nao tivesse acontecido. O TeleZapp tambem nao
+        a recusa: o celular e os outros aparelhos seguem tocando."""
+        return not config.Config().get("avisar_chamadas_whatsapp")
+
     def _oferta_velha(self, chamada):
         """A DLL avisa a chamada por um caminho e a data dela vem por outro,
         em `_ao_chamada`: espera um pouco por ela. Sem data, toca."""
+        if self._ocultar_chamadas():
+            return True          # ignora sem desligar
         fim = time.monotonic() + ESPERA_DATA_DA_OFERTA_S
         while time.monotonic() < fim:
             if chamada in self._ofertas_velhas:
@@ -5811,6 +5855,11 @@ class ProvedorWhatsApp(Provedor):
             eu = self.cliente.get_me().JID if self.cliente else None
             if eu is not None and criador.User == eu.User:
                 return                 # liguei de outro aparelho
+            if self._ocultar_chamadas():
+                self._chamadas_ocultas.add(chamada)
+                log.info("chamada recebida ignorada (aviso de chamadas "
+                         "desligado)")
+                return
             if not criador.User and meta.callCreatorAlt.User:
                 criador = meta.callCreatorAlt
             cid = self._id_da_conversa(criador)
@@ -5850,6 +5899,8 @@ class ProvedorWhatsApp(Provedor):
             log.exception("erro ao tratar chamada recebida")
 
     def _ao_chamada_atendida(self, cliente, e):
+        if e.basicCallMeta.callID in self._chamadas_ocultas:
+            return
         dados = self._chamadas.get(e.basicCallMeta.callID)
         if dados is not None:
             dados["atendida"] = float(e.basicCallMeta.timestamp or
@@ -5858,6 +5909,9 @@ class ProvedorWhatsApp(Provedor):
     def _ao_chamada_encerrada(self, cliente, e):
         try:
             meta = e.basicCallMeta
+            if meta.callID in self._chamadas_ocultas:
+                self._chamadas_ocultas.discard(meta.callID)
+                return
             dados = self._chamadas.pop(meta.callID, None)
             if dados is None:
                 return
@@ -6221,7 +6275,12 @@ class ProvedorWhatsApp(Provedor):
 
     def _pedir_historico(self, conversa_id, info, ancora_id):
         try:
-            self.cliente.request_history_sync(info, QUANTAS_SOB_DEMANDA)
+            # a assinatura oficial (neonize 0.10) leva a conversa, o id, se
+            # fui eu, a hora e quantas; a DLL de teste da 0.5.2 levava o info
+            origem = info.MessageSource
+            self.cliente.request_history_sync(
+                origem.Chat, info.ID, bool(origem.IsFromMe),
+                int(info.Timestamp), QUANTAS_SOB_DEMANDA)
             log.info("histórico pedido ao celular: conversa=%s âncora=%s "
                      "quantas=%d", conversa_id, ancora_id,
                      QUANTAS_SOB_DEMANDA)

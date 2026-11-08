@@ -27,7 +27,7 @@ def test_midias_tem_o_botao_sequencia_de_audio(tmp_path, monkeypatch):
     assert "Sequência de áudio" in mod.grupos("Mídias")
     soltas = {o.chave for o in mod.opcoes("Mídias")}
     assert not (CHAVES & soltas)               # saíram da tela solta
-    assert "falar_quem_toca" in soltas          # (o primeiro áudio fica)
+    assert "falar_quem_toca" not in soltas      # (agora em Reprodução de áudio)
     dentro = {o.chave for o in mod.opcoes_do_grupo("Mídias",
                                                    "Sequência de áudio")}
     assert dentro == CHAVES

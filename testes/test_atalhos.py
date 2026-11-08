@@ -131,3 +131,18 @@ def test_teclas_de_edicao_do_windows():
         assert at.e_de_edicao(c), c
     for c in ("Ctrl+Shift+P", "Alt+Left", "Ctrl+Alt+Right", "F5", None):
         assert not at.e_de_edicao(c), c
+
+
+def test_texto_dos_atalhos_mostra_o_que_esta_em_uso_agora():
+    r = at.Registro()
+    r.registrar("a", "&Alfa\tCtrl+1", "Mensagens", "Ctrl+1")
+    r.registrar("b", "&Beta", "Mensagens")
+    r.registrar("c", "&Gama", "Conversas", "Ctrl+3")
+    texto = at.texto_dos_atalhos(r)
+    assert "MENSAGENS\nAlfa: Ctrl+1\n" in texto
+    assert "CONVERSAS\nGama: Ctrl+3" in texto
+    assert "Beta" not in texto                 # sem tecla, fica de fora
+    r.definir_personalizados({"a": "Ctrl+9", "c": ""})
+    texto = at.texto_dos_atalhos(r)
+    assert "Alfa: Ctrl+9" in texto and "Ctrl+1" not in texto
+    assert "Gama" not in texto                 # ficou sem tecla
