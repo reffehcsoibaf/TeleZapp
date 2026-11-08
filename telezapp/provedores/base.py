@@ -583,6 +583,13 @@ class Provedor(ABC):
         quando o servico nao deixa saber sem consultar a rede."""
         return ""
 
+    def confirmar_telefone(self, telefone):
+        """(id, motivo): confere na rede o telefone digitado, tentando as
+        formas dele (ex.: Brasil com e sem o 9). Id vazio e motivo preenchido
+        quando o servico garante que o numero nao existe; por padrao, o que
+        id_do_telefone disser, sem consultar."""
+        return self.id_do_telefone(telefone), ""
+
     def nome_de_participante(self, participante_id):
         """Nome para mostrar de quem aparece num recibo (entregue, lida);
         vazio se nao souber."""

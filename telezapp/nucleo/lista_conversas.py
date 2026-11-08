@@ -15,6 +15,7 @@ ITENS = (
     ("nao_lidas", "Quantidade de mensagens não lidas"),
     ("autor", "Autor da última mensagem (em grupos)"),
     ("previa", "Trecho da última mensagem"),
+    ("estado", "Estado da última mensagem, quando é minha (só com o trecho ativado)"),
     ("reacoes", "Reações às minhas mensagens"),
     ("quem_reagiu", "Quem reagiu às minhas mensagens"),
 )
@@ -23,7 +24,7 @@ ROTULOS = dict(ITENS)
 # o trecho da ultima mensagem e as reacoes vem desligados: a leitura da lista
 # segue como sempre foi ate a pessoa ligar
 PADRAO = {"ordem": list(CHAVES),
-          "ocultos": ["autor", "previa", "reacoes", "quem_reagiu"]}
+          "ocultos": ["autor", "previa", "estado", "reacoes", "quem_reagiu"]}
 TAMANHO_DA_PREVIA = 80
 MENSAGEM_DO_MINIMO = "Pelo menos um item precisa ficar ativado."
 ESCOLHAS_DIGITAR = (("pular", "Pular para o item que começa com a letra"),
@@ -51,6 +52,11 @@ def normalizar(valor):
         ordem.insert(ordem.index("previa"), "autor")
         if "previa" in escondidos:
             escondidos.append("autor")
+    # o estado vem logo depois do trecho, desligado como ele nasce
+    if "estado" in novos and "previa" in ordem:
+        novos.remove("estado")
+        ordem.insert(ordem.index("previa") + 1, "estado")
+        escondidos.append("estado")
     ordem += novos
     escondidos += [c for c in novos if c in PADRAO["ocultos"]]
     ocultos = [c for c in ordem if c in escondidos]
@@ -146,6 +152,16 @@ def previa_da_mensagem(msg, grupo=False):
         else corpo
 
 
+def estado_da_mensagem(msg):
+    """O estado da ultima mensagem (enviada, entregue, lida...), so quando
+    ela e minha; senao vazio."""
+    if msg is None or not msg.minha or not msg.estado:
+        return ""
+    if not m.conteudo(msg, com_estado=False).strip():
+        return ""
+    return msg.estado
+
+
 def _nao_lidas(c):
     if c.nao_lidas <= 0:
         return ""
@@ -178,21 +194,25 @@ def texto_de_quem_reagiu(pessoas, maximo=3):
     return "%s e %s reagiram" % (", ".join(nomes[:-1]), nomes[-1])
 
 
-def rotulo(c, valor=None, previa="", reacoes=0, quem_reagiu=(), autor=""):
+def rotulo(c, valor=None, previa="", reacoes=0, quem_reagiu=(), autor="",
+           estado=""):
     """A linha da conversa na lista. Fixada e silenciada aparecem sempre,
     logo depois do servico (ou do nome, se o servico estiver de fora). Se os
     itens ativados nao tiverem nada para mostrar nesta conversa (sem nao
     lidas e sem mensagem, por exemplo), vale o nome. reacoes: quantas
     reacoes as mensagens minhas receberam desde que a conversa foi aberta
     pela ultima vez; quem_reagiu: [(quem, emoji)] dessas reacoes; autor: quem
-    escreveu a ultima mensagem, em grupos."""
+    escreveu a ultima mensagem, em grupos; estado: o da ultima mensagem se ela e
+    minha (so vale com o trecho ativado)."""
     partes = []
-    for chave in ativos(valor):
+    itens = ativos(valor)
+    for chave in itens:
         texto = {"nome": c.nome,
                  "servico": m.SERVICOS.get(c.servico, c.servico),
                  "nao_lidas": _nao_lidas(c),
                  "autor": autor,
                  "previa": previa,
+                 "estado": estado if "previa" in itens else "",
                  "reacoes": texto_das_reacoes(reacoes),
                  "quem_reagiu": texto_de_quem_reagiu(quem_reagiu)}[chave]
         if texto:

@@ -107,6 +107,7 @@ class EnvioFalhou:
     motivo: str
     devolver_texto: bool = True    # False: resposta de botao, nada a devolver
     tipo: str = "texto"            # tipo da mensagem local que falhou
+    nome_arquivo: str = ""         # qual arquivo falhou (varios de uma vez)
 
 
 @dataclass

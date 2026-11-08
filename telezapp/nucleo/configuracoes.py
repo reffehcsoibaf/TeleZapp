@@ -242,6 +242,26 @@ class ModeloConfiguracoes:
             self.definir("audio_velocidade",
                          vel.ajustar(atual, vel.passo_valido(valor)))
 
+    # Fora da redefinicao: o que protege o acesso (autenticacao ao abrir e
+    # codigo das trancadas), para ninguem desligar a protecao sem a senha.
+    CATEGORIAS_FORA_DA_REDEFINICAO = ("Privacidade",)
+
+    def redefinir_padroes(self):
+        """Marca, como pendente, todas as opcoes no padrao de fabrica: as
+        opcoes comuns, as tres listas, os atalhos e o pacote de sons (volta
+        ao da casa, com todos os eventos ativados). Nao mexe em contas,
+        chaves de IA, privacidade nem nos pacotes de sons criados pela
+        pessoa. Vale ao aplicar; cancelar desfaz."""
+        for o in config.OPCOES:
+            if o.categoria not in self.CATEGORIAS_FORA_DA_REDEFINICAO:
+                self.definir(o.chave, o.padrao)
+        self.lista_definir(None)
+        self.lista_msg_definir(None)
+        self.aviso_definir(None)
+        if self.registro is not None:
+            self.atalhos_restaurar_todos()
+        self.sons.redefinir()
+
     @staticmethod
     def limitar(opcao, valor):
         """Numero dentro de (minimo, maximo); lixo vira o padrao."""

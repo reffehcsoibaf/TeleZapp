@@ -13,6 +13,25 @@
 </header>
 <main>
 <section>
+<h2>Versão 2026.11.08.0</h2>
+<ul>
+<li>Chamadas recebidas: com "Avisar chamadas do WhatsApp" desmarcada, o TeleZapp agora ignora a chamada por completo, como se ela não tivesse acontecido: sem janela, som nem fala, e sem a linha da chamada na conversa. Ele não recusa a chamada: o celular e os outros aparelhos continuam tocando.</li>
+<li>Teclas de atalho (Shift F1): a janela mostra os atalhos que estão valendo agora, inclusive os que você mudou em Configurações, Atalhos. Enter ou Espaço numa função da lista executa essa função, quando possível, e o botão "Personalizar atalhos" abre direto a tela de atalhos.</li>
+<li>Envio de vários arquivos: o som curto de enviada continua a cada arquivo, mas a fala vem uma vez só, quando a fila termina ("3 enviadas." ou, se algum falhou, "14 enviadas e 17 com erro."). O botão Anexar arquivo aceita vários arquivos de uma vez.</li>
+<li>Arquivos de atalho do Google Drive (.gdoc, .gsheet, .gslides) não têm conteúdo para enviar. O TeleZapp avisa isso, orienta a baixar como PDF ou Word e confere se o arquivo pode ser lido antes de colocá-lo na fila.</li>
+<li>Lista de conversas: novo item "Estado da última mensagem, quando é minha" (entregue, lida, reproduzida). Só vale com o item "Trecho da última mensagem" ativado e vem desligado.</li>
+<li>Nova opção, em Mídias, Reprodução de áudio: "Falar o ponto do áudio ao avançar ou voltar com as teclas". Desmarcada, avançar e voltar pelo teclado acontece em silêncio.</li>
+<li>Em Configurações, Avançado, o botão "Redefinir as configurações aos padrões de fábrica" volta opções, listas, atalhos e pacote de sons ao original. Pede confirmação e só vale ao dar OK ou Aplicar. Contas, chaves de IA e Privacidade não mudam.</li>
+<li>Tom de chamada feita: agora é um tom de telefone de verdade, em duas versões à escolha em Configurações, Sons: Europa (padrão) ou EUA. O som "chamando" saiu da lista de eventos do pacote de sons.</li>
+<li>Telefones do Brasil: ao iniciar uma conversa por número, o TeleZapp tenta com e sem o 9 depois do DDD e usa a forma que está registrada no WhatsApp. Só avisa que o número não está registrado se nenhuma das duas existir.</li>
+<li>Corrigido: ao dar Enter numa conversa com mensagens não lidas, o leitor de tela repetia a conversa na lista antes de ir para as mensagens.</li>
+<li>Busca de conversas: Esc limpa a busca quando não há mais nada a cancelar, e trocar o filtro de conta ou de tipo também limpa a busca.</li>
+<li>Configurações: opções do mesmo assunto ficam atrás de um botão. Mídias ganha "Gravação", "Chamadas de voz e vídeo", "Download de mídias", "Enter nas mídias" e "Reprodução de áudio"; Mensagens ganha "Prévia de links". A busca de opções continua achando todas.</li>
+<li>Chamadas, base do WhatsApp atualizada (neonize 0.10.0) e melhorias no som das chamadas: o codec combinado vale na chamada, os pacotes de áudio chegam em ordem e a chamada passa a registrar um resumo do áudio recebido. Testadas voz nos dois sentidos e subida para vídeo; chamadas recebidas de aparelhos Android sem som ainda não foram confirmadas. Se acontecer, mande um feedback pelo programa.</li>
+<li>Conhecido: quando o TeleZapp liga e você atende em outro aparelho seu, o celular pode continuar tocando por alguns segundos.</li>
+</ul>
+</section>
+<section>
 <h2>Versão 2026.11.07.0</h2>
 <ul>
 <li>Corrigido: com "Pedir autenticação ao abrir o TeleZapp" ligado, o TeleZapp podia ficar aberto sem nenhuma janela, sem pedir o Windows Hello nem o PIN, e não abria mais. Agora o aviso do Windows Hello aparece numa janela do TeleZapp, que traz o botão "Usar o PIN do TeleZapp" (Esc faz o mesmo), então dá para entrar com o PIN a qualquer momento. Se o seu TeleZapp já não abre por causa disso, encerre-o pelo Gerenciador de Tarefas, instale esta versão por cima (baixe o TeleZapp.exe) e abra de novo; os seus dados não são apagados.</li>

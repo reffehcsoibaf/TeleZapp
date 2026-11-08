@@ -403,6 +403,14 @@ class EstadoDeSons:
             self.ativo = pacote_id
             self.mexeu = True
 
+    def redefinir(self):
+        """Pacote da casa e todos os eventos ativados, em todos os pacotes."""
+        if self.ativo == PADRAO and not any(self.desativados.values()):
+            return
+        self.ativo = PADRAO
+        self.desativados = {}
+        self.mexeu = True
+
     def criar(self, nome):
         """-> (id, erro). O pacote so existe no disco depois de aplicar."""
         nome, erro = nome_valido(nome, [n for _, n in self.pacotes()])

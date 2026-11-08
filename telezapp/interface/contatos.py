@@ -122,7 +122,15 @@ def adicionar_contato(pai, banco, contas, falar):
         wx.MessageBox("Informe o nome e um telefone válido, com DDD.",
                       "Contatos", wx.OK | wx.ICON_WARNING, pai)
         return None
-    id_ = contas.provedor(conta_id).id_do_telefone(telefone)
+    id_, motivo = contas.provedor(conta_id).confirmar_telefone(telefone)
+    if not id_:
+        wx.MessageBox(
+            "%s Confira o número: no Brasil, o app já tentou com e sem o 9 "
+            "depois do DDD." % (motivo or "Não achei esse número."),
+            "Contatos", wx.OK | wx.ICON_WARNING, pai)
+        return None
+    # a forma registrada pode ser outra (Brasil sem o 9)
+    telefone = "+" + id_.split("@")[0]
     banco.salvar_contato(conta_id, id_, nome, telefone)
     avisar_conta(contas.provedor(conta_id), id_, nome, telefone, falar)
     return (conta_id, id_), "Contato %s adicionado." % nome

@@ -72,3 +72,47 @@ def test_caixa_some_nos_pacotes_que_nao_se_editam(tmp_path, monkeypatch):
     assert not d.cx_arquivo_som.visivel
     assert not d.lbl_arquivo_som.visivel
     assert not d.btn_procurar_som.visivel
+
+
+def test_tom_de_chamada_e_uma_caixa_na_tela_de_sons_e_toca_ao_escolher(
+        tmp_path, monkeypatch):
+    from telezapp.interface import configuracoes as ui
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path / "dados"))
+    cfg = config.Config()
+    modelo = ModeloConfiguracoes(cfg)
+    assert modelo.valor("tom_de_chamada") == "europa"       # padrao
+    assert [v for v, _ in modelo.escolhas(
+        next(o for o in config.OPCOES if o.chave == "tom_de_chamada"))] \
+        == ["europa", "eua"]
+    tocados = []
+    monkeypatch.setattr(ui, "tocar_tom_de_chamada", tocados.append)
+    d = _dialogo_com_sons(cfg, modelo)
+    opcao = next(o for o in config.OPCOES if o.chave == "tom_de_chamada")
+    d._ao_escolher(opcao, "eua")
+    assert tocados == ["eua"]                         # o tom toca ao escolher
+    assert modelo.pendentes["tom_de_chamada"] == "eua"
+
+
+def test_botao_de_redefinir_so_vale_se_confirmar(tmp_path, monkeypatch):
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path / "dados"))
+    cfg = config.Config()
+    cfg.dados["enter_envia"] = not config.PADROES["enter_envia"]
+    modelo = ModeloConfiguracoes(cfg)
+    d = object.__new__(DialogoConfiguracoes)
+    d.modelo = modelo
+    d.fala = types.SimpleNamespace(falar=lambda *a, **k: falado.append(a[0]))
+    d.controles = {}
+    mostradas = []
+    d._mostrar_opcoes = mostradas.append
+    falado = []
+    wx_falso.resposta_messagebox[0] = wx_falso.NO
+    d._redefinir_padroes()
+    assert modelo.pendentes == {} and not mostradas
+    wx_falso.resposta_messagebox[0] = wx_falso.YES
+    try:
+        d._redefinir_padroes()
+    finally:
+        wx_falso.resposta_messagebox[0] = wx_falso.YES
+    assert modelo.pendentes["enter_envia"] == config.PADROES["enter_envia"]
+    assert mostradas == ["Avançado"]
+    assert "Padrões de fábrica" in falado[0]

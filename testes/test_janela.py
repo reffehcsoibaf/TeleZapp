@@ -215,7 +215,9 @@ def test_abrir_conversa_com_nao_lidas_foca_o_marcador(j):
     assert ditas == []                              # nada falado a parte
     assert ("carregar", "10", 100) in j.contas.p.pedidos
     assert ("lida", "10") in j.contas.p.pedidos
-    assert j.lista_conv.itens[0] == "Ana, Telegram"
+    # o rotulo da lista nao muda enquanto o foco esta nela: o leitor de tela
+    # repetiria a conversa (relato de 08/11)
+    assert j.lista_conv.itens[0] == "Ana, Telegram, 2 não lidas"
     assert wx_falso._foco[0] is j.lista_conv        # espera o servico
 
     j.b.publicar(ev.MensagensCarregadas("t1", "10", [
@@ -228,6 +230,7 @@ def test_abrir_conversa_com_nao_lidas_foca_o_marcador(j):
         "nova 1")                                    # seta para baixo: 1a
     assert wx_falso._foco[0] is j.lista_msgs         # foco uma vez so
     assert ditas == []
+    assert j.lista_conv.itens[0] == "Ana, Telegram"  # refeita com o foco fora
 
     j._char_hook(Tecla(wx_falso.WXK_ESCAPE))         # Esc volta
     assert wx_falso._foco[0] is j.lista_conv
@@ -1446,8 +1449,8 @@ def test_anexar_pelo_botao_envia_foto_e_audio_como_documento(
     for nome in ("foto.jpg", "som.mp3"):
         arq = tmp_path / nome
         arq.write_bytes(b"x" * 10)
-        monkeypatch.setattr(jm.dialogos, "escolher_arquivo",
-                            lambda pai, pasta="", a=str(arq): a)
+        monkeypatch.setattr(jm.dialogos, "escolher_arquivos",
+                            lambda pai, pasta="", a=str(arq): [a])
         j._anexar_arquivo()
         assert ("arquivo", "20", m.DOCUMENTO, nome, "") in \
             j.contas.p.pedidos
@@ -1457,8 +1460,8 @@ def test_anexar_arquivo_usa_a_caixa_como_legenda(j, tmp_path, monkeypatch):
     _abrir_com_caixa(j)
     pdf = tmp_path / "relatorio.pdf"
     pdf.write_bytes(b"%PDF")
-    monkeypatch.setattr(jm.dialogos, "escolher_arquivo",
-                        lambda pai, pasta="": str(pdf))
+    monkeypatch.setattr(jm.dialogos, "escolher_arquivos",
+                        lambda pai, pasta="": [str(pdf)])
     j.caixa.SetValue("o relatório")
     j._anexar_arquivo()
     assert ("arquivo", "20", m.DOCUMENTO, "relatorio.pdf",
@@ -1480,10 +1483,57 @@ def test_anexar_arquivo_usa_a_caixa_como_legenda(j, tmp_path, monkeypatch):
 
 def test_anexar_cancelado_nao_envia(j, monkeypatch):
     _abrir_com_caixa(j)
-    monkeypatch.setattr(jm.dialogos, "escolher_arquivo",
-                        lambda pai, pasta="": None)
+    monkeypatch.setattr(jm.dialogos, "escolher_arquivos",
+                        lambda pai, pasta="": [])
     j._anexar_arquivo()
     assert not [p for p in j.contas.p.pedidos if p[0] == "arquivo"]
+
+
+def test_anexar_varios_envia_todos_e_legenda_so_no_primeiro(
+        j, tmp_path, monkeypatch):
+    _abrir_com_caixa(j)
+    caminhos = []
+    for nome in ("a.pdf", "b.pdf", "c.pdf"):
+        arq = tmp_path / nome
+        arq.write_bytes(b"%PDF")
+        caminhos.append(str(arq))
+    monkeypatch.setattr(jm.dialogos, "escolher_arquivos",
+                        lambda pai, pasta="": caminhos)
+    j.caixa.SetValue("os três")
+    j._anexar_arquivo()
+    pedidos = [p for p in j.contas.p.pedidos if p[0] == "arquivo"]
+    assert [(p[3], p[4]) for p in pedidos] == [
+        ("a.pdf", "os três"), ("b.pdf", ""), ("c.pdf", "")]
+    assert j.caixa.GetValue() == ""
+
+
+def test_falha_de_um_dos_varios_arquivos_marca_o_arquivo_certo(j):
+    """Varios documentos sem legenda tem o mesmo texto e tipo: a falha e a
+    confirmacao tem de achar a mensagem local pelo nome do arquivo."""
+    def local(i, nome):
+        return m.Mensagem("t1", "20", "local-%d" % i, minha=True,
+                          data=AGORA + i, texto="", tipo=m.DOCUMENTO,
+                          nome_arquivo=nome, estado=m.ENVIANDO)
+    lista = [local(1, "a.pdf"), local(2, "b.pdf"), local(3, "c.pdf")]
+    achada = j._local_enviando(lista, "", m.DOCUMENTO, "c.pdf")
+    assert achada.nome_arquivo == "c.pdf"
+    # sem nome (texto, ou servico que nao informa): o primeiro, como antes
+    assert j._local_enviando(lista, "", m.DOCUMENTO).nome_arquivo == "a.pdf"
+    # nome que nao bate: cai no comportamento antigo
+    assert j._local_enviando(lista, "", m.DOCUMENTO,
+                             "x.pdf").nome_arquivo == "a.pdf"
+
+
+def test_esc_na_lista_limpa_a_busca_e_troca_de_filtro_tambem(j):
+    j.campo_busca.SetValue("ana")
+    j.busca = "ana"
+    assert j._limpar_busca() is True
+    assert j.busca == "" and j.campo_busca.GetValue() == ""
+    assert j._limpar_busca() is False
+    j.campo_busca.SetValue("ana")
+    j.busca = "ana"
+    j._ao_filtro_tipo()
+    assert j.busca == "" and j.campo_busca.GetValue() == ""
 
 
 def test_arquivo_invalido_e_falado(j, tmp_path):
@@ -1589,7 +1639,7 @@ def test_sem_conexao_nao_anexa(j, monkeypatch):
     _abrir_com_caixa(j)
     j.b.publicar(ev.EstadoConta("t1", ev.DESCONECTADA))
     chamado = []
-    monkeypatch.setattr(jm.dialogos, "escolher_arquivo",
+    monkeypatch.setattr(jm.dialogos, "escolher_arquivos",
                         lambda *a, **k: chamado.append(1))
     j._anexar_arquivo()
     assert not chamado
@@ -2264,7 +2314,7 @@ def test_lista_de_conversas_muda_a_ordem_e_os_itens(j):
         "ocultos": ["servico", "previa"]})
     assert j.lista_conv.itens[0] == "2 não lidas, Ana"
     assert j.cfg.get("lista_conversas")["ocultos"] == [
-        "servico", "autor", "previa", "reacoes", "quem_reagiu"]
+        "servico", "autor", "previa", "estado", "reacoes", "quem_reagiu"]
     assert not j.itens["lista_servico"].marcado
     assert j.itens["lista_nome"].marcado
     j.itens["lista_servico"].Check(True)       # o menu marca antes do evento
@@ -2285,7 +2335,8 @@ def test_item_do_menu_da_lista_nao_deixa_tirar_o_ultimo(j):
     assert ditas[-1] == "Pelo menos um item precisa ficar ativado."
     assert j.itens["lista_nome"].marcado   # voltou marcado
     assert j.cfg.get("lista_conversas")["ocultos"] == [
-        "servico", "nao_lidas", "autor", "previa", "reacoes", "quem_reagiu"]
+        "servico", "nao_lidas", "autor", "previa", "estado", "reacoes",
+        "quem_reagiu"]
     j._alternar_item_da_lista("previa")
     assert ditas[-1] == "Trecho da última mensagem: ativado."
     assert "previa" not in j.cfg.get("lista_conversas")["ocultos"]
@@ -3009,6 +3060,9 @@ def test_nova_mensagem_para_telefone_cria_conversa_no_whatsapp(j, monkeypatch):
     class Zap:
         def id_do_telefone(self, tel):
             return tel.lstrip("+") + "@s.whatsapp.net"
+
+        def confirmar_telefone(self, tel):
+            return self.id_do_telefone(tel), ""
         pedidos = []
 
         def carregar_mensagens(self, *a, **k):
@@ -7723,11 +7777,177 @@ def test_novo_topico_pede_o_nome_cria_e_abre_o_topico(j, monkeypatch):
     assert ditas[-1] == "Sem permissão." and len(abertas) == 1
 
 
-def test_tom_de_chamada_feita_repete_a_cada_5s_e_o_toque_a_cada_3s(
+def test_tom_de_chamada_feita_repete_pelo_tom_escolhido_e_o_toque_a_cada_3s(
         j, monkeypatch):
     prazos = []
     monkeypatch.setattr(jm.wx, "CallLater",
                         lambda ms, f, *a: prazos.append(ms), raising=False)
+    jm.definir_tom_de_chamada("europa")
+    j._repetir_toque(object(), "chamando", "chamando")
+    jm.definir_tom_de_chamada("eua")
     j._repetir_toque(object(), "chamando", "chamando")
     j._repetir_toque(object(), "tocando", "toque")
-    assert prazos == [5000, 3000]
+    jm.definir_tom_de_chamada("europa")
+    assert prazos == [4000, 6000, 3000]
+
+
+def test_telefone_fora_do_whatsapp_diz_o_motivo_certo(j):
+    from telezapp.nucleo import nova_mensagem as nm
+    j.cfg.salvar_conta({"id": "w1", "servico": "whatsapp", "nome": "Zap"})
+
+    class Zap:
+        def confirmar_telefone(self, tel):
+            return "", "Este número não está registrado no WhatsApp."
+
+        def resolver_destinatario(self, texto):
+            raise AssertionError("nao deve cair no resolvedor generico")
+    j.contas.provedores["w1"] = Zap()
+    j.contas.provedor = lambda cid: j.contas.provedores.get(cid)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    assert j._resolver_destino("w1", "+55 62 98322-0258", nm) is None
+    j._falar_nao_encontrei("+55 62 98322-0258")
+    assert "não está registrado no WhatsApp" in ditas[-1]
+    assert "sem o 9" in ditas[-1]
+    # o motivo vale uma vez so: a proxima falha volta ao texto geral
+    j._falar_nao_encontrei("Fulano")
+    assert ditas[-1].startswith("Não encontrei Fulano")
+
+
+from telezapp.nucleo import lista_conversas as _lc_nucleo  # noqa: E402
+
+
+def test_estado_da_ultima_mensagem_acompanha_na_lista_de_conversas(j):
+    j._aplicar_opcao("lista_conversas", {
+        "ordem": list(_lc_nucleo.CHAVES),
+        "ocultos": [c for c in _lc_nucleo.CHAVES
+                    if c not in ("nome", "previa", "estado")]})
+    j._abrir_conversa(j.indice[("t1", "20")])
+    mensagem = msg("3", "a", minha=True, conversa="20")
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", [mensagem]))
+    j._atualizar_previa(("t1", "20"), mensagem)
+    j.b.publicar(ev.EstadosMensagens("t1", "20", ["3"], m.ENTREGUE))
+    assert j._rotulo_da_conversa(j.indice[("t1", "20")]).endswith(", entregue")
+    j.b.publicar(ev.EstadosMensagens("t1", "20", ["3"], m.LIDA))
+    assert j._rotulo_da_conversa(j.indice[("t1", "20")]).endswith(", lida")
+
+
+def test_pular_no_audio_em_silencio_quando_a_opcao_esta_desligada(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+
+    class Motor:
+        terminou = False
+        posicao = 12.0
+        duracao = 39.0
+        pulos = []
+
+        def avancar(self, delta):
+            self.pulos.append(delta)
+
+    j.cfg.set("falar_pulo_audio", False)
+    j.audio = (("t1", "10", "1"), Motor())
+    j._pular_audio(5)
+    assert Motor.pulos == [5] and ditas == []
+    j.cfg.set("falar_pulo_audio", True)
+    j._pular_audio(5)
+    assert ditas == ["0:12 de 0:39"]
+    j.audio = None
+
+
+def _locais_de_arquivos(n):
+    return [m.Mensagem("t1", "10", "local-%d" % k, minha=True,
+                       data=AGORA + k, tipo=m.DOCUMENTO,
+                       nome_arquivo="%d.pdf" % k, estado=m.ENVIANDO)
+            for k in range(1, n + 1)]
+
+
+def test_varios_arquivos_tocam_o_som_a_cada_um_e_falam_so_no_fim(
+        j, monkeypatch):
+    sons, ditas = [], []
+    monkeypatch.setattr(jm, "bipe", lambda tipo="nova": sons.append(tipo))
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    chave = ("t1", "10")
+    j.cache[chave] = _locais_de_arquivos(3)
+    j._tirar_local(chave, "", m.DOCUMENTO, "1.pdf")
+    j._tirar_local(chave, "", m.DOCUMENTO, "2.pdf")
+    assert sons == ["enviada", "enviada"] and ditas == []
+    j._tirar_local(chave, "", m.DOCUMENTO, "3.pdf")
+    assert sons == ["enviada"] * 3 and ditas == ["3 enviadas."]
+    # um arquivo so segue avisando como antes
+    j.cache[chave] = _locais_de_arquivos(1)
+    j._tirar_local(chave, "", m.DOCUMENTO, "1.pdf")
+    assert ditas[-1] == "Enviada."
+
+
+def test_fila_de_arquivos_com_erro_diz_quantos_foram_e_quantos_falharam(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    chave = ("t1", "10")
+    j.cache[chave] = _locais_de_arquivos(4)
+    j._tirar_local(chave, "", m.DOCUMENTO, "1.pdf")
+    j.b.publicar(ev.EnvioFalhou("t1", "10", "", "sem rede", tipo=m.DOCUMENTO,
+                                nome_arquivo="2.pdf"))
+    j.b.publicar(ev.EnvioFalhou("t1", "10", "", "sem rede", tipo=m.DOCUMENTO,
+                                nome_arquivo="3.pdf"))
+    assert ditas == []                       # ainda falta o 4
+    j._tirar_local(chave, "", m.DOCUMENTO, "4.pdf")
+    assert ditas == ["2 enviadas e 2 com erro."]
+    assert j._lotes == {}
+
+
+def test_shift_f1_mostra_os_atalhos_atuais_e_nao_os_de_fabrica(j):
+    padrao = j.atalhos.efetivo("ajuda")
+    assert padrao == "Shift+F1"
+    j.atalhos.definir_personalizados({"ajuda": "Ctrl+Alt+J"})
+    lista = [t for _, t in jm.nucleo_atalhos.lista_dos_atalhos(j.atalhos)]
+    assert "Ajuda: Teclas de atalho: Ctrl+Alt+J" in lista
+    assert "Ajuda: Teclas de atalho: Shift+F1" not in lista
+    texto = jm.texto_da_ajuda(j.atalhos)
+    assert "ATALHOS EM USO" in texto and "NA LISTA DE CONVERSAS" in texto
+
+
+def test_shift_f1_tem_lista_que_executa_e_botao_para_personalizar(
+        j, monkeypatch):
+    pedidas = []
+    monkeypatch.setattr(jm.wx, "CallAfter",
+                        lambda f, *a: pedidas.append((f.__name__, a)),
+                        raising=False)
+
+    class Dlg:
+        fechado = False
+
+        def EndModal(self, _):
+            self.fechado = True
+    dlg = Dlg()
+
+    def abrir(acao):
+        monkeypatch.setattr(
+            jm.dialogos, "mostrar_texto",
+            lambda pai, titulo, texto, rotulo, **k: acao(k, dlg))
+        j._teclas_de_atalho()
+
+    # Enter numa funcao com tecla: fecha e executa
+    def enter_em_ajuda(k, d):
+        rotulo, itens, executar = k["comandos"]
+        assert any(t.endswith(": Shift+F1") for t in itens)
+        executar([t.endswith(": Shift+F1") for t in itens].index(True), d)
+    abrir(enter_em_ajuda)
+    assert dlg.fechado and pedidas[-1] == ("_executar_item_do_menu",
+                                           ("ajuda",))
+    # o botao leva a Configuracoes, Atalhos
+    dlg.fechado = False
+    abrir(lambda k, d: k["botoes_extra"][0][1](d))
+    assert dlg.fechado and pedidas[-1] == ("_configuracoes", ("Atalhos",))
+    # atalho global (fora do menu) nao executa e a janela fica aberta
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.atalhos.definir_personalizados({"mostrar_janela": "Ctrl+Alt+W"})
+    dlg.fechado = False
+
+    def enter_no_global(k, d):
+        rotulo, itens, executar = k["comandos"]
+        i = [t.endswith(": Ctrl+Alt+W") for t in itens].index(True)
+        executar(i, d)
+    abrir(enter_no_global)
+    assert not dlg.fechado and "fora da janela" in ditas[-1]

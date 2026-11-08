@@ -345,9 +345,10 @@ def _reproducao(pai, msg, caminho, texto, fala, motor, video, cfg=None):
                                  formatar_tempo(mo.duracao)),
                    interromper=True)
 
-    def pular(delta):
+    def pular(delta, tecla=False):
         mo.avancar(delta)
-        dizer()
+        if not tecla or cfg is None or cfg.get("falar_pulo_audio"):
+            dizer()
 
     def atualizar_rotulo():
         botao.SetLabel("&Pausar" if mo.tocando else "&Tocar")
@@ -375,9 +376,9 @@ def _reproducao(pai, msg, caminho, texto, fala, motor, video, cfg=None):
         if k == wx.WXK_SPACE and not isinstance(dlg.FindFocus(), wx.Button):
             alternar()
         elif k == wx.WXK_LEFT:
-            pular(-passo)
+            pular(-passo, tecla=True)
         elif k == wx.WXK_RIGHT:
-            pular(passo)
+            pular(passo, tecla=True)
         elif k == wx.WXK_HOME:
             mo.ir_para(0)
             dizer()

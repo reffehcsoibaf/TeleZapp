@@ -135,9 +135,6 @@ SONS = {
     "toque": (sequencia(["E5", "G5", "E5", "G5"], 0.22, 0.32, 1.0, 0.2, True)
               + [(1.0 + k * 0.22, n, 0.32, 1.0, 0.2 if k % 2 == 0 else -0.2)
                  for k, n in enumerate(["E5", "G5", "E5", "G5"])], "sino"),
-    "chamando": ([(0.0, "A4", 0.55, 0.9, -0.15), (0.0, "E5", 0.55, 0.6, 0.15),
-                  (1.0, "A4", 0.55, 0.9, -0.15),
-                  (1.0, "E5", 0.55, 0.6, 0.15)], "sino"),
     "desligada": (sequencia(["G5", "C5"], 0.14, 0.45), "sino"),
     "desconectada": (sequencia(["A5", "E5", "C5"], 0.12, 0.5, 0.9), "grave"),
     "reconectada": (sequencia(["C5", "G5"], 0.12, 0.45), "sino"),

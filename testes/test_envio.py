@@ -136,3 +136,11 @@ def test_audio_ogg_que_nao_e_opus_vai_como_documento(tmp_path):
     f.write_bytes(b"OggS" + bytes(60))        # Ogg que nao e Opus
     a = envio.preparar(str(f))
     assert a.tipo == m.DOCUMENTO and a.nome == "vorbis.ogg"
+
+
+def test_atalho_do_google_drive_e_recusado_com_explicacao(tmp_path):
+    g = tmp_path / "Relatorio.gdoc"
+    g.write_text('{"url": "https://docs.google.com/document/d/x"}')
+    with pytest.raises(envio.ErroEnvio) as e:
+        envio.preparar(str(g), como_documento=True)
+    assert "Google Drive" in str(e.value) and "Relatorio.gdoc" in str(e.value)

@@ -38,7 +38,7 @@ EVT_CONTEXT_MENU = EVT_KEY_DOWN = EVT_BUTTON = EVT_LISTBOX = object()
 EVT_CHAR = object()
 EVT_SET_FOCUS = object()
 TE_PASSWORD = 2048
-EVT_CHOICE = EVT_TEXT = EVT_CHECKBOX = object()
+EVT_CHOICE = EVT_TEXT = EVT_CHECKBOX = EVT_SPINCTRL = object()
 DefaultPosition = (-1, -1)
 mensagens = []          # o que passou por MessageBox
 resposta_messagebox = [NO]
@@ -306,6 +306,12 @@ class Choice(Janela):
         assert -1 <= i < len(self.itens), (i, len(self.itens))
         self.sel = i
 
+    def GetCount(self):
+        return len(self.itens)
+
+    def GetString(self, i):
+        return self.itens[i]
+
 
 class SpinCtrl(Janela):
     def __init__(self, *a, initial=0, **k):
@@ -519,6 +525,15 @@ class MenuItem:
 
     def Check(self, v=True):
         self.marcado = v
+
+    def IsEnabled(self):
+        return True
+
+    def IsCheckable(self):
+        return False
+
+    def IsChecked(self):
+        return self.marcado
 
 
 class Menu:

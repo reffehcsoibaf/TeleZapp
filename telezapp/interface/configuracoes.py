@@ -14,7 +14,7 @@ import threading
 import wx
 
 from telezapp import config
-from telezapp.acessibilidade.fala import bipe
+from telezapp.acessibilidade.fala import bipe, tocar_tom_de_chamada
 
 from telezapp.nucleo import atalhos as nucleo_atalhos
 from telezapp.nucleo import pacotes_de_som
@@ -168,6 +168,8 @@ class DialogoConfiguracoes(wx.Dialog):
         if categoria == "Privacidade" and self.privacidade is not None \
                 and not self.modelo.busca.strip():
             self._criar_privacidade_conta()
+        if categoria == "Avançado" and not self.modelo.busca.strip():
+            self._criar_botao_redefinir()
         if categoria == "Inteligência artificial" and self.ia is not None \
                 and not self.modelo.busca.strip():
             self._criar_ia()
@@ -444,6 +446,10 @@ class DialogoConfiguracoes(wx.Dialog):
         self.btn_ouvir_som.Bind(wx.EVT_BUTTON, lambda e: self._sons_ouvir())
         self.btn_procurar_som.Bind(wx.EVT_BUTTON,
                                    lambda e: self._sons_procurar())
+        # o tom de chamada feita nao e um arquivo do pacote: uma caixa so,
+        # que toca o tom ao escolher
+        self._criar_opcao(next(o for o in config.OPCOES
+                               if o.chave == "tom_de_chamada"))
         self._sons_preencher_pacotes()
         self._sons_preencher_eventos()
 
@@ -644,6 +650,34 @@ class DialogoConfiguracoes(wx.Dialog):
             self._criar_campos_codigo()
         self._sincronizar_atualizacoes()
         self._sincronizar_pasta()
+
+    def _criar_botao_redefinir(self):
+        """Botao que volta tudo ao padrao de fabrica (so vale ao aplicar)."""
+        b = wx.Button(self.painel,
+                      label="Redefinir as configurações aos padrões de fábrica")
+        b.Bind(wx.EVT_BUTTON, lambda e: self._redefinir_padroes())
+        self.lay_painel.Add(b, 0, wx.ALL, 8)
+        self.controles["redefinir_padroes"] = b
+
+    def _redefinir_padroes(self):
+        r = wx.MessageBox(
+            "Voltar todas as configurações aos padrões de fábrica? Isso inclui "
+            "as listas, os atalhos e o pacote de sons. Suas contas, as chaves "
+            "de IA, a privacidade e os pacotes de sons que você criou não "
+            "mudam. Só vale quando você der OK ou Aplicar; Cancelar desfaz.",
+            "Padrões de fábrica", wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
+            self)
+        if r != wx.YES:
+            return
+        self.modelo.redefinir_padroes()
+        self._mostrar_opcoes("Avançado")
+        b = self.controles.get("redefinir_padroes")
+        if b is not None:
+            b.SetFocus()
+        if self.fala is not None:
+            self.fala.falar("Padrões de fábrica marcados. Clique em OK ou "
+                            "Aplicar para valer; Cancelar desfaz.",
+                            interromper=True)
 
     def _criar_botao_grupo(self, categoria, grupo):
         """Um botao que abre, numa janela, as opcoes que ficam juntas."""
@@ -1072,6 +1106,8 @@ class DialogoConfiguracoes(wx.Dialog):
 
     def _ao_escolher(self, opcao, valor):
         self.modelo.definir(opcao.chave, valor)
+        if opcao.chave == "tom_de_chamada":
+            tocar_tom_de_chamada(valor)     # ouve o que acabou de escolher
         if opcao.chave == "audio_passo_velocidade":
             # a lista de velocidades depende do passo: refaz as opcoes
             i = self._categoria_escolhida()
@@ -1168,8 +1204,26 @@ class DialogoGrupoOpcoes(wx.Dialog):
         self._em_foco = None
         self.caixas = {}
         self.campos_codigo = {}
+        self._opcoes_escolha = {}
         lay = wx.BoxSizer(wx.VERTICAL)
         for o in opcoes:
+            if o.numero:
+                lay.Add(wx.StaticText(self, label=o.rotulo + ":"), 0,
+                        wx.LEFT | wx.RIGHT | wx.TOP, 8)
+                c = wx.SpinCtrl(self, min=o.numero[0], max=o.numero[1],
+                                initial=int(pai.modelo.valor(o.chave)),
+                                name=o.rotulo)
+                # o campo do Windows so confirma ao sair dele: o texto
+                # digitado tambem vale
+                c.Bind(wx.EVT_SPINCTRL, lambda e, o=o, c=c:
+                       pai.modelo.definir(o.chave, c.GetValue()))
+                c.Bind(wx.EVT_TEXT, lambda e, o=o, c=c:
+                       pai.modelo.definir(o.chave, c.GetValue()))
+                c.Bind(wx.EVT_SET_FOCUS,
+                       lambda e, o=o: self._ao_focar(e, o))
+                lay.Add(c, 0, wx.ALL, 8)
+                self.caixas[o.chave] = c
+                continue
             if o.escolhas:
                 # o rotulo nasce logo antes da caixa combinada: e o texto
                 # que o leitor de tela usa como nome dela
@@ -1179,13 +1233,13 @@ class DialogoGrupoOpcoes(wx.Dialog):
                 c = wx.Choice(self, choices=[r for _, r in escolhas],
                               name=o.rotulo)
                 c.SetSelection(pai.modelo.indice_da_escolha(o))
-                c.Bind(wx.EVT_CHOICE, lambda e, o=o, c=c, esc=escolhas:
-                       pai.modelo.definir(o.chave,
-                                          esc[c.GetSelection()][0]))
+                c.Bind(wx.EVT_CHOICE, lambda e, o=o, c=c:
+                       self._ao_escolher(o, c))
                 c.Bind(wx.EVT_SET_FOCUS,
                        lambda e, o=o: self._ao_focar(e, o))
                 lay.Add(c, 0, wx.ALL, 8)
                 self.caixas[o.chave] = c
+                self._opcoes_escolha[o.chave] = o
                 continue
             c = wx.CheckBox(self, label=o.rotulo, name=o.rotulo)
             c.SetValue(bool(pai.modelo.valor(o.chave)))
@@ -1204,6 +1258,21 @@ class DialogoGrupoOpcoes(wx.Dialog):
         self.SetSizerAndFit(lay)
         self.Bind(wx.EVT_CHAR_HOOK, self._ao_tecla)
         self.CentreOnParent()
+
+    def _ao_escolher(self, opcao, caixa):
+        modelo = self.pai.modelo
+        modelo.definir(opcao.chave, modelo.escolhas(opcao)[
+            caixa.GetSelection()][0])
+        # a lista de uma pode depender do valor de outra (a velocidade do
+        # audio depende do passo): refaz as que mudaram
+        for chave, o in self._opcoes_escolha.items():
+            if chave == opcao.chave:
+                continue
+            c = self.caixas[chave]
+            novas = [r for _, r in modelo.escolhas(o)]
+            if [c.GetString(i) for i in range(c.GetCount())] != novas:
+                c.Set(novas)
+                c.SetSelection(modelo.indice_da_escolha(o))
 
     def _ao_marcar(self, opcao, caixa):
         self.pai.modelo.definir(opcao.chave, caixa.GetValue())

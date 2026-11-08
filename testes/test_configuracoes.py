@@ -258,8 +258,10 @@ def test_interface_e_mensagens_reunem_as_categorias_antigas(mod):
                       "como_me_chamar", "tamanho_letra"}
     assert "prioridade_abertura" in {o.chave for o in mod.opcoes("Sistema")}
     assert "estilo" not in {o.chave for o in config.OPCOES}   # virou a lista
-    assert {"ortografia_idioma", "enter_envia",
-            "previa_links"} <= {o.chave for o in mod.opcoes("Mensagens")}
+    assert {"ortografia_idioma", "enter_envia"} <= {
+        o.chave for o in mod.opcoes("Mensagens")}
+    assert "previa_links" in {o.chave for o in mod.opcoes_do_grupo(
+        "Mensagens", "Prévia de links")}
 
 
 def test_busca_acha_opcao_dentro_de_um_grupo(mod):
@@ -327,3 +329,31 @@ def test_busca_de_atalhos_acha_a_funcao_ou_junta_muitas(mod, monkeypatch):
               if d.tipo == "atalhos_busca"]
     assert len(juntos) == 1 and juntos[0].alvo == ""
     assert "2 funções" in juntos[0].rotulo
+
+
+def test_redefinir_padroes_marca_tudo_como_pendente_e_poupa_a_privacidade(mod):
+    mod.registro = _registro()
+    mod.cfg.dados["enter_envia"] = not config.PADROES["enter_envia"]
+    mod.cfg.dados["seguranca_ao_entrar"] = True
+    mod.cfg.dados["lista_conversas"] = {"ordem": ["nome"], "ocultos": []}
+    mod.cfg.dados["pacote_de_sons"] = "marimba"
+    mod.atalho_definir("b", "Ctrl+2")
+    mod.sons.selecionar("marimba")
+    mod.sons.alternar("marimba", "nova")
+    mod.redefinir_padroes()
+    assert mod.valor("enter_envia") == config.PADROES["enter_envia"]
+    # a autenticacao ao abrir nao se desliga por aqui
+    assert mod.valor("seguranca_ao_entrar") is True
+    from telezapp.nucleo import lista_conversas as lc
+    assert mod.lista_em_uso() == lc.normalizar(None)
+    assert mod.atalhos_pendentes is None and mod.atalho_de("b") == ""
+    assert mod.sons.ativo == pacotes_padrao() and not mod.sons.desativados
+    # nada foi gravado antes de aplicar
+    assert mod.cfg.get("enter_envia") != config.PADROES["enter_envia"]
+    feitas = mod.aplicar(lambda c, v: None)
+    assert "enter_envia" in feitas and "seguranca_ao_entrar" not in feitas
+
+
+def pacotes_padrao():
+    from telezapp.nucleo import pacotes_de_som
+    return pacotes_de_som.PADRAO

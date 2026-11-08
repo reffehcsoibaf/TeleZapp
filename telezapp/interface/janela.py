@@ -20,9 +20,9 @@ import wx
 
 from telezapp import (GRUPO_DE_SUPORTE, NOME, PAGINA_DO_PROJETO, VERSAO,
                       config)
-from telezapp.acessibilidade.fala import (Fala, INTERVALO_TOM_DE_CHAMADA_MS,
+from telezapp.acessibilidade.fala import (Fala, intervalo_do_tom_de_chamada,
                                           INTERVALO_TOQUE_MS, bipe,
-                                          definir_sons)
+                                          definir_sons, definir_tom_de_chamada)
 from telezapp.interface import colagem, dialogos, robos, visualizadores
 from telezapp.interface import salvar as ui_salvar
 from telezapp.nucleo import copia_oficial, localizacao, silenciados
@@ -102,7 +102,6 @@ TEXTO_CARREGANDO = "Carregando mensagens..."
 TEXTO_FILTRO_VAZIO = "Nenhuma conversa neste filtro."
 # De quantos em quantos ms o som de uma chamada repete: o tom de quem liga
 # segue o do telefone (1 s de tom e 4 s de silencio)
-INTERVALO_DO_SOM_DE_CHAMADA = {"chamando": INTERVALO_TOM_DE_CHAMADA_MS}
 TEXTO_SEM_CONTAS ="Nenhuma conversa ainda. Aperte Alt e use Novo, Nova conta, no " \
                    "menu, para adicionar uma conta do Telegram ou do WhatsApp."
 MINUTOS_PARA_TENTAR_DE_NOVO = 5  # busca de versao com a pessoa ocupada
@@ -113,77 +112,31 @@ MAX_BOTOES_LINK = 12     # links e botoes de endereco, tambem na ordem de Tab
 LIMITE_ROTULO_LINK = 80  # caracteres do rotulo de um botao de link
 SEGUNDOS_VOZ_NO_STATUS = 60    # o limite do WhatsApp para voz no status
 
-AJUDA = """\
+AJUDA_INICIO = """\
 ESTRUTURA DA JANELA
 Sem conversa aberta, só a lista de Conversas aparece. Enter abre a conversa e
 leva você à lista de Mensagens; Esc fecha a conversa. Com a conversa aberta, a caixa
 para escrever fica logo abaixo das mensagens.
 
-ATALHOS
-Alt 1: ir para a lista de conversas
-Alt 2: na lista de conversas, a próxima conversa com mensagens não lidas;
-dentro da conversa, o marcador de mensagens não lidas
-Alt 3: ir para a lista de mensagens
+"""
+
+AJUDA_OUTRAS_TECLAS = """\
+OUTRAS TECLAS (estas não mudam)
 End: ir para o fim da lista (Home: para o início)
-Control E: ir para a caixa de digitação
-Control R: ouvir a última mensagem da conversa aberta
-F5: atualizar a lista de conversas
-Control N: nova mensagem (escolhe a conta, se houver mais de uma, o destinatário e
-o texto)
-Control F: buscar conversa pelo nome (digitar o código secreto aqui libera as
-conversas trancadas no celular)
-Control Shift T: esconder de novo as conversas trancadas
-Conversas, Busca por critérios (ou o botão ao lado do Sair): achar mensagens
-guardadas combinando texto, serviço, conta, tipo, data, favoritas e mais
-(sem tecla de fábrica; dê uma em Configurações, Atalhos)
-Alt 4: filtro de serviço ou conta da lista de conversas
-Alt 5: filtro de tipo de conversa (todas, não lidas, pessoais, grupos,
-canais, arquivadas, trancadas)
-Control Shift R: responder à mensagem selecionada
 Control Espaço (nas listas de conversas e de mensagens): ligar o modo de
 seleção e marcar o item em foco; depois, Espaço marca ou desmarca os outros,
 a tecla Menu mostra as ações para todos os marcados e Esc desfaz tudo; os
-atalhos (Delete, Control Shift F, Control Shift C, Control Shift E...) também
-valem para todos os marcados
-Delete: apagar a conversa (na lista de conversas) ou a mensagem (na lista de
-mensagens) selecionada, com confirmação
-Control I: detalhes da conversa selecionada (dados, mídias, membros, grupos em
-comum, administração)
-F2: editar a mensagem de texto selecionada (se for sua e estiver no prazo)
-Control Shift E: encaminhar a mensagem selecionada (ou as marcadas) para as
-conversas que você escolher
-Control Shift C: copiar o texto da mensagem selecionada (o menu de contexto
-tem um item de cópia para cada tipo de conteúdo)
+atalhos de apagar, fixar, encaminhar e copiar também valem para todos os
+marcados
 Control V na caixa de digitar: colar arquivos ou imagens copiados, que
 são enviados com o Enter; o texto da caixa vira a legenda
-Alt Enter: ver os detalhes e o texto completo da mensagem selecionada
-Control Shift D: depurar a mensagem selecionada (menu Depurar)
-Control O: abrir a mídia da mensagem (baixa antes, se preciso), mesmo
-quando a legenda tem link
-Control B: baixar a mídia sem abrir
 Tab (na mensagem): vai aos botões de resposta e depois aos links, botões
 de endereço e pessoas mencionadas; Espaço ou Enter abre
-F7: verificar a ortografia do texto da caixa de digitar (palavra, sugestões
-e botões para trocar, ignorar ou adicionar ao dicionário do Windows)
-Control Shift A: anexar e enviar um arquivo (foto, vídeo, áudio, documento)
-Control Shift M: começar a gravar uma nota de voz pelo microfone; apertar de
-novo para e envia (Esc descarta). Os botões de gravar abrem uma janela
-Control Shift S: o mesmo, gravando o som do computador
-Todos os atalhos do menu podem ser mudados em Configurações, Atalhos
-Control Shift Seta para cima e para baixo: áudio mais rápido e mais lento
-(0,25x a 3x); Control Shift 0: velocidade normal
-Control Shift Seta para a esquerda e para a direita: voltar e avançar 5
-segundos no áudio que toca (Control Shift Page Up e Page Down: 30
-segundos)
-Control vírgula: abrir as configurações (busca, categorias e opções)
-Control Shift L: ligar para a conversa (Telegram, conversa com uma pessoa)
-Chamadas, Ligar com vídeo e Ligar ou desligar a câmera (WhatsApp): sem tecla de
-fábrica; dê uma em Configurações, Atalhos
-Control Shift J: voltar à janela da chamada
-Control Shift K: silenciar ou ativar o microfone na chamada
-Control Shift H: desligar a chamada
 Tecla Aplicativos ou Shift F10: menu da mensagem selecionada
 
+"""
+
+AJUDA_FIM = """\
 NA LISTA DE CONVERSAS
 Setas: percorrem as conversas (cada uma é lida com o número de não lidas).
 Enter: abre a conversa e leva o foco para as mensagens: para o item "Início
@@ -220,6 +173,16 @@ Escolha como cada mensagem é lida (autor e hora primeiro, conteúdo primeiro
 ou autor só quando muda) e ligue ou desligue o som e a fala das mensagens
 novas.
 """
+
+
+def texto_da_ajuda(registro):
+    """O texto de Teclas de atalho: a estrutura da janela, as teclas fixas e o
+    resto da ajuda. Os atalhos em uso agora ficam numa lista a parte, montada
+    na hora (nucleo.atalhos.lista_dos_atalhos)."""
+    return (AJUDA_INICIO + "ATALHOS EM USO\nA lista logo depois deste texto "
+            "traz os atalhos de agora, com o que você mudou. Enter ou Espaço "
+            "numa função a executa. O botão Personalizar atalhos abre "
+            "Configurações, Atalhos.\n\n" + AJUDA_OUTRAS_TECLAS + AJUDA_FIM)
 
 
 def seguro(funcao):
@@ -448,6 +411,7 @@ class Janela(wx.Frame):
         self._carregar_previa_de_links()
         self.conversas = []           # as do filtro, pela ultima mensagem
         self.busca = ""               # texto do campo de busca de conversas
+        self._sem_whatsapp = ""       # motivo do ultimo telefone nao achado
         self.trancadas_liberadas = False   # codigo secreto digitado agora
         self._tipos_atuais = m.tipos_visiveis(False)
         self._buscando = False        # evita tratar a limpeza do campo
@@ -469,7 +433,7 @@ class Janela(wx.Frame):
         dialogos.abrir_por_dentro = self._abrir_link_por_dentro
         self.rascunhos = {}           # texto nao enviado de cada conversa
         self.indice = {}              # chave -> Conversa
-        self.previas = {}             # chave -> (data, trecho, autor da ultima)
+        self.previas = {}      # chave -> (data, trecho, autor, estado da ultima)
         self._previas_lidas = False   # as do banco ja foram lidas?
         self.reacoes_novas = {}       # chave -> reacoes novas as minhas msgs
         self.quem_reagiu = {}         # chave -> [(quem, emoji)] dessas reacoes
@@ -523,6 +487,7 @@ class Janela(wx.Frame):
         self.locais = 0               # contador de mensagens "enviando"
         # local-N -> o que foi mandado, para tentar de novo se falhar
         self._anexos_locais = {}
+        self._lotes = {}   # chave -> [enviados, com erro] da fila de arquivos
         self.sincronia = {}           # conta_id -> (percentual, quando)
         self.audio = None             # (chave, Reprodutor) tocando sem janela
         self.interrompidas = {}       # conta_id -> % em que a sincronia parou
@@ -919,6 +884,7 @@ class Janela(wx.Frame):
                 "nao_lidas"),
             "lista_autor": lambda e: self._alternar_item_da_lista("autor"),
             "lista_previa": lambda e: self._alternar_item_da_lista("previa"),
+            "lista_estado": lambda e: self._alternar_item_da_lista("estado"),
             "lista_reacoes": lambda e: self._alternar_item_da_lista(
                 "reacoes"),
             "lista_quem_reagiu": lambda e: self._alternar_item_da_lista(
@@ -988,8 +954,7 @@ class Janela(wx.Frame):
             "fixar_msg": lambda e: self._fixar_mensagem(),
             "dep_msg": lambda e: self._depurar_mensagem(),
             "dep_conv": lambda e: self._depurar_conversa(),
-            "ajuda": lambda e: dialogos.mostrar_texto(
-                self, "Teclas de atalho", AJUDA, "Teclas de atalho"),
+            "ajuda": lambda e: self._teclas_de_atalho(),
             "anexar": lambda e: self._anexar_arquivo(),
             "gravar_mic": lambda e: self._gravar_rapido(MICROFONE),
             "gravar_som": lambda e: self._gravar_rapido(SOM_INTERNO),
@@ -1078,6 +1043,58 @@ class Janela(wx.Frame):
                        self.itens["baixar_demanda"]).Check(True)
 
     # --------------------------------------------------- atalhos na tela
+    def _teclas_de_atalho(self):
+        """Shift F1: o guia de teclas e, numa lista, os atalhos em uso agora.
+        Enter ou Espaco numa funcao da lista a executa (depois de fechar a
+        janela); o botao leva a Configuracoes, Atalhos."""
+        lista = nucleo_atalhos.lista_dos_atalhos(self.atalhos)
+        pedido = []
+
+        def executar(i, dlg):
+            chave = lista[i][0]
+            it = self.itens.get(chave)
+            if it is None:
+                self.fala.falar("Este atalho vale fora da janela e não "
+                                "pode ser executado daqui.", interromper=True)
+                return
+            if not it.IsEnabled():
+                self.fala.falar("Esta função não está disponível agora.",
+                                interromper=True)
+                return
+            pedido.append(("executar", chave))
+            dlg.EndModal(wx.ID_OK)
+
+        def personalizar(dlg):
+            pedido.append(("personalizar", ""))
+            dlg.EndModal(wx.ID_OK)
+
+        dialogos.mostrar_texto(
+            self, "Teclas de atalho", texto_da_ajuda(self.atalhos),
+            "Teclas de atalho",
+            botoes_extra=[("&Personalizar atalhos", personalizar)],
+            comandos=("Atalhos em uso (%d). Enter ou Espaço executa a "
+                      "função" % len(lista), [t for _, t in lista], executar))
+        if not pedido:
+            return
+        quem, chave = pedido[0]
+        if quem == "personalizar":
+            wx.CallAfter(self._configuracoes, "Atalhos")
+        else:
+            wx.CallAfter(self._executar_item_do_menu, chave)
+
+    def _executar_item_do_menu(self, chave):
+        """Faz o que o item de menu faz, como se tivesse sido escolhido."""
+        it = self.itens.get(chave)
+        if it is None or not it.IsEnabled():
+            return
+        evento = wx.CommandEvent(wx.wxEVT_MENU, it.GetId())
+        if it.IsCheckable():
+            novo = not it.IsChecked()
+            it.Check(novo)
+            evento.SetInt(int(novo))
+        evento.SetEventObject(self)
+        self.ProcessEvent(evento)
+
     def _mostrar_atalhos(self):
         return bool(self.cfg.get("mostrar_atalhos"))
 
@@ -2255,11 +2272,12 @@ class Janela(wx.Frame):
 
     def _rotulo_da_conversa(self, c):
         """A linha da conversa, com as informacoes e a ordem escolhidas."""
-        _, trecho, autor = self.previas.get(c.chave, (0, "", ""))
+        _, trecho, autor, estado = self.previas.get(
+            c.chave, (0, "", "", ""))
         return lista_conv_nucleo.rotulo(
             c, self._lista_em_uso(), trecho,
             self.reacoes_novas.get(c.chave, 0),
-            self.quem_reagiu.get(c.chave, ()), autor)
+            self.quem_reagiu.get(c.chave, ()), autor, estado)
 
     def _atualizar_previa_se_for_a_ultima(self, chave, msg):
         """A mensagem mudou (editada, apagada...): se era a ultima da
@@ -2282,15 +2300,16 @@ class Janela(wx.Frame):
         quem = self._quem_enviou(msg) if grupo else ""
         trecho = lista_conv_nucleo.previa_da_mensagem(msg, grupo)
         autor = lista_conv_nucleo.autor_da_mensagem(msg, grupo, quem)
-        if antes is not None and antes[1:] == (trecho, autor):
+        estado = lista_conv_nucleo.estado_da_mensagem(msg)
+        if antes is not None and antes[1:] == (trecho, autor, estado):
             return False
-        self.previas[chave] = (msg.data, trecho, autor)
+        self.previas[chave] = (msg.data, trecho, autor, estado)
         return True
 
     def _carregar_previas(self):
         """Le do banco, em segundo plano, a ultima mensagem de cada conversa
         (so quando a lista mostra o trecho)."""
-        if self._previas_lidas or not {"previa", "autor"} & set(
+        if self._previas_lidas or not {"previa", "autor", "estado"} & set(
                 lista_conv_nucleo.ativos(self._lista_em_uso())):
             return
         self._previas_lidas = True
@@ -3621,9 +3640,23 @@ class Janela(wx.Frame):
                 dict(m.FILTROS_TIPO)[self.filtro_tipo],
                 self._resumo_filtro()), interromper=True)
 
+    def _limpar_busca(self):
+        """Esvazia o campo de busca de conversas. False se ja estava vazio
+        (o Esc entao nao tem mais o que fazer); a lista nao e refeita aqui."""
+        if not self.busca and not self.campo_busca.GetValue():
+            return False
+        self._buscando = True
+        try:
+            self.campo_busca.SetValue("")
+        finally:
+            self._buscando = False
+        self.busca = ""
+        return True
+
     def _ao_filtro_conta(self, evento=None):
         i = self.cx_conta.GetSelection()
         if 0 <= i < len(self._opcoes_conta):
+            self._limpar_busca()
             self.filtro_conta = self._opcoes_conta[i][0]
             self.cfg.set("filtro_conta", self.filtro_conta)
             self._aplicar_filtros(
@@ -3632,6 +3665,7 @@ class Janela(wx.Frame):
     def _ao_filtro_tipo(self, evento=None):
         i = self.cx_tipo.GetSelection()
         if 0 <= i < len(self._tipos_atuais):
+            self._limpar_busca()
             self.filtro_tipo = self._tipos_atuais[i][0]
             self._guardar_filtro_tipo()
             self._esconder_se_saiu_das_trancadas()
@@ -3644,6 +3678,7 @@ class Janela(wx.Frame):
             self.fala.falar("As conversas trancadas estão escondidas.",
                             interromper=True)
             return
+        self._limpar_busca()
         self.filtro_tipo = valor
         self.cx_tipo.SetSelection(self._indice_tipo())
         self._guardar_filtro_tipo()
@@ -3871,7 +3906,8 @@ class Janela(wx.Frame):
             if self._acao_concluida(chave, msg.texto, True):
                 self.fala.falar("Enviado: " + msg.texto, interromper=True)
             else:
-                self._tirar_local(chave, msg.texto, msg.tipo)
+                self._tirar_local(chave, msg.texto, msg.tipo,
+                                  msg.nome_arquivo)
         self._mesclar(chave, [msg])
         if aberta:
             # nada tira a pessoa de onde ela esta por conta propria
@@ -3964,7 +4000,8 @@ class Janela(wx.Frame):
         self._fim_do_envio(chave)
         self._acao_concluida(chave, e.texto, False)
         achada = self._local_enviando(self.cache.get(chave, []), e.texto,
-                                      getattr(e, "tipo", m.TEXTO))
+                                      getattr(e, "tipo", m.TEXTO),
+                                      getattr(e, "nome_arquivo", ""))
         if achada is not None:
             achada.estado = m.FALHOU
         if chave == self.atual:
@@ -3972,6 +4009,17 @@ class Janela(wx.Frame):
             if e.devolver_texto and not self.caixa.GetValue():
                 self.caixa.SetValue(e.texto)
         bipe("falha_envio")
+        if achada is not None and achada.tipo != m.TEXTO and (
+                chave in self._lotes or self._midias_enviando(chave)):
+            # numa fila de arquivos, quem falhou entra na contagem final
+            self._lotes.setdefault(chave, [0, 0])[1] += 1
+            self.SetStatusText("Não foi possível enviar: %s." % e.motivo)
+            log.info("envio falhou (%s)", e.motivo)
+            if not self._midias_enviando(chave):
+                ok, erro = self._lotes.pop(chave)
+                self.fala.falar(self._resumo_do_lote(ok, erro),
+                                interromper=True)
+            return
         texto = "Não foi possível enviar: %s." % e.motivo
         if chave == self.atual and e.devolver_texto:
             texto += " O texto voltou para a caixa de digitação."
@@ -4006,6 +4054,11 @@ class Janela(wx.Frame):
                     m.ORDEM_ESTADOS.get(x.estado, 0) < nivel:
                 x.estado = e.estado
                 mudou = True
+                # a lista de conversas mostra o estado da ultima
+                if "estado" in lista_conv_nucleo.ativos(
+                        self._lista_em_uso()) and \
+                        self._atualizar_previa_se_for_a_ultima(chave, x):
+                    self._preencher_conversas()
         if mudou and chave == self.atual:
             self._preencher_mensagens()
 
@@ -4255,8 +4308,8 @@ class Janela(wx.Frame):
             if self.chamada is c and c.estado == estado:
                 bipe(som)
                 self._repetir_toque(c, estado, som)
-        wx.CallLater(INTERVALO_DO_SOM_DE_CHAMADA.get(
-            som, INTERVALO_TOQUE_MS), de_novo)
+        wx.CallLater(intervalo_do_tom_de_chamada() if som == "chamando"
+                     else INTERVALO_TOQUE_MS, de_novo)
 
     def _atualizar_dialogo_chamada(self, c):
         if self.dlg_chamada is not None and self.dlg_chamada.chamada is c:
@@ -4582,6 +4635,13 @@ class Janela(wx.Frame):
                             not self._voltar_da_respondida():
                         self._esc_da_conversa()
                     return
+                # nada mais a cancelar: Esc limpa a busca de conversas
+                if foco in (self.lista_conv, self.campo_busca) and \
+                        self._limpar_busca():
+                    self._aplicar_filtros(falar=False)
+                    self.fala.falar("Busca limpa. %s" % self._resumo_filtro(),
+                                    interromper=True)
+                    return
             if k == wx.WXK_DELETE and sem_mod:
                 if foco is self.lista_conv:
                     self._apagar_conversa()
@@ -4856,7 +4916,11 @@ class Janela(wx.Frame):
             if conv.nao_lidas:
                 p.marcar_como_lida(conv.id)
         conv.nao_lidas = 0
-        self._preencher_conversas()
+        if self.marcador_n <= 0:
+            # com nao lidas, a lista de conversas so e refeita quando o foco
+            # sair dela (_dar_foco_as_mensagens): o rotulo perde o "N nao
+            # lidas" e o leitor de tela repetiria a conversa
+            self._preencher_conversas()
         self._preencher_mensagens(self._destino_inicial())
         log.info("conversa aberta (%d no cache, %d não lidas)", len(lista),
                  self.marcador_n)
@@ -4877,6 +4941,7 @@ class Janela(wx.Frame):
         self.aguardando_foco = False
         if self.FindFocus() in (self.lista_conv, None):
             self.lista_msgs.SetFocus()
+        self._preencher_conversas()     # tira o "N nao lidas" do rotulo
 
     def _esc_da_conversa(self):
         """Esc na conversa. Dentro de um topico de grupo (Telegram), volta
@@ -6594,11 +6659,7 @@ class Janela(wx.Frame):
             return
         achado = pessoa or self._resolver_destino(conta_id, destino, nm)
         if achado is None:
-            bipe("erro")
-            self.fala.falar("Não encontrei %s. Use o nome de um contato ou "
-                            "conversa, um telefone no formato internacional (como "
-                            "+55 51 99999 8888) ou um @usuário."
-                            % destino, interromper=True)
+            self._falar_nao_encontrei(destino)
             return
         conversa_id, nome = achado
         conv = self._garantir_conversa(conta_id, conversa_id, nome)
@@ -6752,11 +6813,7 @@ class Janela(wx.Frame):
         conta_id, destino, pessoa = escolha
         achado = pessoa or self._resolver_destino(conta_id, destino, nm)
         if achado is None:
-            bipe("erro")
-            self.fala.falar("Não encontrei %s. Use o nome de um contato ou "
-                            "conversa, um telefone no formato internacional (como "
-                            "+55 51 99999 8888) ou um @usuário."
-                            % destino, interromper=True)
+            self._falar_nao_encontrei(destino)
             return
         conversa_id, nome = achado
         self._ligar_para(self._garantir_conversa(conta_id, conversa_id, nome))
@@ -6835,6 +6892,7 @@ class Janela(wx.Frame):
         conversas da conta ou, para telefone e @usuario, pelo servico."""
         tipo = nm.tipo_de_destino(destino)
         prov = self.contas.provedor(conta_id)
+        self._sem_whatsapp = ""
         if tipo == nm.NOME:
             achados = nm.candidatos(
                 destino, self.banco.contatos(conta_id),
@@ -6858,10 +6916,28 @@ class Janela(wx.Frame):
                 [c for c in self.indice.values() if c.conta_id == conta_id])
             if conhecido:
                 return conhecido[0][:2]
-            id_ = prov.id_do_telefone(tel) if prov else ""
+            id_, motivo = prov.confirmar_telefone(tel) if prov else ("", "")
             if id_:
-                return id_, tel
+                # a forma registrada pode ser outra (Brasil sem o 9)
+                return id_, "+" + id_.split("@")[0]
+            if motivo:
+                self._sem_whatsapp = motivo
+                return None
         return prov.resolver_destinatario(destino) if prov else None
+
+    def _falar_nao_encontrei(self, destino):
+        """O aviso quando _resolver_destino nao achou: o motivo certo se o
+        servico garantiu que o telefone nao existe."""
+        bipe("erro")
+        if self._sem_whatsapp:
+            texto = ("%s Confira o número: no Brasil, o app já tentou com e "
+                     "sem o 9 depois do DDD." % self._sem_whatsapp)
+            self._sem_whatsapp = ""
+        else:
+            texto = ("Não encontrei %s. Use o nome de um contato ou "
+                     "conversa, um telefone no formato internacional (como "
+                     "+55 51 99999 8888) ou um @usuário." % destino)
+        self.fala.falar(texto, interromper=True)
 
     def _responder(self):
         x = self._mensagem_selecionada()
@@ -7330,11 +7406,7 @@ class Janela(wx.Frame):
         conta_id, destino, pessoa = escolha
         achado = pessoa or self._resolver_destino(conta_id, destino, nm)
         if achado is None:
-            bipe("erro")
-            self.fala.falar("Não encontrei %s. Use o nome de um contato ou "
-                            "conversa, um telefone no formato internacional "
-                            "(como +55 51 99999 8888) ou um @usuário."
-                            % destino, interromper=True)
+            self._falar_nao_encontrei(destino)
             return None
         return conta_id, achado[0], achado[1]
 
@@ -8547,24 +8619,59 @@ class Janela(wx.Frame):
         p.enviar_texto(conversa_id, texto, resposta, mencoes or None)
         log.info("texto enviado para a fila (%d caracteres)", len(texto))
 
-    def _tirar_local(self, chave, texto, tipo=m.TEXTO):
+    def _tirar_local(self, chave, texto, tipo=m.TEXTO, nome=""):
         """Troca a mensagem 'enviando' pela confirmada pelo servico."""
         lista = self.cache.get(chave, [])
-        achada = self._local_enviando(lista, texto, tipo)
+        achada = self._local_enviando(lista, texto, tipo, nome)
         if achada is not None:
             lista.remove(achada)
             self._anexos_locais.pop(achada.id, None)
-        bipe("enviada")
+        bipe("enviada")             # curto e discreto: a cada envio
+        if achada is not None and achada.tipo != m.TEXTO:
+            # varios arquivos: a fala vem uma vez, quando a fila acaba
+            self._lotes.setdefault(chave, [0, 0])[0] += 1
+            if self._midias_enviando(chave):
+                return
+            ok, erro = self._lotes.pop(chave)
+            if erro:
+                self.fala.falar(self._resumo_do_lote(ok, erro),
+                                interromper=True)
+                return
+            if ok > 1:
+                if self.cfg.get("confirmar_envio"):
+                    self.fala.falar(self._resumo_do_lote(ok, 0))
+                return
         if self.cfg.get("confirmar_envio"):
             self.fala.falar("Enviada.")
 
+    def _midias_enviando(self, chave):
+        """Ainda ha arquivo seu sendo enviado nesta conversa?"""
+        return any(x.id.startswith("local-") and x.estado == m.ENVIANDO and
+                   x.tipo != m.TEXTO for x in self.cache.get(chave, []))
+
     @staticmethod
-    def _local_enviando(lista, texto, tipo):
+    def _resumo_do_lote(ok, erro):
+        """"14 enviadas e 17 com erro." ao fim de uma fila de arquivos."""
+        partes = []
+        if ok:
+            partes.append("%d enviada%s" % (ok, "" if ok == 1 else "s"))
+        if erro:
+            partes.append("%d com erro" % erro)
+        return " e ".join(partes) + "."
+
+    @staticmethod
+    def _local_enviando(lista, texto, tipo, nome=""):
         """A mensagem local 'enviando' que o servico acabou de confirmar (ou
         que falhou): do mesmo tipo; numa midia, serve outro tipo de midia,
-        porque o servico pode classificar de outro jeito."""
+        porque o servico pode classificar de outro jeito. Com varios
+        arquivos de uma vez (todos sem legenda), o nome do arquivo decide
+        qual e: sem isso a falha de um aparecia no lugar de outro."""
         locais = [x for x in lista if x.id.startswith("local-") and
                   x.estado == m.ENVIANDO and x.texto == texto]
+        if nome:
+            mesmos = [x for x in locais if x.nome_arquivo == nome]
+            if mesmos:
+                locais = mesmos
         for x in locais:
             if x.tipo == tipo:
                 return x
@@ -8607,12 +8714,33 @@ class Janela(wx.Frame):
             return
         if self._destino_do_envio() is None:
             return
-        caminho = dialogos.escolher_arquivo(
+        caminhos = dialogos.escolher_arquivos(
             self, self.cfg.get("pasta_anexos") or "")
-        if not caminho:
+        if not caminhos:
             return
-        self.cfg.set("pasta_anexos", os.path.dirname(caminho))
-        self._enviar_arquivo(caminho, como_documento=True)
+        self.cfg.set("pasta_anexos", os.path.dirname(caminhos[0]))
+        if len(caminhos) == 1:
+            self._enviar_arquivo(caminhos[0], como_documento=True)
+            return
+        # varios: o texto da caixa vira legenda so do primeiro; uma resposta
+        # em andamento vale para todos e sai no fim
+        enviados = 0
+        for k, caminho in enumerate(caminhos):
+            try:
+                anexo = envio.preparar(caminho, como_documento=True)
+            except envio.ErroEnvio as e:
+                bipe("erro")
+                self.fala.falar("%s: %s" % (os.path.basename(caminho), e),
+                                interromper=True)
+                continue
+            if self._enviar_anexo(anexo, com_legenda=(enviados == 0),
+                                  limpar_resposta=False):
+                enviados += 1
+        if self.resposta_a is not None:
+            self.resposta_a = None
+            self._rotular_caixa()
+        if enviados > 1:
+            self.fala.falar("%d arquivos enviados para a fila." % enviados)
 
     def _novo_gravador(self, pasta, origem, maximo_segundos, estereo=True):
         """O Gravador com as opcoes da pessoa: estereo do microfone e do som
@@ -9102,9 +9230,10 @@ class Janela(wx.Frame):
         motor = self.audio[1]
         try:
             motor.avancar(segundos)
-            self.fala.falar("%s de %s" % (
-                formatar_tempo(motor.posicao), formatar_tempo(motor.duracao)),
-                interromper=True)
+            if self.cfg.get("falar_pulo_audio"):
+                self.fala.falar("%s de %s" % (
+                    formatar_tempo(motor.posicao),
+                    formatar_tempo(motor.duracao)), interromper=True)
         except Exception:
             log.exception("erro ao pular no áudio")
 
@@ -9726,6 +9855,7 @@ class Janela(wx.Frame):
             ativo = pacotes_de_som.PADRAO
         desativados = (self.cfg.get("sons_desativados") or {}).get(ativo, [])
         definir_sons(pacotes_de_som.mapa(ativo, desativados))
+        definir_tom_de_chamada(self.cfg.get("tom_de_chamada"))
 
     def _aplicar_privacidade_conta(self, mudancas):
         """Grava na conta as escolhas de privacidade e confere, lendo de
