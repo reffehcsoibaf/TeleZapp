@@ -161,3 +161,60 @@ def test_m4a_aac_e_decodificado_pelo_pyav_e_toca(tmp_path):
     p.fechar()
     import os
     assert not os.path.exists(wav)
+
+
+def test_ogg_opus_que_a_libsndfile_nao_decodifica_ate_o_fim_toca_pelo_pyav(
+        tmp_path, monkeypatch):
+    pytest.importorskip("av")
+    caminho = str(tmp_path / "voz.ogg")
+    dados = (0.2 * np.sin(np.linspace(0, 900, 48000 * 3))).astype("float32")
+    sf.write(caminho, dados, 48000, subtype="OPUS")
+
+    class FalhaNoMeio:
+        """Abre normalmente e falha na leitura, como a libsndfile numa voz do WhatsApp Web."""
+        def __init__(self, c, *a, **k):
+            self._real = sf.SoundFile(c, *a, **k)
+            self.lidos = 0
+
+        def read(self, n, **k):
+            self.lidos += n
+            if self.lidos > 48000:
+                raise sf.LibsndfileError(
+                    1, prefix="Supported file format but file is malformed.")
+            return self._real.read(n, **k)
+
+        def __getattr__(self, nome):
+            return getattr(self._real, nome)
+    original = sf.SoundFile
+    chamadas = []
+
+    def so_a_primeira_falha(c, *a, **k):
+        # a abertura de leitura do .ogg falha no meio; o WAV do PyAV e o de gravacao abrem normal
+        if a == () and k == {} and str(c).endswith(".ogg") and not chamadas:
+            chamadas.append(c)
+            return FalhaNoMeio(c)
+        return original(c, *a, **k)
+    monkeypatch.setattr(sf, "SoundFile", so_a_primeira_falha)
+    saidas = []
+
+    def fabrica(taxa, canais, cb):
+        saidas.append(Saida(taxa, canais, cb))
+        return saidas[-1]
+    p = r.Reprodutor(caminho, fabrica)
+    assert chamadas and p._wav and p._wav.endswith(".wav")   # caiu no PyAV
+    assert abs(p.duracao - 3.0) < 0.2
+    p.tocar()
+    assert np.abs(saidas[0].puxar(4800)).max() > 0.01
+    # toca ate o fim sem parar no meio
+    tocados = 0
+    while p.tocando and tocados < 400:
+        saidas[0].puxar(4800)
+        tocados += 1
+    assert p.terminou and tocados >= 25
+    p.fechar()
+
+
+def test_ogg_opus_normal_continua_abrindo_direto_sem_pyav(tmp_path):
+    p, saidas = criar(tmp_path, "b.ogg", subtype="OPUS")
+    assert p._wav is None                       # nao precisou do PyAV
+    p.fechar()

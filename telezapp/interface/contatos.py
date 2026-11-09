@@ -475,8 +475,10 @@ def dialogo_nova_mensagem(pai, contas, buscar, titulo="Nova mensagem",
     return None
 
 
-def dialogo_nova_chamada(pai, contas, buscar):
-    return dialogo_nova_mensagem(pai, contas, buscar, "Nova chamada")
+def dialogo_nova_chamada(pai, contas, buscar, video=False):
+    return dialogo_nova_mensagem(
+        pai, contas, buscar,
+        "Nova chamada de vídeo" if video else "Nova chamada")
 
 
 class DialogoEnviarContatos(wx.Dialog):

@@ -48,6 +48,16 @@ class ConversaApagadaNoCelular:
 
 
 @dataclass
+class ConversaLimpaNoCelular:
+    """A pessoa limpou a conversa no celular: as mensagens saem, a conversa
+    fica na lista. `data`: ate onde foi limpa (segundos); o que for mais novo
+    fica."""
+    conta_id: str
+    conversa_id: str
+    data: float = 0.0
+
+
+@dataclass
 class AutoresAtualizados:
     """O servico descobriu o nome de quem enviou mensagens que estavam sem
     autor (grupo do WhatsApp com participante so em LID).

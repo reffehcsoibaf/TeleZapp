@@ -202,6 +202,23 @@ class Provedor(ABC):
         de chamadas enxerga; listas vazias se nao houver."""
         return [], []
 
+    # True quando o servico busca mensagens em todas as conversas da conta,
+    # no servidor, alem do que esta guardado neste computador
+    suporta_busca_global = False
+
+    def buscar_global(self, texto, modo="tudo", filtro="qualquer", limite=50):
+        """A busca do aplicativo do servico (nomes, mensagens e posts
+        publicos). Bloqueia: chamar fora da janela. Devolve um
+        busca_global.ResultadoGlobal ou levanta RuntimeError com o motivo."""
+        raise RuntimeError("Este serviço não faz busca global.")
+
+    def adotar_conversa(self, conv):
+        """Uma conversa achada pela busca vai ser aberta."""
+
+    def entrar_em_conversa(self, conversa_id):
+        """Entra no grupo ou canal publico. Devolve (ok, texto)."""
+        return False, "Este serviço não faz isso."
+
     # o que dizer enquanto o pedido de mensagens mais antigas anda
     AVISO_MAIS_ANTIGAS = "Buscando mensagens mais antigas."
 

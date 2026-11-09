@@ -603,3 +603,27 @@ def test_meta_primeiro_e_opcao_desmarcada_por_padrao():
     from telezapp import config
     o = [o for o in config.OPCOES if o.chave == "ia_meta_primeiro"]
     assert o and o[0].padrao is False
+
+
+def test_bot_do_telegram_e_opcao_desmarcada_e_traz_o_nome():
+    from telezapp import config
+    o = {o.chave: o for o in config.OPCOES}
+    assert o["ia_bot_primeiro"].padrao is False
+    assert o["ia_bot_nome"].padrao == "@AmelieTelegramBot"
+    assert o["ia_bot_nome"].texto
+
+
+def test_bot_externo_da_o_proprio_nome_e_recebe_o_video_inteiro(tmp_path):
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"0" * 64)
+    vistos = []
+
+    def bot(midia, inst, perg):
+        vistos.append((midia.genero, midia.nome))
+        return "Uma pessoa andando."
+    bot.nome = "Bot do Telegram (@x)"
+    bot.video_inteiro = True
+    r = servico.executar_meta("video", str(video), "medio", bot)
+    assert vistos == [("video", "v.mp4")]
+    assert (r.texto, r.provedor, r.via_quadros) == (
+        "Uma pessoa andando.", "Bot do Telegram (@x)", False)

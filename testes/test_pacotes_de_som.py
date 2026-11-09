@@ -49,6 +49,8 @@ def test_pacotes_da_casa_trazem_um_arquivo_por_evento(dados):
     for pacote in ("telezapp", "cristal", "marimba", "retro", "suave"):
         assert not pk.editavel(pacote) and pk.da_casa(pacote)
         for evento, _ in pk.eventos():
+            if evento in pk.VARIANTES_POR_SERVICO:
+                continue          # seguem o evento comum, sem arquivo
             assert os.path.isfile(pk.arquivo_do_evento(pacote, evento)), (
                 pacote, evento)
 
@@ -75,7 +77,8 @@ def test_arquivos_da_pasta_lista_so_os_sons_do_pacote(dados):
 def test_mapa_de_cada_pacote_para_o_modulo_de_sons(dados):
     eventos = {e for e, _ in pk.eventos()}
     assert pk.mapa("padrao") == {
-        e: "" if e in pk.EVENTOS_QUE_SEGUEM else fala.BIP for e in eventos}
+        e: "" if e in pk.EVENTOS_QUE_SEGUEM or e in pk.VARIANTES_POR_SERVICO
+        else fala.BIP for e in eventos}
     assert pk.mapa("padrao", ["nova"])["nova"] == "desligado"
     telezapp = pk.mapa("telezapp", ["erro"])
     assert telezapp["erro"] == "desligado"

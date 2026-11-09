@@ -16,6 +16,8 @@ def mod(tmp_path, monkeypatch):
 def test_categorias_sem_repeticao_e_com_todas_as_opcoes(mod):
     cats = categorias()
     assert len(cats) == len(set(cats))
+    mod.cfg.salvar_conta({"id": "w1", "servico": "whatsapp"})
+    mod.cfg.salvar_conta({"id": "t1", "servico": "telegram"})
     todas = [o for c in cats for o in mod.opcoes(c)] + [
         o for c in cats for g in mod.grupos(c)
         for o in mod.opcoes_do_grupo(c, g)]
@@ -251,6 +253,9 @@ def test_interface_e_mensagens_reunem_as_categorias_antigas(mod):
                       "falar_novas_fora_do_telezapp", "confirmar_envio",
                       "falar_reacoes", "falar_descricoes",
                       "falar_quantas_no_filtro"}
+    assert "avisar_chamadas_whatsapp" not in {   # sem conta, nao aparece
+        o.chave for o in mod.opcoes("Interface")}
+    mod.cfg.salvar_conta({"id": "t1", "servico": "telegram"})
     soltas = {o.chave for o in mod.opcoes("Interface")}
     assert soltas == {"status_no_titulo", "avisar_chamadas_whatsapp",
                       "ocultar_contatos_duplicados",
@@ -357,3 +362,50 @@ def test_redefinir_padroes_marca_tudo_como_pendente_e_poupa_a_privacidade(mod):
 def pacotes_padrao():
     from telezapp.nucleo import pacotes_de_som
     return pacotes_de_som.PADRAO
+
+
+def test_opcoes_de_um_servico_so_aparecem_com_conta_dele(mod):
+    def chaves(cat="Inteligência artificial"):
+        return {o.chave for o in mod.opcoes(cat)}
+    assert not {"ia_meta_primeiro", "ia_bot_primeiro",
+                "ia_bot_nome"} & chaves()
+    assert not {"ia_meta_primeiro", "ia_bot_primeiro"} & {
+        o.chave for o in config.buscar_opcoes("primeiro") if mod._ha_conta_para(o)}
+    mod.cfg.salvar_conta({"id": "t1", "servico": "telegram"})
+    assert {"ia_bot_primeiro", "ia_bot_nome"} <= chaves()
+    assert "ia_meta_primeiro" not in chaves()
+    mod.cfg.salvar_conta({"id": "w1", "servico": "whatsapp"})
+    assert "ia_meta_primeiro" in chaves()
+    mod.busca = "bot do telegram"
+    assert "ia_bot_primeiro" in {o.chave for o in mod.opcoes(CATEGORIA_BUSCA)}
+
+
+def test_chamada_do_telegram_recebida_e_ignorada_com_o_aviso_desligado(
+        tmp_path, monkeypatch):
+    import asyncio
+    import types
+    from telezapp.provedores import chamadas_telegram as ct
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path))
+    nova = []
+    fake = types.SimpleNamespace(
+        chamadas={}, _video_pedido={},
+        _nova=lambda *a, **k: nova.append(a),
+        atualizar_dispositivos=lambda: None,
+        nome_de=lambda cid: asyncio.sleep(0, "Ana"))
+    upd = types.SimpleNamespace(chat_id=7)
+    asyncio.run(ct.ChamadasTelegram._ao_receber(fake, None, upd))
+    assert len(nova) == 1                       # aviso ligado: toca
+    config.Config().set("avisar_chamadas_whatsapp", False)
+    asyncio.run(ct.ChamadasTelegram._ao_receber(fake, None, upd))
+    assert len(nova) == 1                       # desligado: ignora
+
+
+def test_conta_desativada_esconde_as_opcoes_do_servico(mod):
+    def chaves():
+        return {o.chave for o in mod.opcoes("Inteligência artificial")}
+    mod.cfg.salvar_conta({"id": "t1", "servico": "telegram"})
+    assert "ia_bot_primeiro" in chaves()
+    mod.cfg.salvar_conta({"id": "t1", "servico": "telegram", "ativa": False})
+    assert "ia_bot_primeiro" not in chaves()
+    mod.cfg.salvar_conta({"id": "t1", "servico": "telegram", "ativa": True})
+    assert "ia_bot_primeiro" in chaves()

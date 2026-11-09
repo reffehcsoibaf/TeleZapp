@@ -184,6 +184,9 @@ class Opcao:
     # so vale quando o TeleZapp abre de novo: ao dar OK nas configuracoes
     # com uma destas mudada, ele oferece reiniciar
     reabrir: bool = False
+    # so aparece nas configuracoes quando ha uma conta deste servico
+    # ("whatsapp", "telegram"); vazio: aparece sempre
+    servico: str = ""
 
 
 MENSAGENS_POR_VEZ = (50, 5000)
@@ -226,18 +229,20 @@ OPCOES = (
           "disponível enquanto a conversa está aberta (o celular pode "
           "deixar de tocar nesse tempo) e, como no próprio WhatsApp, quem "
           "esconde o seu status também não vê o dos outros."),
-    Opcao("avisar_chamadas_whatsapp", "Avisar chamadas do WhatsApp",
+    Opcao("avisar_chamadas_whatsapp", "Avisar chamadas recebidas",
           "Interface", True,
-          "Quando alguém liga pelo WhatsApp, abre uma janela dizendo quem "
-          "está chamando e se é por voz ou por vídeo, com os botões OK e "
-          "Conversar. Vale quando o TeleZapp não consegue atender a chamada "
-          "(sem o componente de chamadas): atenda em outro dispositivo. "
-          "Desmarcada, o TeleZapp ignora as chamadas recebidas do WhatsApp "
-          "por completo: sem janela, som nem fala, sem a linha da chamada "
-          "na conversa e sem contar como mensagem não lida, como se ela não "
-          "tivesse acontecido. Ele não recusa a chamada: o celular e os "
-          "outros aparelhos continuam tocando. Vale para as chamadas que "
-          "chegarem depois de desmarcar."),
+          "Quando alguém liga pelo WhatsApp ou pelo Telegram, o TeleZapp "
+          "avisa: no WhatsApp, quando ele não consegue atender (sem o "
+          "componente de chamadas), abre uma janela dizendo quem está "
+          "chamando e se é por voz ou por vídeo, com os botões OK e "
+          "Conversar (atenda em outro dispositivo); no Telegram, toca e abre "
+          "a janela da chamada para você atender. Desmarcada, o TeleZapp "
+          "ignora as chamadas recebidas por completo: sem janela, som nem "
+          "fala. No WhatsApp também some a linha da chamada na conversa e "
+          "ela não conta como mensagem não lida, como se não tivesse "
+          "acontecido. Ele não recusa a chamada: o celular e os outros "
+          "aparelhos continuam tocando. Vale para as chamadas que chegarem "
+          "depois de desmarcar.", servico="whatsapp,telegram"),
     Opcao("como_me_chamar", "Como me chamar nas mensagens", "Interface", "",
           "O nome que aparece no lugar de Você quando o autor é você: nas "
           "mensagens, na lista de conversas, nas reações, nos votos, na busca "
@@ -479,7 +484,31 @@ OPCOES = (
           "Mensagens", True,
           "No Telegram, uma barra digitada na caixa vazia mostra os comandos "
           "do robô da conversa. Sem robô, a barra fica como um caractere "
-          "qualquer."),
+          "qualquer.", servico="telegram"),
+    Opcao("formatacao_das_mensagens", "Formatação do texto das mensagens",
+          "Mensagens", "original",
+          "O que fazer com os asteriscos, sublinhados e outros símbolos que "
+          "marcam o texto. No WhatsApp, *texto* é negrito, _texto_ é "
+          "itálico, ~texto~ é tachado e `texto` é código; bots e IAs "
+          "escrevem em Markdown: **texto** é negrito, # é título e - abre um "
+          "item. Como veio: o texto com os símbolos, sem mudança. Anunciar: "
+          "os símbolos viram palavras, como \"negrito: texto\", e o "
+          "leitor de tela diz o que são. Tirar os símbolos: só o texto. "
+          "Vale para o que você lê e ouve; copiar, salvar e exportar usam "
+          "o texto original. Só pares bem formados são mudados.",
+          escolhas=(("original", "Como veio, com os símbolos"),
+                    ("anunciar", "Anunciar a formatação (negrito: texto)"),
+                    ("tirar", "Tirar os símbolos"))),
+    Opcao("foco_ao_abrir_conversa", "Foco ao abrir uma conversa", "Mensagens",
+          "mensagens",
+          "Para onde vai o foco quando você abre uma conversa. Na lista de "
+          "mensagens, o leitor de tela lê o ponto em que você parou ou a "
+          "primeira não lida. Na caixa de digitar, você já pode escrever; "
+          "as mensagens ficam a um Shift Tab, ou use o atalho de ir para as "
+          "mensagens. Numa conversa só de leitura o foco vai sempre para a "
+          "lista de mensagens.",
+          escolhas=(("mensagens", "Na lista de mensagens"),
+                    ("caixa", "Na caixa de digitar"))),
     Opcao("enter_envia", "Enter na caixa de digitar envia a mensagem",
           "Mensagens", True,
           "Marcada (o padrão), Enter envia e Shift Enter quebra a linha; "
@@ -796,9 +825,9 @@ if _aparencia.MODO_VISUAL_DISPONIVEL:
 EVENTOS_SOM = (
     ("nova", "mensagem recebida",
      "O som geral de mensagem nova numa conversa que não é a aberta. Os sons "
-     "de mensagem pessoal, de grupo, de canal e de comunidade seguem este "
+     "de mensagem individual, de grupo, de canal e de comunidade seguem este "
      "até receberem um som próprio."),
-    ("nova_pessoal", "mensagem pessoal recebida",
+    ("nova_pessoal", "mensagem individual recebida",
      "Tocado quando chega uma mensagem numa conversa com uma pessoa que não "
      "está aberta. Sem um som próprio no pacote, toca o de mensagem "
      "recebida."),
@@ -924,7 +953,27 @@ def _opcoes_de_ia():
               "para aceitar os termos pelo celular, vale a ordem dos "
               "provedores abaixo, como sempre. O arquivo vai para a Meta, e "
               "o pedido aparece na conversa com a Meta AI. Desmarcada, nada "
-              "muda."),
+              "muda.", servico="whatsapp"),
+        Opcao("ia_bot_primeiro", "Tentar primeiro por um bot do Telegram",
+              "Inteligência artificial", False, "Marcada, a transcrição de "
+              "voz e áudio e a descrição de imagens, figurinhas e vídeos "
+              "tentam primeiro o bot do Telegram escolhido abaixo, pela sua "
+              "conta do Telegram, sem abrir janela. O bot tem de responder "
+              "sozinho ao arquivo, sem comando. Se ele não responder a tempo, "
+              "vale a ordem dos provedores, como sempre. Privacidade: o bot é "
+              "um serviço de terceiros, que não é do TeleZapp nem do "
+              "Telegram. Cada arquivo (voz, áudio, foto, figurinha ou vídeo) "
+              "vai para quem mantém o bot, pela sua conta do Telegram, e o "
+              "que ele faz com os dados depende dele. O pedido e a resposta "
+              "ficam na sua conversa com o bot. Marque só se aceita isso, e "
+              "evite com arquivos sensíveis. Precisa de uma conta do "
+              "Telegram conectada; sem ela, vale a ordem dos provedores. "
+              "Quando as duas estão marcadas, o bot vem antes da Meta AI. "
+              "Desmarcada, nada muda.", servico="telegram"),
+        Opcao("ia_bot_nome", "Bot do Telegram para descrever e transcrever",
+              "Inteligência artificial", "@AmelieTelegramBot", "O @nome do "
+              "bot que recebe os arquivos quando \"Tentar primeiro por um bot "
+              "do Telegram\" está marcada.", texto=True, servico="telegram"),
     )
 
 
@@ -941,6 +990,31 @@ OPCOES = OPCOES + (
           escolhas=(("europa", "Europa (425 Hz, 1 s de tom e 3 s de silêncio)"),
                     ("eua", "EUA (440 e 480 Hz, 2 s de tom e 4 s de silêncio)"))),
 )
+
+
+def _com_variantes_por_servico(eventos):
+    """Depois de cada evento que se diferencia por servico, uma linha para o
+    WhatsApp e outra para o Telegram."""
+    from telezapp.acessibilidade import fala
+    nomes = {"whatsapp": "WhatsApp", "telegram": "Telegram"}
+    saida = []
+    for nome, rotulo, descricao in eventos:
+        saida.append((nome, rotulo, descricao))
+        if nome not in fala.EVENTOS_POR_SERVICO:
+            continue
+        for servico in fala.SERVICOS_DO_SOM:
+            if servico == "telegram" and nome == "nova_comunidade":
+                continue                   # o Telegram nao tem comunidades
+            saida.append((
+                "%s_%s" % (nome, servico),
+                "%s (%s)" % (rotulo, nomes[servico]),
+                "Só para o %s. Sem um som próprio no pacote, toca o de %s; "
+                "desativado, esse serviço fica sem este som." % (
+                    nomes[servico], rotulo)))
+    return tuple(saida)
+
+
+EVENTOS_SOM = _com_variantes_por_servico(EVENTOS_SOM)
 
 
 def precisa_reabrir(chave):

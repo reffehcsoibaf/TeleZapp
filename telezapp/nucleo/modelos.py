@@ -548,15 +548,29 @@ def _partes(*itens):
     return ", ".join(p for p in itens if p)
 
 
-def texto_visivel(m):
+# Ligado pela janela a partir da opcao `formatacao_das_mensagens`: o que se
+# faz com os asteriscos e sublinhados do texto (ver nucleo.formatacao).
+FORMATACAO = {"modo": "original"}
+
+
+def definir_formatacao(modo):
+    FORMATACAO["modo"] = modo if modo in ("original", "anunciar",
+                                          "tirar") else "original"
+
+
+def texto_visivel(m, formatado=True):
     """O texto como aparece: num grupo do WhatsApp, "@all" (mencionar todos)
     aparece como "@todos", como no celular. O texto guardado continua com
-    "@all", que e o que o WhatsApp entende ao editar."""
+    "@all", que e o que o WhatsApp entende ao editar. `formatado`: os
+    asteriscos e sublinhados seguem a opcao da pessoa (ditos ou tirados)."""
     texto = m.texto or ""
-    if not (m.conversa_id or "").endswith("@g.us") or "@" not in texto:
-        return texto
-    from telezapp.nucleo import mencoes
-    return mencoes.todos_visivel(texto)
+    if (m.conversa_id or "").endswith("@g.us") and "@" in texto:
+        from telezapp.nucleo import mencoes
+        texto = mencoes.todos_visivel(texto)
+    if formatado and FORMATACAO["modo"] != "original":
+        from telezapp.nucleo import formatacao
+        texto = formatacao.aplicar(texto, FORMATACAO["modo"])
+    return texto
 
 
 def conteudo(m, com_estado=True):
@@ -939,7 +953,7 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None,
 FILTROS_TIPO = (("todas", "Todas as conversas"),
                 ("nao_lidas", "Não lidas"),
                 ("citacoes", "Menções e respostas"),
-                ("pessoais", "Pessoais"),
+                ("pessoais", "Individuais"),
                 ("grupos", "Grupos"),
                 ("canais", "Canais"),
                 ("fixadas", "Fixadas"),

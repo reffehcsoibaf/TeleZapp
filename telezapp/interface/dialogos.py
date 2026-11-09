@@ -884,6 +884,20 @@ def imagem_qr(codigo, escala=ESCALA_JANELA):
     return wx.Bitmap(wx.Image(lado, lado, dados))
 
 
+def escolher_o_que_copiar(pai, rotulos):
+    """Lista do que a mensagem tem para copiar (legenda, foto, link...);
+    devolve a posicao escolhida ou None."""
+    dlg = wx.SingleChoiceDialog(
+        pai, "Esta mensagem tem mais de um conteúdo. O que copiar?",
+        "Copiar", list(rotulos))
+    try:
+        if dlg.ShowModal() != wx.ID_OK:
+            return None
+        return dlg.GetSelection()
+    finally:
+        dlg.Destroy()
+
+
 def escolher_historico(pai, opcoes):
     """Pergunta quanto historico trazer; devolve a chave ou None."""
     chaves = list(opcoes)

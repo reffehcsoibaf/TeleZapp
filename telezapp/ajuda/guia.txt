@@ -54,7 +54,7 @@ Também dá para remover o atalho de uma função e voltar ao padrão, de uma fu
 
 Funções como pausar ou descartar a gravação por atalho nascem sem tecla: escolha uma nessa tela.
 
-Cada tipo de conversa também tem o seu atalho, que nasce sem tecla: Todas as conversas, Não lidas, Pessoais, Grupos e os outros, em "Tipo de conversa". O atalho escolhe o tipo e leva você para a lista de conversas. Sem atalho, os mesmos tipos estão no menu Ir para, submenu Tipo de conversa.
+Cada tipo de conversa também tem o seu atalho, que nasce sem tecla: Todas as conversas, Não lidas, Individuais, Grupos e os outros, em "Tipo de conversa". O atalho escolhe o tipo e leva você para a lista de conversas. Sem atalho, os mesmos tipos estão no menu Ir para, submenu Tipo de conversa.
 
 Os atalhos personalizados entram no backup, na parte Configurações, e voltam na restauração.
 
@@ -249,7 +249,7 @@ A tecla Aplicativos ou Shift+F10 abre o menu da mensagem selecionada.
 
 Editar: F2, se a mensagem de texto for sua e estiver dentro do prazo: 15 minutos no WhatsApp, 48 horas no Telegram. Enter salva a edição e Esc cancela.
 Encaminhar: Ctrl+Shift+E, para a mensagem selecionada ou as marcadas no modo de seleção. Escolha as conversas e contatos na janela de busca. A mídia precisa já estar baixada.
-Copiar: Ctrl+Shift+C copia o texto. O menu de contexto tem um item de cópia para cada tipo de conteúdo, como legenda, foto, vídeo e link.
+Copiar: Ctrl+C copia o texto da mensagem em foco. Ctrl+Shift+C copia o conteúdo dela: se a mensagem tem só um (a foto, o áudio, o texto, o link), copia direto; se tem mais de um, como foto com legenda e link, abre uma lista para você escolher o que copiar. A mídia precisa estar baixada. O menu de contexto tem um item de cópia para cada tipo de conteúdo.
 Copiar a transcrição ou descrição: no menu Mensagens, copia o texto que a IA fez da mídia. Vem sem tecla; escolha uma em Configurações, Atalhos.
 Responder em particular: no menu de contexto de uma mensagem de outra pessoa num grupo, abre a conversa particular com ela e cita a mensagem do grupo na resposta. É do WhatsApp.
 Apagar: Delete, sempre perguntando antes.
@@ -679,7 +679,7 @@ O primeiro campo é a busca. Digite uma palavra, como velocidade, e aparece no a
 
 Status do WhatsApp: em Novo status, o botão Gravar mensagem de voz publica um status de voz de até 1 minuto, sem texto. O botão Mencionar pessoas escolhe até 5 pessoas, que podem ver o status e recebem um aviso. Num status de outra pessoa, Control Shift G (Reagir) curte, e Recompartilhar o status, no menu de contexto ou em Mensagem, publica o conteúdo como um status seu, depois de perguntar. Foto, vídeo ou áudio precisam estar baixados antes.
 
-Sons de mensagem: em Configurações, Sons, cada tipo de conversa tem o seu evento: mensagem pessoal, num grupo, num canal e numa comunidade do WhatsApp. Os pacotes que vêm com o programa já trazem um som para cada um. Num pacote personalizado, escolha um arquivo para o evento; sem arquivo, ele toca o som de mensagem recebida (a comunidade, o de grupo). A conversa aberta usa o som de mensagem recebida na conversa aberta. Para uma conversa só, use o botão Som desta conversa nos detalhes dela: o som escolhido vale também com ela aberta e até com os sons de mensagem desativados. Uma menção ou resposta a você num grupo continua com o som próprio dela. Conversas silenciadas, arquivadas ou trancadas seguem sem som.
+Sons de mensagem: em Configurações, Sons, cada tipo de conversa tem o seu evento: mensagem individual, num grupo, num canal e numa comunidade do WhatsApp. Os pacotes que vêm com o programa já trazem um som para cada um. Num pacote personalizado, escolha um arquivo para o evento; sem arquivo, ele toca o som de mensagem recebida (a comunidade, o de grupo). A conversa aberta usa o som de mensagem recebida na conversa aberta. Para uma conversa só, use o botão Som desta conversa nos detalhes dela: o som escolhido vale também com ela aberta e até com os sons de mensagem desativados. Uma menção ou resposta a você num grupo continua com o som próprio dela. Conversas silenciadas, arquivadas ou trancadas seguem sem som.
 
 Cada opção é uma caixa de seleção ou uma lista de escolhas. Logo depois que você chega nela, o TeleZapp fala a explicação; F1 repete. Se isso atrapalhar, desmarque "Falar a descrição de cada opção" (categoria Interface, botão Conteúdo falado), e a explicação passa a ser falada só com F1.
 

@@ -23,7 +23,8 @@ def wav(caminho, segundos=1, taxa=8000):
 
 def test_todo_evento_tem_um_som_nos_pacotes_da_casa():
     from telezapp.nucleo import pacotes_de_som as pk
-    eventos = {nome for nome, _, _ in config.EVENTOS_SOM}
+    eventos = {nome for nome, _, _ in config.EVENTOS_SOM
+               if nome not in pk.VARIANTES_POR_SERVICO}
     assert eventos == {"nova", "enviada", "erro", "conectado", "pronto",
                        "atualizado", "toque", "desligada",
                        "nova_aberta", "nova_grupo", "nova_pessoal",
@@ -33,7 +34,8 @@ def test_todo_evento_tem_um_som_nos_pacotes_da_casa():
                        "mencao_ou_resposta", "gravando", "gravacao_parada",
                        "voto_enquete", "voto_enviado", "escondido",
                        "voltou"}
-    assert {e for e, _ in pk.eventos()} == eventos
+    assert {e for e, _ in pk.eventos()
+            if e not in pk.VARIANTES_POR_SERVICO} == eventos
     assert not [o for o in config.OPCOES if getattr(o, "som", "")]
     for e in eventos:                            # o pacote TeleZapp e completo
         assert pk.arquivo_do_evento(pk.TELEZAPP, e), e
@@ -179,8 +181,10 @@ def test_gerador_cria_sons_curtos_estereo_que_comecam_logo(tmp_path):
     spec.loader.exec_module(gerador)
     from telezapp import config
     caminhos = gerador.gerar(str(tmp_path))
+    from telezapp.nucleo import pacotes_de_som as pk
     assert {os.path.basename(c)[:-4] for c in caminhos} == \
-        {nome for nome, _, _ in config.EVENTOS_SOM}      # um por evento
+        {nome for nome, _, _ in config.EVENTOS_SOM
+         if nome not in pk.VARIANTES_POR_SERVICO}        # um por evento
     for c in caminhos:
         dados, taxa = sf.read(c)
         assert dados.ndim == 2 and dados.shape[1] == 2, c        # estereo
@@ -439,3 +443,44 @@ def test_fluxo_dos_avisos_nao_fecha_com_som_ainda_tocando(monkeypatch):
     saida._fechar_ocioso()                       # o som nao acabou de sair
     assert not fabrica.fluxos[0].fechado
     saida.fechar()
+
+
+def test_som_por_servico_herda_o_comum_ate_ter_um_proprio(tmp_path):
+    from telezapp import config
+    from telezapp.nucleo import pacotes_de_som as pk
+    nomes = {n for n, _, _ in config.EVENTOS_SOM}
+    assert {"nova_pessoal_telegram", "nova_pessoal_whatsapp",
+            "toque_telegram", "reacao_recebida_whatsapp"} <= nomes
+    assert "nova_comunidade_telegram" not in nomes   # sem comunidades
+    arquivo = tmp_path / "t.wav"
+    arquivo.write_bytes(b"RIFF")
+    fala.definir_sons({"nova": "", "nova_pessoal": "",
+                       "nova_pessoal_telegram": str(arquivo),
+                       "nova_pessoal_whatsapp": ""})
+    # o Telegram tem som proprio; o WhatsApp segue o comum
+    assert fala.tipo_do_servico("nova_pessoal", "telegram") == \
+        "nova_pessoal_telegram"
+    assert fala.acao_do_som("nova_pessoal_telegram") == \
+        ("arquivo", str(arquivo))
+    assert fala.acao_do_som("nova_pessoal_whatsapp") == ("padrao", "")
+    # desativado so o do Telegram: fica sem som, o do WhatsApp segue
+    fala.definir_sons({"nova_pessoal": "", "nova_pessoal_telegram": "desligado",
+                       "nova_pessoal_whatsapp": ""})
+    assert fala.acao_do_som("nova_pessoal_telegram") == ("nenhum", "")
+    assert fala.acao_do_som("nova_pessoal_whatsapp") == ("padrao", "")
+    # evento sem variante ou servico desconhecido: o proprio evento
+    assert fala.tipo_do_servico("erro", "telegram") == "erro"
+    assert fala.tipo_do_servico("nova_pessoal", "") == "nova_pessoal"
+    fala.definir_sons({})
+
+
+def test_mensagem_individual_e_o_nome_na_tela_de_sons_e_no_filtro():
+    from telezapp import config
+    from telezapp.nucleo import modelos as m
+    rotulos = {n: r for n, r, _ in config.EVENTOS_SOM}
+    assert rotulos["nova_pessoal"] == "mensagem individual recebida"
+    assert rotulos["nova_pessoal_telegram"] == \
+        "mensagem individual recebida (Telegram)"
+    assert ("pessoais", "Individuais") in m.FILTROS_TIPO   # a chave nao mudou
+    assert not any("pessoal" in r or "pessoais" in r.lower()
+                   for r in rotulos.values())
