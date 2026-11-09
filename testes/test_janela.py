@@ -7210,7 +7210,7 @@ def test_janela_do_som_da_conversa_tem_combobox(j, monkeypatch,
                         lambda cfg, conv: "Som das mensagens: o de nova.")
     monkeypatch.setattr(jd, "bipe", lambda tipo, valor=None: sons.append(
         (tipo, valor)))
-    monkeypatch.setattr(jd.pacotes_de_som, "arquivos_do_pacote",
+    monkeypatch.setattr(jd.pacotes_de_som, "arquivos_da_pasta",
                         lambda pacote_id: [("um.ogg", str(tmp_path / "um.ogg"))])
     monkeypatch.setattr(jd.pacotes_de_som, "arquivo_da_conversa",
                         lambda cfg, chave: str(tmp_path / "um.ogg"))
