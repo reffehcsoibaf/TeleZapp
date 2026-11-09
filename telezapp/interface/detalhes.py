@@ -12,7 +12,7 @@ import traceback
 
 import wx
 
-from telezapp.acessibilidade.fala import bipe
+from telezapp.acessibilidade.fala import acao_do_som, bipe
 from telezapp.nucleo import detalhes as det
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import pacotes_de_som
@@ -491,15 +491,21 @@ class DialogoSomDaConversa(wx.Dialog):
         self._escolher_pelo_caminho(origem, anunciar=True)
 
     def _preencher_escolha(self):
-        """Preenche o combobox com os sons da pasta de conversas."""
-        self._arquivos_escolha = pacotes_de_som.arquivos_dos_sons_da_conversa()
+        """Preenche o combobox com os sons do pacote do som (o tema)."""
+        pacote = self.jan.cfg.get("pacote_de_som") or "padrao"
+        self._arquivos_escolha = pacotes_de_som.arquivos_do_pacote(pacote)
         self.cx_escolha.Set([nome for nome, _ in self._arquivos_escolha])
         indice = -1
-        atual = self._arquivo()
-        if atual:
-            for i, (_, caminho) in enumerate(self._arquivos_escolha):
-                if os.path.normcase(os.path.abspath(caminho)) == \
-                        os.path.normcase(os.path.abspath(atual)):
+        alvo = self._arquivo()
+        if not alvo:
+            acao, caminho = acao_do_som(pacotes_de_som.evento_da_conversa(
+                self.conv))
+            if acao == "arquivo":
+                alvo = caminho
+        if alvo:
+            for i, (_, arquivo) in enumerate(self._arquivos_escolha):
+                if os.path.normcase(os.path.abspath(arquivo)) == \
+                        os.path.normcase(alvo):
                     indice = i
                     break
         self.cx_escolha.SetSelection(indice)
@@ -522,6 +528,11 @@ class DialogoSomDaConversa(wx.Dialog):
                                 interromper=True)
             return
         self._mostrar()
+        for i, (_, arquivo) in enumerate(self._arquivos_escolha):
+            if os.path.normcase(os.path.abspath(arquivo)) == \
+                    os.path.normcase(os.path.abspath(origem)):
+                self.cx_escolha.SetSelection(i)
+                break
         if anunciar:
             self.jan.fala.falar(
                 "Som escolhido: %s." % os.path.basename(origem),
