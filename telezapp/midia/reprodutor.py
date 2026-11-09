@@ -58,6 +58,27 @@ def decodificar_para_wav(caminho, pasta=None):
         entrada.close()
 
 
+# Ogg/Opus (as vozes do WhatsApp): o cabecalho abre na libsndfile, mas ela ja falhou no MEIO de uma voz
+# valida (pacotes de 120 ms de 6 quadros, de quem grava pelo WhatsApp Web) e a voz parava ali. Esses
+# arquivos sao decodificados por inteiro antes de tocar; se falhar, o PyAV (FFmpeg) assume.
+EXTENSOES_CONFERIDAS = (".ogg", ".opus", ".oga")
+LIMITE_CONFERENCIA = 30 * 1024 * 1024
+
+
+def abrir_conferido(sf, caminho):
+    """Abre o arquivo na libsndfile e, num Ogg/Opus, confere que ele decodifica ate o fim."""
+    arq = sf.SoundFile(caminho)
+    if caminho.lower().endswith(EXTENSOES_CONFERIDAS) and             os.path.getsize(caminho) <= LIMITE_CONFERENCIA:
+        try:
+            while len(arq.read(65536, dtype="float32", always_2d=True)):
+                pass
+            arq.seek(0)
+        except Exception:
+            arq.close()
+            raise
+    return arq
+
+
 class Reprodutor:
     def __init__(self, caminho, fabrica_saida=None):
         """fabrica_saida(taxa, canais, callback) -> objeto com start(),
@@ -66,9 +87,10 @@ class Reprodutor:
         try:
             import soundfile as sf
             try:
-                self._arq = sf.SoundFile(caminho)
+                self._arq = abrir_conferido(sf, caminho)
             except Exception:
-                # m4a/aac e afins: a libsndfile nao abre; o PyAV decodifica
+                # m4a/aac e afins (ou um Ogg/Opus que a libsndfile nao decodifica ate o fim):
+                # a libsndfile nao da conta; o PyAV decodifica
                 from telezapp import config
                 self._wav = decodificar_para_wav(caminho,
                                                  config.pasta("temp"))

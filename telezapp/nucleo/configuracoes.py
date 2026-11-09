@@ -163,9 +163,21 @@ class ModeloConfiguracoes:
         do botao dele (ver `grupos`). A busca mostra todas, achadas onde
         estiverem."""
         if categoria == CATEGORIA_BUSCA:
-            return config.buscar_opcoes(self.busca)
+            return [o for o in config.buscar_opcoes(self.busca)
+                    if self._ha_conta_para(o)]
         return [o for o in config.OPCOES
-                if o.categoria == categoria and not o.grupo]
+                if o.categoria == categoria and not o.grupo
+                and self._ha_conta_para(o)]
+
+    def _ha_conta_para(self, opcao):
+        """Opcao de um servico so aparece com uma conta dele cadastrada e
+        ativada (Gerenciar contas)."""
+        if not opcao.servico:
+            return True
+        servicos = set(opcao.servico.split(","))   # "a,b": qualquer um
+        return any(d.get("servico") in servicos
+                   and d.get("ativa", True) is not False   # desativada: nao
+                   for d in self.cfg.contas())
 
     def destinos_da_busca(self):
         """O que a busca acha fora de config.OPCOES (ver `Destino`). As funcoes

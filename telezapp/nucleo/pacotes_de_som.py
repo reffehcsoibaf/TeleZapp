@@ -39,6 +39,14 @@ EXTENSOES = (".ogg", ".opus", ".mp3", ".wav", ".flac")
 # Num pacote personalizado sem arquivo para eles, seguem o evento de que herdam
 # (HERDA), ligado ou nao, e nada muda ate a pessoa escolher um som
 EVENTOS_QUE_SEGUEM = ("nova_pessoal", "nova_canal", "nova_comunidade")
+# Os sons por servico (nova_pessoal_telegram...) tambem seguem o evento comum
+# ate a pessoa dar um arquivo a eles
+VARIANTES_POR_SERVICO = tuple(
+    "%s_%s" % (_e, _s) for _e in (
+        "nova_aberta", "nova_pessoal", "nova_grupo", "nova_canal",
+        "nova_comunidade", "mencao_ou_resposta", "reacao_recebida",
+        "voto_enquete", "toque", "desligada")
+    for _s in ("whatsapp", "telegram"))
 _PROIBIDOS = re.compile(r'[\\/:*?"<>|]')
 
 
@@ -129,7 +137,7 @@ def valor_do_evento(pacote_id, evento, desativados=()):
     arquivo ou o bip do sistema."""
     if evento in desativados:
         return "desligado"
-    if evento in EVENTOS_QUE_SEGUEM:
+    if evento in EVENTOS_QUE_SEGUEM or evento in VARIANTES_POR_SERVICO:
         return arquivo_do_evento(pacote_id, evento)
     return arquivo_do_evento(pacote_id, evento) or BIP
 
@@ -301,7 +309,7 @@ def migrar_liga_desliga(cfg):
 
 
 def migrar_tipos_de_conversa(cfg):
-    """Os sons de mensagem pessoal, de canal e de comunidade vieram depois:
+    """Os sons de mensagem individual, de canal e de comunidade vieram depois:
     quem desligou o som de que eles nasceram continua sem som. Roda uma vez."""
     if cfg.dados.get("sons_por_tipo_migrados"):
         return

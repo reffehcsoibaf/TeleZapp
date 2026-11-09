@@ -14,6 +14,7 @@ import asyncio
 import logging
 import time
 
+from telezapp import config
 from telezapp.midia import video as midia_video
 from telezapp.nucleo import chamadas as ch
 from telezapp.nucleo import eventos as ev
@@ -481,6 +482,11 @@ class ChamadasTelegram:
                 await self.app.leave_call(chat_id)
             except Exception:
                 pass
+            return
+        if not config.Config().get("avisar_chamadas_whatsapp"):
+            # "Avisar chamadas recebidas" desmarcada: ignora, sem atender nem
+            # recusar (o celular e os outros aparelhos seguem tocando)
+            log.info("chamada recebida ignorada (aviso desligado)")
             return
         try:
             nome = await self.nome_de(chat_id)

@@ -1451,6 +1451,7 @@ class ProvedorWhatsApp(Provedor):
                                  ("ChatPinEv", self._ao_fixar),
                                  ("ChatMuteEv", self._ao_silenciar),
                                  ("ChatDeleteEv", self._ao_apagar_conversa),
+                                 ("ChatClearEv", self._ao_limpar_conversa),
                                  ("ChatMarkAsReadEv", self._ao_marcar_lida)):
                 classe = getattr(nev, nome, None)
                 if classe is not None:
@@ -3050,6 +3051,37 @@ class ProvedorWhatsApp(Provedor):
                 self.conta.id, cid, float(evento.Timestamp)))
         except Exception:
             log.exception("erro ao tratar o aviso de apagar conversa")
+
+    def _ao_limpar_conversa(self, cliente, evento):
+        """A conversa foi limpa no celular (as mensagens saem, a conversa
+        fica): a interface apaga as mensagens daqui ate a data do aviso. O
+        celular zera tambem as nao lidas."""
+        try:
+            if evento.FromFullSync:
+                return      # limpeza antiga, de antes: nao apaga daqui
+            if m.MANTER["do_celular"]:
+                log.info("conversa limpa no celular: mantida aqui")
+                return
+            cid = self._id_da_conversa(evento.JID)
+            ate = float(evento.Timestamp)
+            a = evento.Action
+            if a is not None and a.HasField("messageRange") and                     a.messageRange.lastMessageTimestamp:
+                ate = segundos(a.messageRange.lastMessageTimestamp)
+            with self._trava:
+                conv = self._conversas.get(cid)
+                if conv is not None and not (conv.data > ate + 5):
+                    conv.nao_lidas = 0
+                    conv.citacoes = 0
+                self._nao_lidas.pop(cid, None)
+            log.info("conversa limpa no celular")
+            self.barramento.publicar(ev.ConversaLimpaNoCelular(
+                self.conta.id, cid, ate))
+            if conv is not None:
+                self.banco.atualizar_conversa(self.conta.id, cid,
+                                              nao_lidas=0)
+                self._publicar_conversas()
+        except Exception:
+            log.exception("erro ao tratar o aviso de limpar conversa")
 
     def _conferir_arquivadas(self):
         """Poe em cada conversa a marca de arquivada que o celular tem. O
@@ -5359,6 +5391,9 @@ class ProvedorWhatsApp(Provedor):
             except OSError:
                 log.warning("não consegui guardar a cópia da mídia enviada",
                             exc_info=True)
+        espera = getattr(self, "_espera_meta_ai", None)
+        if espera is not None and e_conversa_de_robo_meta(conversa_id):
+            espera["ids"].append(resp.ID)       # para casar a resposta
         with self._trava:
             self._vistas.add(resp.ID)
             self._remetentes[resp.ID] = ("", texto)
@@ -5399,8 +5434,19 @@ class ProvedorWhatsApp(Provedor):
         espera = getattr(self, "_espera_meta_ai", None)
         if espera is None:
             return
-        texto = m.texto_visivel(msg) or msg.texto or ""
+        texto = m.texto_visivel(msg, formatado=False) or msg.texto or ""
         with self._trava:
+            ids = espera.get("ids") or ()
+            # a Meta AI costuma citar o pedido: resposta a OUTRO pedido (um
+            # que estourou o tempo antes) ou mais velha que este nao vale
+            if (msg.resposta_a and ids and msg.resposta_a not in ids) or \
+                    msg.data < espera.get("inicio", 0.0) - 2:
+                log.info("resposta da Meta AI de outro pedido ignorada: "
+                         "resposta_a=%s esperados=%s", msg.resposta_a,
+                         ",".join(ids))
+                return
+            log.info("resposta da Meta AI aceita: resposta_a=%s",
+                     msg.resposta_a or "(nenhuma)")
             espera["respostas"].append(texto)
             espera["ultima"] = time.monotonic()
         espera["chegou"].set()
@@ -5416,8 +5462,8 @@ class ProvedorWhatsApp(Provedor):
             raise RuntimeError("a conta do WhatsApp não está conectada")
         if getattr(self, "_espera_meta_ai", None) is not None:
             raise RuntimeError("já há um pedido à Meta AI em andamento")
-        espera = {"respostas": [], "ultima": 0.0,
-                  "chegou": threading.Event()}
+        espera = {"respostas": [], "ultima": 0.0, "ids": [],
+                  "inicio": time.time(), "chegou": threading.Event()}
         self._espera_meta_ai = espera
         try:
             anexo = envio.preparar(caminho, voz=voz, temporario=False)

@@ -87,6 +87,25 @@ HERDA = {"nova_aberta": "nova", "nova_grupo": "nova",
          "voto_enviado": "enviada"}
 
 
+# Eventos que a pessoa pode diferenciar por servico (WhatsApp e Telegram): a
+# variante "evento_servico" herda o evento comum ate receber um som proprio
+SERVICOS_DO_SOM = ("whatsapp", "telegram")
+EVENTOS_POR_SERVICO = ("nova_aberta", "nova_pessoal", "nova_grupo",
+                       "nova_canal", "nova_comunidade", "mencao_ou_resposta",
+                       "reacao_recebida", "voto_enquete", "toque",
+                       "desligada")
+for _e in EVENTOS_POR_SERVICO:
+    for _s in SERVICOS_DO_SOM:
+        HERDA["%s_%s" % (_e, _s)] = _e
+
+
+def tipo_do_servico(tipo, servico):
+    """O evento do servico (nova_pessoal_telegram), se existe; senao o
+    proprio evento."""
+    variante = "%s_%s" % (tipo, servico)
+    return variante if variante in HERDA else tipo
+
+
 # O tom de "chamando" (eu liguei e espero atender) e o de controle de chamada
 # do telefone: (frequencias em Hz, duracao do tom em ms, intervalo entre o
 # inicio de um tom e o do seguinte em ms). Europa e o padrao; EUA e o que o
@@ -230,7 +249,7 @@ def acao_do_som(tipo, valor=None):
     return "padrao", ""       # sem som escolhido ou arquivo que sumiu
 
 
-def bipe(tipo="nova", valor=None):
+def bipe(tipo="nova", valor=None, servico=""):
     """Sons curtos: nova (mensagem recebida), enviada, erro, pronto
     (codigo ou QR pronto), atualizado (QR trocado), conectado e, nas
     chamadas, toque, chamando e desligada. Cada um pode ser desligado ou
@@ -239,6 +258,8 @@ def bipe(tipo="nova", valor=None):
     if tipo == "chamando":
         tocar_tom_de_chamada()
         return
+    if servico and valor is None:
+        tipo = tipo_do_servico(tipo, servico)
     acao, caminho = acao_do_som(tipo, valor)
     if acao == "nenhum":
         return

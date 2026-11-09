@@ -1806,7 +1806,7 @@ def chamadas(j, monkeypatch):
     falas, sons = [], []
     monkeypatch.setattr(j.fala, "falar",
                         lambda t, interromper=False: falas.append(t))
-    monkeypatch.setattr(jm, "bipe", lambda tipo="nova": sons.append(tipo))
+    monkeypatch.setattr(jm, "bipe", lambda tipo="nova", valor=None, servico="": sons.append(tipo))
     p = j.contas.p
     p.suporta_chamadas = True
     p.comandos = []
@@ -2903,7 +2903,7 @@ def test_menu_unico_com_submenus_na_ordem_pedida(j):
                 for i in menu.itens]
     # Novo e o primeiro menu e junta tudo o que se cria
     assert nomes(menus["Novo"]) == [
-        "Nova mensagem...", "Nova chamada...", "Conversa com a Meta AI",
+        "Nova mensagem...", "Nova chamada...", "Nova chamada de vídeo...",
         "Nova enquete...",
         "Novo contato...", "Novo status ou história...", "Nova conta...",
         "Novo grupo...", "Novo tópico no grupo...", "Novo canal...",
@@ -3547,7 +3547,7 @@ def test_responder_em_particular_so_em_grupo_e_de_outra_pessoa(j):
 
 def test_sons_de_conta_caiu_e_voltou(j, monkeypatch):
     sons = []
-    monkeypatch.setattr(jm, "bipe", lambda tipo, valor=None: sons.append(tipo))
+    monkeypatch.setattr(jm, "bipe", lambda tipo, valor=None, servico="": sons.append(tipo))
     j.b.publicar(ev.EstadoConta("t1", ev.CONECTADA))
     assert sons == []                                  # conectar nao e voltar
     j.b.publicar(ev.EstadoConta("t1", ev.DESCONECTADA))
@@ -3557,7 +3557,7 @@ def test_sons_de_conta_caiu_e_voltou(j, monkeypatch):
 
 def test_som_da_mensagem_nova_depende_de_onde_ela_chegou(j, monkeypatch):
     sons = []
-    monkeypatch.setattr(jm, "bipe", lambda tipo, valor=None: sons.append(tipo))
+    monkeypatch.setattr(jm, "bipe", lambda tipo, valor=None, servico="": sons.append(tipo))
     j.indice[("t1", "20")].tipo = "grupo"
     nova = lambda i: m.Mensagem("t1", "20", i, autor="Bia", texto="oi",
                                 data=AGORA + 50)
@@ -3729,6 +3729,21 @@ def test_detalhes_de_canal_e_menu_dos_itens_de_midia(j):
     link = c.mensagens[1]
     rotulos = [r for r, _ in c._menu_midia(link)]
     assert rotulos[0] == "Abrir o link" and "Copiar link" in rotulos
+
+
+def test_canal_que_a_conta_nao_segue_oferece_seguir_e_nao_deixar_de_seguir(j):
+    c = _controle(j, "canal", {"descricao": "Sobre", "seguidores": 1200,
+                               "verificado": False, "participa": False,
+                               "papel": "você não segue este canal",
+                               "silenciado": False, "link": ""})
+    rotulos = [r for r, _ in c._botoes()]
+    assert "&Seguir o canal" in rotulos
+    assert "&Deixar de seguir" not in rotulos
+    assert "&Silenciar o canal" not in rotulos
+    assert "Seu papel: você não segue este canal" in "\n".join(c._linhas())
+    c.dados["participa"] = True
+    rotulos = [r for r, _ in c._botoes()]
+    assert "&Deixar de seguir" in rotulos and "&Seguir o canal" not in rotulos
 
 
 def test_menu_do_membro_traz_os_itens_da_lista_de_conversas(j):
@@ -4240,7 +4255,7 @@ def test_detalhes_de_mensagem_de_grupo_tem_botoes_de_quem_recebeu(
 
 def test_aviso_de_chamada_do_whatsapp_tem_ok_e_conversar(j, monkeypatch):
     sons = []
-    monkeypatch.setattr(jm, "bipe", lambda t, *a: sons.append(t))
+    monkeypatch.setattr(jm, "bipe", lambda t, *a, **k: sons.append(t))
     ditas = []
     j.fala.falar = lambda t, interromper=False: ditas.append(t)
     j.b.publicar(ev.ChamadaWhatsApp("t1", "20", "Ana", False, "tocando", "C1"))
@@ -4271,7 +4286,7 @@ def test_falar_mensagens_novas_por_lugar_e_sem_depender_do_som(j, monkeypatch):
     ditas = []
     j.fala.falar = lambda t, interromper=False: ditas.append(t)
     sons = []
-    monkeypatch.setattr(jm, "bipe", lambda t, *a: sons.append(t))
+    monkeypatch.setattr(jm, "bipe", lambda t, *a, **k: sons.append(t))
     c = j.indice[("t1", "20")]
     j._abrir_conversa(c)
     ativa = [True]
@@ -4514,7 +4529,7 @@ def test_avanco_do_envio_no_titulo_na_barra_e_na_fala(j):
 
 def test_reacao_a_mensagem_minha_toca_o_som_proprio(j, monkeypatch):
     sons = []
-    monkeypatch.setattr(jm, "bipe", lambda t, *a: sons.append(t))
+    monkeypatch.setattr(jm, "bipe", lambda t, *a, **k: sons.append(t))
     j.fala.falar = lambda t, interromper=False: None
     j._abrir_conversa(j.indice[("t1", "20")])
     minha = msg("31", "oi", conversa="20", minha=True)
@@ -4542,7 +4557,7 @@ def test_reacao_a_mensagem_minha_toca_o_som_proprio(j, monkeypatch):
 
 def test_mencao_ou_resposta_num_grupo_toca_o_som_proprio(j, monkeypatch):
     sons = []
-    monkeypatch.setattr(jm, "bipe", lambda t, *a: sons.append(t))
+    monkeypatch.setattr(jm, "bipe", lambda t, *a, **k: sons.append(t))
     j.fala.falar = lambda t, interromper=False: None
     grupo = m.Conversa("t1", "30", "Grupo X", "telegram", "grupo",
                        data=AGORA + 10)
@@ -5317,7 +5332,7 @@ def _enquete_minha(j, id_="9"):
 
 def test_sons_dos_votos_em_enquete(j, monkeypatch):
     sons = []
-    monkeypatch.setattr(jm, "bipe", lambda tipo, *a: sons.append(tipo))
+    monkeypatch.setattr(jm, "bipe", lambda tipo, *a, **k: sons.append(tipo))
     enquete = _enquete_minha(j)
     sons.clear()
     j.b.publicar(ev.MensagemAtualizada("t1", "20", enquete, "enquete", "Bia"))
@@ -5338,7 +5353,7 @@ def test_sons_dos_votos_em_enquete(j, monkeypatch):
 
 def test_sons_de_esconder_e_voltar_da_bandeja(j, monkeypatch):
     sons = []
-    monkeypatch.setattr(jm, "bipe", lambda tipo, *a: sons.append(tipo))
+    monkeypatch.setattr(jm, "bipe", lambda tipo, *a, **k: sons.append(tipo))
     from testes.test_janela import BandejaFalsa
     j._bandeja = BandejaFalsa()
     j.Iconize = lambda v=True: None
@@ -5355,7 +5370,7 @@ def test_gravar_por_atalho_toca_o_som_de_gravando_e_o_de_parada(
         j, monkeypatch, tmp_path):
     from telezapp.midia.gravador import MICROFONE
     sons = []
-    monkeypatch.setattr(jm, "bipe", lambda tipo, *a: sons.append(tipo))
+    monkeypatch.setattr(jm, "bipe", lambda tipo, *a, **k: sons.append(tipo))
     _preparar_gravacao_rapida(j, monkeypatch, tmp_path)
     j._gravar_rapido(MICROFONE)
     j._gravar_rapido(MICROFONE)
@@ -5507,10 +5522,19 @@ def test_nova_chamada_escolhe_a_pessoa_e_liga(j, monkeypatch):
     monkeypatch.setattr(contatos, "dialogo_nova_chamada",
                         lambda pai, contas, buscar, **k: vistas.append(contas) or
                         ("t1", "bruno", None))
-    j._ligar_para = lambda conv: ligou.append(conv.id)
+    j._ligar_para = lambda conv, video=False: ligou.append((conv.id, video))
     j._nova_chamada()
     assert [c for c, _ in vistas[0]] == ["t1"]
-    assert ligou == ["20"]                         # Bruno ja existia
+    assert ligou == [("20", False)]                # Bruno ja existia
+    # de video: so entra a conta que faz video
+    j.contas.p.suporta_video = False
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._nova_chamada(video=True)
+    assert ditas[-1] == "Nenhuma conta conectada faz chamadas de vídeo."
+    j.contas.p.suporta_video = True
+    j._nova_chamada(video=True)
+    assert ligou[-1] == ("20", True)
     # ninguem faz chamadas: avisa
     ditas = []
     j.fala.falar = lambda t, interromper=False: ditas.append(t)
@@ -5861,7 +5885,7 @@ def ia_texto(j, monkeypatch):
     monkeypatch.setattr(
         jm.threading, "Thread",
         lambda target=None, args=(), **k: Linha(lambda: target(*args)))
-    monkeypatch.setattr(jm, "bipe", lambda *a: None)
+    monkeypatch.setattr(jm, "bipe", lambda *a, **k: None)
     j.ditas = []
     j.fala.falar = lambda t, interromper=False: j.ditas.append(t)
     return chamadas
@@ -7107,7 +7131,7 @@ def test_nova_de_silenciado_nao_avisa_nem_conta(j, monkeypatch):
     conv = j.indice[("t1", "20")]
     conv.nao_lidas = 1
     sons, ditas = [], []
-    monkeypatch.setattr(jm, "bipe", lambda n: sons.append(n))
+    monkeypatch.setattr(jm, "bipe", lambda n, **k: sons.append(n))
     j.fala.falar = lambda t, interromper=False: ditas.append(t)
     previa = j.previas.get(("t1", "20"))
     nova = msg("9", "calada", conversa="20")
@@ -7228,7 +7252,7 @@ def test_som_da_nova_segue_o_tipo_e_o_proprio_da_conversa(j, monkeypatch,
                                                           tmp_path):
     from telezapp.nucleo import pacotes_de_som as pk
     sons = []
-    monkeypatch.setattr(jm, "bipe", lambda tipo, valor=None: sons.append(
+    monkeypatch.setattr(jm, "bipe", lambda tipo, valor=None, servico="": sons.append(
         (tipo, valor)))
     conv = j.indice[("t1", "20")]
     nova = lambda i: m.Mensagem("t1", "20", i, autor="Bia", texto="oi",
@@ -7865,7 +7889,7 @@ def _locais_de_arquivos(n):
 def test_varios_arquivos_tocam_o_som_a_cada_um_e_falam_so_no_fim(
         j, monkeypatch):
     sons, ditas = [], []
-    monkeypatch.setattr(jm, "bipe", lambda tipo="nova": sons.append(tipo))
+    monkeypatch.setattr(jm, "bipe", lambda tipo="nova", valor=None, servico="": sons.append(tipo))
     j.fala.falar = lambda t, interromper=False: ditas.append(t)
     chave = ("t1", "10")
     j.cache[chave] = _locais_de_arquivos(3)
@@ -7951,3 +7975,225 @@ def test_shift_f1_tem_lista_que_executa_e_botao_para_personalizar(
         executar(i, d)
     abrir(enter_no_global)
     assert not dlg.fechado and "fora da janela" in ditas[-1]
+
+
+def _com_previas(j, conversas):
+    """Liga as prévias e guarda a última mensagem de cada conversa."""
+    j._aplicar_opcao("lista_conversas", {
+        "ordem": ["nome", "servico", "nao_lidas", "previa"], "ocultos": []})
+    j._previas_lidas = True
+    for c in conversas:
+        msgs = j.banco.mensagens("t1", c, 5)
+        if msgs:
+            j._atualizar_previa(("t1", c), msgs[-1])
+
+
+def test_conversa_limpa_no_celular_tira_as_mensagens_e_a_previa(j):
+    j.b.publicar(ev.ConversasAtualizadas("t1", [
+        conv("10", "Ana", nao_lidas=2, data=AGORA)]))
+    j.banco.salvar_mensagens([
+        m.Mensagem("t1", "10", "1", texto="velha", data=AGORA - 50),
+        m.Mensagem("t1", "10", "2", texto="ultima", data=AGORA - 10)])
+    _com_previas(j, ["10"])
+    assert j.previas[("t1", "10")][1] == "ultima"
+    j.b.publicar(ev.ConversaLimpaNoCelular("t1", "10", AGORA - 5))
+    assert j.banco.mensagens("t1", "10") == []
+    assert ("t1", "10") in j.indice            # a conversa fica na lista
+    assert j.indice[("t1", "10")].nao_lidas == 0
+    assert ("t1", "10") not in j.previas
+    assert "ultima" not in j.lista_conv.itens[0]
+    assert j.lista_conv.itens[0].startswith("Ana")
+
+
+def test_conversa_limpa_no_celular_deixa_o_que_chegou_depois(j):
+    j.b.publicar(ev.ConversasAtualizadas("t1", [
+        conv("10", "Ana", data=AGORA)]))
+    j.banco.salvar_mensagens([
+        m.Mensagem("t1", "10", "1", texto="velha", data=AGORA - 50),
+        m.Mensagem("t1", "10", "2", texto="nova", data=AGORA)])
+    _com_previas(j, ["10"])
+    j.b.publicar(ev.ConversaLimpaNoCelular("t1", "10", AGORA - 20))
+    assert [x.id for x in j.banco.mensagens("t1", "10")] == ["2"]
+    assert j.previas[("t1", "10")][1] == "nova"
+
+
+def test_mensagem_apagada_refaz_a_previa_com_a_que_sobrou(j):
+    j.b.publicar(ev.ConversasAtualizadas("t1", [
+        conv("10", "Ana", data=AGORA)]))
+    j.banco.salvar_mensagens([
+        m.Mensagem("t1", "10", "1", texto="anterior", data=AGORA - 50),
+        m.Mensagem("t1", "10", "2", texto="ultima", data=AGORA - 10)])
+    _com_previas(j, ["10"])
+    j.b.publicar(ev.MensagemApagadaNoCelular("t1", "10", "2"))
+    assert j.previas[("t1", "10")][1] == "anterior"
+    assert "anterior" in j.lista_conv.itens[0]
+
+
+def test_atualizar_conversas_confere_as_previas_com_o_banco(j, monkeypatch):
+    j.b.publicar(ev.ConversasAtualizadas("t1", [
+        conv("10", "Ana", data=AGORA), conv("20", "Bia", data=AGORA)]))
+    j.banco.salvar_mensagens([
+        m.Mensagem("t1", "10", "1", texto="oi", data=AGORA - 10)])
+    j.previas[("t1", "10")] = (AGORA - 10, "oi", "", "")
+    j.previas[("t1", "20")] = (AGORA - 10, "fantasma", "", "")
+    j._previas_lidas = True
+    j._previas_prontas(j.banco.ultimas_mensagens(), AGORA)
+    assert ("t1", "20") not in j.previas        # o banco nao tem
+    assert j.previas[("t1", "10")][1] == "oi"
+    # uma que chegou depois do inicio da leitura nao e tirada
+    j.previas[("t1", "30")] = (AGORA + 5, "chegou agora", "", "")
+    j._previas_prontas({}, AGORA)
+    assert ("t1", "30") in j.previas
+
+
+def test_f5_e_fim_da_sincronia_pedem_a_conferencia_das_previas(j,
+                                                              monkeypatch):
+    pedidos = []
+    monkeypatch.setattr(j, "_carregar_previas",
+                        lambda refazer=False: pedidos.append(refazer))
+    j._atualizar_conversas()
+    j._ev_sincronia(types.SimpleNamespace(quantas=0))
+    assert pedidos == [True, True]
+
+
+def test_conversa_com_a_meta_ai_so_no_menu_com_conta_do_whatsapp(j):
+    menu = j._menu_do_item["meta_ai"]
+
+    def nomes():
+        return [i.rotulo.replace("&", "") for i in menu.itens]
+    assert "Conversa com a Meta AI" not in nomes()      # so ha Telegram
+    j.cfg.salvar_conta({"id": "w1", "servico": "whatsapp"})
+    j._ajustar_menu_por_contas()
+    n = nomes()
+    assert n[n.index("Nova chamada de vídeo...") + 1] == \
+        "Conversa com a Meta AI"
+    j.cfg.remover_conta("w1")
+    j._ajustar_menu_por_contas()
+    assert "Conversa com a Meta AI" not in nomes()
+
+
+def test_conversa_silenciada_e_aberta_nao_toca_som_de_mensagem_nova(
+        j, monkeypatch):
+    sons = []
+    monkeypatch.setattr(jm, "bipe", lambda tipo, valor=None, servico="": sons.append(tipo))
+    conv = j.indice[("t1", "20")]
+    j._abrir_conversa(conv)
+    nova = lambda i: m.Mensagem("t1", "20", i, autor="Bia", texto="oi",
+                                data=AGORA + 50)
+    sons.clear()
+    j.b.publicar(ev.MensagemNova(nova("40"), conv))
+    assert sons == ["nova_aberta"]                 # sem silenciar: toca
+    conv.silenciada_ate = -1.0                     # silenciada para sempre
+    sons.clear()
+    j.b.publicar(ev.MensagemNova(nova("41"), conv))
+    assert sons == []
+
+
+def test_meta_ai_some_do_menu_com_a_conta_do_whatsapp_desativada(j):
+    menu = j._menu_do_item["meta_ai"]
+
+    def tem():
+        return any(i.rotulo.replace("&", "") == "Conversa com a Meta AI"
+                   for i in menu.itens)
+    j.cfg.salvar_conta({"id": "w1", "servico": "whatsapp"})
+    j._ajustar_menu_por_contas()
+    assert tem()
+    j.cfg.salvar_conta({"id": "w1", "servico": "whatsapp", "ativa": False})
+    j._ajustar_menu_por_contas()
+    assert not tem()
+
+
+def test_busca_global_aparece_com_conta_do_telegram_e_abre_o_resultado(
+        j, monkeypatch):
+    from telezapp.nucleo import busca as busca_nucleo
+    menu = j._menu_do_item["busca_global"]
+    assert any(i.rotulo.replace("&", "") == "Busca global no Telegram..."
+               for i in menu.itens)                 # o `j` tem conta do Telegram
+    # sem conta do Telegram ativa, o item some
+    j.cfg.salvar_conta({"id": "t1", "servico": "telegram", "ativa": False})
+    j._ajustar_menu_por_contas()
+    assert not any(i.rotulo.replace("&", "") == "Busca global no Telegram..."
+                   for i in menu.itens)
+    # um achado de conversa e mensagem ainda nao guardadas
+    conv = m.Conversa("t1", "999", "Canal novo", "telegram", "canal",
+                      data=AGORA)
+    x = m.Mensagem("t1", "999", "5", autor="Canal novo",
+                   texto="receita de bolo", data=AGORA)
+    visto = []
+    j._ver_na_conversa = lambda y: visto.append(y.id)
+    j._abrir_achado_do_servidor(
+        busca_nucleo.achado_do_servidor(x, conv, "bolo"))
+    assert j.indice[("t1", "999")] is conv
+    assert j.banco.mensagem("t1", "999", "5") is not None
+    assert visto == ["5"]
+
+
+def test_busca_global_abre_chat_achado_e_cria_a_conversa(j):
+    from telezapp.nucleo import busca_global as bg
+    conv = m.Conversa("t1", "555", "Canal de notícias", "telegram", "canal",
+                      somente_leitura=True)
+    adotadas, abertas = [], []
+    p = j.contas.provedor("t1")
+    p.adotar_conversa = lambda c: adotadas.append(c.id)
+    j._abrir_conversa_de = lambda c: abertas.append(c.id)
+    j._abrir_chat_do_servidor(bg.ResultadoChat(conv, "noticias", 10, False).conversa)
+    assert adotadas == ["555"] and abertas == ["555"]
+    assert j.indice[("t1", "555")] is conv
+    assert j.banco.conversas("t1")
+
+
+def test_foco_ao_abrir_conversa_segue_a_opcao(j):
+    conv = j.indice[("t1", "20")]
+    j._abrir_conversa(conv)
+    assert j.FindFocus() is j.lista_msgs                # o padrao
+    j._fechar_conversa()
+    j.cfg.set("foco_ao_abrir_conversa", "caixa")
+    j._abrir_conversa(conv)
+    assert j.FindFocus() is j.caixa
+    j._fechar_conversa()
+    conv.somente_leitura = True                         # nao da para escrever
+    j._abrir_conversa(conv)
+    assert j.FindFocus() is j.lista_msgs
+
+
+def test_som_de_mensagem_nova_diz_de_que_servico_veio(j, monkeypatch):
+    vistos = []
+    monkeypatch.setattr(jm, "bipe", lambda tipo, valor=None, servico="":
+                        vistos.append((tipo, servico)))
+    j.contas.servico = lambda conta_id: "telegram"
+    conv = j.indice[("t1", "20")]
+    j._fechar_conversa() if j.atual else None
+    j.b.publicar(ev.MensagemNova(m.Mensagem(
+        "t1", "20", "70", autor="Bia", texto="oi", data=AGORA + 90), conv))
+    assert vistos and vistos[-1][1] == "telegram"
+    assert j._servico_da_conta("t1") == "telegram"
+
+
+def test_atalhos_de_copiar_texto_e_de_copiar_o_conteudo(j):
+    assert j.atalhos.efetivo("copiar") == "Ctrl+C"
+    assert j.atalhos.efetivo("copiar_conteudo") == "Ctrl+Shift+C"
+
+
+def test_copiar_o_conteudo_copia_direto_ou_abre_a_lista(j, monkeypatch):
+    copiados, perguntas = [], []
+    j._copiar_conteudo = lambda x, tipo, valor: copiados.append((tipo, valor))
+    sel = m.Mensagem("t1", "20", "60", autor="Bia", texto="so texto",
+                     data=AGORA)
+    j._mensagem_selecionada = lambda: sel
+    j._copiar_o_conteudo()                       # um conteudo so: direto
+    assert copiados == [("texto", "so texto")]
+    foto = m.Mensagem("t1", "20", "61", autor="Bia", tipo=m.FOTO,
+                      texto="legenda com https://exemplo.com", data=AGORA)
+    sel = foto
+    monkeypatch.setattr(
+        jm.dialogos, "escolher_o_que_copiar",
+        lambda pai, rotulos: perguntas.append(list(rotulos)) or 1)
+    copiados.clear()
+    j._copiar_o_conteudo()                       # varios: pergunta
+    assert len(perguntas[0]) >= 3                # legenda, foto e link
+    assert copiados == [("midia", "")]           # a 2a da lista
+    monkeypatch.setattr(jm.dialogos, "escolher_o_que_copiar",
+                        lambda pai, rotulos: None)
+    copiados.clear()
+    j._copiar_o_conteudo()                       # cancelou: nada
+    assert copiados == []

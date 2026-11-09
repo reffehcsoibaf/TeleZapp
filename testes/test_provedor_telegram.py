@@ -1961,3 +1961,107 @@ def test_criar_topico_sem_permissao_explica_e_titulo_vazio_nao_pede():
     pedidos.clear()
     ok, texto, _ = asyncio.run(p._criar_topico("-100555", "   "))
     assert not ok and "nome" in texto and pedidos == []
+
+
+def test_bot_de_descricao_so_vale_a_resposta_ao_pedido(monkeypatch):
+    def msg(id_, texto, ref=None, out=False):
+        return types.SimpleNamespace(
+            id=id_, message=texto, out=out,
+            reply_to=types.SimpleNamespace(reply_to_msg_id=ref)
+            if ref else None)
+
+    class Cliente:
+        async def get_entity(self, nome):
+            self.nome = nome
+            return "ent"
+
+        async def send_file(self, ent, caminho, voice_note=False):
+            self.voz = voice_note
+            return types.SimpleNamespace(id=100)
+
+        async def get_messages(self, ent, min_id=0, limit=20):
+            return [msg(101, "de um pedido velho", ref=90),
+                    msg(102, "Um cachorro na grama.", ref=100),
+                    msg(103, "", ref=100), msg(100, "meu pedido", out=True)]
+
+    async def rapido(_):
+        return None
+    monkeypatch.setattr(tg.asyncio, "sleep", rapido)
+    fake = types.SimpleNamespace(cliente=Cliente())
+    texto = asyncio.run(tg.ProvedorTelegram._perguntar_bot(
+        fake, "AmelieTelegramBot", "x.jpg", False, 5, 0.0))
+    assert texto == "Um cachorro na grama."
+    assert fake.cliente.nome == "@AmelieTelegramBot"
+
+
+def test_busca_global_converte_os_resultados_e_cria_a_conversa_que_falta(
+        ambiente):
+    from telethon.tl import types as T
+
+    class Cliente(ClienteFalso):
+        async def get_input_entity(self, peer):
+            return "ent"
+
+        def iter_messages(self, entidade, search=None, limit=None):
+            async def gen():
+                assert entidade is None and search == "bolo"
+                x = T.Message(
+                    id=5, peer_id=T.PeerUser(11), message="receita de bolo",
+                    date=datetime.datetime(2026, 11, 1,
+                                           tzinfo=datetime.timezone.utc),
+                    out=False)
+
+                async def chat():
+                    return types.SimpleNamespace(first_name="Ana",
+                                                 last_name="")
+                x.get_chat = chat
+                yield x
+            return gen()
+    p = ambiente.criar(Cliente())
+    p.cliente = Cliente()
+    achados = asyncio.run(p._buscar_mensagens("bolo", "qualquer", 50))
+    assert len(achados) == 1
+    x, conv = achados[0]
+    assert (x.id, x.conversa_id) == ("5", "11")
+    assert "bolo" in x.texto
+    assert conv.nome == "Ana" and conv.tipo == "privada"
+    assert "11" not in p._conversas      # so passa a existir ao abrir
+    p.adotar_conversa(conv)
+    assert p._conversas["11"] is conv
+
+
+def test_busca_global_de_chats_diz_o_tipo_e_se_a_conta_participa(ambiente):
+    from telethon.tl import types as T
+
+    class Cliente(ClienteFalso):
+        async def __call__(self, requisicao):
+            assert requisicao.q == "noticias"
+            canal = T.Channel(id=100, title="Notícias", photo=T.ChatPhotoEmpty(),
+                              date=datetime.datetime(2026, 1, 1,
+                                                     tzinfo=datetime.timezone.utc),
+                              broadcast=True, username="noticias",
+                              participants_count=1500, access_hash=1)
+            grupo = T.Channel(id=200, title="Papo", photo=T.ChatPhotoEmpty(),
+                              date=datetime.datetime(2026, 1, 1,
+                                                     tzinfo=datetime.timezone.utc),
+                              megagroup=True, access_hash=2)
+            robo = T.User(id=300, first_name="Descreve", bot=True,
+                          username="descreve_bot", access_hash=3)
+            return T.contacts.Found(
+                my_results=[T.PeerChannel(200)],
+                results=[T.PeerChannel(100), T.PeerUser(300)],
+                chats=[canal, grupo], users=[robo])
+    p = ambiente.criar(Cliente())
+    p.cliente = Cliente()
+    achados = asyncio.run(p._buscar_chats("noticias"))
+    por_nome = {a.conversa.nome: a for a in achados}
+    assert [a.conversa.tipo for a in achados] == ["grupo", "canal", "privada"]
+    assert por_nome["Papo"].participa and not por_nome["Notícias"].participa
+    assert por_nome["Notícias"].usuario == "noticias"
+    assert por_nome["Notícias"].membros == 1500
+    assert por_nome["Descreve"].bot and por_nome["Descreve"].tipo == "bot"
+    assert por_nome["Notícias"].pode_entrar()
+    assert not por_nome["Papo"].pode_entrar()
+    texto = por_nome["Notícias"].texto_da_lista()
+    assert texto.startswith("Canal: Notícias") and "1500 inscritos" in texto
+    assert "você não participa" in texto

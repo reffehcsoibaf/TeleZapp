@@ -552,6 +552,20 @@ class Menu:
     def AppendSeparator(self):
         pass
 
+    def GetMenuItems(self):
+        return list(self.itens)
+
+    def FindItemById(self, id_):
+        return next((i for i in self.itens if i.GetId() == id_), None)
+
+    def Remove(self, item):
+        self.itens.remove(item)
+        return item
+
+    def Insert(self, pos, item):
+        self.itens.insert(pos, item)
+        return item
+
     def AppendSubMenu(self, submenu, rotulo):
         self.submenus.append((rotulo, submenu))
         return MenuItem()

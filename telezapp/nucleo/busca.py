@@ -311,6 +311,12 @@ def _trecho(x, extras, termo):
     return m.conteudo(x, com_estado=False).replace("\n", " ")[:120]
 
 
+def achado_do_servidor(x, conversa, termo):
+    """Um Achado a partir de uma mensagem que o servico devolveu (nao esta
+    obrigatoriamente guardada aqui)."""
+    return Achado(x, conversa, _trecho(x, m.extras_de(x), termo))
+
+
 def buscar(banco, c, agora=None):
     """Lista de `Achado` das mensagens guardadas que atendem a todos os
     criterios de `c` (`Criterios`), das mais novas para as mais antigas (ou o

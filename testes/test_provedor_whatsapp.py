@@ -4654,3 +4654,53 @@ def test_chamada_recebida_some_por_completo_com_o_aviso_desligado(amb):
     amb.f["CallOffer"](amb.c, _chamada("oferta", "O2"))
     assert esperar(amb.fila, ev.MensagemNova).mensagem.id == "chamada-O2"
     assert esperar(amb.fila, ev.ChamadaWhatsApp).chamada_id == "O2"
+
+
+def test_conversa_limpa_no_celular_vira_evento_e_zera_nao_lidas(amb):
+    cid = "5551@s.whatsapp.net"
+    amb.p._conversas[cid] = m.Conversa("w1", cid, "Ana", "whatsapp",
+                                        nao_lidas=3, data=TS)
+    amb.p._ao_limpar_conversa(None, types.SimpleNamespace(
+        JID=jid("5551"), Timestamp=TS, FromFullSync=False, Action=None))
+    e = esperar(amb.fila, ev.ConversaLimpaNoCelular)
+    assert (e.conversa_id, e.data) == (cid, float(TS))
+    assert amb.p._conversas[cid].nao_lidas == 0     # a conversa fica
+
+
+def test_conversa_limpa_antiga_ou_com_opcao_de_manter_nao_avisa(amb,
+                                                               monkeypatch):
+    cid = "5551@s.whatsapp.net"
+    amb.p._conversas[cid] = m.Conversa("w1", cid, "Ana", "whatsapp",
+                                        nao_lidas=3, data=TS)
+    amb.p._ao_limpar_conversa(None, types.SimpleNamespace(
+        JID=jid("5551"), Timestamp=TS, FromFullSync=True, Action=None))
+    monkeypatch.setitem(m.MANTER, "do_celular", True)
+    amb.p._ao_limpar_conversa(None, types.SimpleNamespace(
+        JID=jid("5551"), Timestamp=TS, FromFullSync=False, Action=None))
+    assert amb.fila.empty() or not any(
+        isinstance(e, ev.ConversaLimpaNoCelular)
+        for e in list(amb.fila.queue))
+    assert amb.p._conversas[cid].nao_lidas == 3
+
+
+def _resposta_bot(resposta_a="", data=None, texto="resposta"):
+    return m.Mensagem("w1", "999@bot", "R" + resposta_a + texto, minha=False,
+                      data=float(TS if data is None else data), texto=texto,
+                      resposta_a=resposta_a)
+
+
+def test_meta_ai_so_aceita_resposta_ao_pedido_atual(amb):
+    import threading
+    amb.p._espera_meta_ai = {"respostas": [], "ultima": 0.0, "ids": ["P2"],
+                             "inicio": float(TS),
+                             "chegou": threading.Event()}
+    # resposta a um pedido anterior que estourou o tempo: fora
+    amb.p._resposta_da_meta_ai(_resposta_bot("P1", texto="velha"), "999@bot")
+    assert amb.p._espera_meta_ai["respostas"] == []
+    # mais velha que o pedido: fora
+    amb.p._resposta_da_meta_ai(_resposta_bot("", TS - 60, "antiga"), "999@bot")
+    assert amb.p._espera_meta_ai["respostas"] == []
+    # a que cita este pedido, e a que nao cita nada, valem
+    amb.p._resposta_da_meta_ai(_resposta_bot("P2", texto="certa"), "999@bot")
+    amb.p._resposta_da_meta_ai(_resposta_bot("", texto="solta"), "999@bot")
+    assert amb.p._espera_meta_ai["respostas"] == ["certa", "solta"]

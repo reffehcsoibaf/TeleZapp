@@ -757,7 +757,9 @@ class ControleDetalhes:
             if d.get("link"):
                 botoes.append(("Copiar o &link", lambda: self.jan._copiar_texto(
                     d["link"])))
-            if d:
+            if d and not d.get("participa", True):
+                botoes.append(("&Seguir o canal", self.seguir_canal))
+            elif d:
                 botoes.append(("Re&ativar o som do canal"
                                if d.get("silenciado") else "&Silenciar o canal",
                                self.silenciar_canal))
@@ -1594,6 +1596,26 @@ class ControleDetalhes:
     def silenciar_canal(self):
         silenciar = not (self.dados or {}).get("silenciado")
         self._canal("silenciar", silenciar)
+
+    def seguir_canal(self):
+        r = wx.MessageBox("Seguir o canal %s? Ele passa a fazer parte das "
+                          "suas conversas no Telegram." % self.conv.nome,
+                          "Seguir o canal",
+                          wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
+                          self.dlg)
+        if r != wx.YES:
+            return
+        jan = self.jan
+        jan.fala.falar("Enviando ao serviço...", interromper=True)
+
+        def trabalho():
+            try:
+                ok, texto = self.prov.entrar_em_conversa(self.conv.id)
+            except Exception as e:
+                ok, texto = False, "Erro: %s" % type(e).__name__
+            wx.CallAfter(self._resultado_canal, "seguir", ok, texto)
+        threading.Thread(target=trabalho, daemon=True,
+                         name="canal").start()
 
     def deixar_de_seguir(self):
         r = wx.MessageBox("Deixar de seguir o canal %s?" % self.conv.nome,

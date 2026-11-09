@@ -1,0 +1,412 @@
+--- engine.go.orig-tentativas	2026-11-09 15:05:41.437156400 -0300
++++ engine.go	2026-11-09 15:06:14.091555400 -0300
+@@ -1782,6 +1782,38 @@
+ 	return melhor
+ }
+ 
++// candidatosDeRelay lista os relays da oferta na ordem em que a midia de uma chamada recebida deve
++// tentar: primeiro o que getMediaRelayEndpoint escolhe, depois os outros por (nao proprio antes do
++// proprio, menor c2r_rtt antes do maior, sem rtt por ultimo). Sem repeticao. TeleZapp: plano B das
++// chamadas recebidas sem som (meowcaller#40, #37): se o relay escolhido nao traz a midia do outro
++// lado, o proximo e tentado.
++func candidatosDeRelay(rd *relayData, inbound bool) []*relayEndpoint {
++	var saida []*relayEndpoint
++	visto := map[*relayEndpoint]bool{}
++	if e := getMediaRelayEndpoint(rd, inbound); e != nil {
++		saida = append(saida, e)
++		visto[e] = true
++	}
++	var outros []*relayEndpoint
++	for i := range rd.endpoints {
++		e := &rd.endpoints[i]
++		if !visto[e] && len(e.addresses) > 0 {
++			outros = append(outros, e)
++		}
++	}
++	sort.SliceStable(outros, func(a, b int) bool {
++		ea, eb := outros[a], outros[b]
++		if (ea.authTokenID == 0) != (eb.authTokenID == 0) {
++			return ea.authTokenID == 0
++		}
++		if (ea.c2rRTT == 0) != (eb.c2rRTT == 0) {
++			return ea.c2rRTT != 0
++		}
++		return ea.c2rRTT < eb.c2rRTT
++	})
++	return append(saida, outros...)
++}
++
+ // descreverRelaysDaOferta resume os endpoints da oferta para o log (nunca enderecos nem tokens):
+ // nome, is_fna, token_id, auth_token_id e c2r_rtt. TeleZapp.
+ func descreverRelaysDaOferta(rd *relayData) string {
+--- engine_media.go.orig-tentativas	2026-11-09 15:05:40.967513800 -0300
++++ engine_media.go	2026-11-09 15:06:14.088871200 -0300
+@@ -100,7 +100,7 @@
+ 	e.c.log.Info().Str("call_id", callID).Msg("starting media")
+ 	go func() {
+ 		defer clear(callKey)
+-		if err := e.runMedia(mctx, callID, call, callKey, selfLID, peerLID, rd, inbound); err != nil {
++		if err := e.runMediaComTentativas(mctx, callID, call, callKey, selfLID, peerLID, rd, inbound, m.group); err != nil {
+ 			e.c.log.Warn().Err(err).Str("call_id", callID).Msg("media ended")
+ 		}
+ 	}()
+@@ -110,9 +110,12 @@
+ // the channel and the allocate bytes (re-sent by the keepalive).
+ //
+ // NOT VALIDATED: live-relay only.
+-func (e *engine) connectAndAllocate(ctx context.Context, rd *relayData, streamSsrcs [9]uint32, inbound bool) (*relay.RelayMediaChannel, []byte, error) {
++func (e *engine) connectAndAllocate(ctx context.Context, rd *relayData, streamSsrcs [9]uint32, inbound bool, forcado *relayEndpoint) (*relay.RelayMediaChannel, []byte, error) {
+ 	log := e.c.log
+-	ep := getMediaRelayEndpoint(rd, inbound)
++	ep := forcado // TeleZapp: tentativa em outro relay
++	if ep == nil {
++		ep = getMediaRelayEndpoint(rd, inbound)
++	}
+ 	if ep == nil || len(ep.addresses) == 0 {
+ 		return nil, nil, fmt.Errorf("relay has no usable endpoint")
+ 	}
+@@ -190,7 +193,7 @@
+ // out with the allocate at t+0, BEFORE any RTP; no STUN binding-requests are ever sent.
+ //
+ // NOT VALIDATED: live-relay only.
+-func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKey []byte, selfLID, peerLID string, rd *relayData, inbound bool) error {
++func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKey []byte, selfLID, peerLID string, rd *relayData, inbound bool, forcado *relayEndpoint, aoOuvirOPar func()) error {
+ 	log := e.c.log
+ 	selfParticipantID := rtp.FormatE2ESrtpParticipantID(selfLID)
+ 	ssrc, err := rtp.DeriveWasmParticipantSsrc(callID, selfParticipantID, 0, log)
+@@ -221,7 +224,7 @@
+ 	if err != nil {
+ 		return err
+ 	}
+-	ch, allocate, err := e.connectAndAllocate(ctx, rd, streamSsrcs, inbound)
++	ch, allocate, err := e.connectAndAllocate(ctx, rd, streamSsrcs, inbound, forcado)
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -897,6 +900,9 @@
+ 			}
+ 			if rtcpIn++; rtcpIn == 1 {
+ 				log.Info().Uint32("ssrc", senderSsrc).Uint32("index", index).Msg("first authenticated peer SRTCP received")
++				if aoOuvirOPar != nil {
++					aoOuvirOPar() // TeleZapp: o outro lado chegou por este relay
++				}
+ 			}
+ 			keyframe := rtp.RtcpRequestsKeyframe(plain, videoSelfSsrc)
+ 			if keyframe {
+@@ -1168,6 +1174,9 @@
+ 			}
+ 			if rtpIn++; rtpIn == 1 {
+ 				log.Info().Msg("first RTP decoded from relay, inbound audio flowing")
++				if aoOuvirOPar != nil {
++					aoOuvirOPar() // TeleZapp: o outro lado chegou por este relay
++				}
+ 				e.c.diag.Emit("meta", map[string]any{"event": "first_rtp_in", "call_id": callID})
+ 				if call != nil {
+ 					call.setPhase(CallPhaseActive)
+--- engine.go (acrescimo: o momento em que a chamada foi atendida)
++++ engine.go
+@@ type engineCall struct {
+ 	acceptPending bool
++	aceitoEm      time.Time // TeleZapp: quando o <accept> saiu (plano B: o prazo do relay conta daqui)
+@@ func (e *engine) sendAccept(...)
+ 	m.acceptPending = false
++	m.aceitoEm = time.Now()
+ 	e.mu.Unlock()
+--- /dev/null	2026-11-09 15:21:43.000000000 -0300
++++ engine_tentativas_telezapp.go	2026-11-09 15:20:25.725464900 -0300
+@@ -0,0 +1,112 @@
++package meowcaller
++
++import (
++	"context"
++	"os"
++	"sync"
++	"sync/atomic"
++	"time"
++)
++
++// janelaSemMidiaDoPar e quanto se espera, em cada relay, por algo autenticado do outro lado (SRTCP ou
++// audio) antes de tentar o proximo. Numa chamada que funciona o primeiro SRTCP chega em ~1,5 s.
++var janelaSemMidiaDoPar = 5 * time.Second
++
++// rodadasDeRelays e quantas vezes a lista de relays e percorrida antes de ficar no ultimo.
++const rodadasDeRelays = 2
++
++// runMediaComTentativas e o plano B das chamadas recebidas sem som: numa chamada 1:1 recebida com mais
++// de um relay na oferta, se o relay escolhido nao traz nada autenticado do outro lado em
++// janelaSemMidiaDoPar (contada a partir do momento em que a chamada foi atendida), derruba a midia e
++// tenta o proximo (candidatosDeRelay), dando voltas na lista. Chamada de saida e de grupo seguem o
++// caminho de sempre. TeleZapp.
++func (e *engine) runMediaComTentativas(ctx context.Context, callID string, call *Call, callKey []byte, selfLID, peerLID string, rd *relayData, inbound, grupo bool) error {
++	return e.tentarRelays(ctx, callID, inbound, grupo, rd, func(c context.Context, ep *relayEndpoint, par func()) error {
++		return e.runMedia(c, callID, call, callKey, selfLID, peerLID, rd, inbound, ep, par)
++	})
++}
++
++// prazoDaTentativa devolve quando a tentativa que comecou em `inicio` deve estourar: janelaSemMidiaDoPar
++// depois do mais tardio entre o comeco dela e o atendimento da chamada. Zero enquanto a chamada nao foi
++// atendida (o outro lado so manda midia depois disso).
++func (e *engine) prazoDaTentativa(callID string, inicio time.Time) time.Time {
++	e.mu.Lock()
++	defer e.mu.Unlock()
++	m := e.calls[callID]
++	if m == nil || m.acceptPending || m.aceitoEm.IsZero() {
++		return time.Time{}
++	}
++	base := inicio
++	if m.aceitoEm.After(base) {
++		base = m.aceitoEm
++	}
++	return base.Add(janelaSemMidiaDoPar)
++}
++
++func (e *engine) tentarRelays(ctx context.Context, callID string, inbound, grupo bool, rd *relayData, rodar func(context.Context, *relayEndpoint, func()) error) error {
++	cands := candidatosDeRelay(rd, inbound)
++	if !inbound || grupo || len(cands) < 2 {
++		return rodar(ctx, nil, nil)
++	}
++	total := rodadasDeRelays * len(cands)
++	for n := 0; n < total; n++ {
++		ep := cands[n%len(cands)]
++		ultimo := n == total-1
++		tctx, cancel := context.WithCancel(ctx)
++		var uma sync.Once
++		par := make(chan struct{})
++		var estourou atomic.Bool
++		inicio := time.Now()
++		if !ultimo {
++			go func(ep *relayEndpoint) {
++				tick := time.NewTicker(100 * time.Millisecond)
++				defer tick.Stop()
++				for {
++					select {
++					case <-par:
++						return
++					case <-tctx.Done():
++						return
++					case <-tick.C:
++					}
++					if prazo := e.prazoDaTentativa(callID, inicio); !prazo.IsZero() && time.Now().After(prazo) {
++						estourou.Store(true)
++						e.c.log.Warn().Str("call_id", callID).Str("relay", ep.relayName).
++							Msg("TeleZapp: nada do outro lado neste relay; tentando o proximo")
++						cancel()
++						return
++					}
++				}
++			}(ep)
++		}
++		e.c.log.Info().Str("call_id", callID).Str("relay", ep.relayName).Int("tentativa", n+1).
++			Int("de", total).Msg("TeleZapp: midia no relay")
++		usado := ep
++		if n == 0 && os.Getenv("TELEZAPP_FORCAR_TENTATIVA") == "1" {
++			// so para testar o plano B: a primeira tentativa vai a um endereco que nao responde
++			falso := *ep
++			falso.addresses = []relayAddress{{ipv4: "192.0.2.1", port: 3478}}
++			usado = &falso
++			e.c.log.Warn().Str("call_id", callID).Msg("TeleZapp: TELEZAPP_FORCAR_TENTATIVA ligado; 1a tentativa num endereco que nao responde")
++		}
++		err := rodar(tctx, usado, func() { uma.Do(func() { close(par) }) })
++		cancel()
++		if !estourou.Load() {
++			return err
++		}
++		// a proxima tentativa monta tudo de novo: solta o que a anterior deixou na chamada
++		e.mu.Lock()
++		if m := e.calls[callID]; m != nil {
++			old := m.groupReceivers
++			m.groupReceivers = nil
++			e.mu.Unlock()
++			if old != nil {
++				old.clear()
++			}
++		} else {
++			e.mu.Unlock()
++			return err
++		}
++	}
++	return nil
++}
+--- /dev/null	2026-11-09 15:21:43.000000000 -0300
++++ engine_tentativas_telezapp_test.go	2026-11-09 15:20:46.126667700 -0300
+@@ -0,0 +1,169 @@
++package meowcaller
++
++import (
++	"context"
++	"testing"
++	"time"
++
++	"github.com/rs/zerolog"
++)
++
++func relaysDeAndroid() *relayData {
++	return &relayData{endpoints: []relayEndpoint{
++		{relayName: "gru1c02", tokenID: 0, c2rRTT: 0, addresses: []relayAddress{{ipv4: "1.1.1.1", port: 1}}},
++		{relayName: "bsb1c01", tokenID: 1, c2rRTT: 0, addresses: []relayAddress{{ipv4: "2.2.2.2", port: 2}}},
++		{relayName: "poa1c01", tokenID: 2, c2rRTT: 8, addresses: []relayAddress{{ipv4: "3.3.3.3", port: 3}}},
++	}}
++}
++
++func TestCandidatosDeRelayComecaPeloEscolhidoESegueOutros(t *testing.T) {
++	rd := relaysDeAndroid()
++	cands := candidatosDeRelay(rd, true)
++	if len(cands) != 3 {
++		t.Fatalf("quis 3 candidatos, vieram %d", len(cands))
++	}
++	if cands[0] != getMediaRelayEndpoint(rd, true) {
++		t.Fatalf("o primeiro deve ser o que o caminho de sempre escolhe, veio %s", cands[0].relayName)
++	}
++	vistos := map[string]bool{}
++	for _, c := range cands {
++		if vistos[c.relayName] {
++			t.Fatalf("relay repetido: %s", c.relayName)
++		}
++		vistos[c.relayName] = true
++	}
++	// com rtt, o de menor rtt e o primeiro (relayDoChamadorSemFNA); os sem rtt seguem na ordem da oferta
++	if cands[0].relayName != "poa1c01" || cands[1].relayName != "gru1c02" || cands[2].relayName != "bsb1c01" {
++		t.Fatalf("ordem inesperada: %s %s %s", cands[0].relayName, cands[1].relayName, cands[2].relayName)
++	}
++	// oferta do Android do WinZapp (sem rtt): o primeiro nao proprio, depois o outro
++	sem := &relayData{endpoints: []relayEndpoint{
++		{relayName: "gru1c02", tokenID: 0, addresses: []relayAddress{{ipv4: "1.1.1.1", port: 1}}},
++		{relayName: "bsb1c01", tokenID: 1, addresses: []relayAddress{{ipv4: "2.2.2.2", port: 2}}},
++	}}
++	c2 := candidatosDeRelay(sem, true)
++	if len(c2) != 2 || c2[0].relayName != "gru1c02" || c2[1].relayName != "bsb1c01" {
++		t.Fatalf("oferta sem rtt: ordem inesperada %v", c2)
++	}
++}
++
++func engineDeTeste() *engine {
++	client := &Client{log: zerolog.Nop()}
++	eng := &engine{c: client, calls: make(map[string]*engineCall)}
++	client.eng = eng
++	eng.calls["c1"] = &engineCall{aceitoEm: time.Now()}
++	return eng
++}
++
++func TestTentarRelaysPulaParaOProximoQuandoNaoChegaNada(t *testing.T) {
++	antes := janelaSemMidiaDoPar
++	janelaSemMidiaDoPar = 80 * time.Millisecond
++	defer func() { janelaSemMidiaDoPar = antes }()
++	eng := engineDeTeste()
++	var usados []string
++	err := eng.tentarRelays(context.Background(), "c1", true, false, relaysDeAndroid(),
++		func(ctx context.Context, ep *relayEndpoint, par func()) error {
++			usados = append(usados, ep.relayName)
++			if len(usados) == 2 { // o segundo relay "traz" o outro lado
++				par()
++				return nil
++			}
++			<-ctx.Done()
++			return ctx.Err()
++		})
++	if err != nil {
++		t.Fatalf("erro inesperado: %v", err)
++	}
++	if len(usados) != 2 {
++		t.Fatalf("quis 2 tentativas, foram %d: %v", len(usados), usados)
++	}
++}
++
++func TestTentarRelaysNaoMexeEmSaidaNemGrupoNemRelayUnico(t *testing.T) {
++	eng := engineDeTeste()
++	for _, c := range []struct {
++		inbound, grupo bool
++		rd             *relayData
++	}{
++		{false, false, relaysDeAndroid()},
++		{true, true, relaysDeAndroid()},
++		{true, false, &relayData{endpoints: relaysDeAndroid().endpoints[:1]}},
++	} {
++		chamadas := 0
++		_ = eng.tentarRelays(context.Background(), "c1", c.inbound, c.grupo, c.rd,
++			func(ctx context.Context, ep *relayEndpoint, par func()) error {
++				chamadas++
++				if ep != nil || par != nil {
++					t.Fatalf("o caminho de sempre nao recebe relay forcado")
++				}
++				return nil
++			})
++		if chamadas != 1 {
++			t.Fatalf("quis uma execucao so, foram %d", chamadas)
++		}
++	}
++}
++
++func TestTentarRelaysNaoReexecutaSeAChamadaTerminaEmVezDeEstourar(t *testing.T) {
++	antes := janelaSemMidiaDoPar
++	janelaSemMidiaDoPar = time.Second
++	defer func() { janelaSemMidiaDoPar = antes }()
++	eng := engineDeTeste()
++	ctx, cancel := context.WithCancel(context.Background())
++	chamadas := 0
++	_ = eng.tentarRelays(ctx, "c1", true, false, relaysDeAndroid(),
++		func(c context.Context, ep *relayEndpoint, par func()) error {
++			chamadas++
++			cancel() // a chamada acabou antes do prazo
++			<-c.Done()
++			return c.Err()
++		})
++	if chamadas != 1 {
++		t.Fatalf("a chamada acabou: nao tenta outro relay (foram %d)", chamadas)
++	}
++}
++
++func TestTentarRelaysDaVoltasNaListaAteAcertar(t *testing.T) {
++	antes := janelaSemMidiaDoPar
++	janelaSemMidiaDoPar = 60 * time.Millisecond
++	defer func() { janelaSemMidiaDoPar = antes }()
++	eng := engineDeTeste()
++	rd := &relayData{endpoints: relaysDeAndroid().endpoints[:2]} // 2 relays
++	var usados []string
++	err := eng.tentarRelays(context.Background(), "c1", true, false, rd,
++		func(ctx context.Context, ep *relayEndpoint, par func()) error {
++			usados = append(usados, ep.relayName)
++			if len(usados) == 3 { // na volta, o primeiro relay funciona
++				par()
++				return nil
++			}
++			<-ctx.Done()
++			return ctx.Err()
++		})
++	if err != nil {
++		t.Fatalf("erro inesperado: %v", err)
++	}
++	if len(usados) != 3 || usados[0] != usados[2] || usados[0] == usados[1] {
++		t.Fatalf("quis relay A, B, A; foi %v", usados)
++	}
++}
++
++func TestTentarRelaysSoContaOPrazoDepoisDeAtender(t *testing.T) {
++	antes := janelaSemMidiaDoPar
++	janelaSemMidiaDoPar = 50 * time.Millisecond
++	defer func() { janelaSemMidiaDoPar = antes }()
++	eng := engineDeTeste()
++	eng.calls["c1"].aceitoEm = time.Time{} // ainda tocando
++	chamadas := 0
++	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
++	defer cancel()
++	_ = eng.tentarRelays(ctx, "c1", true, false, relaysDeAndroid(),
++		func(c context.Context, ep *relayEndpoint, par func()) error {
++			chamadas++
++			<-c.Done()
++			return c.Err()
++		})
++	if chamadas != 1 {
++		t.Fatalf("antes de atender nao troca de relay (foram %d tentativas)", chamadas)
++	}
++}
+--- engine_media.go (acrescimo: soltar o Recv ao cancelar)
++++ engine_media.go
+@@ func (e *engine) runMedia(...)
+-	defer ch.Close()
++	// TeleZapp: o Recv abaixo bloqueia e nao olha o contexto; ao cancelar (plano B das tentativas de
++	// relay, ou fim da chamada) o canal e fechado para soltar o Recv. O Once evita fechar duas vezes.
++	fimDoLaco := make(chan struct{})
++	var fecharCanal sync.Once
++	fechaCanal := func() { fecharCanal.Do(func() { _ = ch.Close() }) }
++	defer func() { close(fimDoLaco); fechaCanal() }()
++	go func() { select { case <-ctx.Done(): fechaCanal(); case <-fimDoLaco: } }()

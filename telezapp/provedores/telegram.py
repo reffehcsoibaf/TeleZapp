@@ -810,6 +810,63 @@ class ProvedorTelegram(Provedor):
         self._entidades[cid] = await self.cliente.get_input_entity(entidade)
         return cid, nome_de(entidade)
 
+    # ------------------------------------------- bot de descricao (IA)
+    def perguntar_bot(self, bot, caminho, voz, tempo=120, calma=6.0):
+        """Manda o arquivo ao bot (@nome) e devolve o texto que ele responder.
+        Bloqueia: chamar fora da janela. So vale o que o bot manda depois do
+        envio e que cita este envio (ou nao cita nada); o texto que ele
+        edita (\"processando...\" e depois a resposta) conta pelo valor
+        final. Levanta RuntimeError com o motivo."""
+        if self._loop is None or self._loop.is_closed() or \
+                self.cliente is None:
+            raise RuntimeError("a conta do Telegram não está conectada")
+        if getattr(self, "_bot_ocupado", False):
+            raise RuntimeError("já há um pedido ao bot em andamento")
+        self._bot_ocupado = True
+        try:
+            return asyncio.run_coroutine_threadsafe(
+                self._perguntar_bot(bot, caminho, voz, tempo, calma),
+                self._loop).result(timeout=tempo + calma + 60)
+        except RuntimeError:
+            raise
+        except Exception as e:
+            raise RuntimeError("o bot não respondeu (%s)" % type(e).__name__)
+        finally:
+            self._bot_ocupado = False
+
+    async def _perguntar_bot(self, bot, caminho, voz, tempo, calma):
+        bot = "@" + bot.lstrip("@")
+        ent = await self.cliente.get_entity(bot)
+        enviada = await self.cliente.send_file(ent, caminho, voice_note=voz)
+        log.info("pedido enviado ao bot de descrição")
+        fim = time.monotonic() + tempo
+        visto, mudou_em = None, None
+        while time.monotonic() < fim:
+            await asyncio.sleep(1.5)
+            achadas = await self.cliente.get_messages(
+                ent, min_id=enviada.id, limit=20)
+            textos = []
+            for x in sorted(achadas, key=lambda y: y.id):
+                if x.out or not (x.message or "").strip():
+                    continue
+                ref = getattr(getattr(x, "reply_to", None),
+                              "reply_to_msg_id", None)
+                if ref and ref != enviada.id:
+                    log.info("resposta do bot a outro pedido ignorada")
+                    continue
+                textos.append(x.message.strip())
+            if not textos:
+                continue
+            agora = time.monotonic()
+            if textos != visto:
+                visto, mudou_em = textos, agora
+            elif agora - mudou_em >= calma:
+                log.info("resposta do bot: %d partes", len(textos))
+                return "\n\n".join(textos)
+        if visto:
+            return "\n\n".join(visto)
+        raise RuntimeError("o bot não respondeu a tempo")
+
     # ------------------------------------------------------ privacidade
     def _executar(self, corotina, espera=20):
         """Roda no loop do Telegram e devolve o resultado (ou levanta o
@@ -1988,13 +2045,17 @@ class ProvedorTelegram(Provedor):
                 functions.channels.GetFullChannelRequest(ent))
             direitos = getattr(ent, "admin_rights", None)
             usuario = getattr(ent, "username", None)
+            participa = not getattr(ent, "left", False)
             return {
                 "nome": nome_de(ent), "descricao": cheio.full_chat.about or "",
                 "seguidores": int(cheio.full_chat.participants_count or 0),
                 "verificado": bool(getattr(ent, "verified", False)),
+                "participa": participa,
                 "silenciado": self._canal_silenciado(cheio), "papel": (
                     "dono" if getattr(ent, "creator", False) else
-                    "administrador" if direitos else "seguidor"),
+                    "administrador" if direitos else
+                    "seguidor" if participa else
+                    "você não segue este canal"),
                 "criado_em": ent.date.timestamp() if getattr(
                     ent, "date", None) else 0.0,
                 "link": ("https://t.me/" + usuario) if usuario else "",
@@ -2721,6 +2782,196 @@ class ProvedorTelegram(Provedor):
                  type(ent).__name__)
         self.barramento.publicar(
             ev.MensagensCarregadas(self.conta.id, conversa_id, msgs))
+
+    suporta_busca_global = True
+
+    def buscar_global(self, texto, modo="tudo", filtro="qualquer", limite=50,
+                      espera=60):
+        """A busca do aplicativo do Telegram: pessoas, bots, grupos e canais
+        (nas conversas da conta e publicos), mensagens de todas as conversas
+        (com filtro de tipo) e posts publicos de canais. Devolve um
+        busca_global.ResultadoGlobal."""
+        from telethon import errors
+        if self._loop is None or self._loop.is_closed() or \
+                self.cliente is None:
+            raise RuntimeError("A conta do Telegram não está conectada.")
+        try:
+            return asyncio.run_coroutine_threadsafe(
+                self._buscar_global(texto, modo, filtro, limite),
+                self._loop).result(timeout=espera)
+        except errors.FloodWaitError as e:
+            raise RuntimeError("O Telegram pediu para esperar %d segundos "
+                               "antes de buscar de novo." % e.seconds)
+        except (asyncio.TimeoutError, TimeoutError):
+            raise RuntimeError("O Telegram não respondeu a tempo.")
+        except Exception as e:
+            log.info("busca global falhou: %r", e)
+            raise RuntimeError("Não consegui buscar no Telegram (%s)." %
+                               type(e).__name__)
+
+    async def _buscar_global(self, texto, modo, filtro, limite):
+        from telethon import errors
+        from telezapp.nucleo import busca_global as bg
+        r = bg.ResultadoGlobal()
+        if modo in ("tudo", "chats") and texto:
+            try:
+                r.chats = await self._buscar_chats(texto)
+            except errors.FloodWaitError:
+                raise
+            except Exception as e:
+                log.info("busca de conversas falhou: %r", e)
+                r.avisos.append("Não consegui buscar pessoas, grupos e "
+                                "canais.")
+        if modo in ("tudo", "mensagens"):
+            r.mensagens = await self._buscar_mensagens(texto, filtro, limite)
+        if modo in ("tudo", "posts") and texto:
+            try:
+                r.posts = await self._buscar_posts(texto, limite)
+            except errors.FloodWaitError:
+                raise
+            except Exception as e:
+                log.info("busca de posts publicos falhou: %r", e)
+                if modo == "posts":
+                    r.avisos.append("O Telegram não fez a busca de posts "
+                                    "públicos agora (%s). Ela tem limite "
+                                    "por dia." % type(e).__name__)
+        return r
+
+    async def _buscar_chats(self, texto):
+        """Pessoas, bots, grupos e canais: os da conta e os publicos."""
+        from telethon import utils
+        from telethon.tl import functions, types as T
+        from telezapp.nucleo import busca_global as bg
+        r = await self.cliente(functions.contacts.SearchRequest(
+            q=texto, limit=30))
+        entidades = {}
+        for e in list(r.users) + list(r.chats):
+            entidades[utils.get_peer_id(e)] = e
+        meus = {utils.get_peer_id(p) for p in r.my_results}
+        vistos, saida = set(), []
+        for peer in list(r.my_results) + list(r.results):
+            pid = utils.get_peer_id(peer)
+            ent = entidades.get(pid)
+            if pid in vistos or ent is None:
+                continue
+            vistos.add(pid)
+            cid = str(pid)
+            bot = bool(getattr(ent, "bot", False))
+            if isinstance(ent, T.Channel):
+                tipo = "grupo" if getattr(ent, "megagroup", False) or \
+                    getattr(ent, "gigagroup", False) else "canal"
+            elif isinstance(ent, T.Chat):
+                tipo = "grupo"
+            else:
+                tipo = "privada"
+            conv = self._conversas.get(cid) or m.Conversa(
+                self.conta.id, cid, nome_de(ent) or "Sem nome", self.servico,
+                tipo, somente_leitura=somente_leitura_do_telegram(ent))
+            try:
+                self._entidades.setdefault(cid, utils.get_input_peer(ent))
+            except Exception:
+                pass
+            saida.append(bg.ResultadoChat(
+                conv, getattr(ent, "username", "") or "",
+                int(getattr(ent, "participants_count", 0) or 0),
+                pid in meus or cid in self._conversas, bot))
+        return saida
+
+    async def _buscar_mensagens(self, texto, filtro, limite):
+        """Mensagens de todas as conversas da conta, no servidor."""
+        from telethon.tl import types as T
+        from telezapp.nucleo import busca_global as bg
+        nome = bg.filtro_do_telegram(filtro)
+        extra = {"filter": getattr(T, nome)} if nome else {}
+        achados = []
+        async for msg in self.cliente.iter_messages(
+                None, search=texto, limit=limite, **extra):
+            par = await self._achado_de_mensagem(msg)
+            if par is not None:
+                achados.append(par)
+        return achados
+
+    async def _buscar_posts(self, texto, limite):
+        """Posts publicos de canais, mesmo de canais que a conta nao segue."""
+        from telethon import utils
+        from telethon.tl import functions, types as T
+        r = await self.cliente(functions.channels.SearchPostsRequest(
+            offset_rate=0, offset_peer=T.InputPeerEmpty(), offset_id=0,
+            limit=limite, query=texto))
+        entidades = {}
+        for e in list(getattr(r, "users", [])) + list(
+                getattr(r, "chats", [])):
+            entidades[utils.get_peer_id(e)] = e
+        achados = []
+        for msg in getattr(r, "messages", []):
+            par = await self._achado_de_mensagem(
+                msg, entidades.get(utils.get_peer_id(msg.peer_id)))
+            if par is not None:
+                achados.append(par)
+        return achados
+
+    async def _achado_de_mensagem(self, msg, chat=None):
+        """(Mensagem, Conversa) de uma mensagem devolvida pela busca. A
+        conversa que a conta ainda nao tem e criada so na resposta: ela so
+        passa a existir de verdade quando a pessoa a abre (adotar_conversa)."""
+        from telethon import utils
+        try:
+            cid = str(utils.get_peer_id(msg.peer_id))
+            conv = self._conversas.get(cid)
+            if conv is None:
+                if chat is None:
+                    chat = await msg.get_chat()
+                conv = m.Conversa(
+                    self.conta.id, cid, nome_de(chat) or "Sem nome",
+                    self.servico,
+                    "canal" if getattr(msg, "is_channel", False) and
+                    not getattr(msg, "is_group", False) else
+                    "grupo" if getattr(msg, "is_group", False)
+                    else "privada",
+                    data=msg.date.timestamp() if msg.date else 0.0,
+                    somente_leitura=somente_leitura_do_telegram(chat))
+                try:
+                    if chat is not None:
+                        entrada = utils.get_input_peer(chat)
+                    else:
+                        entrada = await self.cliente.get_input_entity(
+                            msg.peer_id)
+                    self._entidades.setdefault(cid, entrada)
+                except Exception:
+                    pass
+            x = converter(msg, self.conta.id, cid, conv.lidas_ate, conv.nome)
+            return (x, conv) if x is not None else None
+        except Exception:
+            log.exception("resultado da busca global")
+            return None
+
+    def adotar_conversa(self, conv):
+        """A conversa achada pela busca passa a fazer parte da conta (a
+        pessoa vai abri-la)."""
+        self._conversas.setdefault(conv.id, conv)
+
+    def entrar_em_conversa(self, conversa_id):
+        """Entra no grupo ou canal publico. Devolve (ok, texto)."""
+        return self._sincrono(self._entrar_em(conversa_id), 30) or (
+            False, "O Telegram não respondeu.")
+
+    async def _entrar_em(self, conversa_id):
+        from telethon import errors
+        from telethon.tl import functions
+        try:
+            ent = await self._entidade(conversa_id)
+            await self.cliente(functions.channels.JoinChannelRequest(ent))
+        except errors.InviteRequestSentError:
+            return True, ("O pedido para entrar foi enviado. Um "
+                          "administrador precisa aprovar.")
+        except errors.UserAlreadyParticipantError:
+            return False, "Você já está neste grupo ou canal."
+        except Exception as e:
+            log.warning("entrar falhou: %s", type(e).__name__)
+            return False, ("O Telegram não deixou entrar (%s)." %
+                           type(e).__name__)
+        self._agendar(self._atualizar_conversas())
+        return True, "Você entrou."
 
     def buscar_mais_antigas(self, conversa_id, quantas):
         if conversa_id.startswith(PREFIXO_STATUS):
