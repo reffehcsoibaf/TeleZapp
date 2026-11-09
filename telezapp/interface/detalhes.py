@@ -436,6 +436,9 @@ class DialogoSomDaConversa(wx.Dialog):
         lay = wx.BoxSizer(wx.VERTICAL)
         self.situacao = wx.StaticText(self, label="")
         lay.Add(self.situacao, 0, wx.ALL, 10)
+        self.cx_escolha = wx.Choice(self, name="Som da conversa")
+        self.cx_escolha.Bind(wx.EVT_CHOICE, lambda e: self._escolher())
+        lay.Add(self.cx_escolha, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
         linha = wx.WrapSizer(wx.HORIZONTAL)
         self.botoes = {}
         for chave, rotulo, funcao in (
@@ -452,8 +455,9 @@ class DialogoSomDaConversa(wx.Dialog):
         self.SetEscapeId(wx.ID_CANCEL)
         self.SetSizerAndFit(lay)
         self.CentreOnParent()
+        self._arquivos_escolha = []
         self._mostrar()
-        self.botoes["escolher"].SetFocus()
+        self.cx_escolha.SetFocus()
 
     def _arquivo(self):
         return pacotes_de_som.arquivo_da_conversa(self.jan.cfg, self.conv.chave)
@@ -462,6 +466,7 @@ class DialogoSomDaConversa(wx.Dialog):
         self.situacao.SetLabel(texto_do_som_da_conversa(self.jan.cfg,
                                                         self.conv))
         self.botoes["remover"].Enable(bool(self._arquivo()))
+        self._preencher_escolha()
         self.Layout()
 
     def ouvir(self):
@@ -483,6 +488,31 @@ class DialogoSomDaConversa(wx.Dialog):
             origem = dlg.GetPath()
         finally:
             dlg.Destroy()
+        self._escolher_pelo_caminho(origem, anunciar=True)
+
+    def _preencher_escolha(self):
+        """Preenche o combobox com os sons da pasta de conversas."""
+        self._arquivos_escolha = pacotes_de_som.arquivos_dos_sons_da_conversa()
+        self.cx_escolha.Set([nome for nome, _ in self._arquivos_escolha])
+        indice = -1
+        atual = self._arquivo()
+        if atual:
+            for i, (_, caminho) in enumerate(self._arquivos_escolha):
+                if os.path.normcase(os.path.abspath(caminho)) == \
+                        os.path.normcase(os.path.abspath(atual)):
+                    indice = i
+                    break
+        self.cx_escolha.SetSelection(indice)
+
+    def _escolher(self):
+        """Escolhe o som da conversa pelo combobox."""
+        i = self.cx_escolha.GetSelection()
+        if not 0 <= i < len(self._arquivos_escolha):
+            return
+        self._escolher_pelo_caminho(
+            self._arquivos_escolha[i][1], anunciar=False)
+
+    def _escolher_pelo_caminho(self, origem, anunciar=True):
         try:
             pacotes_de_som.definir_som_da_conversa(self.jan.cfg,
                                                    self.conv.chave, origem)
@@ -492,8 +522,11 @@ class DialogoSomDaConversa(wx.Dialog):
                                 interromper=True)
             return
         self._mostrar()
-        self.jan.fala.falar("Som escolhido: %s." % os.path.basename(origem),
-                            interromper=True)
+        if anunciar:
+            self.jan.fala.falar(
+                "Som escolhido: %s." % os.path.basename(origem),
+                interromper=True)
+        self.ouvir()
         self.botoes["ouvir"].SetFocus()
 
     def remover(self):
@@ -501,7 +534,7 @@ class DialogoSomDaConversa(wx.Dialog):
         self._mostrar()
         self.jan.fala.falar("Esta conversa voltou ao som do tipo dela.",
                             interromper=True)
-        self.botoes["escolher"].SetFocus()
+        self.cx_escolha.SetFocus()
 
 
 def texto_do_som_da_conversa(cfg, conv):

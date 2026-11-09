@@ -84,6 +84,18 @@ def arquivos_da_pasta(pacote_id):
             for nome in sorted(nomes, key=str.lower)]
 
 
+def arquivos_dos_sons_da_conversa():
+    """[(nome, caminho)] dos sons da pasta de conversas, para o combobox da
+    janela de detalhes. Sem pasta, lista nada."""
+    pasta = config.pasta("sons", "conversas")
+    if not os.path.isdir(pasta):
+        return []
+    nomes = [nome for nome in sorted(os.listdir(pasta), key=str.lower)
+             if os.path.splitext(nome)[1].lower() in EXTENSOES
+             and os.path.isfile(os.path.join(pasta, nome))]
+    return [(nome, os.path.join(pasta, nome)) for nome in nomes]
+
+
 def listar():
     """[(id, nome)] dos pacotes que existem: os da casa e depois os
     personalizados, em ordem alfabetica."""

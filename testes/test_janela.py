@@ -7200,6 +7200,35 @@ def test_som_da_nova_segue_o_tipo_e_o_proprio_da_conversa(j, monkeypatch,
     pk.remover_som_da_conversa(j.cfg, conv.chave)
 
 
+def test_janela_do_som_da_conversa_tem_combobox(j, monkeypatch,
+                                                tmp_path):
+    from telezapp.interface import detalhes as jd
+
+    falas = []
+    sons = []
+    monkeypatch.setattr(jd, "texto_do_som_da_conversa",
+                        lambda cfg, conv: "Som das mensagens: o de nova.")
+    monkeypatch.setattr(jd, "bipe", lambda tipo, valor=None: sons.append(
+        (tipo, valor)))
+    monkeypatch.setattr(jd.pacotes_de_som, "arquivos_dos_sons_da_conversa",
+                        lambda: [("um.ogg", str(tmp_path / "um.ogg"))])
+    monkeypatch.setattr(jd.pacotes_de_som, "arquivo_da_conversa",
+                        lambda cfg, chave: str(tmp_path / "um.ogg"))
+    monkeypatch.setattr(jd.pacotes_de_som, "definir_som_da_conversa",
+                        lambda cfg, chave, origem: None)
+    monkeypatch.setattr(j.fala, "falar",
+                        lambda t, interromper=False: falas.append(t))
+    d = jd.DialogoSomDaConversa(None, j, j.indice[("t1", "20")])
+    assert d.cx_escolha is not None
+    d._mostrar()
+    assert d.cx_escolha.itens == ["um.ogg"]
+    assert d.cx_escolha.GetSelection() == 0
+    d.cx_escolha.SetSelection(0)
+    d._escolher()                        # escolhe pelo combobox
+    assert sons == [("nova", str(tmp_path / "um.ogg"))]   # toca o som
+    assert falas == []                    # quem fala e o NVDA, nao o programa
+
+
 def test_recompartilhar_status_pergunta_e_chama_o_provedor(j, monkeypatch,
                                                            tmp_path):
     feitos, ditas, respostas = [], [], [jm.wx.YES]
