@@ -516,9 +516,9 @@ class DialogoSomDaConversa(wx.Dialog):
         if not 0 <= i < len(self._arquivos_escolha):
             return
         self._escolher_pelo_caminho(
-            self._arquivos_escolha[i][1], anunciar=False)
+            self._arquivos_escolha[i][1], anunciar=False, focar=False)
 
-    def _escolher_pelo_caminho(self, origem, anunciar=True):
+    def _escolher_pelo_caminho(self, origem, anunciar=True, focar=True):
         try:
             pacotes_de_som.definir_som_da_conversa(self.jan.cfg,
                                                    self.conv.chave, origem)
@@ -538,7 +538,8 @@ class DialogoSomDaConversa(wx.Dialog):
                 "Som escolhido: %s." % os.path.basename(origem),
                 interromper=True)
         self.ouvir()
-        self.botoes["ouvir"].SetFocus()
+        if focar:
+            self.botoes["ouvir"].SetFocus()
 
     def remover(self):
         pacotes_de_som.remover_som_da_conversa(self.jan.cfg, self.conv.chave)
