@@ -492,7 +492,7 @@ class DialogoSomDaConversa(wx.Dialog):
 
     def _preencher_escolha(self):
         """Preenche o combobox com os sons do pacote do som (o tema)."""
-        pacote = self.jan.cfg.get("pacote_de_som") or "padrao"
+        pacote = pacotes_de_som.EstadoDeSons(self.jan.cfg).ativo
         self._arquivos_escolha = pacotes_de_som.arquivos_da_pasta(pacote)
         self.cx_escolha.Set([nome for nome, _ in self._arquivos_escolha])
         indice = -1
