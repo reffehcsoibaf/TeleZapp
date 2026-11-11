@@ -4869,3 +4869,82 @@ def test_buscar_canais_pagina_seguinte_repete_o_formato_que_valeu(amb):
     assert segunda.proximo == ""
     assert len(vistas) == 1                      # foi direto ao formato que valeu
     assert vistas[0][1]["input"]["start_cursor"] == "C1"
+
+
+def test_sinal_e_causa_da_queda():
+    assert wa.sinal_de_queda("Received stream end frame") == "servidor"
+    assert wa.sinal_de_queda("Got 503 stream error, assuming") == "servidor"
+    assert wa.sinal_de_queda("Keepalive timed out") == "keepalive"
+    assert wa.sinal_de_queda(
+        "Error reading from websocket: failed to get reader: failed to read "
+        "frame header: EOF") == "EOF"
+    assert wa.sinal_de_queda(
+        "Error reading from websocket: failed to read frame header: read "
+        "tcp [::1]:1->[::2]:2: wsarecv: reset") == "rede"
+    assert wa.sinal_de_queda("outra coisa") == ""
+    assert wa.causa_da_queda({"EOF", "servidor"}) == "servidor"
+    assert wa.causa_da_queda({"EOF"}) == "EOF"
+    assert wa.causa_da_queda(set()) == "desconhecida"
+
+
+def test_queda_registra_causa_e_duracao_no_log(tmp_path, caplog):
+    p, banco = _provedor_com_cliente(tmp_path, ClienteFalso())
+    p._sinais_de_queda = [(time.monotonic(), "servidor"),
+                          (time.monotonic(), "EOF")]
+    p._no_ar_desde = time.monotonic() - 100
+    with caplog.at_level(logging.INFO):
+        p._ao_desconectar(None, None)
+        p._ao_conectar(None, types.SimpleNamespace())
+    texto = " ".join(r.getMessage() for r in caplog.records)
+    assert "queda do WhatsApp" in texto and "servidor" in texto
+    assert "100 s no ar" in texto or "99 s no ar" in texto
+    assert p._queda_desde is None
+
+
+# ------------------------------------------------ mensagens agendadas (daqui)
+def test_agendada_do_whatsapp_fica_no_banco_e_pode_mudar_e_cancelar(tmp_path):
+    from datetime import datetime
+    p, banco = _provedor_com_cliente(tmp_path, ClienteFalso())
+    assert p.PODE_AGENDAR and p.AGENDA_LOCAL
+    quando = datetime(2026, 11, 12, 9, 0)
+    assert p.agendar_texto("5551@s.whatsapp.net", "bom dia", quando, "R1",
+                           [{"nome": "Ana", "id": "x"}]) == (True, "")
+    itens = p.agendadas("5551@s.whatsapp.net")
+    assert [(x["texto"], x["quando"], x["atrasada"]) for x in itens] == [
+        ("bom dia", quando, False)]
+    assert p.agendadas("outra@s.whatsapp.net") == []
+    novo = datetime(2026, 11, 13, 10, 30)
+    p.mudar_horario_agendada("5551@s.whatsapp.net", itens[0]["id"], novo)
+    assert p.agendadas("5551@s.whatsapp.net")[0]["quando"] == novo
+    p.cancelar_agendadas("5551@s.whatsapp.net", [itens[0]["id"]])
+    assert p.agendadas("5551@s.whatsapp.net") == []
+
+
+def test_agenda_do_whatsapp_envia_o_que_chegou_na_hora_e_separa_as_atrasadas(
+        tmp_path):
+    from datetime import datetime
+    p, banco = _provedor_com_cliente(tmp_path, ClienteFalso())
+    enviados = []
+    p.enviar_texto = lambda c, t, r="", mencoes=None: \
+        enviados.append((c, t, r, mencoes))
+    agora = datetime(2026, 11, 12, 9, 0, 30).timestamp()
+    p.agendar_texto("c1", "na hora", datetime(2026, 11, 12, 9, 0), "R1",
+                    [{"nome": "Ana", "id": "x"}])
+    p.agendar_texto("c2", "atrasada", datetime(2026, 11, 12, 7, 0))
+    p.agendar_texto("c3", "futura", datetime(2026, 11, 12, 18, 0))
+    prontas, atrasadas = p.vencidas_da_agenda(agora, 120)
+    assert [x["texto"] for x in prontas] == ["na hora"]
+    assert [x["texto"] for x in atrasadas] == ["atrasada"]
+    # a atrasada nao volta a ser perguntada
+    assert p.vencidas_da_agenda(agora, 120) == ([prontas[0]], [])
+    assert p.enviar_agendada(prontas[0]["id"]) is True
+    assert enviados == [("c1", "na hora", "R1", [{"nome": "Ana", "id": "x"}])]
+    assert p.enviar_agendada(prontas[0]["id"]) is False       # ja saiu
+    assert [x["texto"] for x in p.agendadas("c2")] == ["atrasada"]
+    assert p.agendadas("c2")[0]["atrasada"] is True
+    # mudar o horario da atrasada a devolve para a fila
+    p.mudar_horario_agendada("c2", p.agendadas("c2")[0]["id"],
+                             datetime(2026, 11, 13, 8, 0))
+    assert p.agendadas("c2")[0]["atrasada"] is False
+    p.descartar_agendadas([x["id"] for x in atrasadas])
+    assert p.agendadas("c2") == []

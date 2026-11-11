@@ -22,11 +22,13 @@ PAGINAS_VAZIAS_SEGUIDAS = 8
 
 
 class DialogoBuscaDeCanais(wx.Dialog):
-    def __init__(self, pai, contas, buscar, seguir, falar=None, cfg=None):
+    def __init__(self, pai, contas, buscar, seguir, falar=None, cfg=None,
+                 ver=None):
         """contas: [(id, nome)] das contas do WhatsApp; buscar(conta_id,
         texto, categoria, visao, cursor="") -> Pagina (bloqueia; levanta
         RuntimeError com o motivo); seguir(conta_id, canal) -> (ok, texto)
-        (bloqueia); falar(texto) fala sem esperar."""
+        (bloqueia); falar(texto) fala sem esperar; ver(conta_id, canal) ->
+        texto das ultimas publicacoes (bloqueia; levanta RuntimeError)."""
         super().__init__(pai, title="Buscar canais do WhatsApp",
                          size=(760, 600),
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
@@ -34,6 +36,7 @@ class DialogoBuscaDeCanais(wx.Dialog):
         self.buscar_fn, self.seguir_fn = buscar, seguir
         self.falar = falar or (lambda texto: None)
         self.cfg = cfg
+        self.ver_fn = ver
         self.canais = []
         self.proximo = ""             # cursor da pagina seguinte, se houver
         self.fim = False              # o WhatsApp disse que nao tem mais
@@ -82,15 +85,18 @@ class DialogoBuscaDeCanais(wx.Dialog):
         # os botoes de acao vem DEPOIS da lista: da lista, o Tab chega a eles
         botoes = wx.BoxSizer(wx.HORIZONTAL)
         self.b_seguir = wx.Button(self, wx.ID_ANY, "&Seguir o canal")
+        self.b_ver = wx.Button(self, wx.ID_ANY, "Ver &publicações")
         self.b_mais = wx.Button(self, wx.ID_ANY, "Ver &mais")
         self.b_link = wx.Button(self, wx.ID_ANY, "Copiar o &link")
         self.b_fechar = wx.Button(self, wx.ID_CANCEL, "&Fechar")
-        for b in (self.b_seguir, self.b_mais, self.b_link, self.b_fechar):
+        for b in (self.b_seguir, self.b_ver, self.b_mais, self.b_link,
+                  self.b_fechar):
             botoes.Add(b, 0, wx.RIGHT, 6)
         lay.Add(botoes, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
         self.SetSizer(lay)
         self.b_buscar.SetDefault()
         self.b_seguir.Enable(False)
+        self.b_ver.Enable(False)
         self.b_mais.Enable(False)
         self.b_link.Enable(False)
 
@@ -99,6 +105,7 @@ class DialogoBuscaDeCanais(wx.Dialog):
         self.termo.Bind(wx.EVT_TEXT_ENTER, lambda e: self.buscar())
         self.b_seguir.Bind(wx.EVT_BUTTON, lambda e: self._seguir())
         self.b_link.Bind(wx.EVT_BUTTON, lambda e: self._copiar_link())
+        self.b_ver.Bind(wx.EVT_BUTTON, lambda e: self._ver_publicacoes())
         self.lista.Bind(wx.EVT_LISTBOX, lambda e: self._ajustar_botoes())
         self.lista.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self._seguir())
         self.lista.Bind(wx.EVT_CHAR_HOOK, self._tecla_da_lista)
@@ -230,6 +237,8 @@ class DialogoBuscaDeCanais(wx.Dialog):
         self.b_seguir.Enable(atual is not None and not atual.seguindo
                              and not self.ocupada)
         self.b_link.Enable(atual is not None and bool(atual.link))
+        self.b_ver.Enable(atual is not None and self.ver_fn is not None
+                          and not self.ocupada)
         # sempre ligado depois de uma busca (assim o leitor de tela o acha);
         # sem cursor ou no fim, apertar explica por que nao ha mais
         self.b_mais.Enable(self._pedido is not None and not self.fim
@@ -301,3 +310,47 @@ class DialogoBuscaDeCanais(wx.Dialog):
             self.falar("Link copiado.")
         else:
             self.falar("Não consegui usar a área de transferência.")
+
+    def _ver_publicacoes(self):
+        c = self._atual()
+        if c is None:
+            self.falar("Escolha um canal.")
+            return
+        if self.ocupada:
+            self.falar("Espere a busca terminar.")
+            return
+        self.ocupada = True
+        self._ajustar_botoes()
+        self.falar("Lendo as publicações.")
+        conta_id = self._conta_escolhida()
+
+        def trabalho():
+            try:
+                texto, erro = self.ver_fn(conta_id, c), ""
+            except RuntimeError as e:
+                texto, erro = "", str(e)
+            except Exception:
+                texto, erro = "", "Algo deu errado ao ler as publicações."
+            wx.CallAfter(self._publicacoes_prontas, c, texto, erro)
+        threading.Thread(target=trabalho, daemon=True,
+                         name="ver-canal").start()
+
+    def _publicacoes_prontas(self, canal, texto, erro):
+        if not self:
+            return
+        self.ocupada = False
+        self._ajustar_botoes()
+        if erro:
+            self.falar(erro)
+            return
+        self.falar("Publicações prontas.")
+        indice = self.lista.GetSelection()
+        dialogos.mostrar_texto(
+            self, "Publicações de %s" % (canal.nome or "canal"), texto,
+            "Publicações do canal")
+        # Esc fecha a leitura e volta para o mesmo canal da lista de
+        # resultados, como na busca global do Telegram
+        if self and indice >= 0:
+            self.lista.SetSelection(indice)
+            self.lista.SetFocus()
+            self._ajustar_botoes()

@@ -750,6 +750,9 @@ class ProvedorTelegram(Provedor):
         self._loop = None
         self._thread = None
         self._entidades = {}                    # conversa_id -> InputPeer
+        # conversa_id -> (mencoes, reacoes, marcada como nao lida) por ler no
+        # Telegram, que a contagem de nao lidas nao mostra
+        self._pendencias = {}
         self._observada = None                  # conversa com a presenca aberta
         self._historias_em = 0.0                # ultima busca de historias
         self._conversas = {}                    # conversa_id -> Conversa
@@ -1327,6 +1330,10 @@ class ProvedorTelegram(Provedor):
                     citacoes.get(cid, 0),
                     int(getattr(d.dialog, "unread_mentions_count", 0) or 0))
                 self._conversas[cid] = c
+                self._pendencias[cid] = (
+                    int(getattr(d.dialog, "unread_mentions_count", 0) or 0),
+                    int(getattr(d.dialog, "unread_reactions_count", 0) or 0),
+                    bool(getattr(d.dialog, "unread_mark", False)))
                 if getattr(getattr(d, "entity", None), "forum", False):
                     topicos = await self._conversas_de_topicos(d, c)
                     if topicos:
@@ -2689,8 +2696,10 @@ class ProvedorTelegram(Provedor):
         try:
             ent = await self.cliente.get_entity(usuario)
         except Exception as e:
-            log.info("não achei um @usuario mencionado (%s)",
-                     type(e).__name__)
+            log.info("não achei um @usuario mencionado (%s; %d letras, "
+                     "só ASCII: %s, termina em bot: %s)",
+                     type(e).__name__, len(usuario), usuario.isascii(),
+                     usuario.lower().endswith("bot"))
             return None
         nome = nome_de(ent)
         if nome == "@" + usuario:
@@ -3202,6 +3211,91 @@ class ProvedorTelegram(Provedor):
     def enviar_texto(self, conversa_id, texto, resposta_a="", mencoes=None):
         self._agendar(self._enviar(conversa_id, texto, resposta_a, mencoes))
 
+    # ------------------------------------------------ mensagens agendadas
+    PODE_AGENDAR = True
+
+    def agendar_texto(self, conversa_id, texto, quando, resposta_a="",
+                      mencoes=None):
+        return self._sincrono(
+            self._agendar_texto(conversa_id, texto, quando, resposta_a,
+                                mencoes), 30) or (
+            False, "O Telegram não respondeu. A mensagem não foi agendada.")
+
+    async def _agendar_texto(self, conversa_id, texto, quando, resposta_a,
+                             mencoes):
+        try:
+            ent = await self._entidade(conversa_id)
+            enviar, entidades = await self._com_mencoes(texto, mencoes)
+            await self.cliente.send_message(
+                ent, enviar, schedule=quando.astimezone(),
+                reply_to=self._resposta_em(conversa_id, resposta_a),
+                link_preview=previa_links.LIGADAS["enviar"],
+                **({"formatting_entities": entidades} if entidades else {}))
+        except Exception as e:
+            log.warning("agendar falhou: %s", type(e).__name__)
+            return False, _motivo(e)
+        log.info("mensagem agendada (%d caracteres)", len(texto))
+        return True, ""
+
+    def agendadas(self, conversa_id):
+        resposta = self._sincrono(self._agendadas(conversa_id), 30)
+        if resposta is None:
+            raise RuntimeError("O Telegram não respondeu.")
+        return resposta
+
+    async def _agendadas(self, conversa_id):
+        from telethon.tl import functions
+        ent = await self._entidade(conversa_id)
+        r = await self.cliente(functions.messages.GetScheduledHistoryRequest(
+            peer=ent, hash=0))
+        itens = []
+        for msg in getattr(r, "messages", None) or []:
+            data = getattr(msg, "date", None)
+            if data is None:
+                continue
+            texto = getattr(msg, "message", "") or ""
+            if not texto and getattr(msg, "media", None) is not None:
+                texto = "(mídia)"
+            itens.append({"id": int(msg.id), "texto": texto,
+                          "quando": data.astimezone().replace(tzinfo=None)})
+        itens.sort(key=lambda x: (x["quando"], x["id"]))
+        log.info("mensagens agendadas da conversa: %d", len(itens))
+        return itens
+
+    def cancelar_agendadas(self, conversa_id, ids):
+        return self._sincrono(self._cancelar_agendadas(conversa_id, ids),
+                              30) or (False, "O Telegram não respondeu.")
+
+    async def _cancelar_agendadas(self, conversa_id, ids):
+        from telethon.tl import functions
+        try:
+            ent = await self._entidade(conversa_id)
+            await self.cliente(functions.messages.DeleteScheduledMessagesRequest(
+                peer=ent,
+                id=[int(i) for i in ids]))
+        except Exception as e:
+            log.warning("cancelar agendada falhou: %s", type(e).__name__)
+            return False, _motivo(e)
+        return True, ""
+
+    def mudar_horario_agendada(self, conversa_id, id_, quando):
+        return self._sincrono(
+            self._mudar_horario_agendada(conversa_id, id_, quando), 30) or (
+            False, "O Telegram não respondeu.")
+
+    async def _mudar_horario_agendada(self, conversa_id, id_, quando):
+        from telethon.tl import functions
+        try:
+            ent = await self._entidade(conversa_id)
+            await self.cliente(functions.messages.EditMessageRequest(
+                peer=ent, id=int(id_),
+                schedule_date=quando.astimezone()))
+        except Exception as e:
+            log.warning("mudar o horário da agendada falhou: %s",
+                        type(e).__name__)
+            return False, _motivo(e)
+        return True, ""
+
     async def _com_mencoes(self, texto, mencoes):
         """(texto, entidades): quem tem @usuario vira '@usuario' no texto; os
         demais viram mencao por entidade, que o Telegram mostra como o nome."""
@@ -3334,26 +3428,172 @@ class ProvedorTelegram(Provedor):
     def marcar_como_lida(self, conversa_id):
         self._agendar(self._marcar_lida(conversa_id))
 
+    def precisa_de_leitura(self, conversa_id):
+        """No Telegram quem manda e o servidor: a contagem daqui pode estar
+        defasada (canal, mensagem que chegou por outro caminho). Abrir a
+        conversa sempre confirma a leitura; e um pedido barato."""
+        return not conversa_id.startswith(PREFIXO_STATUS)
+
     async def _marcar_lida(self, conversa_id):
         if conversa_id.startswith(PREFIXO_STATUS):
             await self._ver_historias(conversa_id)
             return
         ent = await self._entidade(conversa_id)
         topico = separar_topico(conversa_id)[1]
+        conv = self._conversas.get(conversa_id)
+        log.info("pedido de leitura ao Telegram: %s, %d não lidas aqui",
+                 conv.tipo if conv is not None else "conversa desconhecida",
+                 conv.nao_lidas if conv is not None else 0)
         if topico:
             # grupo com topicos: le-se um topico por vez
-            ultima = [x.id for x in self.banco.mensagens(
-                self.conta.id, conversa_id, 1) if x.id.isdigit()]
-            if ultima:
-                from telethon.tl import functions
-                await self.cliente(functions.messages.ReadDiscussionRequest(
-                    peer=ent, msg_id=topico, read_max_id=int(ultima[-1])))
+            await self._ler_topicos(ent, conversa_id, [topico])
+        elif self._e_grupo_com_topicos(conversa_id):
+            # o grupo inteiro (Marcar como lida na lista): cada topico com
+            # pendencia, senao o celular continua com os topicos nao lidos
+            await self._ler_topicos(ent, conversa_id, None)
+            if self._pendencias.pop(conversa_id, (0, 0, False))[2]:
+                from telethon.tl import functions, types as T
+                await self.cliente(functions.messages.MarkDialogUnreadRequest(
+                    peer=T.InputDialogPeer(ent), unread=False))
         else:
-            await self.cliente.send_read_acknowledge(ent)
+            mencoes, reacoes, marcada = self._pendencias.pop(
+                conversa_id, (0, 0, False))
+            # max_id=0 ("tudo") nem sempre pega em canal; os aplicativos
+            # oficiais mandam o numero da ultima mensagem do servidor
+            topo = await self._ultima_do_servidor(ent)
+            await self.cliente.send_read_acknowledge(
+                ent, max_id=topo, clear_mentions=True, clear_reactions=True)
+            if marcada:
+                # o ponto azul de "marcada como nao lida" so some com isto
+                from telethon.tl import functions, types as T
+                await self.cliente(functions.messages.MarkDialogUnreadRequest(
+                    peer=T.InputDialogPeer(ent), unread=False))
+            log.info("leitura confirmada ao Telegram (até a mensagem %d; "
+                     "menções %d, reações %d, marcada como não lida: %s)",
+                     topo, mencoes, reacoes, "sim" if marcada else "não")
+            await self._conferir_leitura(ent)
         conv = self._conversas.get(conversa_id)
         if conv is not None:
             conv.nao_lidas = 0
         self.banco.atualizar_conversa(self.conta.id, conversa_id, nao_lidas=0)
+
+    def _e_grupo_com_topicos(self, conversa_id):
+        prefixo = conversa_id + SEPARADOR_TOPICO
+        return any(c.startswith(prefixo) for c in list(self._conversas))
+
+    async def _topicos_do_servidor(self, ent, topicos):
+        """Topicos (ForumTopic) do servidor: os pedidos ou, com None, os
+        primeiros 100 do grupo."""
+        from telethon.tl import functions
+        if topicos is None:
+            r = await self.cliente(functions.messages.GetForumTopicsRequest(
+                peer=ent, offset_date=None, offset_id=0, offset_topic=0,
+                limit=100))
+        else:
+            r = await self.cliente(functions.messages.GetForumTopicsByIDRequest(
+                peer=ent, topics=list(topicos)))
+        return [t for t in getattr(r, "topics", []) if hasattr(t, "title")]
+
+    async def _ler_topicos(self, ent, conversa_id, topicos):
+        """Le topicos de um grupo com topicos ate a ultima mensagem de cada
+        um no servidor, com mencoes e reacoes. topicos=None: todos os que
+        tem algo pendente."""
+        from telethon.tl import functions
+        chat = separar_topico(conversa_id)[0]
+        try:
+            achados = await self._topicos_do_servidor(ent, topicos)
+        except Exception as e:
+            log.info("tópicos para a leitura: %s", type(e).__name__)
+            achados = []
+        if topicos is not None and not achados:
+            # sem resposta do servidor: vale a ultima guardada aqui
+            ultima = [x.id for x in self.banco.mensagens(
+                self.conta.id, conversa_id, 1) if x.id.isdigit()]
+            if ultima:
+                await self.cliente(functions.messages.ReadDiscussionRequest(
+                    peer=ent, msg_id=topicos[0],
+                    read_max_id=int(ultima[-1])))
+            log.info("leitura de tópico sem dados do servidor (última "
+                     "guardada: %s)", ultima[-1] if ultima else "nenhuma")
+            return
+        lidos = 0
+        for t in achados:
+            pendente = (t.unread_count or t.unread_mentions_count or
+                        t.unread_reactions_count)
+            if topicos is None and not pendente:
+                continue
+            await self.cliente(functions.messages.ReadDiscussionRequest(
+                peer=ent, msg_id=t.id, read_max_id=t.top_message))
+            if t.unread_mentions_count:
+                await self.cliente(functions.messages.ReadMentionsRequest(
+                    peer=ent, top_msg_id=t.id))
+            if t.unread_reactions_count:
+                await self.cliente(functions.messages.ReadReactionsRequest(
+                    peer=ent, top_msg_id=t.id))
+            lidos += 1
+            cid = id_do_topico(chat, t.id)
+            conv = self._conversas.get(cid)
+            if conv is not None:
+                conv.nao_lidas = 0
+            self.banco.atualizar_conversa(self.conta.id, cid, nao_lidas=0)
+        log.info("leitura de tópicos confirmada ao Telegram (%d de %d)",
+                 lidos, len(achados))
+        await self._conferir_topicos(ent, chat, [t.id for t in achados if
+                                                 topicos is not None or
+                                                 t.unread_count])
+
+    async def _conferir_topicos(self, ent, chat, ids):
+        """Pergunta ao servidor como ficaram os topicos lidos. O Geral (1)
+        que nao pegou com a leitura de topico e lido como o grupo: e o que
+        ele e por baixo."""
+        if not ids:
+            return
+        try:
+            depois = await self._topicos_do_servidor(ent, ids)
+        except Exception as e:
+            log.info("conferência dos tópicos: %s", type(e).__name__)
+            return
+        for t in depois:
+            if not t.unread_count:
+                continue
+            log.warning("tópico %d ainda com %d não lidas no servidor (lido "
+                        "até %d, última %d)", t.id, t.unread_count,
+                        t.read_inbox_max_id, t.top_message)
+            if t.id == TOPICO_GERAL:
+                try:
+                    await self.cliente.send_read_acknowledge(
+                        ent, max_id=t.top_message)
+                    log.info("tópico Geral lido como o grupo")
+                except Exception as e:
+                    log.info("leitura do Geral como o grupo: %s",
+                             type(e).__name__)
+
+    async def _ultima_do_servidor(self, ent):
+        """Numero da mensagem mais nova da conversa no servidor (0 se nao
+        der para saber: ai vale o "tudo" do Telegram)."""
+        try:
+            msgs = await self.cliente.get_messages(ent, limit=1)
+        except Exception as e:
+            log.info("última mensagem para a leitura: %s", type(e).__name__)
+            return 0
+        return max((getattr(x, "id", 0) or 0 for x in msgs or []), default=0)
+
+    async def _conferir_leitura(self, ent):
+        """Pergunta ao servidor como ficou a conversa depois de ler, so para
+        o log: se ainda ha nao lidas, a leitura nao pegou."""
+        try:
+            from telethon.tl import functions, types as T
+            r = await self.cliente(functions.messages.GetPeerDialogsRequest(
+                peers=[T.InputDialogPeer(ent)]))
+            d = r.dialogs[0]
+        except Exception as e:
+            log.info("conferência da leitura: %s", type(e).__name__)
+            return
+        nivel = log.info if not d.unread_count else log.warning
+        nivel("servidor depois da leitura: %d não lidas, lida até %d, "
+              "última %d, menções %d, marcada como não lida: %s",
+              d.unread_count, d.read_inbox_max_id, d.top_message,
+              d.unread_mentions_count, "sim" if d.unread_mark else "não")
 
     # ------------------------------------------------- chamadas de voz
     @property

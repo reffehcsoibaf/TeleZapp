@@ -1087,6 +1087,30 @@ COLECAO_DO_TIPO = {1: "critical_block", 2: "critical_unblock_low",
                    3: "regular_low", 4: "regular_high", 5: "regular"}
 
 
+def sinal_de_queda(texto):
+    """O que um aviso do whatsmeow diz sobre uma queda da conexao: "servidor"
+    (o WhatsApp mandou fechar: fim do stream ou 503), "keepalive" (o ping nao
+    foi respondido), "rede" (conexao reiniciada, "read tcp"), "EOF" (fechada,
+    sem dizer por quem) ou "" se o aviso nao e de queda."""
+    if "Received stream end frame" in texto or "503 stream error" in texto:
+        return "servidor"
+    if "Keepalive timed out" in texto:
+        return "keepalive"
+    if "Error reading from websocket" in texto:
+        if "read tcp" in texto or "reset" in texto or "timeout" in texto:
+            return "rede"
+        return "EOF"
+    return ""
+
+
+def causa_da_queda(sinais):
+    """Resume os sinais recentes numa causa so, do mais ao menos revelador."""
+    for ordem in ("servidor", "keepalive", "rede", "EOF"):
+        if ordem in sinais:
+            return ordem
+    return "desconhecida"
+
+
 def colecao_fora_de_sincronia(texto):
     """Nome da colecao do estado do app que o whatsmeow nao conseguiu ler
     numa notificacao ("mismatching LTHash"), ou None se o texto e outro."""
@@ -1246,6 +1270,10 @@ class ProvedorWhatsApp(Provedor):
         self._observadas = {}       # JID da conversa observada -> conversa_id
         self._presenca_cid = None   # a conversa aberta com presenca
         self._ouvinte = None
+        self._ouvinte_quedas = None
+        self._sinais_de_queda = []   # (monotonic, sinal) dos avisos recentes
+        self._queda_desde = None     # monotonic do inicio da queda
+        self._no_ar_desde = None     # monotonic do ultimo conectado
         self._ultimo_reparo = {}
         self._nao_reconectar = False  # banida ou aberta em outro lugar
         self._lid_para_numero = {}  # do pacote de historico
@@ -1465,6 +1493,8 @@ class ProvedorWhatsApp(Provedor):
             self.cliente.event.qr(self._vivo(self._ao_qr))
             if self._ouvinte is None:
                 self._ouvir_falhas_do_pareamento()
+            if self._ouvinte_quedas is None:
+                self._ouvir_quedas()
             self._estado(ev.CONECTANDO)
             self._inicio = time.perf_counter()
             self.cliente.connect()   # bloqueia ate parar()
@@ -1526,6 +1556,10 @@ class ProvedorWhatsApp(Provedor):
             logging.getLogger("whatsmeow.Client").removeHandler(
                 self._ouvinte)
             self._ouvinte = None
+        if self._ouvinte_quedas is not None:
+            logging.getLogger("whatsmeow.Client").removeHandler(
+                self._ouvinte_quedas)
+            self._ouvinte_quedas = None
         if self.cliente is not None:
             # so o stop() encerra o connect(), que roda numa thread do
             # neonize que nao e "daemon" e seguraria o fechamento do app
@@ -1537,6 +1571,24 @@ class ProvedorWhatsApp(Provedor):
             t.join(timeout=6)
 
     # ---------------------------------------------------------- pareamento
+    def _ouvir_quedas(self):
+        """Guarda os avisos do whatsmeow que explicam uma queda da conexao
+        (chegam um instante antes do evento de desconectada), para o registro
+        dizer a causa provavel."""
+        provedor = self
+
+        class Ouvinte(logging.Handler):
+            def emit(self, registro):
+                sinal = sinal_de_queda(registro.getMessage())
+                if sinal:
+                    agora = time.monotonic()
+                    lista = [x for x in provedor._sinais_de_queda
+                             if agora - x[0] < 30]
+                    lista.append((agora, sinal))
+                    provedor._sinais_de_queda = lista
+        self._ouvinte_quedas = Ouvinte(logging.WARNING)
+        logging.getLogger("whatsmeow.Client").addHandler(self._ouvinte_quedas)
+
     def _ouvir_falhas_do_pareamento(self):
         """O whatsmeow so conta no registro que o pareamento falhou; este
         ouvinte transforma esses dois avisos num evento, para a janela
@@ -1613,6 +1665,15 @@ class ProvedorWhatsApp(Provedor):
     def _ao_conectar(self, cliente, e):
         log.info("conectado em %.2fs", time.perf_counter() - getattr(
             self, "_inicio", time.perf_counter()))
+        agora = time.monotonic()
+        if self._queda_desde is not None:
+            log.info("queda do WhatsApp: %.1f s fora; causa provável: %s; "
+                     "a conexão tinha ficado %s no ar",
+                     agora - self._queda_desde, self._causa_da_queda,
+                     "%d s" % self._tempo_no_ar
+                     if self._tempo_no_ar is not None else "um tempo ignorado")
+            self._queda_desde = None
+        self._no_ar_desde = agora
         self._conectada = True
         self._pareando = False
         self._disponivel = False
@@ -1940,6 +2001,13 @@ class ProvedorWhatsApp(Provedor):
             return
         self._conectada = False
         self._fila_entregue = False
+        if self._queda_desde is None:
+            self._queda_desde = time.monotonic()
+            self._causa_da_queda = causa_da_queda(
+                {x[1] for x in self._sinais_de_queda
+                 if self._queda_desde - x[0] < 15})
+            self._tempo_no_ar = (self._queda_desde - self._no_ar_desde
+                                 if self._no_ar_desde else None)
         self._avisar_sincronia_interrompida()
         self._estado(ev.DESCONECTADA, "reconectando")
 
@@ -2774,6 +2842,33 @@ class ProvedorWhatsApp(Provedor):
                      if isinstance(corpo, dict) else "")
             return cw.Pagina(canais, proximo)
         raise ultimo or RuntimeError("A busca de canais não deu resultado.")
+
+    def publicacoes_do_canal(self, canal, quantas=15):
+        """As ultimas publicacoes de um canal, mesmo sem segui-lo:
+        [(id no servidor, tipo, texto, visualizacoes)] da mais nova para a
+        mais antiga. Levanta RuntimeError com o motivo."""
+        from telezapp.nucleo import canais_whatsapp as cw
+        if self.cliente is None or not self._conectada:
+            raise RuntimeError("Sem conexão com o WhatsApp.")
+        try:
+            chat = _jid_obj(*jid_de_texto(canal.id))
+            lidas = self.cliente.get_newsletter_messages(chat, quantas, 0)
+        except Exception as e:
+            log.warning("ver as publicações do canal falhou: %s: %s",
+                        type(e).__name__, str(e)[:160])
+            raise RuntimeError(
+                "O WhatsApp não mostrou as publicações deste canal (%s)." %
+                type(e).__name__)
+        itens = []
+        for n in lidas:
+            tipo, texto = cw.resumo_da_publicacao(n.Message)
+            itens.append((int(n.MessageServerID), tipo, texto,
+                          int(n.ViewsCount)))
+        itens.sort(key=lambda x: x[0], reverse=True)
+        log.info("publicações do canal: %d lidas (pedi %d); tipos: %s",
+                 len(itens), quantas,
+                 ", ".join(sorted({x[1] for x in itens})) or "nenhum")
+        return itens
 
     def seguir_canal_achado(self, canal):
         if self.cliente is None or not self._conectada:
@@ -4741,6 +4836,66 @@ class ProvedorWhatsApp(Provedor):
                 self.conta.id, cid, x, "fixada"))
 
     PODE_ENVIAR_CONTATOS = True
+
+    # -------------------------------------------- mensagens agendadas
+    # O WhatsApp nao guarda mensagem agendada: o TeleZapp guarda no banco e
+    # envia na hora marcada, com o programa aberto e a conta conectada.
+    PODE_AGENDAR = True
+    AGENDA_LOCAL = True
+
+    def agendar_texto(self, conversa_id, texto, quando, resposta_a="",
+                      mencoes=None):
+        self.banco.guardar_agendada(
+            self.conta.id, conversa_id, texto, quando.timestamp(),
+            resposta_a or "", json.dumps(mencoes) if mencoes else "")
+        log.info("mensagem agendada para enviar daqui (%d caracteres)",
+                 len(texto))
+        return True, ""
+
+    def agendadas(self, conversa_id):
+        from datetime import datetime
+        return [{"id": x["id"], "texto": x["texto"], "atrasada": x["atrasada"],
+                 "quando": datetime.fromtimestamp(x["quando"])}
+                for x in self.banco.agendadas(self.conta.id, conversa_id)]
+
+    def cancelar_agendadas(self, conversa_id, ids):
+        self.banco.tirar_agendadas(ids)
+        return True, ""
+
+    def mudar_horario_agendada(self, conversa_id, id_, quando):
+        self.banco.mudar_agendada(id_, quando.timestamp())
+        return True, ""
+
+    def vencidas_da_agenda(self, agora, tolerancia):
+        """(prontas, atrasadas) das que chegaram na hora. As que passaram da
+        hora por mais que `tolerancia` segundos (o programa estava fechado ou
+        sem conexao) ficam marcadas como atrasadas: a pessoa decide."""
+        prontas, atrasadas = [], []
+        for x in self.banco.agendadas_vencidas(self.conta.id, agora):
+            (prontas if agora - x["quando"] <= tolerancia
+             else atrasadas).append(x)
+        if atrasadas:
+            self.banco.marcar_agendadas_atrasadas([x["id"] for x in atrasadas])
+        return prontas, atrasadas
+
+    def enviar_agendada(self, id_):
+        """Envia a agendada agora, pelo caminho de um texto comum, e a tira
+        da agenda. False se ela ja nao existe."""
+        x = self.banco.agendada(id_)
+        if x is None:
+            return False
+        try:
+            mencoes = json.loads(x["mencoes"]) if x["mencoes"] else None
+        except ValueError:
+            mencoes = None
+        self.banco.tirar_agendadas([id_])
+        self.enviar_texto(x["conversa_id"], x["texto"], x["resposta_a"],
+                          mencoes)
+        log.info("mensagem agendada enviada (%d caracteres)", len(x["texto"]))
+        return True
+
+    def descartar_agendadas(self, ids):
+        self.banco.tirar_agendadas(ids)
 
     def enviar_contatos(self, conversa_id, contatos):
         contatos = list(contatos)

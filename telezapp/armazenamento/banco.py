@@ -149,6 +149,19 @@ CREATE TABLE IF NOT EXISTS contatos (
     telefone TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (conta_id, id)
 );
+-- Mensagens agendadas que o TeleZapp mesmo envia na hora (WhatsApp, que nao
+-- guarda mensagem agendada). `atrasada`: passou da hora sem o TeleZapp
+-- poder enviar; a pessoa decide o que fazer.
+CREATE TABLE IF NOT EXISTS agendadas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conta_id TEXT NOT NULL,
+    conversa_id TEXT NOT NULL,
+    texto TEXT NOT NULL,
+    quando REAL NOT NULL,
+    resposta_a TEXT NOT NULL DEFAULT '',
+    mencoes TEXT NOT NULL DEFAULT '',
+    atrasada INTEGER NOT NULL DEFAULT 0
+);
 -- Estrutura original das mensagens, so com o modo de depuracao ligado.
 CREATE TABLE IF NOT EXISTS depuracao (
     conta_id TEXT NOT NULL,
@@ -339,7 +352,7 @@ class Banco:
                               (conta_id,))
             for tabela in ("mensagens", "recibos", "status", "midias",
                            "fichas", "posicoes", "contatos", "limpas", "apagadas",
-                           "apagar_pendente"):
+                           "apagar_pendente", "agendadas"):
                 self._con.execute(
                     "DELETE FROM %s WHERE conta_id=?" % tabela, (conta_id,))
             self._agenda = None
@@ -920,6 +933,69 @@ class Banco:
                 "DELETE FROM apagar_pendente WHERE conta_id=? AND "
                 "conversa_id=? AND mensagem_id=?",
                 (conta_id, conversa_id, mensagem_id))
+
+    # ----------------------------------------------- mensagens agendadas
+    def guardar_agendada(self, conta_id, conversa_id, texto, quando,
+                         resposta_a="", mencoes=""):
+        """Guarda uma mensagem para o TeleZapp enviar em `quando` (epoch);
+        devolve o numero dela."""
+        with self._trava, self._con:
+            return self._con.execute(
+                "INSERT INTO agendadas (conta_id, conversa_id, texto, quando,"
+                " resposta_a, mencoes) VALUES (?,?,?,?,?,?)",
+                (conta_id, conversa_id, texto, quando, resposta_a or "",
+                 mencoes or "")).lastrowid
+
+    def _agendada(self, linha):
+        return {"id": linha[0], "conta_id": linha[1], "conversa_id": linha[2],
+                "texto": linha[3], "quando": linha[4], "resposta_a": linha[5],
+                "mencoes": linha[6], "atrasada": bool(linha[7])}
+
+    _COLUNAS_AGENDADA = ("id, conta_id, conversa_id, texto, quando, "
+                         "resposta_a, mencoes, atrasada")
+
+    def agendadas(self, conta_id, conversa_id=None):
+        """As agendadas da conta (ou so de uma conversa), da mais proxima."""
+        sql = "SELECT %s FROM agendadas WHERE conta_id=?" %             self._COLUNAS_AGENDADA
+        args = [conta_id]
+        if conversa_id is not None:
+            sql += " AND conversa_id=?"
+            args.append(conversa_id)
+        with self._trava:
+            return [self._agendada(x) for x in self._con.execute(
+                sql + " ORDER BY quando, id", args)]
+
+    def agendada(self, id_):
+        with self._trava:
+            linha = self._con.execute(
+                "SELECT %s FROM agendadas WHERE id=?" % self._COLUNAS_AGENDADA,
+                (id_,)).fetchone()
+        return self._agendada(linha) if linha else None
+
+    def agendadas_vencidas(self, conta_id, ate):
+        """As que ainda nao foram tratadas e ja passaram de `ate`."""
+        with self._trava:
+            return [self._agendada(x) for x in self._con.execute(
+                "SELECT %s FROM agendadas WHERE conta_id=? AND atrasada=0 "
+                "AND quando<=? ORDER BY quando, id" % self._COLUNAS_AGENDADA,
+                (conta_id, ate))]
+
+    def marcar_agendadas_atrasadas(self, ids):
+        with self._trava, self._con:
+            self._con.executemany(
+                "UPDATE agendadas SET atrasada=1 WHERE id=?",
+                [(i,) for i in ids])
+
+    def mudar_agendada(self, id_, quando):
+        with self._trava, self._con:
+            self._con.execute(
+                "UPDATE agendadas SET quando=?, atrasada=0 WHERE id=?",
+                (quando, id_))
+
+    def tirar_agendadas(self, ids):
+        with self._trava, self._con:
+            self._con.executemany("DELETE FROM agendadas WHERE id=?",
+                                  [(i,) for i in ids])
 
     def esquecer_limpezas(self, conta_id):
         """Novo pareamento: o que foi limpo ou apagado pode voltar."""

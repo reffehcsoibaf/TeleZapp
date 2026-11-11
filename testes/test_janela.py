@@ -2073,8 +2073,13 @@ def test_voz_tocada_passa_a_dizer_ouvida_na_lista_e_fica_guardada(
     assert antes and "ouvida" not in antes[0]
     selecionar(j, "5")
     j._char_hook(Tecla(wx_falso.WXK_RETURN))        # toca
+    # a linha em foco nao muda enquanto a selecao esta nela: o NVDA leria a
+    # linha de novo por cima do audio
+    durante = [t for t in j.lista_msgs.itens if "mensagem de voz" in t]
+    assert "ouvida" not in durante[0] and j._texto_adiado
+    j._ao_selecionar(None)                           # a selecao saiu
     depois = [t for t in j.lista_msgs.itens if "mensagem de voz" in t]
-    assert "ouvida" in depois[0]
+    assert "ouvida" in depois[0] and not j._texto_adiado
     guardada = j.banco.mensagem("t1", "10", "5")
     assert m.extras_de(guardada)["ouvida"] is True
     # tocar de novo nao reescreve nada nem muda a linha
@@ -3559,14 +3564,45 @@ def test_responder_em_particular_so_em_grupo_e_de_outra_pessoa(j):
     assert not j._pode_responder_em_particular(x)
 
 
-def test_sons_de_conta_caiu_e_voltou(j, monkeypatch):
+def test_queda_curta_nao_toca_nem_fala(j, monkeypatch):
+    sons, ditas = [], []
+    monkeypatch.setattr(jm, "bipe", lambda tipo, valor=None, servico="": sons.append(tipo))
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.b.publicar(ev.EstadoConta("t1", ev.CONECTADA))
+    assert sons == []                                  # conectar nao e voltar
+    ditas.clear()
+    j.b.publicar(ev.EstadoConta("t1", ev.DESCONECTADA))
+    j.b.publicar(ev.EstadoConta("t1", ev.CONECTADA))   # voltou antes do prazo
+    assert sons == [] and ditas == []
+    # o aviso agendado da queda que ja acabou nao faz nada
+    j._avisar_queda_longa("t1", j._quedas["t1"])
+    assert sons == []
+
+
+def test_queda_longa_toca_desconectada_e_reconectada(j, monkeypatch):
+    sons, ditas = [], []
+    monkeypatch.setattr(jm, "bipe", lambda tipo, valor=None, servico="": sons.append(tipo))
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.b.publicar(ev.EstadoConta("t1", ev.CONECTADA))
+    ditas.clear()
+    j.b.publicar(ev.EstadoConta("t1", ev.DESCONECTADA))
+    j._avisar_queda_longa("t1", j._quedas["t1"])       # passou o prazo
+    assert sons == ["desconectada"]
+    j.b.publicar(ev.EstadoConta("t1", ev.CONECTADA))
+    assert sons == ["desconectada", "reconectada"]
+    assert any("conectado" in t for t in ditas)
+
+
+def test_aviso_de_queda_antiga_nao_vale_para_a_queda_nova(j, monkeypatch):
     sons = []
     monkeypatch.setattr(jm, "bipe", lambda tipo, valor=None, servico="": sons.append(tipo))
     j.b.publicar(ev.EstadoConta("t1", ev.CONECTADA))
-    assert sons == []                                  # conectar nao e voltar
     j.b.publicar(ev.EstadoConta("t1", ev.DESCONECTADA))
+    primeira = j._quedas["t1"]
     j.b.publicar(ev.EstadoConta("t1", ev.CONECTADA))
-    assert sons == ["desconectada", "reconectada"]
+    j.b.publicar(ev.EstadoConta("t1", ev.DESCONECTADA))   # segunda queda
+    j._avisar_queda_longa("t1", primeira)                 # prazo da primeira
+    assert sons == []
 
 
 def test_som_da_mensagem_nova_depende_de_onde_ela_chegou(j, monkeypatch):
@@ -8476,8 +8512,9 @@ def test_buscar_canais_abre_a_janela_com_as_funcoes_do_provedor(
     criadas = []
 
     class Falsa:
-        def __init__(self, pai, contas, buscar, seguir, falar=None, cfg=None):
-            criadas.append((contas, buscar, seguir))
+        def __init__(self, pai, contas, buscar, seguir, falar=None, cfg=None,
+                     ver=None):
+            criadas.append((contas, buscar, seguir, ver))
 
         def ShowModal(self):
             return wx_falso.ID_CANCEL
@@ -8490,15 +8527,21 @@ def test_buscar_canais_abre_a_janela_com_as_funcoes_do_provedor(
     j.contas.provedor = lambda cid: types.SimpleNamespace(
         buscar_canais=lambda *a, **k: chamadas.append(("buscar", a, k)) or [],
         seguir_canal_achado=lambda c: chamadas.append(("seguir", c.id)) or
-        (True, "ok"))
+        (True, "ok"),
+        publicacoes_do_canal=lambda c: chamadas.append(("ver", c.id)) or [
+            (2, "Texto", "oi", 0)])
     j._busca_canais()
-    contas, buscar, seguir = criadas[0]
+    contas, buscar, seguir, ver = criadas[0]
     assert contas == [("w1", "Vivo")]
     buscar("w1", "bom", "NEWS", "TRENDING", "C9")
     seguir("w1", cw.CanalWA("1@newsletter", "A", "", None, False, False, ""))
+    texto = ver("w1", cw.CanalWA("1@newsletter", "A", "", None, False, False,
+                                 ""))
+    assert "1. Texto: oi" in texto
     assert chamadas == [("buscar", ("bom", "NEWS", "TRENDING"),
                          {"cursor": "C9"}),
-                        ("seguir", "1@newsletter")]
+                        ("seguir", "1@newsletter"),
+                        ("ver", "1@newsletter")]
 
 
 def test_voz_com_legenda_mostra_e_deixa_copiar_a_legenda():
@@ -8583,3 +8626,291 @@ def test_robo_sem_conversa_oferece_iniciar_e_manda_o_start(j, monkeypatch):
     j.cache[("t1", "777")] = [m.Mensagem("t1", "777", "1", autor="Livros")]
     j._link_de_usuario_pronto("t1", Prov(), info, achado, False)
     assert perguntas == [] and iniciados == []
+
+
+# ------------------------------------------------ mensagens agendadas
+def _dialogo_de_agendar(monkeypatch, resultado, resposta):
+    from telezapp.interface import agendadas as ja
+    criados = []
+
+    class Dialogo:
+        def __init__(self, pai, destino, texto="", **k):
+            criados.append((destino, texto))
+
+        def ShowModal(self):
+            return resposta
+
+        def escolhido(self):
+            return resultado
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(ja, "DialogoAgendar", Dialogo)
+    return criados
+
+
+class _ThreadAgendar:
+    def __init__(self, target=None, args=(), **k):
+        self.target, self.args = target, args
+
+    def start(self):
+        self.target(*self.args)
+
+
+def test_agendar_sem_servico_avisa(j):
+    _abrir_com_caixa(j)
+    j.estados["t1"] = ev.CONECTADA
+    j.contas.p.PODE_AGENDAR = False
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._agendar_mensagem()
+    assert ditas[-1] == "Este serviço ainda não agenda mensagens."
+
+
+def test_agendar_leva_o_texto_da_caixa_e_limpa_ao_dar_certo(j, monkeypatch):
+    from datetime import datetime, timedelta
+    _abrir_com_caixa(j)
+    j.estados["t1"] = ev.CONECTADA
+    j.contas.p.PODE_AGENDAR = True
+    pedidos = []
+    j.contas.p.agendar_texto = lambda c, t, q, r="", mencoes=None: \
+        pedidos.append((c, t, q, r)) or (True, "")
+    quando = datetime.now() + timedelta(days=1)
+    criados = _dialogo_de_agendar(monkeypatch, ("bom dia", quando),
+                                  jm.wx.ID_OK)
+    monkeypatch.setattr(jm.threading, "Thread", _ThreadAgendar)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.caixa.SetValue("bom dia")
+    j._agendar_mensagem()
+    assert criados[0][1] == "bom dia"               # a janela abre com o texto
+    assert pedidos == [("20", "bom dia", quando, "")]
+    assert j.caixa.GetValue() == ""
+    assert ditas[-1].startswith("Mensagem agendada para amanhã às ")
+
+
+def test_agendar_que_falha_mantem_o_texto_na_caixa(j, monkeypatch):
+    from datetime import datetime, timedelta
+    _abrir_com_caixa(j)
+    j.estados["t1"] = ev.CONECTADA
+    j.contas.p.PODE_AGENDAR = True
+    j.contas.p.agendar_texto = lambda *a, **k: (False, "sem conexão")
+    _dialogo_de_agendar(monkeypatch,
+                        ("oi", datetime.now() + timedelta(days=1)),
+                        jm.wx.ID_OK)
+    monkeypatch.setattr(jm.threading, "Thread", _ThreadAgendar)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.caixa.SetValue("oi")
+    j._agendar_mensagem()
+    assert j.caixa.GetValue() == "oi"
+    assert "Não consegui agendar: sem conexão" in ditas[-1]
+
+
+def test_agendar_cancelado_nao_agenda(j, monkeypatch):
+    _abrir_com_caixa(j)
+    j.estados["t1"] = ev.CONECTADA
+    j.contas.p.PODE_AGENDAR = True
+    pedidos = []
+    j.contas.p.agendar_texto = lambda *a, **k: pedidos.append(a) or (True, "")
+    _dialogo_de_agendar(monkeypatch, None, jm.wx.ID_CANCEL)
+    j.caixa.SetValue("oi")
+    j._agendar_mensagem()
+    assert pedidos == [] and j.caixa.GetValue() == "oi"
+
+
+def test_ver_agendadas_abre_a_lista_com_as_funcoes_do_provedor(j, monkeypatch):
+    from datetime import datetime
+    from telezapp.interface import agendadas as ja
+    _abrir_com_caixa(j)
+    j.estados["t1"] = ev.CONECTADA
+    j.contas.p.PODE_AGENDAR = True
+    chamadas = []
+    j.contas.p.agendadas = lambda c: chamadas.append(("lista", c)) or []
+    j.contas.p.mudar_horario_agendada = lambda c, i, q: \
+        chamadas.append(("mudar", c, i)) or (True, "")
+    j.contas.p.cancelar_agendadas = lambda c, ids: \
+        chamadas.append(("cancelar", c, ids)) or (True, "")
+    criadas = []
+
+    class Falsa:
+        def __init__(self, pai, destino, carregar, mudar, cancelar, **k):
+            criadas.append((destino, carregar, mudar, cancelar))
+
+        def ShowModal(self):
+            return jm.wx.ID_CANCEL
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(ja, "DialogoAgendadas", Falsa)
+    j._ver_agendadas()
+    _, carregar, mudar, cancelar = criadas[0]
+    carregar()
+    mudar({"id": 8}, datetime(2026, 11, 20, 8, 0))
+    cancelar({"id": 8})
+    assert chamadas == [("lista", "20"), ("mudar", "20", 8),
+                        ("cancelar", "20", [8])]
+
+
+# ------------------------------------------------ leitura com a janela sem foco
+def test_mensagem_na_conversa_aberta_com_janela_sem_foco_marca_lida_ao_voltar(
+        j, monkeypatch):
+    j._abrir_conversa(j.indice[("t1", "20")])
+    j.estados["t1"] = ev.CONECTADA
+    j.contas.p.pedidos.clear()
+    monkeypatch.setattr(j, "IsActive", lambda: False)
+    c = j.indice[("t1", "20")]
+    j.b.publicar(ev.MensagemNova(msg("7", "chegou", conversa="20"), c))
+    assert ("lida", "20") not in j.contas.p.pedidos     # sem foco: espera
+    assert ("t1", "20") in j._leitura_pendente
+    j._ao_ativar(types.SimpleNamespace(GetActive=lambda: True,
+                                       Skip=lambda: None))
+    assert ("lida", "20") in j.contas.p.pedidos
+    assert not j._leitura_pendente
+    # voltar de novo nao repete
+    j.contas.p.pedidos.clear()
+    j._ao_ativar(types.SimpleNamespace(GetActive=lambda: True,
+                                       Skip=lambda: None))
+    assert j.contas.p.pedidos == []
+
+
+def test_abrir_conversa_com_leitura_pendente_avisa_a_conta(j):
+    j.estados["t1"] = ev.CONECTADA
+    j._leitura_pendente.add(("t1", "10"))
+    j.indice[("t1", "10")].nao_lidas = 0
+    j.contas.p.pedidos.clear()
+    j._abrir_conversa(j.indice[("t1", "10")])
+    assert ("lida", "10") in j.contas.p.pedidos
+    assert ("t1", "10") not in j._leitura_pendente
+
+
+def test_abrir_conversa_com_pendencia_da_conta_avisa_mesmo_sem_nao_lidas(j):
+    j.estados["t1"] = ev.CONECTADA
+    j.contas.p.precisa_de_leitura = lambda cid: cid == "10"
+    j.indice[("t1", "10")].nao_lidas = 0
+    j.contas.p.pedidos.clear()
+    j._abrir_conversa(j.indice[("t1", "10")])
+    assert ("lida", "10") in j.contas.p.pedidos
+    j.contas.p.pedidos.clear()
+    j._abrir_conversa(j.indice[("t1", "20")])
+    assert ("lida", "20") not in j.contas.p.pedidos
+
+
+# ------------------------------------------------ agenda do WhatsApp (daqui)
+def _provedor_de_agenda_local(j):
+    """O provedor falso vira um de agenda propria, com o que a janela usa."""
+    p = j.contas.p
+    p.AGENDA_LOCAL = True
+    p.PODE_AGENDAR = True
+    p.conta = types.SimpleNamespace(id="t1")
+    p.enviadas, p.descartadas = [], []
+    p.enviar_agendada = lambda i: p.enviadas.append(i) or True
+    p.descartar_agendadas = lambda ids: p.descartadas.extend(ids)
+    j.estados["t1"] = ev.CONECTADA
+    return p
+
+
+def test_agenda_propria_envia_o_que_chegou_na_hora(j):
+    p = _provedor_de_agenda_local(j)
+    p.vencidas_da_agenda = lambda agora, tol: (
+        [{"id": 1, "conversa_id": "10", "texto": "oi", "quando": 0}], [])
+    j._conferir_agendadas(repetir=False)
+    assert p.enviadas == [1]
+
+
+def test_agenda_propria_pergunta_sobre_as_atrasadas(j, monkeypatch):
+    p = _provedor_de_agenda_local(j)
+    atrasadas = [{"id": 3, "conversa_id": "10", "texto": "oi", "quando": 1.0},
+                 {"id": 4, "conversa_id": "10", "texto": "tchau",
+                  "quando": 2.0}]
+    p.vencidas_da_agenda = lambda agora, tol: ([], list(atrasadas))
+    perguntas, ditas = [], []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    for resposta, enviadas, descartadas, fala in (
+            (jm.wx.YES, [3, 4], [], "Enviando."),
+            (jm.wx.NO, [], [3, 4], "Descartadas."),
+            (jm.wx.CANCEL, [], [], "Ficaram na lista de Mensagens "
+                                   "agendadas.")):
+        p.enviadas.clear()
+        p.descartadas.clear()
+        monkeypatch.setattr(jm.wx, "MessageBox", lambda texto, *a, **k:
+                            perguntas.append(texto) or resposta)
+        j._conferir_agendadas(repetir=False)
+        assert p.enviadas == enviadas and p.descartadas == descartadas
+        assert ditas[-1] == fala
+    assert "2 mensagens agendadas" in perguntas[0]
+    assert "Sim: enviar agora" in perguntas[0]
+
+
+def test_agenda_propria_nao_age_sem_conexao(j):
+    p = _provedor_de_agenda_local(j)
+    j.estados["t1"] = ev.DESCONECTADA
+    chamou = []
+    p.vencidas_da_agenda = lambda *a: chamou.append(1) or ([], [])
+    j._conferir_agendadas(repetir=False)
+    assert chamou == []
+
+
+def test_agendar_no_whatsapp_avisa_que_o_telezapp_precisa_estar_aberto(
+        j, monkeypatch):
+    from datetime import datetime, timedelta
+    p = _provedor_de_agenda_local(j)
+    _abrir_com_caixa(j)
+    p.agendar_texto = lambda *a, **k: (True, "")
+    abertas = []
+    from telezapp.interface import agendadas as ja
+
+    class Dialogo:
+        def __init__(self, pai, destino, texto="", local=False, **k):
+            abertas.append(local)
+
+        def ShowModal(self):
+            return jm.wx.ID_OK
+
+        def escolhido(self):
+            return "oi", datetime.now() + timedelta(days=1)
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(ja, "DialogoAgendar", Dialogo)
+    monkeypatch.setattr(jm.threading, "Thread", _ThreadAgendar)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.caixa.SetValue("oi")
+    j._agendar_mensagem()
+    assert abertas == [True]
+    assert "precisa estar aberto e conectado" in ditas[-1]
+
+
+def test_midia_ganha_botoes_depois_da_lista_e_eles_agem(jm_midia):
+    j = jm_midia
+    selecionar(j, "2")
+    j._atualizar_botoes()
+    rotulos = [b.GetLabel() for b in j.botoes_midia
+               if getattr(b, "visivel", False)]
+    assert rotulos[:3] == ["Abrir a foto", "Baixar a mídia sem abrir",
+                           "Copiar foto"]
+    j._tocar_botao_midia(1)                       # baixar sem abrir
+    assert j.midias.baixados == ["2"]
+    selecionar(j, "1")                            # texto: sem botoes
+    j._atualizar_botoes()
+    assert not any(getattr(b, "visivel", False) for b in j.botoes_midia)
+
+
+def test_botoes_depois_da_lista_podem_ser_ocultados(jm_midia):
+    j = jm_midia
+    j.cfg.set("botoes_midia", False)
+    selecionar(j, "2")
+    j._atualizar_botoes()
+    assert not any(getattr(b, "visivel", False) for b in j.botoes_midia)
+    j._aplicar_opcao("botoes_midia", True)        # volta na hora
+    assert any(getattr(b, "visivel", False) for b in j.botoes_midia)
+
+
+def test_esc_num_botao_depois_da_lista_vale_o_mesmo_que_na_lista(jm_midia):
+    j = jm_midia
+    selecionar(j, "2")
+    j._atualizar_botoes()
+    j.botoes_midia[0].SetFocus()
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))
+    assert wx_falso._foco[0] is j.lista_conv      # fechou a conversa

@@ -227,6 +227,19 @@ Mensagens de empresas do WhatsApp com botões de resposta, como "Sim" e "Não", 
 
 Se houver mais de 12 opções, as demais ficam em Enter na mensagem, na lista Botões de resposta e opções dos detalhes. A resposta da empresa chega como uma mensagem nova, com os próximos botões. Botões de pagamento ainda não podem ser tocados.
 
+# Botões da mídia
+Numa mensagem com foto, vídeo, áudio, mensagem de voz, documento ou figurinha, Tab leva primeiro aos botões da mídia, antes dos botões de resposta, dos links e das pessoas mencionadas:
+Abrir ou reproduzir, por exemplo "Reproduzir a mensagem de voz" ou "Abrir a foto".
+Baixar a mídia sem abrir, que vira "Salvar a mídia em um arquivo" depois que ela foi baixada.
+Copiar a mídia, o mesmo que Ctrl+Shift+C.
+A inteligência artificial, como "Transcrever o áudio" ou "Descrever a imagem", e depois "Ver a transcrição".
+
+As mesmas ações estão no menu de contexto da mensagem e nos botões dos detalhes (Alt+Enter).
+
+Esc em qualquer botão depois da lista faz o mesmo que na lista de mensagens: para o áudio que está tocando, cancela o download ou fecha a conversa.
+
+Para tirar esses botões do caminho do Tab, use Configurações, categoria Mensagens, botão "Botões depois das mensagens". Cada grupo tem sua caixa: botões da mídia, botões de resposta e opções, links e pessoas mencionadas. Desmarcado, o grupo deixa de aparecer depois da lista, mas continua nos detalhes da mensagem (Alt+Enter).
+
 # Escrever e enviar mensagens
 Na caixa de digitação, Enter envia e Shift+Enter faz uma nova linha. Ctrl+Enter também envia.
 
@@ -306,6 +319,14 @@ Ao receber uma localização em tempo real no Telegram, a mensagem tem o botão 
 Para quem não está na agenda, use "Digitar um contato...": o nome e o telefone valem só para aquele envio.
 
 No WhatsApp, os marcados vão juntos em uma mensagem. No Telegram, vai uma mensagem para cada contato.
+
+Mensagens agendadas: escreva a mensagem na caixa e use "Agendar a mensagem digitada...", no menu Mensagem (Control Shift P). Na janela, confira o texto e digite a data (hoje, amanhã ou dia/mês/ano, como 25/12/2026) e a hora (como 14:30).
+
+No Telegram, o servidor guarda a mensagem e a envia na hora marcada, mesmo com o TeleZapp fechado e o computador desligado.
+
+O WhatsApp não guarda mensagens agendadas: o TeleZapp as guarda e envia na hora marcada. Por isso ele precisa estar aberto e conectado nessa hora. Se estiver fechado ou sem conexão, ao abrir ele avisa quantas passaram da hora e pergunta: Sim envia agora, Não descarta, Cancelar deixa na lista para decidir depois.
+
+"Mensagens agendadas...", no mesmo menu, lista as da conversa aberta, da mais próxima para a mais distante. Nela, "Mudar o horário" e "Cancelar o envio" (que pede confirmação). Só texto por enquanto.
 
 # Robôs do Telegram
 "Comandos do robô...", no menu Conversas e no menu de contexto da conversa, lista os comandos do robô da conversa, ou dos robôs do grupo, com a descrição de cada um. Ao escolher, o comando é enviado na conversa. Se houver algo escrito na caixa de mensagem, envie ou apague primeiro.
