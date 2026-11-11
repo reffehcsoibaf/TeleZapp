@@ -109,21 +109,21 @@ def arquivos_do_pacote(pacote_id):
     return []
 
 
-def sons_para_escolher(ativo):
-    """[(rotulo, caminho)] dos sons de todos os pacotes, o ativo primeiro:
-    "Cristal: nova". E a lista do som proprio de uma conversa."""
-    ids = [i for i, _ in listar()]
+def sons_do_evento(evento, ativo, seguem=None):
+    """[(nome do pacote, caminho)] do som desse evento em cada pacote que o
+    tem, o pacote ativo primeiro. `seguem` e o evento comum que vale quando o
+    pacote nao tem arquivo para `evento` (nova_pessoal segue nova). E a
+    lista do som proprio de uma conversa."""
+    ids = [i for i, _ in listar() if i != PADRAO]   # padrao: so bips
     if ativo in ids:
         ids.remove(ativo)
         ids.insert(0, ativo)
     achados = []
     for pid in ids:
-        if pid == PADRAO:
-            continue                      # bips do sistema: nao ha arquivos
-        nome = nome_do_pacote(pid)
-        for arq, caminho in arquivos_do_pacote(pid):
-            achados.append(("%s: %s" % (nome, os.path.splitext(arq)[0]),
-                            caminho))
+        caminho = arquivo_do_evento(pid, evento) or (
+            arquivo_do_evento(pid, seguem) if seguem else "")
+        if caminho:
+            achados.append((nome_do_pacote(pid), caminho))
     return achados
 
 
@@ -192,14 +192,22 @@ def evento_da_conversa(conv):
 
 
 # ------------------------------------------------- som proprio de uma conversa
-def _chave_da_conversa(chave):
-    return "%s|%s" % chave
+# Os eventos que uma conversa pode ter com som proprio. "nova" e a mensagem
+# recebida (a chave sem sufixo e a das versoes antigas, que so tinham esta)
+EVENTOS_DA_CONVERSA = ("nova", "nova_aberta", "mencao_ou_resposta",
+                       "reacao_recebida", "voto_enquete")
 
 
-def arquivo_da_conversa(cfg, chave):
-    """O arquivo de som proprio da conversa (conta, id), ou "" se ela nao tem
-    ou se o arquivo sumiu."""
-    nome = (cfg.get("sons_de_conversa") or {}).get(_chave_da_conversa(chave))
+def _chave_da_conversa(chave, evento="nova"):
+    texto = "%s|%s" % chave
+    return texto if evento == "nova" else "%s|%s" % (texto, evento)
+
+
+def arquivo_da_conversa(cfg, chave, evento="nova"):
+    """O arquivo de som proprio da conversa (conta, id) para o evento, ou ""
+    se ela nao tem ou se o arquivo sumiu."""
+    nome = (cfg.get("sons_de_conversa") or {}).get(
+        _chave_da_conversa(chave, evento))
     if not nome:
         return ""
     caminho = os.path.join(config.pasta("sons", "conversas"),
@@ -207,16 +215,15 @@ def arquivo_da_conversa(cfg, chave):
     return caminho if os.path.isfile(caminho) else ""
 
 
-def definir_som_da_conversa(cfg, chave, origem):
+def definir_som_da_conversa(cfg, chave, origem, evento="nova"):
     """Copia o arquivo para a pasta de sons (o original pode sumir) e o guarda
-    como o som da conversa. OSError se nao der para copiar."""
-    texto = _chave_da_conversa(chave)
+    como o som do evento nessa conversa. OSError se nao der para copiar."""
+    texto = _chave_da_conversa(chave, evento)
     ext = os.path.splitext(origem)[1].lower() or ".wav"
     nome = hashlib.sha1(texto.encode("utf-8")).hexdigest()[:16] + ext
     destino = os.path.join(config.pasta("sons", "conversas"), nome)
-    antigo = arquivo_da_conversa(cfg, chave)
-    if os.path.normcase(os.path.abspath(origem)) != \
-            os.path.normcase(os.path.abspath(destino)):
+    antigo = arquivo_da_conversa(cfg, chave, evento)
+    if os.path.normcase(os.path.abspath(origem)) !=             os.path.normcase(os.path.abspath(destino)):
         shutil.copyfile(origem, destino)
     if antigo and os.path.normcase(antigo) != os.path.normcase(destino):
         _apagar(antigo)
@@ -226,13 +233,19 @@ def definir_som_da_conversa(cfg, chave, origem):
     return destino
 
 
-def remover_som_da_conversa(cfg, chave):
-    antigo = arquivo_da_conversa(cfg, chave)
+def remover_som_da_conversa(cfg, chave, evento="nova"):
+    antigo = arquivo_da_conversa(cfg, chave, evento)
     if antigo:
         _apagar(antigo)
     sons = dict(cfg.get("sons_de_conversa") or {})
-    if sons.pop(_chave_da_conversa(chave), None) is not None:
+    if sons.pop(_chave_da_conversa(chave, evento), None) is not None:
         cfg.set("sons_de_conversa", sons)
+
+
+def quantos_sons_da_conversa(cfg, chave):
+    """Em quantos eventos a conversa tem som proprio."""
+    return sum(1 for e in EVENTOS_DA_CONVERSA
+               if arquivo_da_conversa(cfg, chave, e))
 
 
 def _apagar(caminho):

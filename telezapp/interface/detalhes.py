@@ -13,7 +13,7 @@ import traceback
 
 import wx
 
-from telezapp.acessibilidade.fala import acao_do_som, bipe
+from telezapp.acessibilidade.fala import bipe
 from telezapp.interface import dialogos
 from telezapp.nucleo import detalhes as det
 from telezapp.nucleo import modelos as m
@@ -428,25 +428,37 @@ def _quando(ts):
 
 
 class DialogoSomDaConversa(wx.Dialog):
-    """O som proprio de uma conversa: vale na hora, sem passar pelas
-    configuracoes."""
+    """Os sons proprios de uma conversa: valem na hora, sem passar pelas
+    configuracoes. Primeiro se escolhe o evento (mensagem recebida, menção,
+    reação...); a lista de sons traz o som desse evento em cada pacote."""
 
     def __init__(self, pai, jan, conv):
-        super().__init__(pai, title="Som de %s" % conv.nome,
+        super().__init__(pai, title="Sons de %s" % conv.nome,
                          style=wx.DEFAULT_DIALOG_STYLE)
         self.jan, self.conv = jan, conv
+        self.eventos = eventos_do_som_da_conversa(conv)
         lay = wx.BoxSizer(wx.VERTICAL)
         self.situacao = wx.StaticText(self, label="")
         lay.Add(self.situacao, 0, wx.ALL, 10)
-        self.cx_escolha = wx.Choice(self, name="Som da conversa")
+        lay.Add(wx.StaticText(self, label="&Evento:"), 0, wx.LEFT, 10)
+        self.cx_evento = wx.Choice(
+            self, name="Evento",
+            choices=[rotulo for _, rotulo, _, _ in self.eventos])
+        self.cx_evento.SetSelection(0)
+        self.cx_evento.Bind(wx.EVT_CHOICE, lambda e: self._mostrar())
+        lay.Add(self.cx_evento, 0, wx.EXPAND | wx.ALL, 10)
+        lay.Add(wx.StaticText(self, label="&Som deste evento em cada "
+                                          "pacote:"), 0, wx.LEFT, 10)
+        self.cx_escolha = wx.Choice(self, name="Som deste evento")
         self.cx_escolha.Bind(wx.EVT_CHOICE, lambda e: self._escolher())
-        lay.Add(self.cx_escolha, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        lay.Add(self.cx_escolha, 0, wx.EXPAND | wx.ALL, 10)
         linha = wx.WrapSizer(wx.HORIZONTAL)
         self.botoes = {}
         for chave, rotulo, funcao in (
-                ("escolher", "&Escolher um arquivo de som...", self.escolher),
+                ("escolher", "Escolher um &arquivo de som...", self.escolher),
                 ("ouvir", "&Ouvir", self.ouvir),
-                ("remover", "&Voltar ao som do tipo de conversa", self.remover)):
+                ("remover", "&Voltar ao som padrão deste evento",
+                 self.remover)):
             b = wx.Button(self, label=rotulo)
             b.Bind(wx.EVT_BUTTON, lambda e, f=funcao: f())
             linha.Add(b, 0, wx.RIGHT | wx.TOP, 6)
@@ -459,28 +471,37 @@ class DialogoSomDaConversa(wx.Dialog):
         self.CentreOnParent()
         self._arquivos_escolha = []
         self._mostrar()
-        self.cx_escolha.SetFocus()
+        self.cx_evento.SetFocus()
+
+    def _atual(self):
+        """(evento guardado, rotulo, evento do pacote, evento que segue)."""
+        return self.eventos[max(0, self.cx_evento.GetSelection())]
 
     def _arquivo(self):
-        return pacotes_de_som.arquivo_da_conversa(self.jan.cfg, self.conv.chave)
+        return pacotes_de_som.arquivo_da_conversa(
+            self.jan.cfg, self.conv.chave, self._atual()[0])
 
     def _mostrar(self):
-        self.situacao.SetLabel(texto_do_som_da_conversa(self.jan.cfg,
-                                                        self.conv))
+        rotulo = self._atual()[1]
+        if self._arquivo():
+            self.situacao.SetLabel("%s: som próprio desta conversa." % rotulo)
+        else:
+            self.situacao.SetLabel("%s: o som padrão do pacote." % rotulo)
         self.botoes["remover"].Enable(bool(self._arquivo()))
         self._preencher_escolha()
         self.Layout()
 
     def ouvir(self):
+        guardado, _, no_pacote, _ = self._atual()
         arquivo = self._arquivo()
         if arquivo:
-            bipe("nova", arquivo)
+            bipe(guardado, arquivo)
         else:
-            bipe(pacotes_de_som.evento_da_conversa(self.conv))
+            bipe(no_pacote)
 
     def escolher(self):
         dlg = wx.FileDialog(
-            self, "Escolha o som desta conversa",
+            self, "Escolha o som deste evento nesta conversa",
             wildcard="Sons|*.wav;*.ogg;*.opus;*.mp3;*.flac|"
                      "Todos os arquivos|*.*",
             style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST)
@@ -493,20 +514,17 @@ class DialogoSomDaConversa(wx.Dialog):
         self._escolher_pelo_caminho(origem, anunciar=True)
 
     def _preencher_escolha(self):
-        """Preenche o combobox com os sons de todos os pacotes (o ativo
-        primeiro) e marca o som que a conversa usa."""
-        pacote = pacotes_de_som.EstadoDeSons(self.jan.cfg).ativo
-        self._arquivos_escolha = pacotes_de_som.sons_para_escolher(pacote)
+        """Preenche a lista com o som do evento em cada pacote (o ativo
+        primeiro) e marca o que a conversa usa."""
+        _, _, no_pacote, segue = self._atual()
+        ativo = pacotes_de_som.EstadoDeSons(self.jan.cfg).ativo
+        self._arquivos_escolha = pacotes_de_som.sons_do_evento(
+            no_pacote, ativo, segue)
         nomes = [nome for nome, _ in self._arquivos_escolha]
         if nomes != [self.cx_escolha.GetString(i)
                      for i in range(self.cx_escolha.GetCount())]:
             self.cx_escolha.Set(nomes)       # so refaz se mudou (NVDA)
         alvo = self._arquivo()
-        if not alvo:
-            acao, caminho = acao_do_som(pacotes_de_som.evento_da_conversa(
-                self.conv))
-            if acao == "arquivo":
-                alvo = caminho
         indice = -1
         if alvo:
             for i, (_, arquivo) in enumerate(self._arquivos_escolha):
@@ -516,7 +534,7 @@ class DialogoSomDaConversa(wx.Dialog):
         self.cx_escolha.SetSelection(indice)
 
     def _escolher(self):
-        """Escolhe o som da conversa pelo combobox."""
+        """Escolhe o som do evento pela lista."""
         i = self.cx_escolha.GetSelection()
         if not 0 <= i < len(self._arquivos_escolha):
             return
@@ -525,14 +543,14 @@ class DialogoSomDaConversa(wx.Dialog):
 
     def _escolher_pelo_caminho(self, origem, anunciar=True, focar=True):
         try:
-            pacotes_de_som.definir_som_da_conversa(self.jan.cfg,
-                                                   self.conv.chave, origem)
+            pacotes_de_som.definir_som_da_conversa(
+                self.jan.cfg, self.conv.chave, origem, self._atual()[0])
         except OSError as e:
             log.warning("som da conversa não copiado: %r", e)
             self.jan.fala.falar("Não consegui copiar este arquivo de som.",
                                 interromper=True)
             return
-        self._mostrar()          # tambem marca o som escolhido no combobox
+        self._mostrar()          # tambem marca o som escolhido na lista
         if anunciar:
             self.jan.fala.falar(
                 "Som escolhido: %s." % os.path.basename(origem),
@@ -542,11 +560,33 @@ class DialogoSomDaConversa(wx.Dialog):
             self.botoes["ouvir"].SetFocus()
 
     def remover(self):
-        pacotes_de_som.remover_som_da_conversa(self.jan.cfg, self.conv.chave)
+        pacotes_de_som.remover_som_da_conversa(
+            self.jan.cfg, self.conv.chave, self._atual()[0])
         self._mostrar()
-        self.jan.fala.falar("Esta conversa voltou ao som do tipo dela.",
+        self.jan.fala.falar("Este evento voltou ao som padrão do pacote.",
                             interromper=True)
         self.cx_escolha.SetFocus()
+
+
+def eventos_do_som_da_conversa(conv):
+    """[(evento guardado, rotulo, evento no pacote, evento que ele segue)]
+    dos eventos em que essa conversa pode ter um som proprio."""
+    rotulos = dict(pacotes_de_som.eventos())
+
+    def nome(evento):
+        texto = rotulos[evento]
+        return texto[:1].upper() + texto[1:]
+    lista = [("nova", "Mensagem recebida (conversa fechada)",
+              pacotes_de_som.evento_da_conversa(conv), "nova"),
+             ("nova_aberta", nome("nova_aberta"), "nova_aberta", "nova")]
+    if conv.tipo == "grupo":
+        lista.append(("mencao_ou_resposta", nome("mencao_ou_resposta"),
+                      "mencao_ou_resposta", None))
+    lista.append(("reacao_recebida", nome("reacao_recebida"),
+                  "reacao_recebida", None))
+    lista.append(("voto_enquete", nome("voto_enquete"), "voto_enquete",
+                  None))
+    return lista
 
 
 def _mesmo_arquivo(a, b):
@@ -562,11 +602,13 @@ def _mesmo_arquivo(a, b):
 
 
 def texto_do_som_da_conversa(cfg, conv):
-    """"Som das mensagens: ..." para os detalhes e a janela do som."""
-    if pacotes_de_som.arquivo_da_conversa(cfg, conv.chave):
-        return "Som das mensagens: próprio desta conversa."
-    return "Som das mensagens: o de %s." % dict(pacotes_de_som.eventos())[
-        pacotes_de_som.evento_da_conversa(conv)]
+    """A linha dos detalhes sobre os sons proprios da conversa."""
+    n = pacotes_de_som.quantos_sons_da_conversa(cfg, conv.chave)
+    if not n:
+        return "Sons: os de %s." % dict(pacotes_de_som.eventos())[
+            pacotes_de_som.evento_da_conversa(conv)]
+    return "Sons: próprios em %s desta conversa." % (
+        "1 evento" if n == 1 else "%d eventos" % n)
 
 
 class ControleDetalhes:

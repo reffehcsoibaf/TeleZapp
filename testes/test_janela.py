@@ -7360,35 +7360,6 @@ def test_som_da_nova_segue_o_tipo_e_o_proprio_da_conversa(j, monkeypatch,
     pk.remover_som_da_conversa(j.cfg, conv.chave)
 
 
-def test_janela_do_som_da_conversa_tem_combobox(j, monkeypatch,
-                                                tmp_path):
-    from telezapp.interface import detalhes as jd
-
-    falas = []
-    sons = []
-    monkeypatch.setattr(jd, "texto_do_som_da_conversa",
-                        lambda cfg, conv: "Som das mensagens: o de nova.")
-    monkeypatch.setattr(jd, "bipe", lambda tipo, valor=None: sons.append(
-        (tipo, valor)))
-    monkeypatch.setattr(jd.pacotes_de_som, "sons_para_escolher",
-                        lambda pacote_id: [("um.ogg", str(tmp_path / "um.ogg"))])
-    monkeypatch.setattr(jd.pacotes_de_som, "arquivo_da_conversa",
-                        lambda cfg, chave: str(tmp_path / "um.ogg"))
-    monkeypatch.setattr(jd.pacotes_de_som, "definir_som_da_conversa",
-                        lambda cfg, chave, origem: None)
-    monkeypatch.setattr(j.fala, "falar",
-                        lambda t, interromper=False: falas.append(t))
-    d = jd.DialogoSomDaConversa(None, j, j.indice[("t1", "20")])
-    assert d.cx_escolha is not None
-    d._mostrar()
-    assert d.cx_escolha.itens == ["um.ogg"]
-    assert d.cx_escolha.GetSelection() == 0
-    d.cx_escolha.SetSelection(0)
-    d._escolher()                        # escolhe pelo combobox
-    assert sons == [("nova", str(tmp_path / "um.ogg"))]   # toca o som
-    assert falas == []                    # quem fala e o NVDA, nao o programa
-
-
 def test_recompartilhar_status_pergunta_e_chama_o_provedor(j, monkeypatch,
                                                            tmp_path):
     feitos, ditas, respostas = [], [], [jm.wx.YES]
@@ -8945,34 +8916,96 @@ def test_esc_num_botao_depois_da_lista_vale_o_mesmo_que_na_lista(jm_midia):
     assert wx_falso._foco[0] is j.lista_conv      # fechou a conversa
 
 
-def test_combobox_do_som_da_conversa_com_pacote_da_casa_e_reabertura(
-        j, monkeypatch, tmp_path):
-    """A lista mostra os sons do pacote da casa e, ao reabrir a janela, marca
-    o som ja escolhido (o da conversa e uma copia com outro nome)."""
-    from telezapp.interface import detalhes as jd
+def _pacotes_falsos(monkeypatch, tmp_path, j):
+    """Dois pacotes (Cristal, Marimba) com um som de nova e um de reacao."""
     from telezapp.nucleo import pacotes_de_som as pk
+    from telezapp.interface import detalhes as jd
 
-    pasta = tmp_path / "pacote"
-    pasta.mkdir()
-    (pasta / "a.wav").write_bytes(b"RIFF-a")
-    (pasta / "b.wav").write_bytes(b"RIFF-b")
+    for nome, conteudo in (("cristal", b"C"), ("marimba", b"M")):
+        pasta = tmp_path / nome
+        pasta.mkdir()
+        (pasta / "nova.wav").write_bytes(b"nova-" + conteudo)
+        (pasta / "reacao_recebida.wav").write_bytes(b"reacao-" + conteudo)
     conversas = tmp_path / "conversas"
     conversas.mkdir()
     monkeypatch.setattr(pk.config, "pasta", lambda *a: str(conversas))
-    monkeypatch.setattr(pk, "PASTA_TELEZAPP", str(pasta))
-    monkeypatch.setattr(pk, "_pasta_da_casa", lambda pid: str(pasta))
+    monkeypatch.setattr(pk, "_pasta_da_casa",
+                        lambda pid: str(tmp_path / pid))
+    monkeypatch.setattr(pk, "NOMES_DA_CASA",
+                        {"cristal": "Cristal", "marimba": "Marimba"})
+    monkeypatch.setattr(pk, "NOMES_FIXOS", {"padrao": "Padrão", "cristal":
+                        "Cristal", "marimba": "Marimba"})
+    monkeypatch.setattr(pk, "listar", lambda: list(pk.NOMES_FIXOS.items()))
     monkeypatch.setattr(jd, "bipe", lambda *a, **k: None)
     monkeypatch.setattr(j.fala, "falar", lambda *a, **k: None)
-    j.cfg.set("pacote_de_sons", "cristal")        # pacote da casa
+    j.cfg.set("pacote_de_sons", "marimba")
+    return pk, jd
+
+
+def test_dialogo_do_som_da_conversa_escolhe_evento_e_depois_o_pacote(
+        j, monkeypatch, tmp_path):
+    """Primeiro o evento; a lista traz o som desse evento em cada pacote
+    (o ativo primeiro). Cada evento guarda o seu som na conversa."""
+    pk, jd = _pacotes_falsos(monkeypatch, tmp_path, j)
     conv = j.indice[("t1", "20")]
+    conv.tipo = "privada"
     try:
         d = jd.DialogoSomDaConversa(None, j, conv)
-        assert d.cx_escolha.itens[:2] == ["Cristal: a", "Cristal: b"]
-        assert "Marimba: a" in d.cx_escolha.itens   # e dos outros pacotes
+        rotulos = d.cx_evento.itens
+        assert rotulos[0].startswith("Mensagem recebida")
+        assert not any("menção" in r.lower() for r in rotulos)   # so grupo
+        assert d.cx_escolha.itens == ["Marimba", "Cristal"]     # ativo 1o
         d.cx_escolha.SetSelection(1)
-        d._escolher()
-        assert d.cx_escolha.GetSelection() == 1
+        d._escolher()                                  # nova: Cristal
+        assert pk.arquivo_da_conversa(j.cfg, conv.chave) != ""
+        assert pk.arquivo_da_conversa(j.cfg, conv.chave,
+                                      "reacao_recebida") == ""
+        i = next(n for n, r in enumerate(rotulos) if "reação" in r.lower())
+        d.cx_evento.SetSelection(i)
+        d._mostrar()                                   # outro evento
+        assert d.cx_escolha.GetSelection() == -1       # ainda sem som
+        d.cx_escolha.SetSelection(0)
+        d._escolher()                                  # reacao: Marimba
+        assert open(pk.arquivo_da_conversa(
+            j.cfg, conv.chave, "reacao_recebida"), "rb").read() == \
+            b"reacao-M"
+        assert pk.quantos_sons_da_conversa(j.cfg, conv.chave) == 2
         d2 = jd.DialogoSomDaConversa(None, j, conv)    # reabre
-        assert d2.cx_escolha.GetSelection() == 1
+        assert d2.cx_escolha.GetSelection() == 1       # nova: Cristal
+        d2.cx_evento.SetSelection(i)
+        d2._mostrar()
+        assert d2.cx_escolha.GetSelection() == 0       # reacao: Marimba
+        d2.remover()
+        assert pk.arquivo_da_conversa(j.cfg, conv.chave,
+                                      "reacao_recebida") == ""
     finally:
-        pk.remover_som_da_conversa(j.cfg, conv.chave)
+        for e in pk.EVENTOS_DA_CONVERSA:
+            pk.remover_som_da_conversa(j.cfg, conv.chave, e)
+
+
+def test_grupo_tem_o_evento_de_mencao_na_lista(j, monkeypatch, tmp_path):
+    pk, jd = _pacotes_falsos(monkeypatch, tmp_path, j)
+    conv = j.indice[("t1", "20")]
+    conv.tipo = "grupo"
+    d = jd.DialogoSomDaConversa(None, j, conv)
+    assert any("menção" in r.lower() for r in d.cx_evento.itens)
+
+
+def test_reacao_e_voto_usam_o_som_proprio_da_conversa(j, monkeypatch,
+                                                      tmp_path):
+    from telezapp.nucleo import pacotes_de_som as pk
+    origem = tmp_path / "meu.ogg"
+    origem.write_bytes(b"som")
+    conv = j.indice[("t1", "20")]
+    pk.config.pasta("sons", "conversas")
+    try:
+        for evento in ("reacao_recebida", "voto_enquete",
+                       "mencao_ou_resposta", "nova_aberta"):
+            arquivo = pk.definir_som_da_conversa(j.cfg, conv.chave,
+                                                 str(origem), evento)
+            assert pk.arquivo_da_conversa(j.cfg, conv.chave, evento) == \
+                arquivo
+        assert pk.arquivo_da_conversa(j.cfg, conv.chave) == ""   # nova nao
+    finally:
+        for e in pk.EVENTOS_DA_CONVERSA:
+            pk.remover_som_da_conversa(j.cfg, conv.chave, e)
