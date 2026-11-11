@@ -291,6 +291,56 @@ def seguidores_por_extenso(n):
     return "%s seguidores" % format(n, ",").replace(",", ".")
 
 
+# Tipos de publicacao de um canal: (campo da mensagem, como dizer, campo do texto)
+TIPOS_DE_PUBLICACAO = (
+    ("conversation", "Texto", None),
+    ("extendedTextMessage", "Texto", "text"),
+    ("imageMessage", "Foto", "caption"),
+    ("videoMessage", "Vídeo", "caption"),
+    ("audioMessage", "Áudio", None),
+    ("documentMessage", "Documento", "caption"),
+    ("stickerMessage", "Figurinha", None),
+    ("pollCreationMessage", "Enquete", "name"),
+    ("pollCreationMessageV2", "Enquete", "name"),
+    ("pollCreationMessageV3", "Enquete", "name"),
+    ("locationMessage", "Localização", "name"),
+    ("contactMessage", "Contato", "displayName"),
+)
+
+
+def resumo_da_publicacao(msg):
+    """(tipo, texto) de uma mensagem de canal (waE2E Message): o tipo em
+    português e o texto ou a legenda; ("Outro tipo", "") se nao reconhece."""
+    for campo, rotulo, texto in TIPOS_DE_PUBLICACAO:
+        try:
+            if not msg.HasField(campo):
+                continue
+        except ValueError:
+            continue
+        valor = getattr(msg, campo)
+        if texto is None:
+            return rotulo, (valor if isinstance(valor, str) else "")
+        return rotulo, (getattr(valor, texto, "") or "")
+    return "Outro tipo", ""
+
+
+def texto_das_publicacoes(canal_nome, itens):
+    """O texto da janela "Ver publicações": da mais nova para a mais antiga.
+    itens: [(id no servidor, tipo, texto, visualizacoes)]."""
+    if not itens:
+        return "%s não tem publicações para mostrar." % (
+            canal_nome or "Este canal")
+    linhas = ["Últimas %d publicações de %s, da mais nova para a mais "
+              "antiga." % (len(itens), canal_nome or "este canal"), ""]
+    for n, (_sid, tipo, texto, vistas) in enumerate(itens, 1):
+        cabeca = "%d. %s" % (n, tipo)
+        if vistas:
+            cabeca += " (%d visualizações)" % vistas
+        linhas.append(cabeca + (": " + texto.strip() if texto.strip()
+                                else "."))
+    return "\n".join(linhas)
+
+
 def linha(c, limite_descricao=120):
     """A linha do canal na lista: nome, verificado, seguidores, se já segue e
     o começo da descrição."""

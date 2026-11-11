@@ -499,6 +499,29 @@ OPCOES = (
           escolhas=(("original", "Como veio, com os símbolos"),
                     ("anunciar", "Anunciar a formatação (negrito: texto)"),
                     ("tirar", "Tirar os símbolos"))),
+    Opcao("botoes_midia", "Mostrar botões da mídia", "Mensagens", True,
+          "Numa mensagem com foto, vídeo, áudio, voz, documento ou "
+          "figurinha, botões logo depois da lista de mensagens, que o Tab "
+          "alcança: abrir ou reproduzir, baixar ou salvar, copiar a mídia e "
+          "a inteligência artificial. Desmarcado, as mesmas ações ficam no "
+          "menu de contexto e nos detalhes da mensagem (Alt+Enter).",
+          grupo="Botões depois das mensagens"),
+    Opcao("botoes_resposta", "Mostrar botões de resposta e opções", "Mensagens",
+          True,
+          "Botões e opções que vêm na mensagem (de robôs, enquetes, "
+          "convites), logo depois da lista de mensagens. Desmarcado, eles "
+          "ficam nos detalhes da mensagem (Alt+Enter).",
+          grupo="Botões depois das mensagens"),
+    Opcao("botoes_links", "Mostrar links", "Mensagens", True,
+          "Um botão para cada link do texto ou da legenda, logo depois da "
+          "lista de mensagens. Desmarcado, os links ficam nos detalhes da "
+          "mensagem (Alt+Enter).",
+          grupo="Botões depois das mensagens"),
+    Opcao("botoes_pessoas", "Mostrar pessoas mencionadas", "Mensagens", True,
+          "Um botão para cada pessoa mencionada, que abre a conversa com "
+          "ela, logo depois da lista de mensagens. Desmarcado, as pessoas "
+          "ficam nos detalhes da mensagem (Alt+Enter).",
+          grupo="Botões depois das mensagens"),
     Opcao("foco_ao_abrir_conversa", "Foco ao abrir uma conversa", "Mensagens",
           "mensagens",
           "Para onde vai o foco quando você abre uma conversa. Na lista de "

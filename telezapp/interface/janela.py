@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime
 import traceback
 import webbrowser
 
@@ -25,6 +26,7 @@ from telezapp.acessibilidade.fala import (Fala, intervalo_do_tom_de_chamada,
                                           definir_sons, definir_tom_de_chamada)
 from telezapp.interface import colagem, dialogos, robos, visualizadores
 from telezapp.interface import salvar as ui_salvar
+from telezapp.nucleo import agendamento as ag_nucleo
 from telezapp.nucleo import copia_oficial, localizacao, silenciados
 from telezapp.nucleo import links_externos, links_recebidos, resumo_midias
 from telezapp.nucleo.links_externos import motivo_de_nao_achar
@@ -110,12 +112,14 @@ TEXTO_FILTRO_VAZIO = "Nenhuma conversa neste filtro."
 TEXTO_SEM_CONTAS ="Nenhuma conversa ainda. Aperte Alt e use Novo, Nova conta, no " \
                    "menu, para adicionar uma conta do Telegram ou do WhatsApp."
 MINUTOS_PARA_TENTAR_DE_NOVO = 5  # busca de versao com a pessoa ocupada
+MAX_BOTOES_MIDIA = 4     # abrir, baixar/salvar, copiar, IA
 MAX_BOTOES_ACAO = 30     # botoes de resposta que cabem na ordem de Tab
 MENSAGENS_DE_CONTEXTO = 12   # final da conversa que vai junto ao redigir com a IA
 MAXIMO_RESUMO = 300      # mensagens da conversa que o resumo com IA le
 MAX_BOTOES_LINK = 12     # links e botoes de endereco, tambem na ordem de Tab
 LIMITE_ROTULO_LINK = 80  # caracteres do rotulo de um botao de link
-SEGUNDOS_VOZ_NO_STATUS = 60    # o limite do WhatsApp para voz no status
+SEGUNDOS_PARA_AVISAR_QUEDA = 10   # queda mais curta que isso so vai ao log
+SEGUNDOS_VOZ_NO_STATUS = 60   # o limite do WhatsApp para voz no status
 
 AJUDA_INICIO = """\
 ESTRUTURA DA JANELA
@@ -482,6 +486,11 @@ class Janela(wx.Frame):
         self._rascunho_da_edicao = ""
         self._escrita_liberada = True   # a conversa aberta aceita mensagens
         self._caiu = set()        # contas que cairam (som de reconectada)
+        self._leitura_pendente = set()   # chegou com a janela sem foco: a
+        # conta ainda nao foi avisada de que foi lida
+        self._texto_adiado = False    # linha de mensagem esperando a selecao sair
+        self._queda_avisada = set()   # quedas que passaram do prazo e tocaram
+        self._quedas = {}         # conta -> numero da queda em andamento
         self._quem_cache = {}     # quem enviou, p/ mensagens sem autor
         self._de_grupo = {}       # resposta em particular -> msg do grupo
         # modo de selecao (Control Espaco): marcas em varias conversas ou
@@ -556,6 +565,8 @@ class Janela(wx.Frame):
         self._registrar_atalho_global()
         if hasattr(wx, "EVT_ICONIZE"):      # minimizar esconde as trancadas
             self.Bind(wx.EVT_ICONIZE, self._ao_minimizar)
+        if hasattr(wx, "EVT_ACTIVATE"):
+            self.Bind(wx.EVT_ACTIVATE, self._ao_ativar)
         self.Bind(wx.EVT_CHAR_HOOK, self._char_hook)
         barramento.ouvir(self._ao_evento)
         self.lista_msgs.Set([TEXTO_SEM_CONVERSA])
@@ -666,6 +677,8 @@ class Janela(wx.Frame):
         item(m_msg, "enviar_msg", "Enviar a mensagem digitada\tCtrl+Enter")
         item(m_msg, "enviar_local", "Enviar a minha &localização...")
         item(m_msg, "enviar_contatos", "Enviar con&tatos...")
+        item(m_msg, "agendar", "Agen&dar a mensagem digitada...	Ctrl+Shift+P")
+        item(m_msg, "ver_agendadas", "Mensagens agen&dadas...")
         m_msg.AppendSeparator()
         item(m_msg, "responder_particular", "Responder em &particular")
         item(m_msg, "responder", "&Responder\tCtrl+Shift+R")
@@ -940,6 +953,8 @@ class Janela(wx.Frame):
             "nova_enquete": lambda e: self._nova_enquete(),
             "enviar_local": lambda e: self._enviar_minha_localizacao(),
             "enviar_contatos": lambda e: self._enviar_contatos(),
+            "agendar": lambda e: self._agendar_mensagem(),
+            "ver_agendadas": lambda e: self._ver_agendadas(),
             "abrir_conv": lambda e: self._abrir_selecionada_na_lista(),
             "marcar_lida": lambda e: self._marcar_conversa_lida(),
             "arquivar": lambda e: self._arquivar_conversa(),
@@ -1374,6 +1389,15 @@ class Janela(wx.Frame):
         else:
             self.lista_msgs = wx.ListBox(
                 painel, style=wx.LB_SINGLE | wx.LB_HSCROLL, name="Mensagens")
+        # acoes da midia da mensagem selecionada (abrir, baixar, copiar,
+        # IA): os primeiros na ordem de Tab depois da lista
+        self.botoes_midia, self._midia_atual = [], []
+        for i in range(MAX_BOTOES_MIDIA):
+            b = wx.Button(painel, label="Mídia")
+            b.Show(False)
+            b.Bind(wx.EVT_BUTTON,
+                   seguro(lambda e, k=i: self._tocar_botao_midia(k)))
+            self.botoes_midia.append(b)
         # botoes de resposta da mensagem selecionada: controles de verdade,
         # criados aqui para ficarem na ordem de Tab logo depois da lista
         # (so aparecem quando a mensagem selecionada tem botoes ou opcoes)
@@ -1446,6 +1470,10 @@ class Janela(wx.Frame):
         dir_ = wx.BoxSizer(wx.VERTICAL)
         dir_.Add(self.rot_msgs, 0, wx.BOTTOM, 4)
         dir_.Add(self.lista_msgs, 3, wx.EXPAND)
+        linha_midia = wx.WrapSizer(wx.HORIZONTAL)
+        for b in self.botoes_midia:
+            linha_midia.Add(b, 0, wx.RIGHT, 6)
+        dir_.Add(linha_midia, 0, wx.TOP, 4)
         linha_acoes = wx.WrapSizer(wx.HORIZONTAL)
         for b in self.botoes_acao:
             linha_acoes.Add(b, 0, wx.RIGHT, 6)
@@ -1476,8 +1504,7 @@ class Janela(wx.Frame):
         self.lista_msgs.Bind(wx.EVT_KEY_DOWN, self._tecla_mensagens)
         self.lista_msgs.Bind(wx.EVT_CHAR, self._digitou_na_lista)
         self.lista_conv.Bind(wx.EVT_CHAR, self._digitou_na_lista)
-        self.lista_msgs.Bind(wx.EVT_LISTBOX,
-                             seguro(lambda e: self._atualizar_botoes()))
+        self.lista_msgs.Bind(wx.EVT_LISTBOX, seguro(self._ao_selecionar))
         self.caixa.Bind(wx.EVT_TEXT_PASTE, self._ao_colar)
         self.caixa.Bind(wx.EVT_TEXT_ENTER,
                         seguro(lambda e: self._enter_na_caixa()))
@@ -1504,10 +1531,14 @@ class Janela(wx.Frame):
             w.Show(escrever)
         if not mensagens:
             self._botoes_chave = None
-            for b in (self.botoes_acao + self.botoes_link
-                      + self.botoes_mencao):
+            for b in self._botoes_de_contexto():
                 b.Show(False)
         self.painel.Layout()
+
+    def _botoes_de_contexto(self):
+        """Os botoes entre a lista de mensagens e a caixa de digitar."""
+        return (self.botoes_midia + self.botoes_acao + self.botoes_link
+                + self.botoes_mencao)
 
     def _acoes_da_mensagem(self, x):
         """Botoes da mensagem: os guardados e, no WhatsApp, o de entrar nos
@@ -1537,22 +1568,35 @@ class Janela(wx.Frame):
         mensagem selecionada (Tab vai de um ao outro). Nao mexe no foco, a
         nao ser que o botao focado deixe de existir."""
         x = self._mensagem_selecionada() if self.atual else None
+        ver = self.cfg.get
+        midia = self._acoes_de_midia(x)[:MAX_BOTOES_MIDIA] \
+            if x and ver("botoes_midia") else []
         acoes = self._acoes_da_mensagem(x)[:MAX_BOTOES_ACAO] if x else []
         links = self._sem_links_de_convite(m.itens_de_link(x), acoes)[
-            :MAX_BOTOES_LINK] if x else []
+            :MAX_BOTOES_LINK] if x and ver("botoes_links") else []
+        if not ver("botoes_resposta"):
+            acoes = []
         mencoes = [dict(p) for p in m.extras_de(x)["mencoes"]
-                   ][:MAX_BOTOES_LINK] if x else []
+                   ][:MAX_BOTOES_LINK] if x and ver("botoes_pessoas") else []
         rotulos_mencao = [dialogos.rotulo_mencao(p) for p in mencoes]
-        chave = (x.id if x else None,
+        chave = (x.id if x else None, tuple(r for r, _ in midia),
                  tuple(a.get("rotulo", "") for a in acoes),
                  tuple(links), tuple(rotulos_mencao))
         if chave == self._botoes_chave:
             return
         self._botoes_chave = chave
         self._acoes_atuais, self._msg_das_acoes = acoes, x
+        self._midia_atual = midia
         self._links_atuais = links
         self._mencoes_atuais = mencoes
         perdeu_foco = False
+        for i, b in enumerate(self.botoes_midia):
+            if i < len(midia):
+                b.SetLabel(midia[i][0].replace("&", "&&"))
+                b.Show(True)
+            else:
+                perdeu_foco = perdeu_foco or b.HasFocus()
+                b.Show(False)
         for i, b in enumerate(self.botoes_acao):
             if i < len(acoes):
                 b.SetLabel((acoes[i].get("rotulo") or "Botão")
@@ -1586,6 +1630,21 @@ class Janela(wx.Frame):
         if perdeu_foco:
             self.lista_msgs.SetFocus()
         self.painel.Layout()
+
+    def _acoes_de_midia(self, x):
+        """[(rotulo, funcao)] da midia da mensagem, para os botoes depois da
+        lista e os detalhes: abrir ou reproduzir, baixar ou salvar, copiar e
+        a inteligencia artificial (sem o "de novo", que fica no menu)."""
+        acoes = self._opcoes_midia(x)
+        if acoes:
+            acoes.append(("Copiar " + m.NOMES_TIPOS[x.tipo],
+                          lambda: self._copiar_conteudo(x, "midia", "")))
+        return acoes + self._opcoes_ia(x)[:1]
+
+    @seguro
+    def _tocar_botao_midia(self, i):
+        if 0 <= i < len(self._midia_atual):
+            self._midia_atual[i][1]()
 
     @seguro
     def _abrir_botao_mencao(self, i):
@@ -1717,6 +1776,7 @@ class Janela(wx.Frame):
             self.lista_conv.SetSelection(0)
         log.info("fala direta pelo NVDA: %s", self.fala.ativa())
         self._apagar_expiradas()
+        wx.CallLater(5000, self._conferir_agendadas)
         threading.Thread(target=self._conferir_copia_ao_abrir, daemon=True,
                          name="conferir-copia").start()
         if self.cfg.get("verificar_atualizacoes"):
@@ -2072,20 +2132,45 @@ class Janela(wx.Frame):
             if self.contas else ""
         if antes == ev.CONECTADA and e.estado != ev.CONECTADA and \
                 e.estado != ev.PRECISA_LOGIN:
+            # queda curta (o servidor fecha a conexao e ela volta em ~1 s)
+            # nao avisa: o som e a fala so vem se passar do prazo
             self._caiu.add(e.conta_id)
-            bipe("desconectada")
+            self._queda_avisada.discard(e.conta_id)
+            numero = self._quedas.get(e.conta_id, 0) + 1
+            self._quedas[e.conta_id] = numero
+            wx.CallLater(SEGUNDOS_PARA_AVISAR_QUEDA * 1000,
+                         self._avisar_queda_longa, e.conta_id, numero)
         if e.estado == ev.CONECTADA and antes != ev.CONECTADA:
+            avisar = True
             if e.conta_id in self._caiu:
                 self._caiu.discard(e.conta_id)
-                bipe("reconectada")
-            self.fala.falar("%s conectado." % servico)
+                avisar = e.conta_id in self._queda_avisada
+                self._queda_avisada.discard(e.conta_id)
+                if avisar:
+                    bipe("reconectada")
+            self._queda_avisada.discard(e.conta_id)
+            if avisar:
+                self.fala.falar("%s conectado." % servico)
             self._trazer_contatos_da_conta(e.conta_id)
             if self.interrompidas.pop(e.conta_id, None) is not None:
                 self._atualizar_titulo()
         elif e.estado == ev.PRECISA_LOGIN:
+            self._queda_avisada.add(e.conta_id)   # a fala ja avisou
             self.fala.falar("%s: %s." % (servico, e.detalhe or e.estado))
             if e.detalhe == "desconectada pelo celular":
                 wx.CallAfter(self._oferecer_parear_de_novo, e.conta_id)
+
+    @seguro
+    def _avisar_queda_longa(self, conta_id, numero):
+        """Passou o prazo e a conta continua fora: toca o som de desconectada.
+        Se ela voltou, ou caiu de novo (outro numero), nao faz nada."""
+        if self._quedas.get(conta_id) != numero or \
+                conta_id not in self._caiu or \
+                self.estados.get(conta_id) in (ev.CONECTADA,
+                                               ev.PRECISA_LOGIN):
+            return
+        self._queda_avisada.add(conta_id)
+        bipe("desconectada")
 
     def _grupos_das_contas(self):
         """[(conta_id, id, nome)] dos grupos de que as contas conectadas
@@ -2994,6 +3079,10 @@ class Janela(wx.Frame):
         except Exception:
             log.exception("erro ao marcar como lida na conta")
         conv.nao_lidas = 0
+        for topico in self._topicos_de(conv):
+            # grupo com topicos: a conta le todos; aqui tambem, senao a
+            # soma dos topicos devolve as nao lidas ao grupo
+            topico.nao_lidas = 0
 
     def _em_massa_conv(self, acao, conv):
         """Atalho ou menu de uma conversa, com a lista de conversas em foco e
@@ -3854,6 +3943,21 @@ class Janela(wx.Frame):
         self.busca = texto
         self._aplicar_filtros(falar=False)
 
+    def _ao_ativar(self, evento):
+        """A janela voltou ao foco: o que chegou na conversa aberta enquanto
+        ela estava sem foco passa a contar como lido, tambem no celular."""
+        evento.Skip()
+        if evento.GetActive():
+            self._avisar_leitura_pendente()
+
+    def _avisar_leitura_pendente(self):
+        if self.atual is None or self.atual not in self._leitura_pendente:
+            return
+        self._leitura_pendente.discard(self.atual)
+        p = self.contas.provedor(self.atual[0]) if self.contas else None
+        if p is not None and self.estados.get(self.atual[0]) == ev.CONECTADA:
+            p.marcar_como_lida(self.atual[1])
+
     def _ao_minimizar(self, evento):
         evento.Skip()
         if evento.IsIconized():
@@ -4063,6 +4167,8 @@ class Janela(wx.Frame):
                 p = self.contas.provedor(msg.conta_id)
                 if p is not None:
                     p.marcar_como_lida(msg.conversa_id)
+            elif not msg.minha:
+                self._leitura_pendente.add(chave)
         if msg.minha or e.silenciosa or calada or msg.tipo == m.AVISO_MEMBROS:
             return  # minha, da sincronia inicial ou silenciada: sem aviso
         self._ia_automatica(msg)
@@ -4802,7 +4908,9 @@ class Janela(wx.Frame):
                 if foco is self.caixa or foco in self.botoes_envio:
                     self._sair_da_caixa()
                     return
-                if foco is self.lista_msgs:
+                if foco is self.lista_msgs or \
+                        foco in self._botoes_de_contexto():
+                    # nos botoes depois da lista, o mesmo que na lista
                     if not self._cancelar_download() and \
                             not self._parar_audio() and \
                             not self._voltar_da_respondida():
@@ -5087,7 +5195,9 @@ class Janela(wx.Frame):
                                 "escrever nela.")
             p.carregar_mensagens(conv.id, min(
                 teto, self._limite_memoria(conv.chave)))
-            if conv.nao_lidas:
+            precisa = getattr(p, "precisa_de_leitura", lambda _c: False)
+            if conv.nao_lidas or conv.chave in self._leitura_pendente or                     precisa(conv.id):
+                self._leitura_pendente.discard(conv.chave)
                 p.marcar_como_lida(conv.id)
         conv.nao_lidas = 0
         if self.marcador_n <= 0:
@@ -5372,8 +5482,11 @@ class Janela(wx.Frame):
         if chave == self.atual:
             self._preencher_mensagens()
 
-    def _preencher_mensagens(self, destino=None):
-        """Refaz a lista. destino: MARCADOR, "ultima" ou None (mantem)."""
+    def _preencher_mensagens(self, destino=None, adiar=None):
+        """Refaz a lista. destino: MARCADOR, "ultima" ou None (mantem).
+        adiar: id de uma mensagem cujo texto novo NAO entra agora na lista
+        (so quando a selecao sair dela): trocar o texto do item em foco faz o
+        NVDA ler a linha de novo, por cima do que se esta ouvindo."""
         if self.atual is None:
             return
         msgs = self._mensagens_atuais()
@@ -5428,6 +5541,10 @@ class Janela(wx.Frame):
             # e nao toca na selecao (o leitor de tela nao anuncia nada)
             for k, (a, b) in enumerate(zip(velhos, itens)):
                 if a != b:
+                    if adiar is not None and mapa[k] == adiar:
+                        itens[k] = a          # a lista ainda mostra o velho
+                        self._texto_adiado = True
+                        continue
                     self.lista_msgs.SetString(k, b)
             for texto in itens[len(velho_mapa):]:
                 self.lista_msgs.Append(texto)
@@ -5670,6 +5787,152 @@ class Janela(wx.Frame):
                         else "Enviando %d contatos." % len(escolhidos),
                         interromper=True)
 
+    def _agendar_mensagem(self):
+        """Agenda o texto da caixa (ou o que se escrever na janela) para uma
+        data e hora; o servidor envia na hora marcada, mesmo com o TeleZapp
+        fechado."""
+        if self._so_texto_no_status():
+            return
+        destino = self._destino_do_envio()
+        if destino is None:
+            return
+        conta_id, conversa_id, prov = destino
+        if not getattr(prov, "PODE_AGENDAR", False):
+            self.fala.falar("Este serviço ainda não agenda mensagens.",
+                            interromper=True)
+            return
+        if self.editando is not None or self.anexos:
+            self.fala.falar("Só dá para agendar texto. Envie ou tire os "
+                            "anexos, ou termine a edição, e tente de novo.",
+                            interromper=True)
+            return
+        from telezapp.interface.agendadas import DialogoAgendar
+        conv = self.indice.get((conta_id, conversa_id))
+        nome = conv.nome if conv else "esta conversa"
+        local = bool(getattr(prov, "AGENDA_LOCAL", False))
+        dlg = DialogoAgendar(self, nome, self.caixa.GetValue().strip(),
+                             local=local)
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            texto, quando = dlg.escolhido()
+        finally:
+            dlg.Destroy()
+        resposta = self.resposta_a.id if self.resposta_a else ""
+        mencoes = list(self.mencoes) or None
+        self.fala.falar("Agendando.", interromper=True)
+
+        def trabalho():
+            try:
+                ok, motivo = prov.agendar_texto(conversa_id, texto, quando,
+                                                resposta, mencoes)
+            except Exception:
+                log.exception("agendar a mensagem")
+                ok, motivo = False, "algo deu errado"
+            wx.CallAfter(self._agendou, ok, motivo, quando, texto,
+                         (conta_id, conversa_id), local)
+        threading.Thread(target=trabalho, daemon=True,
+                         name="agendar-mensagem").start()
+
+    @seguro
+    def _agendou(self, ok, motivo, quando, texto, chave, local=False):
+        from telezapp.nucleo import agendamento as ag
+        if not ok:
+            bipe("erro")
+            self.fala.falar("Não consegui agendar: %s. A mensagem continua "
+                            "na caixa." % motivo, interromper=True)
+            return
+        # o texto agendado sai da caixa, como se tivesse sido enviado
+        if self.atual == chave and self.caixa.GetValue().strip() == texto:
+            self.caixa.Clear()
+            self.mencoes = []
+            if self.resposta_a is not None:
+                self.resposta_a = None
+                self._rotular_caixa()
+        self.fala.falar("Mensagem agendada para %s.%s" % (
+            ag.descricao(quando, datetime.now()),
+            " O TeleZapp precisa estar aberto e conectado nessa hora."
+            if local else ""), interromper=True)
+
+    def _conferir_agendadas(self, repetir=True):
+        """Agenda propria (WhatsApp): envia o que chegou na hora e, do que
+        passou da hora com o programa fechado ou sem conexao, pergunta o que
+        fazer. Confere a cada 15 segundos."""
+        try:
+            for dados in self.cfg.contas():
+                cid = dados["id"]
+                prov = self.contas.provedor(cid) if self.contas else None
+                if prov is None or not getattr(prov, "AGENDA_LOCAL", False) \
+                        or self.estados.get(cid) != ev.CONECTADA:
+                    continue
+                prontas, atrasadas = prov.vencidas_da_agenda(
+                    time.time(), ag_nucleo.TOLERANCIA_SEGUNDOS)
+                for x in prontas:
+                    prov.enviar_agendada(x["id"])
+                if atrasadas:
+                    self._perguntar_atrasadas(prov, atrasadas)
+        except Exception:
+            log.exception("erro ao conferir as mensagens agendadas")
+        finally:
+            if repetir:
+                wx.CallLater(15000, self._conferir_agendadas)
+
+    def _perguntar_atrasadas(self, prov, atrasadas):
+        """Sim envia agora, Nao descarta, Cancelar deixa na lista para ver
+        depois (em Mensagens agendadas)."""
+        primeira = atrasadas[0]
+        conv = self.indice.get((prov.conta.id, primeira["conversa_id"]))
+        quando = datetime.fromtimestamp(primeira["quando"])
+        resumo = ag_nucleo.linha(primeira["texto"], quando, datetime.now(),
+                                 limite=80)
+        n = len(atrasadas)
+        nome = conv.nome if conv else "uma conversa"
+        r = wx.MessageBox(
+            "%s passou da hora enquanto o TeleZapp estava fechado ou sem "
+            "conexão. %s\n\nSim: enviar agora. Não: descartar. Cancelar: "
+            "deixar na lista de Mensagens agendadas para decidir depois." % (
+                "1 mensagem agendada" if n == 1 else
+                "%d mensagens agendadas" % n,
+                ("Para %s, %s" % (nome, resumo)) if n == 1 else
+                ("A primeira, para %s: %s" % (nome, resumo))),
+            "Mensagens agendadas atrasadas",
+            wx.YES_NO | wx.CANCEL | wx.ICON_QUESTION, self)
+        if r == wx.YES:
+            for x in atrasadas:
+                prov.enviar_agendada(x["id"])
+            self.fala.falar("Enviando.", interromper=True)
+        elif r == wx.NO:
+            prov.descartar_agendadas([x["id"] for x in atrasadas])
+            self.fala.falar("Descartadas.", interromper=True)
+        else:
+            self.fala.falar("Ficaram na lista de Mensagens agendadas.",
+                            interromper=True)
+
+    def _ver_agendadas(self):
+        """Lista as agendadas da conversa aberta: mudar o horário e cancelar."""
+        destino = self._destino_do_envio()
+        if destino is None:
+            return
+        conta_id, conversa_id, prov = destino
+        if not getattr(prov, "PODE_AGENDAR", False):
+            self.fala.falar("Este serviço ainda não agenda mensagens.",
+                            interromper=True)
+            return
+        from telezapp.interface.agendadas import DialogoAgendadas
+        conv = self.indice.get((conta_id, conversa_id))
+        dlg = DialogoAgendadas(
+            self, conv.nome if conv else "esta conversa",
+            lambda: prov.agendadas(conversa_id),
+            lambda x, quando: prov.mudar_horario_agendada(
+                conversa_id, x["id"], quando),
+            lambda x: prov.cancelar_agendadas(conversa_id, [x["id"]]),
+            falar=lambda t: self.fala.falar(t, interromper=True),
+            local=bool(getattr(prov, "AGENDA_LOCAL", False)))
+        try:
+            dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+
     def _grupo_com_topicos(self):
         """(conversa do grupo, provedor) do grupo com topicos em foco: o da
         conversa aberta (um topico dele) ou o selecionado na lista; None se
@@ -5825,13 +6088,19 @@ class Janela(wx.Frame):
         controle = None
         if em_grupo and contagens and recibos:
             controle = ControleRecibos(self, conv, recibos, nomes)
+        # as acoes da midia, que tambem viram botoes depois da lista (ou nao,
+        # conforme as configuracoes): fecham os detalhes e agem
+        extra = list(controle.botoes()) if controle else []
+        for rotulo_m, funcao in self._acoes_de_midia(x):
+            extra.append((rotulo_m, lambda dlg, f=funcao: (
+                dlg.EndModal(wx.ID_OK), wx.CallAfter(f))))
         pessoa = dialogos.mostrar_texto(
             self, "Detalhes da mensagem",
             m.detalhes(x, conv.nome if conv else "", recibos=recibos,
                        nomes=nomes, midia=midia, grupo=em_grupo,
                        contagens=contagens),
             "Detalhes e texto completo", links=links,
-            botoes_extra=controle.botoes() if controle else (),
+            botoes_extra=extra,
             botoes=[tuple(b) for b in extras["botoes"]],
             mencoes=extras["mencoes"],
             acoes=[(a.get("rotulo", ""), a.get("tipo") == "lista")
@@ -6835,6 +7104,17 @@ class Janela(wx.Frame):
         """Abre (ou cria, vazia) a conversa com quem foi mencionado, no
         mesmo servico e na mesma conta da mensagem."""
         cid = pessoa.get("id")
+        if not cid and pessoa.get("usuario"):
+            # @usuário que não foi resolvido ao carregar a conversa: tenta
+            # de novo agora, pelo caminho dos links (que diz o motivo da
+            # falha e abre o robô, se for um)
+            prov = self.contas.provedores.get(x.conta_id)
+            info = links_externos.interpretar(
+                "https://t.me/" + pessoa["usuario"])
+            if prov is not None and info is not None:
+                log.info("menção sem id: tentando resolver o @ de novo")
+                self._abrir_usuario_do_link(x.conta_id, prov, info, False)
+                return
         if not cid:
             bipe("erro")
             self.fala.falar("Não consegui localizar esta pessoa.",
@@ -8362,10 +8642,17 @@ class Janela(wx.Frame):
             if p is None:
                 return False, "A conta não está conectada."
             return p.seguir_canal_achado(canal)
+        def ver(conta_id, canal):
+            from telezapp.nucleo import canais_whatsapp as cw
+            p = self.contas.provedor(conta_id)
+            if p is None:
+                raise RuntimeError("A conta não está conectada.")
+            return cw.texto_das_publicacoes(
+                canal.nome, p.publicacoes_do_canal(canal))
         dlg = DialogoBuscaDeCanais(
             self, contas, buscar, seguir,
             falar=lambda t: self.fala.falar(t, interromper=True),
-            cfg=self.cfg)
+            cfg=self.cfg, ver=ver)
         try:
             dlg.ShowModal()
         finally:
@@ -9675,6 +9962,20 @@ class Janela(wx.Frame):
             except Exception:
                 log.exception("erro ao avisar que o áudio foi ouvido")
         if (x.conta_id, x.conversa_id) == self.atual:
+            # a linha passa a dizer "ouvida", mas so depois que a selecao sair
+            # dela: mudar o item em foco faz o NVDA lê-lo por cima do audio
+            self._preencher_mensagens(
+                adiar=x.id if x.id == self._chave_selecionada() else None)
+
+    def _ao_selecionar(self, evt):
+        self._atualizar_botoes()
+        self._aplicar_texto_adiado()
+
+    def _aplicar_texto_adiado(self):
+        """A selecao mudou: agora o item antigo pode receber o texto novo sem
+        o leitor de tela falar."""
+        if self._texto_adiado:
+            self._texto_adiado = False
             self._preencher_mensagens()
 
     def _vigiar_audio(self, motor):
@@ -10095,6 +10396,8 @@ class Janela(wx.Frame):
                 wx.MessageBox(e.erro, NOME, wx.OK | wx.ICON_WARNING, self)
             return
         self.SetStatusText("Mídia baixada.")
+        # o botao "Baixar a midia" da mensagem vira "Salvar a midia"
+        wx.CallAfter(self._atualizar_botoes)
         esperando = self._ia_pendentes.pop(chave, None)
         if esperando is not None:
             wx.CallAfter(self._ia_processar, esperando[0], esperando[1])
@@ -10309,6 +10612,10 @@ class Janela(wx.Frame):
                 m.definir_modo_previa(valor)
                 if self.atual is not None:
                     self._preencher_mensagens()
+            elif chave in ("botoes_midia", "botoes_resposta", "botoes_links",
+                           "botoes_pessoas"):
+                self._botoes_chave = None
+                self._atualizar_botoes()
             elif chave == "formatacao_das_mensagens":
                 m.definir_formatacao(valor)
                 if self.atual is not None:

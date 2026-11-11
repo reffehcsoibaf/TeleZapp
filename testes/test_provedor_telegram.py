@@ -202,7 +202,9 @@ class ClienteFalso:
                             duration=3, name="", size=os.path.getsize(
                                 caminho)), **extra)
 
-    async def get_messages(self, ent, ids=None):
+    async def get_messages(self, ent, ids=None, limit=None):
+        if limit is not None:
+            return [mensagem(77)]
         if ids == 404:
             return None
         grande = ids == 500
@@ -238,8 +240,11 @@ class ClienteFalso:
             self.pedidos_partes.append(ini)
             yield self.conteudo_grande[ini:ini + chunk_size]
 
-    async def send_read_acknowledge(self, ent):
+    async def send_read_acknowledge(self, ent, clear_mentions=False,
+                                    clear_reactions=False, **k):
         self.lidas.append(ent)
+        self.limpou = (clear_mentions, clear_reactions)
+        self.lida_ate = k.get("max_id")
 
     async def delete_messages(self, ent, ids, revoke=True):
         self.apagadas.append((ent, list(ids), revoke))
@@ -2190,3 +2195,155 @@ def test_motivo_do_convite_so_diz_expirou_quando_expirou():
     assert "não respondeu" in tg.motivo_do_convite(TimeoutError())
     assert "(Estranho)" in tg.motivo_do_convite(Estranho())
     assert "expirou" not in tg.motivo_do_convite(Estranho())
+
+
+# ------------------------------------------------ mensagens agendadas
+def _cliente_de_agendadas():
+    
+    class Cliente(ClienteFalso):
+        def __init__(self):
+            super().__init__()
+            self.agendadas = []
+
+        async def send_message(self, ent, texto="", reply_to=None,
+                               link_preview=True, file=None, schedule=None,
+                               **kw):
+            if texto == "falhar":
+                raise errors.ChatWriteForbiddenError(None)
+            self.agendadas.append((ent, texto, reply_to, schedule))
+            return mensagem(55, texto, out=True)
+
+        async def __call__(self, req):
+            self.requisicoes.append(req)
+            if type(req).__name__ == "GetScheduledHistoryRequest":
+                return types.SimpleNamespace(messages=[
+                    mensagem(8, "depois", date=datetime.datetime(
+                        2026, 11, 13, 12, 0, tzinfo=datetime.timezone.utc)),
+                    mensagem(7, "", media=object(), date=datetime.datetime(
+                        2026, 11, 12, 12, 0, tzinfo=datetime.timezone.utc))])
+            return None
+    return Cliente()
+
+
+def test_agendar_texto_manda_a_data_ao_telegram(ambiente):
+    cliente = _cliente_de_agendadas()
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    quando = datetime.datetime(2026, 11, 12, 9, 0)
+    import asyncio
+    ok, motivo = asyncio.run(p._agendar_texto("10", "bom dia", quando, "", None))
+    assert ok and motivo == ""
+    ent, texto, resposta, agendada = cliente.agendadas[0]
+    assert texto == "bom dia" and resposta is None
+    assert agendada.replace(tzinfo=None) == quando and agendada.tzinfo
+    ok, motivo = asyncio.run(p._agendar_texto("10", "falhar", quando, "", None))
+    assert not ok and "permissão" in motivo
+
+
+def test_agendadas_listam_em_ordem_e_cancelam_e_mudam_a_hora(ambiente):
+    import asyncio
+    cliente = _cliente_de_agendadas()
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    itens = asyncio.run(p._agendadas("10"))
+    assert [x["id"] for x in itens] == [7, 8]          # da mais proxima
+    assert itens[0]["texto"] == "(mídia)" and itens[1]["texto"] == "depois"
+    assert itens[0]["quando"].tzinfo is None
+    assert asyncio.run(p._cancelar_agendadas("10", [7, 8])) == (True, "")
+    cancelar = cliente.requisicoes[-1]
+    assert type(cancelar).__name__ == "DeleteScheduledMessagesRequest"
+    assert list(cancelar.id) == [7, 8]
+    assert asyncio.run(p._mudar_horario_agendada(
+        "10", 8, datetime.datetime(2026, 11, 20, 8, 30))) == (True, "")
+    editar = cliente.requisicoes[-1]
+    assert type(editar).__name__ == "EditMessageRequest"
+    assert editar.id == 8 and editar.schedule_date.replace(
+        tzinfo=None) == datetime.datetime(2026, 11, 20, 8, 30)
+    assert tg.ProvedorTelegram.PODE_AGENDAR is True
+
+
+def test_ler_a_conversa_limpa_mencoes_reacoes_e_o_ponto_de_nao_lida(ambiente):
+    import asyncio
+    cliente = ClienteFalso()
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    p._entidades["10"] = "peer10"
+    p._pendencias["10"] = (2, 1, True)
+    asyncio.run(p._marcar_lida("10"))
+    assert cliente.lidas == ["peer10"] and cliente.limpou == (True, True)
+    assert cliente.lida_ate == 77        # a ultima do servidor, nao "tudo"
+    nomes = [type(r).__name__ for r in cliente.requisicoes]
+    desmarcar = cliente.requisicoes[nomes.index("MarkDialogUnreadRequest")]
+    assert nomes[-1] == "GetPeerDialogsRequest"   # confere como ficou
+    assert desmarcar.unread is False
+    assert "10" not in p._pendencias             # ja leu
+
+
+def test_abrir_conversa_do_telegram_sempre_confirma_a_leitura(ambiente):
+    cliente = ClienteFalso()
+    p = ambiente.criar(cliente)
+    # a contagem daqui pode estar defasada (canal, mensagem por outro
+    # caminho): quem manda e o servidor
+    assert p.precisa_de_leitura("10")
+    assert p.precisa_de_leitura("-100123")
+    assert not p.precisa_de_leitura(tg.PREFIXO_STATUS + "5")
+
+
+class ClienteDeTopicos(ClienteFalso):
+    """Grupo com topicos: 1 (Geral) lido, 5 com 3 nao lidas e uma mencao."""
+
+    def __init__(self):
+        super().__init__()
+        self.lidos = set()
+
+    def _topico(self, id, nao_lidas, mencoes=0):
+        lido = id in self.lidos
+        return types.SimpleNamespace(
+            id=id, title="T%d" % id, top_message=id * 100,
+            unread_count=0 if lido else nao_lidas,
+            unread_mentions_count=0 if lido else mencoes,
+            unread_reactions_count=0, read_inbox_max_id=0)
+
+    async def __call__(self, requisicao):
+        self.requisicoes.append(requisicao)
+        nome = type(requisicao).__name__
+        if nome == "ReadDiscussionRequest":
+            self.lidos.add(requisicao.msg_id)
+        if nome in ("GetForumTopicsRequest", "GetForumTopicsByIDRequest"):
+            todos = [self._topico(1, 0), self._topico(5, 3, 1)]
+            ids = getattr(requisicao, "topics", None)
+            return types.SimpleNamespace(topics=[
+                t for t in todos if ids is None or t.id in ids])
+
+
+def test_abrir_topico_le_ate_a_ultima_do_servidor_sem_mensagem_guardada(
+        ambiente):
+    import asyncio
+    cliente = ClienteDeTopicos()
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    p._entidades["-1009"] = "grupo"
+    asyncio.run(p._marcar_lida("-1009#5"))       # nada guardado aqui
+    lidas = [r for r in cliente.requisicoes
+             if type(r).__name__ == "ReadDiscussionRequest"]
+    assert [(r.msg_id, r.read_max_id) for r in lidas] == [(5, 500)]
+    mencoes = [r for r in cliente.requisicoes
+               if type(r).__name__ == "ReadMentionsRequest"]
+    assert [r.top_msg_id for r in mencoes] == [5]
+
+
+def test_marcar_o_grupo_com_topicos_le_cada_topico_pendente(ambiente):
+    import asyncio
+    cliente = ClienteDeTopicos()
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    p._entidades["-1009"] = "grupo"
+    for cid in ("-1009", "-1009#1", "-1009#5"):
+        p._conversas[cid] = m.Conversa("t1", cid, "G", "telegram", "grupo",
+                                       nao_lidas=3)
+    asyncio.run(p._marcar_lida("-1009"))
+    lidas = [r.msg_id for r in cliente.requisicoes
+             if type(r).__name__ == "ReadDiscussionRequest"]
+    assert lidas == [5]                          # o Geral nao tinha nada
+    assert p._conversas["-1009#5"].nao_lidas == 0
+    assert cliente.lidas == []                   # nao le o grupo como canal

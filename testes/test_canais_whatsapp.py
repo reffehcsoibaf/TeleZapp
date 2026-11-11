@@ -319,3 +319,54 @@ class _ThreadNaHora:
 
     def start(self):
         self.target()
+
+
+def test_resumo_da_publicacao_diz_o_tipo_e_o_texto():
+    from neonize.proto.waE2E import WAWebProtobufsE2E_pb2 as E
+    assert cw.resumo_da_publicacao(E.Message(conversation="oi")) == \
+        ("Texto", "oi")
+    m = E.Message()
+    m.extendedTextMessage.text = "com link"
+    assert cw.resumo_da_publicacao(m) == ("Texto", "com link")
+    m = E.Message()
+    m.imageMessage.caption = "legenda"
+    assert cw.resumo_da_publicacao(m) == ("Foto", "legenda")
+    m = E.Message()
+    m.audioMessage.seconds = 3
+    assert cw.resumo_da_publicacao(m) == ("Áudio", "")
+    assert cw.resumo_da_publicacao(E.Message()) == ("Outro tipo", "")
+
+
+def test_texto_das_publicacoes_vazio_e_com_itens():
+    assert "não tem publicações" in cw.texto_das_publicacoes("Canal X", [])
+    t = cw.texto_das_publicacoes("Canal X", [
+        (9, "Texto", "novidade", 120), (8, "Foto", "", 0)])
+    assert t.splitlines()[0].startswith("Últimas 2 publicações de Canal X")
+    assert "1. Texto (120 visualizações): novidade" in t
+    assert "2. Foto." in t
+
+
+def test_dialogo_ver_publicacoes_mostra_o_texto_ou_o_motivo(monkeypatch):
+    from testes import wx_falso
+    canal = cw.canal_de(no())
+    ditas, mostrados = [], []
+    bc, d = _dialogo(monkeypatch, lambda *a: cw.Pagina([canal]),
+                     falar=ditas.append)
+    d.ver_fn = lambda conta, c: "TEXTO"
+    monkeypatch.setattr(bc.dialogos, "mostrar_texto",
+                        lambda *a, **k: mostrados.append(a[2:]))
+    d.termo.SetValue("x")
+    d.buscar()
+    d.lista.SetSelection(0)
+    d.b_ver.SetFocus()
+    d._ver_publicacoes()
+    assert mostrados and mostrados[0][0] == "TEXTO"
+    assert not d.ocupada
+    # ao fechar a leitura (Esc) o foco volta para a lista, no mesmo canal
+    assert d.lista.GetSelection() == 0 and wx_falso._foco[0] is d.lista
+
+    def falha(conta, c):
+        raise RuntimeError("O WhatsApp não mostrou.")
+    d.ver_fn = falha
+    d._ver_publicacoes()
+    assert ditas[-1] == "O WhatsApp não mostrou." and len(mostrados) == 1

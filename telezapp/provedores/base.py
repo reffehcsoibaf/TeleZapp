@@ -96,6 +96,12 @@ class Provedor(ABC):
     def marcar_como_lida(self, conversa_id):
         """Avisa o servico que a pessoa leu a conversa."""
 
+    def precisa_de_leitura(self, conversa_id):
+        """A conta guarda algo por ler que a contagem de nao lidas daqui nao
+        mostra (mencoes, reacoes, "marcada como nao lida")? Se sim, abrir a
+        conversa ainda deve avisar a conta."""
+        return False
+
     def apagar_mensagem(self, mensagem, para_todos=False):
         """Apaga a mensagem na conta do servico (para todos, ou so para
         mim). True se o servico foi avisado."""
@@ -491,6 +497,28 @@ class Provedor(ABC):
         return None
 
     PODE_ENVIAR_CONTATOS = False
+    # o servico guarda a mensagem e a envia na hora marcada (Telegram)
+    PODE_AGENDAR = False
+
+    def agendar_texto(self, conversa_id, texto, quando, resposta_a="",
+                      mencoes=None):
+        """Agenda um texto para `quando` (datetime local). Bloqueia; devolve
+        (True, "") ou (False, motivo)."""
+        raise NotImplementedError
+
+    def agendadas(self, conversa_id):
+        """As mensagens agendadas da conversa, da mais proxima para a mais
+        distante: [{"id", "quando" (datetime local), "texto"}]. Bloqueia."""
+        raise NotImplementedError
+
+    def cancelar_agendadas(self, conversa_id, ids):
+        """Cancela agendadas. Bloqueia; (True, "") ou (False, motivo)."""
+        raise NotImplementedError
+
+    def mudar_horario_agendada(self, conversa_id, id_, quando):
+        """Muda a hora de uma agendada. Bloqueia; (True, "") ou (False,
+        motivo)."""
+        raise NotImplementedError
 
     def enviar_contatos(self, conversa_id, contatos):
         """Envia cartoes de contato: contatos e [(nome, telefone)]. O resultado
