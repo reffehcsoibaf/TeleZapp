@@ -77,19 +77,54 @@ def pasta_do_pacote(pacote_id):
     return os.path.join(pasta_dos_pacotes(), pacote_id[len(PREFIXO):])
 
 
+def _arquivos_na_pasta(pasta):
+    """[(nome, caminho)] dos sons aceitos nessa pasta, em ordem."""
+    if not os.path.isdir(pasta):
+        return []
+    nomes = [nome for nome in sorted(os.listdir(pasta), key=str.lower)
+             if os.path.splitext(nome)[1].lower() in EXTENSOES
+             and os.path.isfile(os.path.join(pasta, nome))]
+    return [(nome, os.path.join(pasta, nome)) for nome in nomes]
+
+
 def arquivos_da_pasta(pacote_id):
     """[(nome, caminho)] dos sons aceitos na pasta do pacote, em ordem. So os
     pacotes personalizados tem pasta editavel: os da casa devolvem []."""
     if not editavel(pacote_id):
         return []
-    pasta = pasta_do_pacote(pacote_id)
-    if not os.path.isdir(pasta):
-        return []
-    nomes = [nome for nome in os.listdir(pasta)
-             if os.path.splitext(nome)[1].lower() in EXTENSOES
-             and os.path.isfile(os.path.join(pasta, nome))]
-    return [(nome, os.path.join(pasta, nome))
-            for nome in sorted(nomes, key=str.lower)]
+    return _arquivos_na_pasta(pasta_do_pacote(pacote_id))
+
+
+def arquivos_do_pacote(pacote_id):
+    """[(nome, caminho)] dos sons do pacote, casa ou personalizado, em ordem.
+    E a fonte dos sons para escolher: o tema do som do pacote escolhido, por
+    exemplo o pacote ZapZap, e nao uma pasta de conversas com nomes
+    criptografados."""
+    if pacote_id in (PADRAO, TELEZAPP) or da_casa(pacote_id):
+        pasta = _pasta_da_casa(TELEZAPP if pacote_id in (PADRAO, TELEZAPP)
+                                else pacote_id)
+        return _arquivos_na_pasta(pasta)
+    if editavel(pacote_id):
+        return _arquivos_na_pasta(pasta_do_pacote(pacote_id))
+    return []
+
+
+def sons_do_evento(evento, ativo, seguem=None):
+    """[(nome do pacote, caminho)] do som desse evento em cada pacote que o
+    tem, o pacote ativo primeiro. `seguem` e o evento comum que vale quando o
+    pacote nao tem arquivo para `evento` (nova_pessoal segue nova). E a
+    lista do som proprio de uma conversa."""
+    ids = [i for i, _ in listar() if i != PADRAO]   # padrao: so bips
+    if ativo in ids:
+        ids.remove(ativo)
+        ids.insert(0, ativo)
+    achados = []
+    for pid in ids:
+        caminho = arquivo_do_evento(pid, evento) or (
+            arquivo_do_evento(pid, seguem) if seguem else "")
+        if caminho:
+            achados.append((nome_do_pacote(pid), caminho))
+    return achados
 
 
 def listar():
@@ -157,14 +192,22 @@ def evento_da_conversa(conv):
 
 
 # ------------------------------------------------- som proprio de uma conversa
-def _chave_da_conversa(chave):
-    return "%s|%s" % chave
+# Os eventos que uma conversa pode ter com som proprio. "nova" e a mensagem
+# recebida (a chave sem sufixo e a das versoes antigas, que so tinham esta)
+EVENTOS_DA_CONVERSA = ("nova", "nova_aberta", "mencao_ou_resposta",
+                       "reacao_recebida", "voto_enquete")
 
 
-def arquivo_da_conversa(cfg, chave):
-    """O arquivo de som proprio da conversa (conta, id), ou "" se ela nao tem
-    ou se o arquivo sumiu."""
-    nome = (cfg.get("sons_de_conversa") or {}).get(_chave_da_conversa(chave))
+def _chave_da_conversa(chave, evento="nova"):
+    texto = "%s|%s" % chave
+    return texto if evento == "nova" else "%s|%s" % (texto, evento)
+
+
+def arquivo_da_conversa(cfg, chave, evento="nova"):
+    """O arquivo de som proprio da conversa (conta, id) para o evento, ou ""
+    se ela nao tem ou se o arquivo sumiu."""
+    nome = (cfg.get("sons_de_conversa") or {}).get(
+        _chave_da_conversa(chave, evento))
     if not nome:
         return ""
     caminho = os.path.join(config.pasta("sons", "conversas"),
@@ -172,16 +215,15 @@ def arquivo_da_conversa(cfg, chave):
     return caminho if os.path.isfile(caminho) else ""
 
 
-def definir_som_da_conversa(cfg, chave, origem):
+def definir_som_da_conversa(cfg, chave, origem, evento="nova"):
     """Copia o arquivo para a pasta de sons (o original pode sumir) e o guarda
-    como o som da conversa. OSError se nao der para copiar."""
-    texto = _chave_da_conversa(chave)
+    como o som do evento nessa conversa. OSError se nao der para copiar."""
+    texto = _chave_da_conversa(chave, evento)
     ext = os.path.splitext(origem)[1].lower() or ".wav"
     nome = hashlib.sha1(texto.encode("utf-8")).hexdigest()[:16] + ext
     destino = os.path.join(config.pasta("sons", "conversas"), nome)
-    antigo = arquivo_da_conversa(cfg, chave)
-    if os.path.normcase(os.path.abspath(origem)) != \
-            os.path.normcase(os.path.abspath(destino)):
+    antigo = arquivo_da_conversa(cfg, chave, evento)
+    if os.path.normcase(os.path.abspath(origem)) !=             os.path.normcase(os.path.abspath(destino)):
         shutil.copyfile(origem, destino)
     if antigo and os.path.normcase(antigo) != os.path.normcase(destino):
         _apagar(antigo)
@@ -191,13 +233,19 @@ def definir_som_da_conversa(cfg, chave, origem):
     return destino
 
 
-def remover_som_da_conversa(cfg, chave):
-    antigo = arquivo_da_conversa(cfg, chave)
+def remover_som_da_conversa(cfg, chave, evento="nova"):
+    antigo = arquivo_da_conversa(cfg, chave, evento)
     if antigo:
         _apagar(antigo)
     sons = dict(cfg.get("sons_de_conversa") or {})
-    if sons.pop(_chave_da_conversa(chave), None) is not None:
+    if sons.pop(_chave_da_conversa(chave, evento), None) is not None:
         cfg.set("sons_de_conversa", sons)
+
+
+def quantos_sons_da_conversa(cfg, chave):
+    """Em quantos eventos a conversa tem som proprio."""
+    return sum(1 for e in EVENTOS_DA_CONVERSA
+               if arquivo_da_conversa(cfg, chave, e))
 
 
 def _apagar(caminho):

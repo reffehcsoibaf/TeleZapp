@@ -4178,7 +4178,9 @@ class Janela(wx.Frame):
         if self._conversa_muda(conv, aberta):
             return        # arquivada ou trancada: sem som, fala nem aviso
         aviso = self._texto_do_aviso(msg, conv, aberta)
-        proprio = pacotes_de_som.arquivo_da_conversa(self.cfg, chave)
+        proprio = (aberta and pacotes_de_som.arquivo_da_conversa(
+            self.cfg, chave, "nova_aberta")) or \
+            pacotes_de_som.arquivo_da_conversa(self.cfg, chave)
         servico = self._servico_da_conta(msg.conta_id)
         if self._avisos_calados():
             self.SetStatusText(aviso[:150])
@@ -4186,7 +4188,9 @@ class Janela(wx.Frame):
         if conv.silenciada():
             pass          # silenciada e aberta: sem som (a fala segue a opcao)
         elif conv.tipo == "grupo" and self._cita_voce(msg):
-            bipe("mencao_ou_resposta", servico=servico)   # no lugar do comum
+            bipe("mencao_ou_resposta", pacotes_de_som.arquivo_da_conversa(
+                self.cfg, chave, "mencao_ou_resposta") or None,
+                servico=servico)                      # no lugar do comum
         elif proprio:
             bipe("nova", proprio)               # escolhido nos detalhes
         else:
@@ -4392,8 +4396,9 @@ class Janela(wx.Frame):
             e.mensagem.autor or "alguém")
         if e.motivo == "reacao":
             if e.mensagem.minha and e.emoji and e.quem != "Você" and                     not calados:
-                bipe("reacao_recebida",
-                     servico=self._servico_da_conta(e.mensagem.conta_id))
+                bipe("reacao_recebida", pacotes_de_som.arquivo_da_conversa(
+                    self.cfg, chave, "reacao_recebida") or None,
+                    servico=self._servico_da_conta(e.mensagem.conta_id))
             if e.mensagem.minha and e.emoji and e.quem != "Você" and \
                     self.cfg.get("falar_reacoes") and not calados:
                 self.fala.falar("%s reagiu com %s à sua mensagem: %s" % (
@@ -4412,8 +4417,9 @@ class Janela(wx.Frame):
                 bipe("voto_enviado")
             elif e.mensagem.minha and e.quem:
                 if not calados:
-                    bipe("voto_enquete", servico=self._servico_da_conta(
-                        e.mensagem.conta_id))
+                    bipe("voto_enquete", pacotes_de_som.arquivo_da_conversa(
+                        self.cfg, chave, "voto_enquete") or None,
+                        servico=self._servico_da_conta(e.mensagem.conta_id))
                 self.SetStatusText("%s votou na sua enquete" % e.quem)
         elif calados and e.motivo in ("editada", "apagada"):
             pass          # gravando: sem fala; o aviso fica so na barra
