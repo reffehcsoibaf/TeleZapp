@@ -2347,3 +2347,58 @@ def test_marcar_o_grupo_com_topicos_le_cada_topico_pendente(ambiente):
     assert lidas == [5]                          # o Geral nao tinha nada
     assert p._conversas["-1009#5"].nao_lidas == 0
     assert cliente.lidas == []                   # nao le o grupo como canal
+
+
+class ClienteDeGrupoComContagem(ClienteDeTopicos):
+    """Topicos lidos, mas o dialogo do grupo ainda conta 4 nao lidas (como
+    o celular que mostra o grupo como mensagens)."""
+
+    def __init__(self):
+        super().__init__()
+        self.lidos = {1, 5}
+
+    async def __call__(self, requisicao):
+        if type(requisicao).__name__ == "GetPeerDialogsRequest":
+            self.requisicoes.append(requisicao)
+            lido = getattr(self, "lida_ate", None) == 900
+            return types.SimpleNamespace(dialogs=[types.SimpleNamespace(
+                unread_count=0 if lido else 4, read_inbox_max_id=800,
+                top_message=900, unread_mark=False,
+                view_forum_as_messages=True)])
+        return await super().__call__(requisicao)
+
+
+def test_grupo_com_topicos_lidos_mas_contando_nao_lidas_e_lido_inteiro(
+        ambiente):
+    import asyncio
+    cliente = ClienteDeGrupoComContagem()
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    p._entidades["-1009"] = "grupo"
+    asyncio.run(p._marcar_lida("-1009#5"))
+    assert cliente.lidas == ["grupo"] and cliente.lida_ate == 900
+
+
+def test_grupo_com_topico_pendente_nao_e_lido_inteiro(ambiente):
+    import asyncio
+    cliente = ClienteDeGrupoComContagem()
+    cliente.lidos = {1}                    # o 5 continua com 3 nao lidas
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    p._entidades["-1009"] = "grupo"
+    asyncio.run(p._marcar_lida("-1009#1"))
+    assert cliente.lidas == []
+
+
+def test_grupo_com_topicos_lidos_e_lido_inteiro_mesmo_contando_zero(ambiente):
+    import asyncio
+    # o servidor ja conta zero, mas um aplicativo que mostra o grupo como
+    # uma conversa so precisa do aviso de "grupo lido"
+    cliente = ClienteDeGrupoComContagem()
+    cliente.lida_ate = 900                 # dialogo ja com 0 nao lidas
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    p._entidades["-1009"] = "grupo"
+    cliente.lidas = []
+    asyncio.run(p._marcar_lida("-1009#5"))
+    assert cliente.lidas == ["grupo"]

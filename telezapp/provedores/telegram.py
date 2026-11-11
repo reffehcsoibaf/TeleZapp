@@ -3541,6 +3541,7 @@ class ProvedorTelegram(Provedor):
         await self._conferir_topicos(ent, chat, [t.id for t in achados if
                                                  topicos is not None or
                                                  t.unread_count])
+        await self._conferir_grupo_de_topicos(ent)
 
     async def _conferir_topicos(self, ent, chat, ids):
         """Pergunta ao servidor como ficaram os topicos lidos. O Geral (1)
@@ -3555,6 +3556,8 @@ class ProvedorTelegram(Provedor):
             return
         for t in depois:
             if not t.unread_count:
+                log.info("tópico %d lido no servidor (lido até %d, última %d)",
+                         t.id, t.read_inbox_max_id, t.top_message)
                 continue
             log.warning("tópico %d ainda com %d não lidas no servidor (lido "
                         "até %d, última %d)", t.id, t.unread_count,
@@ -3567,6 +3570,41 @@ class ProvedorTelegram(Provedor):
                 except Exception as e:
                     log.info("leitura do Geral como o grupo: %s",
                              type(e).__name__)
+
+    async def _conferir_grupo_de_topicos(self, ent):
+        """Com todos os topicos lidos, le tambem o grupo inteiro ate a ultima
+        mensagem, mesmo que o servidor ja conte zero: ler um topico so gera o
+        aviso de "topico lido", e aplicativos que mostram o grupo como uma
+        conversa so (sem topicos, ou de terceiros) so entendem o de "grupo
+        lido", que vem desta leitura."""
+        from telethon.tl import functions, types as T
+        try:
+            r = await self.cliente(functions.messages.GetPeerDialogsRequest(
+                peers=[T.InputDialogPeer(ent)]))
+            d = r.dialogs[0]
+            topicos = await self._topicos_do_servidor(ent, None)
+        except Exception as e:
+            log.info("conferência do grupo com tópicos: %s", type(e).__name__)
+            return
+        pendentes = [t.id for t in topicos if t.unread_count]
+        log.info("grupo com tópicos no servidor: %d não lidas no grupo, lido "
+                 "até %d, última %d, marcado como não lido: %s, mostrado como "
+                 "mensagens: %s; tópicos com não lidas: %s",
+                 d.unread_count, d.read_inbox_max_id, d.top_message,
+                 "sim" if d.unread_mark else "não",
+                 "sim" if getattr(d, "view_forum_as_messages", False)
+                 else "não", ", ".join(map(str, pendentes)) or "nenhum")
+        if pendentes:
+            return          # ler o grupo esconderia o que ainda nao foi lido
+        try:
+            await self.cliente.send_read_acknowledge(ent, max_id=d.top_message)
+            r = await self.cliente(functions.messages.GetPeerDialogsRequest(
+                peers=[T.InputDialogPeer(ent)]))
+            log.info("grupo com tópicos lido como um todo: agora %d não "
+                     "lidas", r.dialogs[0].unread_count)
+        except Exception as e:
+            log.info("leitura do grupo com tópicos como um todo: %s",
+                     type(e).__name__)
 
     async def _ultima_do_servidor(self, ent):
         """Numero da mensagem mais nova da conversa no servidor (0 se nao
