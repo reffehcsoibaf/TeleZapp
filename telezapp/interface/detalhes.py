@@ -4,6 +4,7 @@
 midias com filtro, os membros, os grupos em comum e as ferramentas de
 administrador. `ControleDetalhes` junta a janela principal, os provedores e
 o banco; as janelas daqui so desenham e chamam de volta."""
+import filecmp
 import logging
 import os
 import threading
@@ -12,7 +13,7 @@ import traceback
 
 import wx
 
-from telezapp.acessibilidade.fala import bipe
+from telezapp.acessibilidade.fala import acao_do_som, bipe
 from telezapp.interface import dialogos
 from telezapp.nucleo import detalhes as det
 from telezapp.nucleo import modelos as m
@@ -437,6 +438,9 @@ class DialogoSomDaConversa(wx.Dialog):
         lay = wx.BoxSizer(wx.VERTICAL)
         self.situacao = wx.StaticText(self, label="")
         lay.Add(self.situacao, 0, wx.ALL, 10)
+        self.cx_escolha = wx.Choice(self, name="Som da conversa")
+        self.cx_escolha.Bind(wx.EVT_CHOICE, lambda e: self._escolher())
+        lay.Add(self.cx_escolha, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
         linha = wx.WrapSizer(wx.HORIZONTAL)
         self.botoes = {}
         for chave, rotulo, funcao in (
@@ -453,8 +457,9 @@ class DialogoSomDaConversa(wx.Dialog):
         self.SetEscapeId(wx.ID_CANCEL)
         self.SetSizerAndFit(lay)
         self.CentreOnParent()
+        self._arquivos_escolha = []
         self._mostrar()
-        self.botoes["escolher"].SetFocus()
+        self.cx_escolha.SetFocus()
 
     def _arquivo(self):
         return pacotes_de_som.arquivo_da_conversa(self.jan.cfg, self.conv.chave)
@@ -463,6 +468,7 @@ class DialogoSomDaConversa(wx.Dialog):
         self.situacao.SetLabel(texto_do_som_da_conversa(self.jan.cfg,
                                                         self.conv))
         self.botoes["remover"].Enable(bool(self._arquivo()))
+        self._preencher_escolha()
         self.Layout()
 
     def ouvir(self):
@@ -484,6 +490,40 @@ class DialogoSomDaConversa(wx.Dialog):
             origem = dlg.GetPath()
         finally:
             dlg.Destroy()
+        self._escolher_pelo_caminho(origem, anunciar=True)
+
+    def _preencher_escolha(self):
+        """Preenche o combobox com os sons do pacote de sons ativo (o tema),
+        da casa ou personalizado, e marca o som que a conversa usa."""
+        pacote = pacotes_de_som.EstadoDeSons(self.jan.cfg).ativo
+        self._arquivos_escolha = pacotes_de_som.arquivos_do_pacote(pacote)
+        nomes = [nome for nome, _ in self._arquivos_escolha]
+        if nomes != [self.cx_escolha.GetString(i)
+                     for i in range(self.cx_escolha.GetCount())]:
+            self.cx_escolha.Set(nomes)       # so refaz se mudou (NVDA)
+        alvo = self._arquivo()
+        if not alvo:
+            acao, caminho = acao_do_som(pacotes_de_som.evento_da_conversa(
+                self.conv))
+            if acao == "arquivo":
+                alvo = caminho
+        indice = -1
+        if alvo:
+            for i, (_, arquivo) in enumerate(self._arquivos_escolha):
+                if _mesmo_arquivo(arquivo, alvo):
+                    indice = i
+                    break
+        self.cx_escolha.SetSelection(indice)
+
+    def _escolher(self):
+        """Escolhe o som da conversa pelo combobox."""
+        i = self.cx_escolha.GetSelection()
+        if not 0 <= i < len(self._arquivos_escolha):
+            return
+        self._escolher_pelo_caminho(
+            self._arquivos_escolha[i][1], anunciar=False, focar=False)
+
+    def _escolher_pelo_caminho(self, origem, anunciar=True, focar=True):
         try:
             pacotes_de_som.definir_som_da_conversa(self.jan.cfg,
                                                    self.conv.chave, origem)
@@ -492,17 +532,33 @@ class DialogoSomDaConversa(wx.Dialog):
             self.jan.fala.falar("Não consegui copiar este arquivo de som.",
                                 interromper=True)
             return
-        self._mostrar()
-        self.jan.fala.falar("Som escolhido: %s." % os.path.basename(origem),
-                            interromper=True)
-        self.botoes["ouvir"].SetFocus()
+        self._mostrar()          # tambem marca o som escolhido no combobox
+        if anunciar:
+            self.jan.fala.falar(
+                "Som escolhido: %s." % os.path.basename(origem),
+                interromper=True)
+        self.ouvir()
+        if focar:
+            self.botoes["ouvir"].SetFocus()
 
     def remover(self):
         pacotes_de_som.remover_som_da_conversa(self.jan.cfg, self.conv.chave)
         self._mostrar()
         self.jan.fala.falar("Esta conversa voltou ao som do tipo dela.",
                             interromper=True)
-        self.botoes["escolher"].SetFocus()
+        self.cx_escolha.SetFocus()
+
+
+def _mesmo_arquivo(a, b):
+    """Mesmo caminho ou mesmo conteudo: o som da conversa e uma copia, com
+    outro nome, do arquivo escolhido no pacote."""
+    try:
+        if os.path.normcase(os.path.abspath(a)) == \
+                os.path.normcase(os.path.abspath(b)):
+            return True
+        return filecmp.cmp(a, b, shallow=False)
+    except OSError:
+        return False
 
 
 def texto_do_som_da_conversa(cfg, conv):

@@ -77,19 +77,36 @@ def pasta_do_pacote(pacote_id):
     return os.path.join(pasta_dos_pacotes(), pacote_id[len(PREFIXO):])
 
 
+def _arquivos_na_pasta(pasta):
+    """[(nome, caminho)] dos sons aceitos nessa pasta, em ordem."""
+    if not os.path.isdir(pasta):
+        return []
+    nomes = [nome for nome in sorted(os.listdir(pasta), key=str.lower)
+             if os.path.splitext(nome)[1].lower() in EXTENSOES
+             and os.path.isfile(os.path.join(pasta, nome))]
+    return [(nome, os.path.join(pasta, nome)) for nome in nomes]
+
+
 def arquivos_da_pasta(pacote_id):
     """[(nome, caminho)] dos sons aceitos na pasta do pacote, em ordem. So os
     pacotes personalizados tem pasta editavel: os da casa devolvem []."""
     if not editavel(pacote_id):
         return []
-    pasta = pasta_do_pacote(pacote_id)
-    if not os.path.isdir(pasta):
-        return []
-    nomes = [nome for nome in os.listdir(pasta)
-             if os.path.splitext(nome)[1].lower() in EXTENSOES
-             and os.path.isfile(os.path.join(pasta, nome))]
-    return [(nome, os.path.join(pasta, nome))
-            for nome in sorted(nomes, key=str.lower)]
+    return _arquivos_na_pasta(pasta_do_pacote(pacote_id))
+
+
+def arquivos_do_pacote(pacote_id):
+    """[(nome, caminho)] dos sons do pacote, casa ou personalizado, em ordem.
+    E a fonte dos sons para escolher: o tema do som do pacote escolhido, por
+    exemplo o pacote ZapZap, e nao uma pasta de conversas com nomes
+    criptografados."""
+    if pacote_id in (PADRAO, TELEZAPP) or da_casa(pacote_id):
+        pasta = _pasta_da_casa(TELEZAPP if pacote_id in (PADRAO, TELEZAPP)
+                                else pacote_id)
+        return _arquivos_na_pasta(pasta)
+    if editavel(pacote_id):
+        return _arquivos_na_pasta(pasta_do_pacote(pacote_id))
+    return []
 
 
 def listar():

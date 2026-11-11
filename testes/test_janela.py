@@ -7360,6 +7360,35 @@ def test_som_da_nova_segue_o_tipo_e_o_proprio_da_conversa(j, monkeypatch,
     pk.remover_som_da_conversa(j.cfg, conv.chave)
 
 
+def test_janela_do_som_da_conversa_tem_combobox(j, monkeypatch,
+                                                tmp_path):
+    from telezapp.interface import detalhes as jd
+
+    falas = []
+    sons = []
+    monkeypatch.setattr(jd, "texto_do_som_da_conversa",
+                        lambda cfg, conv: "Som das mensagens: o de nova.")
+    monkeypatch.setattr(jd, "bipe", lambda tipo, valor=None: sons.append(
+        (tipo, valor)))
+    monkeypatch.setattr(jd.pacotes_de_som, "arquivos_do_pacote",
+                        lambda pacote_id: [("um.ogg", str(tmp_path / "um.ogg"))])
+    monkeypatch.setattr(jd.pacotes_de_som, "arquivo_da_conversa",
+                        lambda cfg, chave: str(tmp_path / "um.ogg"))
+    monkeypatch.setattr(jd.pacotes_de_som, "definir_som_da_conversa",
+                        lambda cfg, chave, origem: None)
+    monkeypatch.setattr(j.fala, "falar",
+                        lambda t, interromper=False: falas.append(t))
+    d = jd.DialogoSomDaConversa(None, j, j.indice[("t1", "20")])
+    assert d.cx_escolha is not None
+    d._mostrar()
+    assert d.cx_escolha.itens == ["um.ogg"]
+    assert d.cx_escolha.GetSelection() == 0
+    d.cx_escolha.SetSelection(0)
+    d._escolher()                        # escolhe pelo combobox
+    assert sons == [("nova", str(tmp_path / "um.ogg"))]   # toca o som
+    assert falas == []                    # quem fala e o NVDA, nao o programa
+
+
 def test_recompartilhar_status_pergunta_e_chama_o_provedor(j, monkeypatch,
                                                            tmp_path):
     feitos, ditas, respostas = [], [], [jm.wx.YES]
@@ -8914,3 +8943,35 @@ def test_esc_num_botao_depois_da_lista_vale_o_mesmo_que_na_lista(jm_midia):
     j.botoes_midia[0].SetFocus()
     j._char_hook(Tecla(wx_falso.WXK_ESCAPE))
     assert wx_falso._foco[0] is j.lista_conv      # fechou a conversa
+
+
+def test_combobox_do_som_da_conversa_com_pacote_da_casa_e_reabertura(
+        j, monkeypatch, tmp_path):
+    """A lista mostra os sons do pacote da casa e, ao reabrir a janela, marca
+    o som ja escolhido (o da conversa e uma copia com outro nome)."""
+    from telezapp.interface import detalhes as jd
+    from telezapp.nucleo import pacotes_de_som as pk
+
+    pasta = tmp_path / "pacote"
+    pasta.mkdir()
+    (pasta / "a.wav").write_bytes(b"RIFF-a")
+    (pasta / "b.wav").write_bytes(b"RIFF-b")
+    conversas = tmp_path / "conversas"
+    conversas.mkdir()
+    monkeypatch.setattr(pk.config, "pasta", lambda *a: str(conversas))
+    monkeypatch.setattr(pk, "PASTA_TELEZAPP", str(pasta))
+    monkeypatch.setattr(pk, "_pasta_da_casa", lambda pid: str(pasta))
+    monkeypatch.setattr(jd, "bipe", lambda *a, **k: None)
+    monkeypatch.setattr(j.fala, "falar", lambda *a, **k: None)
+    j.cfg.set("pacote_de_sons", "cristal")        # pacote da casa
+    conv = j.indice[("t1", "20")]
+    try:
+        d = jd.DialogoSomDaConversa(None, j, conv)
+        assert d.cx_escolha.itens == ["a.wav", "b.wav"]
+        d.cx_escolha.SetSelection(1)
+        d._escolher()
+        assert d.cx_escolha.GetSelection() == 1
+        d2 = jd.DialogoSomDaConversa(None, j, conv)    # reabre
+        assert d2.cx_escolha.GetSelection() == 1
+    finally:
+        pk.remover_som_da_conversa(j.cfg, conv.chave)
