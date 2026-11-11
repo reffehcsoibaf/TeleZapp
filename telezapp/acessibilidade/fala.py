@@ -315,6 +315,7 @@ NOTAS = {
     "voto_enquete": ((1047, 60), (1319, 60)),
     "escondido": ((784, 90), (523, 90)),
     "voltou": ((523, 90), (784, 90)),
+    "limite_da_lista": ((262, 45),),
 }
 NOTAS_PADRAO = ((300, 200),)
 TAXA_SINTETICA = 44100

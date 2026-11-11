@@ -3202,6 +3202,20 @@ def test_midia_colada_so_audio_manda_o_texto_a_parte(j, tmp_path):
     assert ("enviar", "20", "ouça", "") in pedidos
 
 
+def test_midia_colada_so_audio_no_telegram_leva_o_texto_de_legenda(j, tmp_path):
+    _abrir_com_caixa(j)
+    j.contas.p.servico = "telegram"
+    mp3 = tmp_path / "som.mp3"
+    mp3.write_bytes(b"ID3")
+    j.anexos.append(jm.envio.preparar(str(mp3)))
+    j.caixa.SetValue("ouça")
+    j._enviar_texto()
+    pedidos = j.contas.p.pedidos
+    assert ("arquivo", "20", m.AUDIO, "som.mp3", "ouça") in pedidos
+    assert not [p for p in pedidos if p[0] == "enviar"]
+    assert j.caixa.GetValue() == ""
+
+
 def test_esc_remove_a_midia_colada_antes_de_sair_da_conversa(j, tmp_path):
     _abrir_com_caixa(j)
     pdf = tmp_path / "a.pdf"
@@ -7141,6 +7155,38 @@ def test_nova_de_silenciado_nao_avisa_nem_conta(j, monkeypatch):
     assert j.previas.get(("t1", "20")) == previa
 
 
+def test_gravando_voz_cala_aviso_de_mensagem_nova(j, monkeypatch):
+    from telezapp.midia import gravador as gr
+    j._fechar_conversa()
+    conv = j.indice[("t1", "20")]
+    sons, ditas = [], []
+    monkeypatch.setattr(jm, "bipe", lambda n, **k: sons.append(n))
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.cfg.set("falar_novas_outras_conversas", True)
+    j.IsActive = lambda: True
+    fantasma = object()
+    gr._ativos.add(fantasma)
+    try:
+        nova = msg("11", "durante a gravacao", conversa="20")
+        nova.minha = False
+        j._ev_nova(ev.MensagemNova(nova, conv))
+        assert sons == [] and ditas == []
+        j.cfg.set("calar_avisos_ao_gravar", False)
+        outra = msg("12", "com a opcao desligada", conversa="20")
+        outra.minha = False
+        j._ev_nova(ev.MensagemNova(outra, conv))
+        assert sons and ditas
+    finally:
+        gr._ativos.discard(fantasma)
+    sons.clear()
+    ditas.clear()
+    j.cfg.set("calar_avisos_ao_gravar", True)
+    fim = msg("13", "depois de gravar", conversa="20")
+    fim.minha = False
+    j._ev_nova(ev.MensagemNova(fim, conv))
+    assert sons and ditas       # voltou ao normal, sem repor o que passou
+
+
 def test_so_mensagem_de_outro_em_grupo_pode_silenciar(j):
     ana, _ = _grupo_com_silenciado(j)
     assert j._pode_silenciar(ana)
@@ -8197,3 +8243,343 @@ def test_copiar_o_conteudo_copia_direto_ou_abre_a_lista(j, monkeypatch):
     copiados.clear()
     j._copiar_o_conteudo()                       # cancelou: nada
     assert copiados == []
+
+
+# ---------------------------------------------- F5 avisa quando termina
+def _ouvir(j, monkeypatch):
+    ditas, sons = [], []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    monkeypatch.setattr(jm, "bipe", lambda tipo="nova", valor=None,
+                        servico="": sons.append(tipo))
+    return ditas, sons
+
+
+def test_f5_fala_e_toca_quando_todas_as_contas_terminam(j, monkeypatch):
+    ditas, sons = _ouvir(j, monkeypatch)
+    avisos = []
+    j.contas.p.atualizar_conversas_avisando = avisos.append
+    j._atualizar_conversas()
+    assert ditas == ["Atualizando as conversas."] and sons == []
+    avisos[0](True)                         # a conta devolveu a lista
+    assert ditas[-1] == "Conversas atualizadas."
+    assert sons == ["tarefa_pronta"]
+    avisos[0](True)                         # aviso repetido nao fala de novo
+    assert len(ditas) == 2 and len(sons) == 1
+
+
+def test_f5_sem_o_aviso_do_provedor_termina_logo(j, monkeypatch):
+    ditas, sons = _ouvir(j, monkeypatch)
+    j._atualizar_conversas()                # o provedor falso so atualiza
+    assert ("atualizar",) in j.contas.p.pedidos
+    assert ditas == ["Atualizando as conversas.", "Conversas atualizadas."]
+    assert sons == ["tarefa_pronta"]
+
+
+def test_f5_que_falha_ou_estoura_o_prazo_avisa_com_erro(j, monkeypatch):
+    ditas, sons = _ouvir(j, monkeypatch)
+    avisos = []
+    j.contas.p.atualizar_conversas_avisando = avisos.append
+    j._atualizar_conversas()
+    avisos[0](False)
+    assert sons == ["erro"] and "não terminou" in ditas[-1]
+    j._atualizar_conversas()
+    rodada = j._f5
+    j._conversas_atualizadas(rodada, True)   # o prazo acabou
+    assert sons == ["erro", "erro"]
+    avisos[1](True)                          # chegou tarde: fica calado
+    assert len(sons) == 2
+
+
+def test_atualizar_sem_avisar_nao_fala_no_fim(j, monkeypatch):
+    ditas, sons = _ouvir(j, monkeypatch)
+    j._atualizar_conversas(avisar=False)
+    assert ditas == [] and sons == []
+    assert ("atualizar",) in j.contas.p.pedidos
+
+
+# ------------------------------------- confirmacoes que podem ser desligadas
+def test_confirmacoes_estao_no_botao_da_categoria_interface():
+    grupo = [o for o in config.OPCOES if o.grupo == "Confirmações"]
+    assert len(grupo) == 7
+    assert all(o.categoria == "Interface" and o.padrao is True
+               and o.chave.startswith("confirmar_") for o in grupo)
+
+
+def test_apagar_mensagem_sem_pergunta_quando_desligada(j):
+    j.lista_conv.SetSelection(0)
+    j._char_hook(Tecla(wx_falso.WXK_RETURN))
+    j.b.publicar(ev.MensagensCarregadas("t1", "10", [
+        msg("1", "a", conversa="10"), msg("2", "b", conversa="10")]))
+    selecionar(j, "2")
+    j.cfg.set("confirmar_apagar_mensagens", False)
+    antes = len(wx_falso.mensagens)
+    wx_falso.resposta_messagebox[0] = wx_falso.NO      # se perguntasse, nao
+    j._apagar_mensagem()
+    assert "2" not in j.mapa
+    assert len(wx_falso.mensagens) == antes            # nao perguntou
+
+
+def test_perguntar_respeita_a_opcao(j):
+    antes = len(wx_falso.mensagens)
+    wx_falso.resposta_messagebox[0] = wx_falso.NO
+    assert jm.dialogos.perguntar("confirmar_bloqueio", "Bloquear?", "t", 0,
+                                 None, j.cfg) == wx_falso.NO
+    assert len(wx_falso.mensagens) == antes + 1
+    j.cfg.set("confirmar_bloqueio", False)
+    assert jm.dialogos.perguntar("confirmar_bloqueio", "Bloquear?", "t", 0,
+                                 None, j.cfg) == wx_falso.YES
+    assert len(wx_falso.mensagens) == antes + 1
+    # sem as configuracoes abertas, le do arquivo
+    assert jm.dialogos.perguntar("confirmar_bloqueio", "Bloquear?", "t",
+                                 0) == wx_falso.YES
+
+
+def test_aviso_do_celular_pode_ser_desligado(j):
+    antes = len(wx_falso.mensagens)
+    j.cfg.set("confirmar_aviso_celular", False)
+    assert j._lembrar_celular() is True
+    assert len(wx_falso.mensagens) == antes
+
+
+
+def test_mesclar_mantem_a_transcricao_quando_a_mensagem_chega_de_novo(j):
+    _abrir_com_caixa(j)
+    chave = j.atual
+    voz = msg("90", "", conversa=chave[1])
+    voz.tipo = m.VOZ
+    m.atualizar_extras(voz, ia={"genero": "audio", "texto": "texto falado"})
+    j._mesclar(chave, [voz])
+    de_novo = msg("90", "", conversa=chave[1])
+    de_novo.tipo = m.VOZ
+    res = j._mesclar(chave, [de_novo])
+    x = [y for y in res if y.id == "90"][0]
+    assert m.extras_de(x)["ia"]["texto"] == "texto falado"
+
+
+def test_esc_na_conversa_aberta_pela_busca_global_volta_aos_resultados(
+        j, monkeypatch):
+    from telezapp.nucleo import busca_global as bg
+    conv = j.indice[("t1", "20")]
+    achado = bg.ResultadoChat(conv, "canal", 10, True)
+    janelas = []
+
+    class Falso:
+        def __init__(self, *a, **k):
+            self.restaurado = None
+            self.escolhido = ("chat", achado)
+            janelas.append(self)
+
+        def restaurar(self, estado):
+            self.restaurado = estado
+
+        def estado(self):
+            return {"termo": "bolo"}
+
+        def ShowModal(self):
+            # a primeira abre o resultado; a que volta so e fechada
+            return wx_falso.ID_OK if len(janelas) == 1 else wx_falso.ID_CANCEL
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(jm, "DialogoBuscaGlobal", Falso)
+    j._contas_com_busca_global = lambda: [("t1", "Telegram")]
+    j._abrir_chat_do_servidor = lambda c: j._abrir_conversa(conv)
+    j._busca_global()
+    assert j.atual == ("t1", "20") and len(janelas) == 1
+    j._fechar_conversa()                         # Esc: volta aos resultados
+    assert len(janelas) == 2 and janelas[1].restaurado == {"termo": "bolo"}
+    assert j.atual is None and j._busca_global_volta is None
+    j._abrir_conversa(conv)                      # aberta por fora: Esc comum
+    j._fechar_conversa()
+    assert len(janelas) == 2
+
+
+def test_dialogo_da_busca_global_guarda_e_restaura_o_estado():
+    from telezapp.interface.busca_global import DialogoBuscaGlobal
+    from telezapp.nucleo import busca_global as bg
+    conv = m.Conversa("t1", "9", "Canal", "telegram", "canal")
+    linhas = [("chat", bg.ResultadoChat(conv, "canal", 10, True), "Canal")]
+    d = DialogoBuscaGlobal(None, [("t1", "Tele")], lambda *a: ([], []))
+    d.termo.SetValue("bolo")
+    d.linhas = linhas
+    d.lista.Set(["Canal"])
+    d.lista.SetSelection(0)
+    estado = d.estado()
+    outro = DialogoBuscaGlobal(None, [("t1", "Tele")], lambda *a: ([], []))
+    outro.restaurar(estado)
+    assert outro.termo.GetValue() == "bolo" and outro.linhas == linhas
+    assert outro.lista.GetSelection() == 0
+
+
+def test_copiar_midia_nao_baixada_baixa_e_copia_quando_chega(jm_midia):
+    j = jm_midia
+    copiados = []
+    original = j._copiar_conteudo
+    selecionar(j, "2")
+    x = j._mensagem_selecionada()
+    j._copiar_conteudo(x, "midia", None)             # ainda nao baixada
+    assert j.midias.baixados == ["2"] and j.abrindo == ("t1", "10", "2")
+    assert x.chave in j._copia_pendente
+    j._copiar_conteudo = lambda y, tipo, valor: copiados.append((y.id, tipo))
+    j.b.publicar(ev.MidiaBaixada("t1", "10", "2", "/p/2.jpg"))
+    assert copiados == [("2", "midia")] and not j._copia_pendente
+    assert not j.abertas                              # copiar nao abre a midia
+    j._copiar_conteudo = original
+
+
+def test_copiar_midia_baixando_desiste_se_der_erro_ou_cancelar(jm_midia):
+    j = jm_midia
+    selecionar(j, "2")
+    x = j._mensagem_selecionada()
+    j._copiar_conteudo(x, "midia", None)
+    j.b.publicar(ev.MidiaBaixada("t1", "10", "2", erro="falhou"))
+    assert not j._copia_pendente
+    j._copiar_conteudo(x, "midia", None)
+    j.b.publicar(ev.MidiaBaixada("t1", "10", "2", cancelada=True))
+    assert not j._copia_pendente
+
+
+def test_copiar_midia_grande_recusada_na_pergunta_nao_deixa_pendencia(
+        jm_midia, monkeypatch):
+    j = jm_midia
+    monkeypatch.setattr(jm.wx, "MessageBox", lambda *a, **k: jm.wx.NO)
+    selecionar(j, "3")                                # 200 MB
+    j._copiar_conteudo(j._mensagem_selecionada(), "midia", None)
+    assert not j._copia_pendente and not j.midias.baixados
+
+
+def test_buscar_canais_do_whatsapp_so_aparece_com_conta_do_whatsapp(j):
+    menu = j._menu_do_item["busca_canais"]
+
+    def tem():
+        return any(i.rotulo.replace("&", "") == "Buscar canais do WhatsApp..."
+                   for i in menu.itens)
+    j.cfg.salvar_conta({"id": "w1", "servico": "whatsapp"})
+    j._ajustar_menu_por_contas()
+    assert tem()
+    j.cfg.salvar_conta({"id": "w1", "servico": "whatsapp", "ativa": False})
+    j._ajustar_menu_por_contas()
+    assert not tem()
+
+
+def test_buscar_canais_sem_conta_conectada_avisa(j, monkeypatch):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._contas_com_busca_de_canais = lambda: []
+    j._busca_canais()
+    assert ditas and "Nenhuma conta do WhatsApp" in ditas[-1]
+
+
+def test_buscar_canais_abre_a_janela_com_as_funcoes_do_provedor(
+        j, monkeypatch):
+    from telezapp.nucleo import canais_whatsapp as cw
+    criadas = []
+
+    class Falsa:
+        def __init__(self, pai, contas, buscar, seguir, falar=None, cfg=None):
+            criadas.append((contas, buscar, seguir))
+
+        def ShowModal(self):
+            return wx_falso.ID_CANCEL
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(jm, "DialogoBuscaDeCanais", Falsa)
+    j._contas_com_busca_de_canais = lambda: [("w1", "Vivo")]
+    chamadas = []
+    j.contas.provedor = lambda cid: types.SimpleNamespace(
+        buscar_canais=lambda *a, **k: chamadas.append(("buscar", a, k)) or [],
+        seguir_canal_achado=lambda c: chamadas.append(("seguir", c.id)) or
+        (True, "ok"))
+    j._busca_canais()
+    contas, buscar, seguir = criadas[0]
+    assert contas == [("w1", "Vivo")]
+    buscar("w1", "bom", "NEWS", "TRENDING", "C9")
+    seguir("w1", cw.CanalWA("1@newsletter", "A", "", None, False, False, ""))
+    assert chamadas == [("buscar", ("bom", "NEWS", "TRENDING"),
+                         {"cursor": "C9"}),
+                        ("seguir", "1@newsletter")]
+
+
+def test_voz_com_legenda_mostra_e_deixa_copiar_a_legenda():
+    voz = m.Mensagem("t1", "10", "v9", autor="Ana", tipo=m.VOZ, segundos=5,
+                     texto="ouça com atenção")
+    assert m.conteudo(voz) == "mensagem de voz, 5 segundos, legenda: ouça com atenção"
+    rotulos = [r for _, r, _ in m.conteudos_copiaveis(voz)]
+    assert rotulos == ["Copiar legenda", "Copiar mensagem de voz"]
+    sem = m.Mensagem("t1", "10", "v8", autor="Ana", tipo=m.VOZ, segundos=5)
+    assert m.conteudo(sem) == "mensagem de voz, 5 segundos"
+    assert [r for _, r, _ in m.conteudos_copiaveis(sem)] == [
+        "Copiar mensagem de voz"]
+
+
+def test_link_de_robo_que_nao_existe_diz_o_motivo(j, monkeypatch):
+    from telezapp.nucleo import links_externos as le
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    monkeypatch.setattr(jm, "bipe", lambda *a, **k: None)
+    info = le.interpretar("https://t.me/RoboQueSumiu?start=x")
+    j._link_de_usuario_pronto(
+        "t1", None, info, None, False, le.motivo_de_nao_achar(ValueError()))
+    assert ditas[-1].startswith("Não encontrei @RoboQueSumiu no Telegram.")
+    assert "não existe" in ditas[-1]
+    j._link_de_usuario_pronto("t1", None, info, None, False)
+    assert ditas[-1] == "Não encontrei @RoboQueSumiu no Telegram."
+
+
+def test_motivos_de_nao_achar_o_usuario_de_um_link():
+    from telezapp.nucleo import links_externos as le
+
+    class UsernameInvalidError(Exception):
+        pass
+
+    class FloodWaitError(Exception):
+        seconds = 12
+    assert "não existe" in le.motivo_de_nao_achar(ValueError("x"))
+    assert "não é um nome válido" in le.motivo_de_nao_achar(
+        UsernameInvalidError())
+    assert "12 segundos" in le.motivo_de_nao_achar(FloodWaitError())
+    assert "não respondeu" in le.motivo_de_nao_achar(TimeoutError())
+    assert le.motivo_de_nao_achar(KeyError("k")) == ""
+
+
+def test_botao_entrar_de_robo_abre_a_conversa_em_vez_de_recusar(
+        j, monkeypatch):
+    abertos = []
+    monkeypatch.setattr(
+        j, "_abrir_usuario_do_link",
+        lambda conta, prov, info, de_fora: abertos.append(
+            (conta, info["usuario"], de_fora)))
+    x = m.Mensagem("t1", "10", "3", autor="Canal")
+    j._confirmar_entrada(
+        x, {"tipo": "entrar", "modo": "publico", "usuario": "LivrosBot"},
+        None, {"pessoa": True, "robo": True, "nome": "Livros"})
+    assert abertos == [("t1", "LivrosBot", False)]
+
+
+def test_robo_sem_conversa_oferece_iniciar_e_manda_o_start(j, monkeypatch):
+    from telezapp.nucleo import links_externos as le
+    iniciados, perguntas = [], []
+
+    class Prov:
+        def iniciar_robo(self, conversa_id, parametro):
+            iniciados.append((conversa_id, parametro))
+    monkeypatch.setattr(jm.threading, "Thread", type(
+        "T", (), {"__init__": lambda s, target=None, args=(), **k:
+                  setattr(s, "f", lambda: target(*args)),
+                  "start": lambda s: s.f()}))
+    monkeypatch.setattr(j, "_abrir_conversa_do_link", lambda *a, **k: None)
+    monkeypatch.setattr(
+        jm.wx, "MessageBox",
+        lambda texto, *a, **k: perguntas.append(texto) or jm.wx.YES)
+    achado = {"id": "777", "nome": "Livros", "tipo": "privada", "robo": True}
+    info = le.interpretar("https://t.me/LivrosBot")
+    j._link_de_usuario_pronto("t1", Prov(), info, achado, False)
+    assert iniciados == [("777", "")]
+    assert "Iniciar o robô" in perguntas[0]
+    # com conversa ja existente, nao pergunta
+    perguntas.clear()
+    iniciados.clear()
+    j.cache[("t1", "777")] = [m.Mensagem("t1", "777", "1", autor="Livros")]
+    j._link_de_usuario_pronto("t1", Prov(), info, achado, False)
+    assert perguntas == [] and iniciados == []

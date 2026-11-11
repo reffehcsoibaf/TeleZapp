@@ -4704,3 +4704,168 @@ def test_meta_ai_so_aceita_resposta_ao_pedido_atual(amb):
     amb.p._resposta_da_meta_ai(_resposta_bot("P2", texto="certa"), "999@bot")
     amb.p._resposta_da_meta_ai(_resposta_bot("", texto="solta"), "999@bot")
     assert amb.p._espera_meta_ai["respostas"] == ["certa", "solta"]
+
+
+def test_ler_conversa_com_mensagem_apagada_pelo_autor_avisa_o_estado(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    cid = "5551988887777@s.whatsapp.net"
+    amb.f["Message"](amb.c, evento("M1", E.Message(conversation="Oi")))
+    esperar(amb.fila, ev.MensagemNova)
+    comum = amb.banco.mensagem("w1", cid, "M1")
+    # leitura comum: so o recibo, sem aviso de estado
+    amb.p.marcar_como_lida(cid)
+    amb.p.enviar_texto(cid, "x")
+    esperar(amb.fila, ev.MensagemNova)
+    assert not getattr(amb.c, "patches", [])
+    # o autor apaga a mensagem, que fica guardada pela opcao de manter
+    amb.f["Message"](amb.c, evento("M2", E.Message(conversation="Segredo")))
+    esperar(amb.fila, ev.MensagemNova)
+    x = amb.banco.mensagem("w1", cid, "M2")
+    m.atualizar_extras(x, apagada_pelo_autor=True)
+    amb.banco.salvar_mensagens([x])
+    amb.p.marcar_como_lida(cid)
+    amb.p.enviar_texto(cid, "y")
+    esperar(amb.fila, ev.MensagemNova)
+    patches = getattr(amb.c, "patches", [])
+    assert len(patches) == 1
+    mut = patches[0].Mutations[0]
+    assert list(mut.Index)[0] == "markChatAsRead"
+    assert mut.Value.markChatAsReadAction.read is True
+    assert comum is not None
+
+
+def test_buscar_canais_monta_a_consulta_e_le_a_resposta(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    vistos = []
+
+    def falso(consulta, variaveis, espera_ms=None):
+        vistos.append((consulta, variaveis))
+        return {"xwa2_newsletters_directory_search": {"result": [
+            {"id": "9@newsletter", "thread_metadata": {
+                "name": {"text": "Bom dia"}, "subscribers_count": "10"},
+             "viewer_metadata": {"role": "GUEST"}}]}}
+    amb.p._mex = falso
+    pagina = amb.p.buscar_canais("bom", "NEWS", "", 10)
+    canais = pagina.canais
+    assert [c.nome for c in canais] == ["Bom dia"] and not canais[0].seguindo
+    assert pagina.proximo == ""
+    consulta, variaveis = vistos[0]
+    assert consulta == "8422355807877290"
+    assert variaveis["input"]["search_text"] == "bom"
+    assert variaveis["input"]["categories"] == ["NEWS"]
+
+
+def test_buscar_canais_resposta_estranha_e_dll_sem_a_funcao(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.p._mex = lambda *a, **k: {"outro_campo": []}
+    with pytest.raises(RuntimeError, match="não entende"):
+        amb.p.buscar_canais("x")
+    del amb.p._mex                       # volta ao metodo real
+    with pytest.raises(RuntimeError, match="não busca canais"):
+        amb.p.buscar_canais("x")         # o cliente falso nao tem a DLL
+
+
+def test_seguir_canal_achado_segue_e_poe_o_canal_na_lista(amb):
+    from telezapp.nucleo import canais_whatsapp as cw
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    seguidos = []
+    amb.c.follow_newsletter = lambda jid: seguidos.append(wa.jid_texto(jid))
+    canal = cw.CanalWA("555@newsletter", "Receitas", "", 3, False, False, "")
+    ok, texto = amb.p.seguir_canal_achado(canal)
+    assert ok and "Receitas" in texto and seguidos == ["555@newsletter"]
+    conv = [c for c in amb.banco.conversas("w1") if c.id == "555@newsletter"]
+    assert conv and conv[0].tipo == "canal" and conv[0].nome
+
+    def recusa(jid):
+        raise RuntimeError("não")
+    amb.c.follow_newsletter = recusa
+    assert amb.p.seguir_canal_achado(canal)[0] is False
+
+
+def test_buscar_canais_passa_para_a_proxima_consulta_se_o_whatsapp_recusa(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    tentadas = []
+
+    def falso(consulta, variaveis, espera_ms=None):
+        tentadas.append(consulta)
+        if consulta == "8629852843766813" or (
+                consulta == "6190824427689257" and
+                "start_cursor" not in variaveis["input"]):
+            raise wa._ConsultaRecusada("recusou")
+        return {"xwa2_newsletters_directory_list": {"result": [
+            {"id": "9@newsletter", "thread_metadata": {
+                "name": {"text": "Bom dia"}}}]}}
+    amb.p._mex = falso
+    amb.p._consulta_de_canais_que_valeu = {}
+    canais = amb.p.buscar_canais("", "", "").canais
+    assert [c.nome for c in canais] == ["Bom dia"]
+    assert tentadas[:7] == ["8629852843766813"] * 6 + ["6190824427689257"]
+    assert tentadas[-1] == "6190824427689257"    # a primeira que deu certo
+    n = len(tentadas)
+    tentadas.clear()
+    amb.p.buscar_canais("", "", "")             # lembra a que deu certo
+    assert tentadas == ["6190824427689257"] or len(tentadas) < n
+
+
+def test_buscar_canais_todas_recusadas_mostra_o_motivo_e_timeout_nao_insiste(
+        amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.p._consulta_de_canais_que_valeu = {}
+    contadas = []
+
+    def recusa(consulta, variaveis, espera_ms=None):
+        contadas.append(consulta)
+        raise wa._ConsultaRecusada("O WhatsApp recusou a busca de canais "
+                                   "(graphql error: 400).")
+    amb.p._mex = recusa
+    with pytest.raises(RuntimeError, match="recusou"):
+        amb.p.buscar_canais("bom")
+    assert len(contadas) == 6                   # 3 ids x 2 variantes (busca)
+    contadas.clear()
+
+    def demora(consulta, variaveis, espera_ms=None):
+        contadas.append(consulta)
+        raise RuntimeError("O WhatsApp demorou demais para responder.")
+    amb.p._mex = demora
+    with pytest.raises(RuntimeError, match="demorou"):
+        amb.p.buscar_canais("bom")
+    assert len(contadas) == 1
+
+
+def test_buscar_canais_pagina_seguinte_repete_o_formato_que_valeu(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.p._consulta_de_canais_que_valeu = {}
+    vistas = []
+
+    def falso(consulta, variaveis, espera_ms=None):
+        vistas.append((consulta, variaveis))
+        if consulta == "8629852843766813" and \
+                "start_cursor" not in variaveis["input"] and \
+                not variaveis["input"]["filters"]["country_codes"]:
+            pagina = "C2" if variaveis["input"].get("start_cursor") else "C1"
+            return {"xwa2_newsletters_directory_list": {
+                "result": [{"id": "%s@newsletter" % pagina[1]}],
+                "page_info": {"endCursor": pagina}}}
+        if consulta == "8629852843766813" and \
+                variaveis["input"].get("start_cursor") == "C1" and \
+                not variaveis["input"]["filters"]["country_codes"]:
+            return {"xwa2_newsletters_directory_list": {
+                "result": [{"id": "2@newsletter"}], "page_info": {}}}
+        raise wa._ConsultaRecusada("recusou")
+    amb.p._mex = falso
+    primeira = amb.p.buscar_canais("", "", "")
+    assert [c.id for c in primeira.canais] == ["1@newsletter"]
+    assert primeira.proximo == "C1"
+    vistas.clear()
+    segunda = amb.p.buscar_canais("", "", "", cursor="C1")
+    assert [c.id for c in segunda.canais] == ["2@newsletter"]
+    assert segunda.proximo == ""
+    assert len(vistas) == 1                      # foi direto ao formato que valeu
+    assert vistas[0][1]["input"]["start_cursor"] == "C1"

@@ -56,6 +56,11 @@ log = logging.getLogger("telezapp.whatsapp")
 # o selo desligado; so "on" o liga.
 os.environ["NEONIZE_BOT_TAG"] = "off"
 
+
+class _ConsultaRecusada(RuntimeError):
+    """O WhatsApp respondeu, mas recusou a consulta (id ou variaveis que
+    este aparelho nao aceita): vale tentar a proxima candidata."""
+
 class ColecaoFora(Exception):
     """O estado do WhatsApp nao confere: o envio espera a copia do celular."""
 
@@ -1972,6 +1977,11 @@ class ProvedorWhatsApp(Provedor):
         self._fila.put(self._conferir_arquivadas)
         self._fila.put(self._atualizar_nomes_de_grupos)
 
+    def atualizar_conversas_avisando(self, ao_terminar):
+        self.atualizar_conversas()
+        # a fila anda em ordem: isto roda depois das duas conferencias
+        self._fila.put(lambda: ao_terminar(True))
+
     def _ajustes_no_celular(self, conversa_id):
         """Arquivada, fixada e silenciada como o celular deixou a conversa
         (armazem local do whatsmeow, que os avisos do celular mantem em
@@ -2661,6 +2671,126 @@ class ProvedorWhatsApp(Provedor):
             return False, ("O WhatsApp não deixou seguir o canal (o link "
                            "pode ter sido cancelado).")
         return True, "Você agora segue o canal."
+
+    # ---------------------------------------- buscar canais (diretorio)
+    suporta_busca_de_canais = True
+    ESPERA_BUSCA_DE_CANAIS_MS = 30000
+    _consulta_de_canais_que_valeu = {}
+
+    def _mex(self, consulta, variaveis, espera_ms=None):
+        """Uma consulta MEX do WhatsApp pela funcao NewsletterMex da DLL do
+        TeleZapp. Devolve o dict `data` da resposta; levanta RuntimeError com
+        o motivo (DLL sem a funcao, sem conexao, erro do WhatsApp)."""
+        if self.cliente is None or not self._conectada:
+            raise RuntimeError("A conta do WhatsApp não está conectada.")
+        dll = getattr(self.cliente, "_NewClient__client", None)
+        funcao = getattr(dll, "NewsletterMex", None)
+        liberar = getattr(dll, "FreeString", None)
+        if funcao is None or liberar is None:
+            raise RuntimeError("Esta versão do componente do WhatsApp não "
+                               "busca canais.")
+        funcao.argtypes = [ctypes.c_char_p, ctypes.c_char_p,
+                           ctypes.c_char_p, ctypes.c_int]
+        funcao.restype = ctypes.c_void_p
+        liberar.argtypes = [ctypes.c_void_p]
+        liberar.restype = None
+        ponteiro = funcao(
+            self.cliente.uuid, str(consulta).encode(),
+            json.dumps(variaveis).encode(),
+            int(espera_ms or self.ESPERA_BUSCA_DE_CANAIS_MS))
+        try:
+            bruto = ctypes.string_at(ponteiro).decode("utf-8", "replace")
+        finally:
+            liberar(ponteiro)
+        try:
+            resposta = json.loads(bruto)
+        except ValueError:
+            raise RuntimeError("O WhatsApp devolveu uma resposta ilegível.")
+        if not resposta.get("ok"):
+            erro = str(resposta.get("erro") or "erro desconhecido")
+            log.warning("busca de canais: consulta %s falhou: %s (variáveis: "
+                        "%s)", consulta, erro[:200],
+                        json.dumps(variaveis)[:200])
+            if "timed out" in erro or "deadline" in erro:
+                raise RuntimeError("O WhatsApp demorou demais para "
+                                   "responder.")
+            raise _ConsultaRecusada(
+                "O WhatsApp recusou a busca de canais (%s)." % erro[:120])
+        dados = resposta.get("dados")
+        return dados if isinstance(dados, dict) else {}
+
+    def buscar_canais(self, texto="", categoria="", visao="", limite=30,
+                      cursor=""):
+        """Tenta as consultas do pedido em ordem e fica com a primeira que o
+        WhatsApp aceita; a que deu certo e lembrada para a proxima vez (e
+        para as paginas seguintes, que repetem o formato que valeu). Devolve
+        uma canais_whatsapp.Pagina. Timeout e falta de conexao nao passam
+        para a proxima consulta."""
+        from telezapp.nucleo import canais_whatsapp as cw
+        paises = [cw.pais_do_telefone(self.conta.telefone)]
+        paises = [p for p in paises if p]
+        candidatas = cw.pedidos(texto, categoria, visao, limite, paises,
+                                cursor)
+        tipo = "texto" if (texto or "").strip() else "lista"
+        lembrada = self._consulta_de_canais_que_valeu.get(tipo)
+        if lembrada is not None:
+            for i, c in enumerate(candidatas):
+                if cw.identidade(c[0], c[1], not cursor) == \
+                        (lembrada[:2] if cursor else lembrada):
+                    candidatas.insert(0, candidatas.pop(i))
+                    break
+        ultimo = None
+        for consulta, variaveis, campo in candidatas:
+            try:
+                dados = self._mex(consulta, variaveis)
+            except _ConsultaRecusada as e:
+                ultimo = e
+                continue
+            try:
+                canais = cw.canais_da_resposta(dados, campo)
+            except ValueError:
+                log.warning("busca de canais: resposta da consulta %s sem o "
+                            "campo %s (chaves: %s)", consulta, campo,
+                            ", ".join(sorted(dados))[:200])
+                ultimo = RuntimeError(
+                    "O WhatsApp respondeu de um jeito que o TeleZapp não "
+                    "entende. A busca de canais pode ter mudado.")
+                continue
+            if not cursor:         # a lembrada vale a da primeira pagina
+                self._consulta_de_canais_que_valeu[tipo] = cw.identidade(
+                    consulta, variaveis)
+            proximo = cw.proximo_cursor(dados, campo)
+            corpo = dados.get(campo)
+            log.info("busca de canais: %d resultados (consulta %s; %s, "
+                     "categoria %s, lista %s, %s); próxima página: %s%s",
+                     len(canais), consulta,
+                     "com texto" if tipo == "texto" else "sem texto",
+                     categoria or "todas", visao or "recomendados",
+                     "página seguinte" if cursor else "primeira página",
+                     "sim" if proximo else "não",
+                     " (%s; chaves: %s)" % (
+                         cw.resumo_da_pagina(dados, campo),
+                         ", ".join(sorted(corpo))[:120])
+                     if isinstance(corpo, dict) else "")
+            return cw.Pagina(canais, proximo)
+        raise ultimo or RuntimeError("A busca de canais não deu resultado.")
+
+    def seguir_canal_achado(self, canal):
+        if self.cliente is None or not self._conectada:
+            return False, "Sem conexão com o WhatsApp."
+        try:
+            chat = _jid_obj(*jid_de_texto(canal.id))
+            self.cliente.follow_newsletter(chat)
+        except Exception as e:
+            log.warning("seguir o canal achado falhou: %s", type(e).__name__)
+            return False, "O WhatsApp não deixou seguir o canal."
+        # o canal entra na lista sem esperar a primeira mensagem
+        conv = self._conversa(canal.id, chat, "", False, time.time())
+        if canal.nome:
+            conv.nome = canal.nome
+        self.banco.salvar_conversas([conv])
+        self._publicar_conversas()
+        return True, "Você agora segue o canal %s." % (canal.nome or "")
 
     def entrar_no_grupo(self, msg, acao):
         if self.cliente is None or not self._conectada:
@@ -4733,7 +4863,8 @@ class ProvedorWhatsApp(Provedor):
         Se a mensagem e de antes do TeleZapp guardar, nao faz nada."""
         x = self.banco.mensagem(self.conta.id, cid, alvo)
         if x is None:
-            log.info("%s de uma mensagem que não está guardada", motivo)
+            log.info("%s de uma mensagem que não está guardada: id=%s "
+                     "conversa=%s", motivo, alvo, cid)
             return
         aplicar(x)
         self.banco.salvar_mensagens([x])
@@ -5708,6 +5839,39 @@ class ProvedorWhatsApp(Provedor):
         if pendentes:
             self._fila.put(lambda: self._enviar_leitura(conversa_id,
                                                         pendentes))
+            if self._alguma_apagada_pelo_autor(conversa_id, pendentes):
+                # o recibo de uma mensagem que o autor apagou nao tira a marca
+                # de nao lida do celular: a conversa lida vai tambem como
+                # aviso de estado, o que o WhatsApp Web faz ao abrir a conversa
+                self._fila.put(lambda: self._conversa_lida_no_estado(
+                    conversa_id))
+
+    def _alguma_apagada_pelo_autor(self, conversa_id, pendentes):
+        for mid, _ in pendentes:
+            x = self.banco.mensagem(self.conta.id, conversa_id, mid)
+            if x is not None and m.extras_de(x)["apagada_pelo_autor"]:
+                return True
+        return False
+
+    def _conversa_lida_no_estado(self, conversa_id):
+        """Avisa o celular, pelo estado do aplicativo (markChatAsRead), que a
+        conversa foi lida neste aparelho."""
+        from neonize.proto.Neonize_pb2 import PatchInfo
+        from neonize.proto.waSyncAction.WAWebProtobufSyncAction_pb2 import (
+            MarkChatAsReadAction, SyncActionMessageRange, SyncActionValue)
+        with self._trava:
+            conv = self._conversas.get(conversa_id)
+            ultima = int(conv.data) if conv is not None and conv.data else                 int(time.time())
+        ok = self._enviar_estado(
+            "markChatAsRead", 3, PatchInfo.REGULAR_LOW,
+            SyncActionValue(markChatAsReadAction=MarkChatAsReadAction(
+                read=True,
+                messageRange=SyncActionMessageRange(
+                    lastMessageTimestamp=ultima))),
+            conversa_id)
+        log.info("conversa lida avisada ao celular pelo estado "
+                 "(mensagem apagada pelo autor): %s",
+                 "aceito" if ok else "não aceito")
 
     def _enviar_leitura(self, conversa_id, pendentes):
         from neonize.utils.enum import ReceiptType

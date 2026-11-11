@@ -106,6 +106,10 @@ class Janela:
     def IsEnabled(self):
         return getattr(self, "ativo", True)
 
+    def Enable(self, v=True):
+        self.ativo = bool(v)
+        return True
+
     def HasFocus(self):
         return _foco[0] is self
 

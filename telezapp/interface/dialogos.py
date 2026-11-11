@@ -1281,3 +1281,21 @@ class DialogoAvisoDeChamada(wx.Dialog):
     def _conversar(self):
         self.Close()
         self.ao_conversar()
+
+
+def confirmacao_desligada(chave, cfg=None):
+    """A pessoa desligou esta pergunta em Configuracoes, Interface,
+    Confirmacoes? (`cfg`: as configuracoes ja abertas; sem elas, le do
+    arquivo.)"""
+    if cfg is None:
+        from telezapp import config
+        cfg = config.Config()
+    return cfg.get(chave) is False
+
+
+def perguntar(chave, texto, titulo, estilo, pai=None, cfg=None):
+    """wx.MessageBox de sim ou nao que a pessoa pode desligar pela opcao
+    `chave`: desligada, devolve wx.YES sem perguntar."""
+    if confirmacao_desligada(chave, cfg):
+        return wx.YES
+    return wx.MessageBox(texto, titulo, estilo, pai)

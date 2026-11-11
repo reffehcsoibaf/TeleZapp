@@ -6,13 +6,17 @@ confirmacao.
 So desenha e pergunta; quem escolhe e apaga e `nucleo.limpeza`. O que foi
 limpo fica registrado e so volta com um novo pareamento da conta.
 """
+import logging
+
 import wx
 
+from telezapp.interface import dialogos
 from telezapp.nucleo import limpeza
 from telezapp.nucleo import modelos as m
 
 TIPOS = (("", ()),) + limpeza.GRUPOS_TIPOS
 TODOS = "Todos"
+log = logging.getLogger("telezapp.limpeza")
 
 
 class DialogoLimpeza(wx.Dialog):
@@ -141,15 +145,20 @@ class DialogoLimpeza(wx.Dialog):
         if sel.bytes:
             pergunta += ", liberando %s" % m.tamanho_legivel(sel.bytes)
         pergunta += ". O que for apagado não volta até a conta ser pareada "             "de novo. Continuar?"
-        r = wx.MessageBox(pergunta, "Limpar mídias e mensagens",
+        log.info("limpeza: pergunta aberta (%d %s)", n, nome)
+        r = dialogos.perguntar(
+            "confirmar_limpeza", pergunta, "Limpar mídias e mensagens",
                           wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
+        log.info("limpeza: resposta %s", "sim" if r == wx.YES else "não")
         if r != wx.YES:
             return
         celular = msgs and self.celular is not None and \
             self.celular.GetValue()
-        if celular and not self.no_celular[0]():
+        if celular and not self.no_celular[0](self):
             return
         feitos, liberados, falhas = limpeza.apagar(self.banco, sel)
+        log.info("limpeza: apagados aqui %d, falhas %d, no celular: %s",
+                 feitos, falhas, "sim" if celular else "não")
         if msgs:
             texto = "%d %s" % (feitos, "mensagem apagada" if feitos == 1
                                else "mensagens apagadas")

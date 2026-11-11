@@ -11,6 +11,7 @@ import threading
 
 import wx
 
+from telezapp.interface import dialogos
 from telezapp.nucleo import modelos as m
 from telezapp.provedores.base import ErroBloqueio
 
@@ -64,7 +65,7 @@ def alternar(pai, prov, conversa_id, nome, falar, depois=lambda: None):
 
     def perguntar(ja_bloqueada):
         bloquear = not ja_bloqueada
-        if wx.MessageBox(pergunta_de_bloqueio(nome, bloquear),
+        if dialogos.perguntar("confirmar_bloqueio", pergunta_de_bloqueio(nome, bloquear),
                          "Contatos bloqueados",
                          wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
                          pai) != wx.YES:
@@ -221,7 +222,7 @@ class GerenciadorBloqueados(wx.Dialog):
 
     def _desbloquear_varios(self, escolhidos):
         """Desbloqueia os marcados um a um, numa thread, e conta no fim."""
-        if wx.MessageBox("Desbloquear os %d contatos marcados?" %
+        if dialogos.perguntar("confirmar_bloqueio", "Desbloquear os %d contatos marcados?" %
                          len(escolhidos), "Contatos bloqueados",
                          wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
                          self) != wx.YES:
@@ -252,7 +253,7 @@ class GerenciadorBloqueados(wx.Dialog):
         prov = self.contas.provedor(conta_id)
         if prov is None:
             return
-        if wx.MessageBox(pergunta_de_bloqueio(nome, True),
+        if dialogos.perguntar("confirmar_bloqueio", pergunta_de_bloqueio(nome, True),
                          "Contatos bloqueados",
                          wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
                          self) != wx.YES:

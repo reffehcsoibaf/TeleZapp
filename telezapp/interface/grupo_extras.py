@@ -8,6 +8,7 @@ import threading
 
 import wx
 
+from telezapp.interface import dialogos
 from telezapp.nucleo import grupo as ng
 
 log = logging.getLogger("telezapp.grupo")
@@ -97,7 +98,7 @@ class DialogoPedidos(wx.Dialog):
             self.fala.falar("Escolha um pedido na lista.", interromper=True)
             return
         if not aprovar:
-            r = wx.MessageBox("Recusar %d pedido%s?" % (
+            r = dialogos.perguntar("confirmar_remover_pessoas", "Recusar %d pedido%s?" % (
                 len(alvos), "" if len(alvos) == 1 else "s"),
                 "Recusar pedidos",
                 wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)

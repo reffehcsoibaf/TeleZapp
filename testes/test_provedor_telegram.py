@@ -863,7 +863,7 @@ def test_links_do_telegram_viram_botao_de_entrar():
             for e in entradas] == [
         ("convite", "AbCdEfGhIjKlMn"), ("convite", "XyZ1234567890"),
         ("publico", "turma_do_bairro")]
-    assert entradas[2]["rotulo"] == "Entrar em @turma_do_bairro (grupo ou canal)"
+    assert entradas[2]["rotulo"] == "Abrir ou entrar em @turma_do_bairro"
     class MessageEntityUrl:
         offset, length = 5, 29
     texto = "olha https://t.me/+AbCdEfGhIjKlMn"
@@ -1994,40 +1994,119 @@ def test_bot_de_descricao_so_vale_a_resposta_ao_pedido(monkeypatch):
     assert fake.cliente.nome == "@AmelieTelegramBot"
 
 
+def _usuario_ana():
+    from telethon.tl import types as T
+    return T.User(id=11, first_name="Ana", access_hash=5)
+
+
+def _mensagem_de_ana(id_, texto="receita de bolo"):
+    from telethon.tl import types as T
+    return T.Message(
+        id=id_, peer_id=T.PeerUser(11), message=texto,
+        date=datetime.datetime(2026, 11, 1, tzinfo=datetime.timezone.utc),
+        out=False)
+
+
 def test_busca_global_converte_os_resultados_e_cria_a_conversa_que_falta(
         ambiente):
-    from telethon.tl import types as T
+    from telethon.tl import functions, types as T
+    pedidos = []
 
     class Cliente(ClienteFalso):
-        async def get_input_entity(self, peer):
-            return "ent"
-
-        def iter_messages(self, entidade, search=None, limit=None):
-            async def gen():
-                assert entidade is None and search == "bolo"
-                x = T.Message(
-                    id=5, peer_id=T.PeerUser(11), message="receita de bolo",
-                    date=datetime.datetime(2026, 11, 1,
-                                           tzinfo=datetime.timezone.utc),
-                    out=False)
-
-                async def chat():
-                    return types.SimpleNamespace(first_name="Ana",
-                                                 last_name="")
-                x.get_chat = chat
-                yield x
-            return gen()
+        async def __call__(self, requisicao):
+            pedidos.append(requisicao)
+            assert isinstance(requisicao, functions.messages.SearchGlobalRequest)
+            return T.messages.MessagesSlice(topics=[],
+                messages=[_mensagem_de_ana(5)], chats=[],
+                users=[_usuario_ana()], count=1, next_rate=3)
     p = ambiente.criar(Cliente())
     p.cliente = Cliente()
-    achados = asyncio.run(p._buscar_mensagens("bolo", "qualquer", 50))
+    achados, proximo = asyncio.run(
+        p._buscar_mensagens("bolo", "qualquer", 50))
+    assert pedidos[0].q == "bolo" and pedidos[0].offset_rate == 0
+    assert pedidos[0].offset_id == 0 and pedidos[0].limit == 50
     assert len(achados) == 1
     x, conv = achados[0]
     assert (x.id, x.conversa_id) == ("5", "11")
     assert "bolo" in x.texto
     assert conv.nome == "Ana" and conv.tipo == "privada"
     assert "11" not in p._conversas      # so passa a existir ao abrir
+    assert proximo is None               # veio menos que o pedido: acabou
     p.adotar_conversa(conv)
     assert p._conversas["11"] is conv
+
+
+def test_busca_global_pagina_seguinte_usa_taxa_conversa_e_id_da_ultima(
+        ambiente):
+    from telethon.tl import types as T
+    pedidos = []
+
+    class Cliente(ClienteFalso):
+        async def __call__(self, requisicao):
+            pedidos.append(requisicao)
+            if len(pedidos) == 1:
+                return T.messages.MessagesSlice(topics=[],
+                    messages=[_mensagem_de_ana(9), _mensagem_de_ana(8)],
+                    chats=[], users=[_usuario_ana()], count=5, next_rate=42)
+            return T.messages.MessagesSlice(topics=[],
+                messages=[_mensagem_de_ana(7)], chats=[],
+                users=[_usuario_ana()], count=5, next_rate=None)
+    p = ambiente.criar(Cliente())
+    p.cliente = Cliente()
+    achados, proximo = asyncio.run(p._buscar_mensagens("bolo", "fotos", 2))
+    assert [x.id for x, _ in achados] == ["9", "8"]
+    assert proximo is not None and proximo[0] == 42 and proximo[2] == 8
+    assert type(pedidos[0].filter).__name__ == "InputMessagesFilterPhotos"
+    achados, depois = asyncio.run(
+        p._buscar_mensagens("bolo", "fotos", 2, proximo))
+    assert [x.id for x, _ in achados] == ["7"] and depois is None
+    assert (pedidos[1].offset_rate, pedidos[1].offset_id) == (42, 8)
+    assert pedidos[1].offset_peer == proximo[1]
+
+
+def test_busca_global_mensagem_unica_nao_fatia_nao_tem_pagina_seguinte(
+        ambiente):
+    from telethon.tl import types as T
+
+    class Cliente(ClienteFalso):
+        async def __call__(self, requisicao):
+            return T.messages.Messages(topics=[],
+                messages=[_mensagem_de_ana(1), _mensagem_de_ana(2)],
+                chats=[], users=[_usuario_ana()])
+    p = ambiente.criar(Cliente())
+    p.cliente = Cliente()
+    achados, proximo = asyncio.run(p._buscar_mensagens("bolo", "qualquer", 2))
+    assert len(achados) == 2 and proximo is None
+
+
+def test_buscar_global_continua_so_mensagens_e_posts_com_o_cursor(ambiente):
+    from telethon.tl import functions, types as T
+    visto = []
+
+    class Cliente(ClienteFalso):
+        async def __call__(self, requisicao):
+            visto.append(type(requisicao).__name__)
+            if isinstance(requisicao, functions.contacts.SearchRequest):
+                return T.contacts.Found(my_results=[], results=[], chats=[],
+                                        users=[])
+            return T.messages.MessagesSlice(topics=[],
+                messages=[_mensagem_de_ana(len(visto))], chats=[],
+                users=[_usuario_ana()], count=9, next_rate=1)
+    p = ambiente.criar(Cliente())
+    p.cliente = Cliente()
+    primeira = asyncio.run(p._buscar_global("bolo", "tudo", "qualquer", 1))
+    assert visto == ["SearchRequest", "SearchGlobalRequest",
+                     "SearchPostsRequest"]
+    assert set(primeira.proximo) == {"mensagens", "posts"}
+    visto.clear()
+    segunda = asyncio.run(p._buscar_global("bolo", "tudo", "qualquer", 1,
+                                           primeira.proximo))
+    assert visto == ["SearchGlobalRequest", "SearchPostsRequest"]  # sem chats
+    assert segunda.chats == [] and len(segunda.mensagens) == 1
+    visto.clear()
+    so_posts = asyncio.run(p._buscar_global(
+        "bolo", "tudo", "qualquer", 1, {"posts": primeira.proximo["posts"]}))
+    assert visto == ["SearchPostsRequest"] and so_posts.mensagens == []
 
 
 def test_busca_global_de_chats_diz_o_tipo_e_se_a_conta_participa(ambiente):
@@ -2065,3 +2144,49 @@ def test_busca_global_de_chats_diz_o_tipo_e_se_a_conta_participa(ambiente):
     texto = por_nome["Notícias"].texto_da_lista()
     assert texto.startswith("Canal: Notícias") and "1500 inscritos" in texto
     assert "você não participa" in texto
+
+
+def test_previa_de_t_me_de_robo_nao_e_erro_e_pede_para_abrir(ambiente):
+    from telethon.tl import types as T
+
+    class Cliente(ClienteFalso):
+        async def get_entity(self, usuario):
+            if usuario == "LivrosBot":
+                return T.User(id=7, first_name="Livros", bot=True,
+                              access_hash=1)
+            return T.Channel(id=100, title="Canal", photo=T.ChatPhotoEmpty(),
+                             date=datetime.datetime(
+                                 2026, 1, 1, tzinfo=datetime.timezone.utc),
+                             broadcast=True, access_hash=2)
+    p = ambiente.criar(Cliente())
+    p.cliente = Cliente()
+    robo = asyncio.run(p._previa({"modo": "publico", "usuario": "LivrosBot"}))
+    assert robo == {"pessoa": True, "robo": True, "nome": "Livros"}
+    canal = asyncio.run(p._previa({"modo": "publico", "usuario": "Noticias"}))
+    assert "pessoa" not in canal and canal["nome"] == "Canal"
+
+
+def test_motivo_do_convite_so_diz_expirou_quando_expirou():
+    class InviteHashExpiredError(Exception):
+        pass
+
+    class InviteHashInvalidError(Exception):
+        pass
+
+    class ChannelPrivateError(Exception):
+        pass
+
+    class FloodWaitError(Exception):
+        seconds = 30
+
+    class Estranho(Exception):
+        pass
+    assert "expirou" in tg.motivo_do_convite(InviteHashExpiredError())
+    assert "expirou" not in tg.motivo_do_convite(InviteHashInvalidError())
+    assert "não é válido" in tg.motivo_do_convite(InviteHashInvalidError())
+    assert "privado" in tg.motivo_do_convite(ChannelPrivateError())
+    assert "30 segundos" in tg.motivo_do_convite(FloodWaitError())
+    assert "não existe" in tg.motivo_do_convite(ValueError("x"))
+    assert "não respondeu" in tg.motivo_do_convite(TimeoutError())
+    assert "(Estranho)" in tg.motivo_do_convite(Estranho())
+    assert "expirou" not in tg.motivo_do_convite(Estranho())

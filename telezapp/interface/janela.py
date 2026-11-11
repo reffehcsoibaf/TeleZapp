@@ -27,6 +27,7 @@ from telezapp.interface import colagem, dialogos, robos, visualizadores
 from telezapp.interface import salvar as ui_salvar
 from telezapp.nucleo import copia_oficial, localizacao, silenciados
 from telezapp.nucleo import links_externos, links_recebidos, resumo_midias
+from telezapp.nucleo.links_externos import motivo_de_nao_achar
 from telezapp.interface import emojis as ui_emojis
 from telezapp.interface import enquete as ui_enquete
 from telezapp.interface import nova_enquete as ui_nova_enquete
@@ -38,6 +39,7 @@ from telezapp.interface.publicar_status import DialogoPublicarStatus
 from telezapp.interface.detalhes import ControleDetalhes, ControleRecibos
 from telezapp.interface.chamada import DialogoChamada
 from telezapp.interface.busca import DialogoBusca
+from telezapp.interface.busca_canais import DialogoBuscaDeCanais
 from telezapp.interface.busca_global import DialogoBuscaGlobal
 from telezapp.nucleo import busca as busca_nucleo
 from telezapp.nucleo import busca_global as busca_global_nucleo
@@ -50,7 +52,8 @@ from telezapp.midia import prioridade
 from telezapp.provedores import chamadas_whatsapp
 from telezapp.midia import velocidade as vel
 from telezapp.midia.gravador import (MICROFONE, SOM_E_MICROFONE,
-                                     SOM_INTERNO, ErroGravacao, Gravador)
+                                     SOM_INTERNO, ErroGravacao, Gravador,
+                                     gravando_agora)
 from telezapp.interface.localizacao import DialogoLocalizacao
 from telezapp.provedores.base import APAGAR_PENDENTE
 from telezapp.midia.reprodutor import (FormatoNaoSuportado, Reprodutor,
@@ -463,6 +466,7 @@ class Janela(wx.Frame):
             os.path.join(config.pasta_dados(), "ia_chaves.json"))
         self._ocultas = []        # [(nome, janela)] escondidas pela pessoa
         self._ia_pendentes = {}   # chave da mensagem -> esperando o download
+        self._copia_pendente = {}  # chave -> mensagem a copiar ao baixar
         self._ia_ocupadas = set()  # mensagens que a IA esta processando
         self._lote_resumo = None   # midias sendo processadas para um resumo
         self._ia_do_lote = set()   # as dele: sem fala a cada uma
@@ -510,6 +514,7 @@ class Janela(wx.Frame):
         self.chamada = None           # nucleo.chamadas.Chamada em curso
         self.dlg_chamada = None       # DialogoChamada aberto
         self._gravacao_rapida = None  # {"gravador", "origem"} gravando por atalho
+        self._busca_global_volta = None   # {"estado", "chave"}: Esc volta a ela
         self._bandeja = None          # icone da area de notificacao
         self._saindo = False          # True: fechar e sair de verdade
         self.vigiar_o_fim = None      # chamada ao fechar, ver __main__
@@ -652,6 +657,7 @@ class Janela(wx.Frame):
         item(m_conv, "buscar_conv", "Bus&car conversa\tCtrl+F")
         item(m_conv, "busca_criterios", "Busca por crit&érios...")
         item(m_conv, "busca_global", "Busca &global no Telegram...")
+        item(m_conv, "busca_canais", "Buscar canais do &WhatsApp...")
         item(m_conv, "esconder_trancadas",
              "Esconder as conversas tr&ancadas\tCtrl+Shift+T")
 
@@ -876,6 +882,7 @@ class Janela(wx.Frame):
             "buscar_conv": lambda e: self._ir_para(self.campo_busca, ""),
             "busca_criterios": lambda e: self._busca_por_criterios(),
             "busca_global": lambda e: self._busca_global(),
+            "busca_canais": lambda e: self._busca_canais(),
             "ver_chamadas": lambda e: self._ver_chamadas(),
             "esconder_trancadas": lambda e: self._esconder_trancadas(),
             "contatos": lambda e: self._gerenciar_contatos(),
@@ -1726,7 +1733,8 @@ class Janela(wx.Frame):
     # itens do menu que so fazem sentido com uma conta do servico:
     # chave -> (servico, chave do item logo acima, para voltar ao lugar)
     ITENS_POR_SERVICO = {"meta_ai": ("whatsapp", "nova_chamada_video"),
-                         "busca_global": ("telegram", "busca_criterios")}
+                         "busca_global": ("telegram", "busca_criterios"),
+                         "busca_canais": ("whatsapp", "busca_criterios")}
 
     def _ajustar_menu_por_contas(self):
         """Tira do menu o que e de um servico sem conta cadastrada (a Meta AI
@@ -2812,7 +2820,9 @@ class Janela(wx.Frame):
         texto = ("Apagar %s? As mensagens e as mídias delas serão apagadas "
                  "deste computador. Elas só voltam se chegar uma mensagem "
                  "nova." % quantas)
-        if no_celular:
+        if self._sem_pergunta("confirmar_apagar_conversas"):
+            no_celular = False
+        elif no_celular:
             dlg = wx.MessageDialog(
                 self, texto + " Quer apagar também no celular?",
                 "Apagar conversas",
@@ -2902,7 +2912,9 @@ class Janela(wx.Frame):
                 self.estados.get(x.conta_id) == ev.CONECTADA else None
         minhas_na_conta = any(x.minha and na_conta(x) for x in msgs)
         para_todos = False
-        if minhas_na_conta:
+        if self._sem_pergunta("confirmar_apagar_mensagens"):
+            pass
+        elif minhas_na_conta:
             dlg = wx.MessageDialog(
                 self, "Apagar %s? Elas somem daqui e do celular. No WhatsApp, "
                 "deixe-o aberto no celular para apagar junto." % quantas,
@@ -3186,7 +3198,9 @@ class Janela(wx.Frame):
         texto = ("Apagar a conversa com %s? As mensagens e as mídias dela "
                  "serão apagadas deste computador. Ela só volta se chegar "
                  "uma mensagem nova." % conv.nome)
-        if no_celular:
+        if self._sem_pergunta("confirmar_apagar_conversas"):
+            no_celular = False
+        elif no_celular:
             dlg = wx.MessageDialog(
                 self, texto + " Quer apagar também no celular?",
                 "Apagar conversa",
@@ -3235,14 +3249,31 @@ class Janela(wx.Frame):
         return bool(prov and getattr(prov, "APAGA_NA_CONTA", False) and
                     self.estados.get(conta_id) == ev.CONECTADA)
 
-    def _lembrar_celular(self):
+    def _sem_pergunta(self, chave):
+        """A pessoa desligou esta pergunta (Configuracoes, Interface,
+        Confirmacoes)? Nas de apagar, sem a pergunta vale a escolha que
+        menos apaga: so para mim, so aqui."""
+        if not dialogos.confirmacao_desligada(chave, self.cfg):
+            return False
+        log.info("confirmação desligada (%s): seguindo sem perguntar", chave)
+        return True
+
+    def _lembrar_celular(self, dono=None):
         """Quem escolheu apagar no celular: com o WhatsApp aberto la, ele
-        apaga junto. False se a pessoa desistiu."""
-        return wx.MessageBox(
+        apaga junto. False se a pessoa desistiu. `dono`: o dialogo aberto
+        que pergunta (a caixa precisa ser dele, senao abre atras e fica sem
+        foco)."""
+        if self._sem_pergunta("confirmar_aviso_celular"):
+            return True
+        log.info("apagar: aviso do celular aberto")
+        segue = wx.MessageBox(
             "Abra o WhatsApp no celular e deixe-o aberto na tela: assim ele "
             "apaga junto. Quando estiver aberto, escolha OK.",
             "Apagar no celular", wx.OK | wx.CANCEL | wx.ICON_INFORMATION,
-            self) != wx.CANCEL
+            dono or self) != wx.CANCEL
+        log.info("apagar: aviso do celular respondido (%s)",
+                 "OK" if segue else "cancelar")
+        return segue
 
     def _perguntar_celular(self, conv, texto, titulo, com_celular, so_aqui):
         """True (tambem no celular), False (so aqui) ou None (desistiu). Sem
@@ -3537,7 +3568,9 @@ class Janela(wx.Frame):
         na_conta = prov is not None and \
             self.estados.get(x.conta_id) == ev.CONECTADA
         para_todos = False
-        if na_conta and x.minha:
+        if self._sem_pergunta("confirmar_apagar_mensagens"):
+            pass
+        elif na_conta and x.minha:
             dlg = wx.MessageDialog(
                 self, "Apagar esta mensagem? Ela some daqui e do celular. No "
                 "WhatsApp, deixe-o aberto no celular para apagar junto.",
@@ -3545,14 +3578,19 @@ class Janela(wx.Frame):
                 wx.YES_NO | wx.CANCEL | wx.CANCEL_DEFAULT | wx.ICON_QUESTION)
             dlg.SetYesNoCancelLabels("Apagar para todos", "Apagar só para mim",
                                      "Cancelar")
+            log.info("apagar mensagem: pergunta aberta (minha)")
             try:
                 r = dlg.ShowModal()
             finally:
                 dlg.Destroy()
+            log.info("apagar mensagem: resposta %s", {
+                wx.ID_YES: "para todos", wx.ID_NO: "só para mim"}.get(
+                r, "cancelar"))
             if r == wx.ID_CANCEL:
                 return
             para_todos = r == wx.ID_YES
         else:
+            log.info("apagar mensagem: pergunta aberta")
             r = wx.MessageBox(
                 "Apagar esta mensagem?" + (
                     " Ela some daqui e do celular. No WhatsApp, deixe-o aberto "
@@ -3560,9 +3598,12 @@ class Janela(wx.Frame):
                     " A conta não está conectada: ela some só daqui."),
                 "Apagar mensagem",
                 wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
+            log.info("apagar mensagem: resposta %s",
+                     "sim" if r == wx.YES else "não")
             if r != wx.YES:
                 return
         self._remover_mensagem_local(x.conta_id, x.conversa_id, x.id)
+        log.info("apagar mensagem: apagada aqui")
         if na_conta:
             threading.Thread(
                 target=self._apagar_na_conta, args=(prov, x, para_todos),
@@ -3962,6 +4003,12 @@ class Janela(wx.Frame):
                         x.conta_id, x.conversa_id) or -1):
                 continue      # limpa, ou de conversa apagada: so volta com
                               # mensagem nova ou novo pareamento
+            antiga = atuais.get(x.id)
+            if antiga is not None and x.tipo != m.TEXTO and \
+                    not m.extras_de(x)["ia"] and m.extras_de(antiga)["ia"]:
+                # a transcricao/descricao e so local: nao some quando a
+                # mensagem chega de novo do servico
+                m.atualizar_extras(x, ia=m.extras_de(antiga)["ia"])
             atuais[x.id] = x
         lista = sorted(atuais.values(), key=_ordem)
         limite = self._limite_memoria(chave)
@@ -4027,6 +4074,9 @@ class Janela(wx.Frame):
         aviso = self._texto_do_aviso(msg, conv, aberta)
         proprio = pacotes_de_som.arquivo_da_conversa(self.cfg, chave)
         servico = self._servico_da_conta(msg.conta_id)
+        if self._avisos_calados():
+            self.SetStatusText(aviso[:150])
+            return        # gravando: nem som nem fala, e nada fica para depois
         if conv.silenciada():
             pass          # silenciada e aberta: sem som (a fala segue a opcao)
         elif conv.tipo == "grupo" and self._cita_voce(msg):
@@ -4039,6 +4089,12 @@ class Janela(wx.Frame):
         if self._deve_falar_nova(aberta):
             self.fala.falar(aviso)
         self.SetStatusText(aviso[:150])
+
+    def _avisos_calados(self):
+        """Gravando voz com a opcao ligada: os avisos de mensagens, reacoes
+        e votos nao tocam nem falam (e nao sao repostos depois), para nao
+        entrar na gravacao. Chamada e retorno da propria gravacao seguem."""
+        return bool(self.cfg.get("calar_avisos_ao_gravar")) and             gravando_agora()
 
     def _servico_da_conta(self, conta_id):
         """whatsapp ou telegram (para o som de cada servico); "" se nao sei."""
@@ -4100,9 +4156,10 @@ class Janela(wx.Frame):
                  "%d mensagens novas chegaram" % e.quantas) + \
             " no WhatsApp enquanto o TeleZapp estava fechado."
         log.info("sincronia: %d mensagens novas", e.quantas)
-        bipe("nova")
-        if self._deve_falar_nova(False):
-            self.fala.falar(texto)
+        if not self._avisos_calados():
+            bipe("nova")
+            if self._deve_falar_nova(False):
+                self.fala.falar(texto)
         self.SetStatusText(texto)
 
     def _ev_falha(self, e):
@@ -4224,14 +4281,15 @@ class Janela(wx.Frame):
         if self._conversa_muda(conv, aberta):
             return
         onde = conv.nome if conv else ""
+        calados = self._avisos_calados()
         autor = m.meu_nome() if e.mensagem.minha else (
             e.mensagem.autor or "alguém")
         if e.motivo == "reacao":
-            if e.mensagem.minha and e.emoji and e.quem != "Você":
+            if e.mensagem.minha and e.emoji and e.quem != "Você" and                     not calados:
                 bipe("reacao_recebida",
                      servico=self._servico_da_conta(e.mensagem.conta_id))
             if e.mensagem.minha and e.emoji and e.quem != "Você" and \
-                    self.cfg.get("falar_reacoes"):
+                    self.cfg.get("falar_reacoes") and not calados:
                 self.fala.falar("%s reagiu com %s à sua mensagem: %s" % (
                     e.quem, e.emoji, m.citacao(e.mensagem)))
                 self.SetStatusText("%s reagiu com %s" % (e.quem, e.emoji))
@@ -4247,9 +4305,12 @@ class Janela(wx.Frame):
             if e.quem == "Você":
                 bipe("voto_enviado")
             elif e.mensagem.minha and e.quem:
-                bipe("voto_enquete",
-                     servico=self._servico_da_conta(e.mensagem.conta_id))
+                if not calados:
+                    bipe("voto_enquete", servico=self._servico_da_conta(
+                        e.mensagem.conta_id))
                 self.SetStatusText("%s votou na sua enquete" % e.quem)
+        elif calados and e.motivo in ("editada", "apagada"):
+            pass          # gravando: sem fala; o aviso fica so na barra
         elif aberta and e.motivo == "editada":
             self.fala.falar("%s editou uma mensagem." % autor)
         elif aberta and e.motivo == "apagada":
@@ -4975,6 +5036,7 @@ class Janela(wx.Frame):
         conv = self._escolher_topico(conv)
         if conv is None:
             return
+        self._busca_global_volta = None
         self.atual = conv.chave
         self.reacoes_novas.pop(conv.chave, None)
         self.quem_reagiu.pop(conv.chave, None)
@@ -5100,6 +5162,8 @@ class Janela(wx.Frame):
         self.marcador_id = None
         self.marcador_n = 0
         antes = self.atual
+        volta = self._busca_global_volta
+        self._busca_global_volta = None
         self.atual = None
         self.presenca = self.digitando = None
         pa = self.contas.provedor(antes[0]) if antes else None
@@ -5114,6 +5178,8 @@ class Janela(wx.Frame):
         self._mostrar_conversa(False, False)
         self._atualizar_titulo()
         self.lista_conv.SetFocus()
+        if volta and volta["chave"] == antes:
+            wx.CallAfter(self._busca_global, volta["estado"])
 
     def _somente_leitura(self):
         """A conversa aberta nao aceita mensagens da conta? Se sim, avisa."""
@@ -5160,14 +5226,75 @@ class Janela(wx.Frame):
         bipe("erro")
         self.fala.falar("Nenhuma conversa com mensagens não lidas.")
 
+    # Quanto o F5 espera as contas antes de dizer que nao terminou
+    ESPERA_ATUALIZAR_S = 30
+
     def _atualizar_conversas(self, avisar=True):
+        """F5. Com `avisar`, fala no comeco e, quando todas as contas
+        conectadas devolvem a lista, fala e toca o som de tarefa pronta."""
         self._carregar_previas(refazer=True)
-        for conta_id in list(self.estados):
+        contas = [c for c in list(self.estados)
+                  if self.contas.provedor(c) is not None
+                  and self.estados[c] == ev.CONECTADA]
+        if not avisar:
+            for conta_id in contas:
+                self.contas.provedor(conta_id).atualizar_conversas()
+            return
+        antes = getattr(self, "_f5", None)
+        if antes is not None and antes["relogio"] is not None:
+            antes["relogio"].Stop()
+        rodada = self._f5 = {"faltam": set(contas), "falhas": 0,
+                             "inicio": time.monotonic(), "relogio": None}
+        self.fala.falar("Atualizando as conversas.")
+        log.info("F5: atualizando as conversas de %d conta(s)", len(contas))
+        for conta_id in contas:
             p = self.contas.provedor(conta_id)
-            if p is not None and self.estados[conta_id] == ev.CONECTADA:
+
+            def pronto(ok=True, conta_id=conta_id):
+                wx.CallAfter(self._conta_atualizada, rodada, conta_id, ok)
+            avisando = getattr(p, "atualizar_conversas_avisando", None)
+            if avisando is not None:
+                avisando(pronto)
+            else:
                 p.atualizar_conversas()
-        if avisar:
-            self.fala.falar("Atualizando as conversas.")
+                pronto()
+        if not contas:
+            wx.CallAfter(self._conversas_atualizadas, rodada)
+        else:
+            rodada["relogio"] = wx.CallLater(
+                self.ESPERA_ATUALIZAR_S * 1000,
+                self._conversas_atualizadas, rodada, True)
+
+    @seguro
+    def _conta_atualizada(self, rodada, conta_id, ok):
+        if getattr(self, "_f5", None) is not rodada:
+            return                      # de um F5 anterior, ja encerrado
+        rodada["faltam"].discard(conta_id)
+        if not ok:
+            rodada["falhas"] += 1
+        if not rodada["faltam"]:
+            self._conversas_atualizadas(rodada)
+
+    @seguro
+    def _conversas_atualizadas(self, rodada, estourou=False):
+        """O F5 terminou (ou o prazo acabou): fala e som."""
+        if getattr(self, "_f5", None) is not rodada:
+            return
+        self._f5 = None
+        if rodada["relogio"] is not None:
+            rodada["relogio"].Stop()
+        demorou = time.monotonic() - rodada["inicio"]
+        if estourou or rodada["falhas"]:
+            log.warning("F5: não terminou em todas as contas (%.1f s, "
+                        "faltaram %d, falharam %d)", demorou,
+                        len(rodada["faltam"]), rodada["falhas"])
+            bipe("erro")
+            self.fala.falar("A atualização das conversas não terminou em "
+                            "todas as contas.", interromper=True)
+            return
+        log.info("F5: conversas atualizadas em %.1f s", demorou)
+        bipe("tarefa_pronta")
+        self.fala.falar("Conversas atualizadas.", interromper=True)
 
     def _reconectar(self):
         self.pareamento_recusado.clear()
@@ -6642,6 +6769,14 @@ class Janela(wx.Frame):
             self.fala.falar(previa["erro"], interromper=True)
             wx.MessageBox(previa["erro"], NOME, wx.OK | wx.ICON_WARNING, self)
             return
+        if previa.get("pessoa"):
+            # o botao era de um robo ou de uma pessoa (t.me/nome): abre a
+            # conversa, como qualquer link de @usuario
+            self._abrir_usuario_do_link(
+                x.conta_id if x is not None else prov.conta.id, prov,
+                links_externos.interpretar(
+                    "https://t.me/" + acao["usuario"]), False)
+            return
         if previa.get("ja_participa"):
             texto = "Você já está em %s." % previa["nome"]
             self.fala.falar(texto, interromper=True)
@@ -6658,8 +6793,9 @@ class Janela(wx.Frame):
             partes.append("Descrição: %s" % previa["descricao"])
         pergunta = " ".join(partes)
         self.fala.falar(pergunta, interromper=True)
-        r = wx.MessageBox(pergunta, "Entrar", wx.YES_NO | wx.ICON_QUESTION,
-                          self)
+        r = dialogos.perguntar(
+            "confirmar_grupos_e_canais", pergunta, "Entrar",
+            wx.YES_NO | wx.ICON_QUESTION, self, self.cfg)
         if r != wx.YES:
             return
         self.fala.falar("Entrando...", interromper=True)
@@ -7441,7 +7577,7 @@ class Janela(wx.Frame):
 
     def _copiar_conteudo(self, x, tipo, valor):
         """Um item "Copiar ..." do menu da mensagem: o texto, o endereco ou o
-        arquivo da midia (que precisa estar baixada)."""
+        arquivo da midia (baixada na hora, se ainda nao estiver)."""
         if m.extras_de(x)["apagada"]:
             self._avisar_apagado("A mensagem foi apagada. Não há conteúdo "
                                  "para copiar.")
@@ -7456,10 +7592,12 @@ class Janela(wx.Frame):
             return
         caminho = self.midias.caminho(x)
         if not caminho:
-            bipe("erro")
-            self.fala.falar(
-                "Esta mídia ainda não foi baixada. Aperte Enter na mensagem "
-                "para baixar e depois copie.", interromper=True)
+            # baixa agora (com a pergunta de tamanho, o andamento e o Esc de
+            # sempre) e copia quando o download terminar
+            self._copia_pendente[x.chave] = x
+            self._abrir_midia(abrir=False, x=x)
+            if self.abrindo != x.chave and not self.midias.baixando(x.chave):
+                self._copia_pendente.pop(x.chave, None)   # desistiu ou falhou
             return
         dados = wx.DataObjectComposite()
         arquivos = wx.FileDataObject()
@@ -8193,8 +8331,48 @@ class Janela(wx.Frame):
                 achadas.append((d["id"], self._nome_da_conta(d)))
         return achadas
 
+    def _contas_com_busca_de_canais(self):
+        """[(id, nome)] das contas conectadas cujo servico busca canais."""
+        achadas = []
+        for d in self.cfg.contas():
+            p = self.contas.provedor(d["id"]) if self.contas else None
+            if p is not None and getattr(p, "suporta_busca_de_canais", False)                     and self.estados.get(d["id"]) == ev.CONECTADA:
+                achadas.append((d["id"], self._nome_da_conta(d)))
+        return achadas
+
     @seguro
-    def _busca_global(self):
+    def _busca_canais(self):
+        """Busca canais no diretorio do WhatsApp, inclusive os que a conta
+        ainda nao segue; seguir um deles o poe na lista de conversas."""
+        contas = self._contas_com_busca_de_canais()
+        if not contas:
+            bipe("erro")
+            self.fala.falar("Nenhuma conta do WhatsApp conectada para buscar "
+                            "canais.", interromper=True)
+            return
+
+        def buscar(conta_id, texto, categoria, visao, cursor=""):
+            p = self.contas.provedor(conta_id)
+            if p is None:
+                raise RuntimeError("A conta não está conectada.")
+            return p.buscar_canais(texto, categoria, visao, cursor=cursor)
+
+        def seguir(conta_id, canal):
+            p = self.contas.provedor(conta_id)
+            if p is None:
+                return False, "A conta não está conectada."
+            return p.seguir_canal_achado(canal)
+        dlg = DialogoBuscaDeCanais(
+            self, contas, buscar, seguir,
+            falar=lambda t: self.fala.falar(t, interromper=True),
+            cfg=self.cfg)
+        try:
+            dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+
+    @seguro
+    def _busca_global(self, estado=None):
         """A busca do aplicativo do Telegram: pessoas, grupos e canais,
         mensagens de todas as conversas e posts publicos. O resultado
         escolhido abre a conversa (na mensagem, quando e uma mensagem)."""
@@ -8209,14 +8387,14 @@ class Janela(wx.Frame):
         def nome_de_conta(cid):
             return nomes.get(cid, cid)
 
-        def buscar(conta_id, texto, modo, filtro):
+        def buscar(conta_id, texto, modo, filtro, cursor=None):
             p = self.contas.provedor(conta_id)
             if p is None:
                 raise RuntimeError("A conta não está conectada.")
-            r = p.buscar_global(texto, modo, filtro)
+            r = p.buscar_global(texto, modo, filtro, cursor=cursor)
             return (busca_global_nucleo.linhas(
                 r, texto, nome_de_conta if len(nomes) > 1 else None),
-                r.avisos)
+                r.avisos, r.proximo)
 
         def entrar(conta_id, conversa_id):
             p = self.contas.provedor(conta_id)
@@ -8227,9 +8405,12 @@ class Janela(wx.Frame):
             self, contas, buscar, entrar,
             falar=lambda t: self.fala.falar(t, interromper=True))
         escolhido = None
+        if estado:
+            dlg.restaurar(estado)
         try:
             if dlg.ShowModal() == wx.ID_OK:
                 escolhido = dlg.escolhido
+                estado = dlg.estado()
         finally:
             dlg.Destroy()
         if escolhido is None:
@@ -8239,6 +8420,9 @@ class Janela(wx.Frame):
             self._abrir_chat_do_servidor(objeto.conversa)
         else:
             self._abrir_achado_do_servidor(objeto)
+        if self.atual is not None:
+            # Esc nesta conversa volta para os resultados (outro Esc fecha)
+            self._busca_global_volta = {"estado": estado, "chave": self.atual}
 
     def _adotar_conversa_do_servidor(self, conv):
         """A conversa achada pela busca pode nao estar na lista: entra nela e
@@ -8294,6 +8478,10 @@ class Janela(wx.Frame):
 
     def _abrir_endereco(self, url):
         aberto = dialogos.abrir_link(url)
+        info = links_externos.interpretar(url)
+        log.info("link aberto: %s; o TeleZapp %s",
+                 links_externos.resumo_para_log(url),
+                 "entende (%s)" % info["acao"] if info else "não entende")
         if aberto == dialogos.PELO_TELEZAPP:
             return
         if aberto:
@@ -8517,6 +8705,8 @@ class Janela(wx.Frame):
             return False
         contas = self._contas_do_servico(info["servico"])
         if not contas:
+            log.info("link %s: nenhuma conta conectada do serviço; vai para "
+                     "o navegador", info["servico"])
             return False
         conta_id = contas[0][0]
         if len(contas) > 1:
@@ -8531,17 +8721,26 @@ class Janela(wx.Frame):
         elif info["acao"] == "telefone":
             self._abrir_link_de_telefone(conta_id, info)
         else:
-            def trabalho():
-                try:
-                    achado = prov.resolver_usuario(info["usuario"])
-                except Exception:
-                    log.exception("resolver o @ de um link")
-                    achado = None
-                wx.CallAfter(self._link_de_usuario_pronto, conta_id, prov,
-                             info, achado, de_fora)
-            threading.Thread(target=trabalho, daemon=True,
-                             name="link-usuario").start()
+            self._abrir_usuario_do_link(conta_id, prov, info, de_fora)
         return True
+
+    def _abrir_usuario_do_link(self, conta_id, prov, info, de_fora):
+        """Resolve o @usuario do link fora da janela e abre a conversa."""
+        if info is None:
+            return
+
+        def trabalho():
+            motivo = ""
+            try:
+                achado = prov.resolver_usuario(info["usuario"])
+            except Exception as e:
+                log.warning("resolver o @ de um link falhou: %s",
+                            type(e).__name__)
+                achado, motivo = None, motivo_de_nao_achar(e)
+            wx.CallAfter(self._link_de_usuario_pronto, conta_id, prov,
+                         info, achado, de_fora, motivo)
+        threading.Thread(target=trabalho, daemon=True,
+                         name="link-usuario").start()
 
     def _abrir_conversa_do_link(self, conta_id, conversa_id, nome, texto,
                                 tipo="privada"):
@@ -8565,11 +8764,14 @@ class Janela(wx.Frame):
                                      info["texto"])
 
     @seguro
-    def _link_de_usuario_pronto(self, conta_id, prov, info, achado, de_fora):
+    def _link_de_usuario_pronto(self, conta_id, prov, info, achado, de_fora,
+                                motivo=""):
+        log.info("link de @usuário: %s", "achei" if achado else "não achei")
         if achado is None:
             bipe("erro")
-            self.fala.falar("Não encontrei @%s no Telegram." % info["usuario"],
-                            interromper=True)
+            self.fala.falar("Não encontrei @%s no Telegram.%s" % (
+                info["usuario"], (" " + motivo) if motivo else ""),
+                interromper=True)
             return
         if achado["tipo"] != "privada" and \
                 (conta_id, achado["id"]) not in self.indice:
@@ -8579,9 +8781,24 @@ class Janela(wx.Frame):
             return
         self._abrir_conversa_do_link(conta_id, achado["id"], achado["nome"],
                                      info["texto"], achado["tipo"])
+        log.info("link de @usuário: tipo %s, robô %s, start %s",
+                 achado["tipo"], "sim" if achado["robo"] else "não",
+                 "sim" if info["start"] is not None else "não")
         if not achado["robo"]:
             return
         nome = achado["nome"]
+        if info["start"] is None and info["startapp"] is None and \
+                not info["app"] and self._robo_sem_conversa(conta_id,
+                                                            achado["id"]):
+            # robo que nunca foi iniciado: ele so responde depois do /start
+            if wx.MessageBox(
+                    "Você ainda não conversou com %s. Iniciar o robô agora "
+                    "(envia o /start)?" % nome, NOME,
+                    wx.YES_NO | wx.ICON_QUESTION, self) == wx.YES:
+                threading.Thread(
+                    target=prov.iniciar_robo, args=(achado["id"], ""),
+                    daemon=True, name="iniciar-robo").start()
+            return
         if info["startapp"] is not None or info["app"]:
             if de_fora and wx.MessageBox(
                     "Um link pede para abrir o aplicativo de %s. Abrir?" % nome,
@@ -8596,6 +8813,12 @@ class Janela(wx.Frame):
             threading.Thread(
                 target=prov.iniciar_robo, args=(achado["id"], info["start"]),
                 daemon=True, name="iniciar-robo").start()
+
+    def _robo_sem_conversa(self, conta_id, conversa_id):
+        """Nao ha nenhuma mensagem guardada nem em memoria da conversa."""
+        chave = (conta_id, conversa_id)
+        return not self.cache.get(chave) and not self.banco.mensagens(
+            conta_id, conversa_id, 1)
 
     def _enviar_comando_do_robo(self, conv, comando):
         """Abre a conversa e envia o comando como uma mensagem digitada. Nao
@@ -9213,6 +9436,13 @@ class Janela(wx.Frame):
             return
         self._enviar_anexo(anexo)
 
+    def _aceita_legenda(self, tipo):
+        """Voz e audio levam legenda no Telegram; no WhatsApp nao (o texto
+        vai depois, como mensagem)."""
+        if tipo not in (m.VOZ, m.AUDIO):
+            return True
+        return self._servico_do_envio() == "telegram"
+
     def _enviar_anexo(self, anexo, com_legenda=True, limpar_resposta=True):
         """Manda um anexo ja preparado; o texto da caixa vai de legenda (menos
         em audio e voz, que nao tem), a nao ser que `com_legenda` seja falso.
@@ -9222,8 +9452,8 @@ class Janela(wx.Frame):
         if destino is None:
             return False
         conta_id, conversa_id, p = destino
-        legenda = "" if anexo.tipo in (m.VOZ, m.AUDIO) or not com_legenda \
-            else self.caixa.GetValue().strip()
+        legenda = "" if not (com_legenda and self._aceita_legenda(
+            anexo.tipo)) else self.caixa.GetValue().strip()
         resposta = self.resposta_a.id if self.resposta_a is not None else ""
         self.locais += 1
         ultima = max((x.data for x in self._mensagens_atuais()), default=0)
@@ -9320,7 +9550,7 @@ class Janela(wx.Frame):
         self._rotular_caixa()
         legenda_usada = False
         for a in anexos:
-            aceita = a.tipo not in (m.VOZ, m.AUDIO) and not legenda_usada
+            aceita = self._aceita_legenda(a.tipo) and not legenda_usada
             tinha = bool(self.caixa.GetValue().strip())
             if self._enviar_anexo(a, com_legenda=aceita,
                                   limpar_resposta=False) and aceita and tinha:
@@ -9646,13 +9876,14 @@ class Janela(wx.Frame):
         finally:
             dlg.Destroy()
 
-    def _limpar_conversa_com_opcoes(self, conv):
+    def _limpar_conversa_com_opcoes(self, conv, dono=None):
         """A janela de limpeza ja filtrada nesta conversa (botao dos
-        detalhes). Devolve True se algo foi apagado."""
+        detalhes). Devolve True se algo foi apagado. `dono`: o dialogo dos
+        detalhes, que esta aberto por baixo."""
         from telezapp.interface import limpeza as ui_limpeza
         feito = []
         dlg = ui_limpeza.DialogoLimpeza(
-            self, self.banco, [], [],
+            dono or self, self.banco, [], [],
             lambda t: self.fala.falar(t, interromper=True),
             lambda sel: (feito.append(sel), self._ao_limpar(sel)),
             so_a_conversa=(conv.conta_id, conv.id, conv.nome),
@@ -9848,12 +10079,14 @@ class Janela(wx.Frame):
         if pedida:
             self.abrindo = None
         if e.cancelada:
+            self._copia_pendente.pop(chave, None)
             self._ia_pendentes.pop(chave, None)
             self._midia_do_resumo_acabou(chave, True)
             if pedida:
                 self.fala.falar("Download cancelado.", interromper=True)
             return
         if e.erro:
+            self._copia_pendente.pop(chave, None)
             self._ia_pendentes.pop(chave, None)
             self._midia_do_resumo_acabou(chave, True)
             if pedida or not e.automatica:
@@ -9865,6 +10098,10 @@ class Janela(wx.Frame):
         esperando = self._ia_pendentes.pop(chave, None)
         if esperando is not None:
             wx.CallAfter(self._ia_processar, esperando[0], esperando[1])
+            return
+        a_copiar = self._copia_pendente.pop(chave, None)
+        if a_copiar is not None:
+            wx.CallAfter(self._copiar_conteudo, a_copiar, "midia", None)
             return
         if not e.automatica:
             bipe("download_pronto")

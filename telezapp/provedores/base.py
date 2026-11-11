@@ -77,6 +77,12 @@ class Provedor(ABC):
     def atualizar_conversas(self):
         """Busca a lista de conversas -> ConversasAtualizadas."""
 
+    def atualizar_conversas_avisando(self, ao_terminar):
+        """Como atualizar_conversas, e chama ao_terminar(ok) quando a busca
+        acaba (de qualquer thread): o F5 avisa a pessoa que terminou."""
+        self.atualizar_conversas()
+        ao_terminar(True)
+
     @abstractmethod
     def carregar_mensagens(self, conversa_id, limite=50):
         """Busca as ultimas mensagens -> MensagensCarregadas."""
@@ -206,11 +212,28 @@ class Provedor(ABC):
     # no servidor, alem do que esta guardado neste computador
     suporta_busca_global = False
 
-    def buscar_global(self, texto, modo="tudo", filtro="qualquer", limite=50):
+    def buscar_global(self, texto, modo="tudo", filtro="qualquer", limite=50,
+                      cursor=None):
         """A busca do aplicativo do servico (nomes, mensagens e posts
-        publicos). Bloqueia: chamar fora da janela. Devolve um
+        publicos). `cursor`: o `proximo` de um resultado anterior, para a
+        pagina seguinte. Bloqueia: chamar fora da janela. Devolve um
         busca_global.ResultadoGlobal ou levanta RuntimeError com o motivo."""
         raise RuntimeError("Este serviço não faz busca global.")
+
+    # True quando o servico busca canais no diretorio dele (WhatsApp)
+    suporta_busca_de_canais = False
+
+    def buscar_canais(self, texto="", categoria="", visao="", limite=30,
+                      cursor=""):
+        """Busca canais no diretorio do servico (ou lista o diretorio, sem
+        texto). `cursor`: o da pagina seguinte. Bloqueia: chamar fora da
+        janela. Devolve uma canais_whatsapp.Pagina (os CanalWA e o cursor da
+        proxima pagina) ou levanta RuntimeError com o motivo."""
+        raise RuntimeError("Este serviço não busca canais.")
+
+    def seguir_canal_achado(self, canal):
+        """Segue um canal achado na busca. Devolve (ok, texto)."""
+        return False, "Este serviço não faz isso."
 
     def adotar_conversa(self, conv):
         """Uma conversa achada pela busca vai ser aberta."""

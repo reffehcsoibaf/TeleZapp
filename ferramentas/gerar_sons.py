@@ -156,6 +156,8 @@ SONS = {
     "voto_enviado": (sequencia(["E5", "G5"], 0.06, 0.20, 0.9), "sino"),
     "escondido": (sequencia(["E5", "C5"], 0.10, 0.30, 0.9), "sino"),
     "voltou": (sequencia(["C5", "E5"], 0.10, 0.30, 0.9), "sino"),
+    # um toque curto e grave: bateu no fim (ou no comeco) da lista
+    "limite_da_lista": ([(0.0, "C4", 0.14, 0.9, 0.0)], "grave"),
 }
 
 

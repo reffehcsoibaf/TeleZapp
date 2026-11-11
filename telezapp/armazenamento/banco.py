@@ -13,8 +13,9 @@ import threading
 import time
 from dataclasses import astuple, fields
 
-from telezapp.nucleo.modelos import (AGUARDANDO, ORDEM_ESTADOS, Conversa,
-                                     Mensagem)
+from telezapp.nucleo.modelos import (AGUARDANDO, ORDEM_ESTADOS, TEXTO,
+                                     Conversa, Mensagem, atualizar_extras,
+                                     extras_de)
 
 log = logging.getLogger("telezapp.banco")
 
@@ -394,12 +395,32 @@ class Banco:
             and x.data > apagadas.get((x.conta_id, x.conversa_id), -1)]
         sql = "INSERT OR REPLACE INTO mensagens (%s) VALUES (%s)" % (
             ", ".join(_CAMPOS_MSG), ", ".join("?" * len(_CAMPOS_MSG)))
-        linhas = [_linha_msg(m) for m in mensagens]
 
         def gravar():
             with self._trava, self._con:
-                self._con.executemany(sql, linhas)
+                self._manter_ia(mensagens)
+                self._con.executemany(
+                    sql, [_linha_msg(m) for m in mensagens])
         _com_tentativas(gravar)
+
+    def _manter_ia(self, mensagens):
+        """A transcricao ou descricao da IA so existe aqui, nunca vem do
+        servico: se a mensagem for gravada de novo (historico, edicao, recibo)
+        sem ela, devolve a que ja estava guardada."""
+        for x in mensagens:
+            if x.tipo == TEXTO or '"ia"' in (x.extras or ""):
+                continue
+            antiga = self._con.execute(
+                "SELECT extras FROM mensagens WHERE conta_id=? AND "
+                "conversa_id=? AND id=?",
+                (x.conta_id, x.conversa_id, x.id)).fetchone()
+            if not antiga or '"ia"' not in (antiga[0] or ""):
+                continue
+            ia = extras_de(Mensagem("", "", "", extras=antiga[0]))["ia"]
+            if ia.get("texto"):
+                atualizar_extras(x, ia=ia)
+                log.info("transcrição/descrição da IA mantida ao regravar a "
+                         "mensagem %s", x.id)
 
     def data_antes_de(self, conta_id, conversa_id, data):
         """Data da mensagem guardada mais nova que seja anterior a `data`

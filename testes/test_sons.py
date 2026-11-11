@@ -33,7 +33,7 @@ def test_todo_evento_tem_um_som_nos_pacotes_da_casa():
                        "tarefa_pronta", "reacao_recebida",
                        "mencao_ou_resposta", "gravando", "gravacao_parada",
                        "voto_enquete", "voto_enviado", "escondido",
-                       "voltou"}
+                       "voltou", "limite_da_lista"}
     assert {e for e, _ in pk.eventos()
             if e not in pk.VARIANTES_POR_SERVICO} == eventos
     assert not [o for o in config.OPCOES if getattr(o, "som", "")]
