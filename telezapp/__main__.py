@@ -276,6 +276,12 @@ def main():
     etapa(log, "componentes carregados")
     app = wx.App(False)
     etapa(log, "aplicativo wx criado")
+    try:
+        from telezapp.interface import limite_de_lista
+        limite_de_lista.instalar()     # som de limite em todas as listas
+    except Exception:
+        log.warning("som de limite de lista indisponível: %s",
+                    traceback.format_exc())
     from telezapp.nucleo import atualizador, instalacao
     programa = instalacao.pasta_do_programa()
     if programa:

@@ -11,6 +11,7 @@ import threading
 
 import wx
 
+from telezapp.interface import dialogos
 from telezapp.nucleo import enviar_contatos as ec
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import nova_mensagem as nm
@@ -302,7 +303,7 @@ class GerenciadorContatos(wx.Dialog):
         if not escolhidos:
             return
         quem = escolhidos[0][2] if len(escolhidos) == 1 else             "os %d contatos marcados" % len(escolhidos)
-        if wx.MessageBox("Remover %s dos contatos do TeleZapp? A pessoa "
+        if dialogos.perguntar("confirmar_remover_pessoas", "Remover %s dos contatos do TeleZapp? A pessoa "
                          "continua na conta; só o nome dado aqui some."
                          % quem, "Contatos",
                          wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,

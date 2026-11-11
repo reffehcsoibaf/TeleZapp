@@ -588,6 +588,17 @@ OPCOES = (
           escolhas=tuple((k, "%d kbps" % k) for k in
                          (32, 48, 64, 96, 128, 160, 192, 256)),
           grupo="Gravação"),
+    Opcao("calar_avisos_ao_gravar",
+          "Calar os avisos de mensagens enquanto grava voz",
+          "Mídias", True,
+          "Enquanto uma gravação de voz está em andamento (inclusive "
+          "pausada), o TeleZapp não toca os sons nem fala os avisos de "
+          "mensagens novas, reações, votos de enquete e mensagens editadas "
+          "ou apagadas, para não entrarem na gravação. Os avisos que "
+          "chegam nesse tempo não são repetidos depois; as mensagens "
+          "continuam na lista. Chamadas e os sons da própria gravação "
+          "seguem normais.",
+          grupo="Gravação"),
     Opcao("volume_gravacao", "Volume da gravação, em porcentagem",
           "Mídias", 100,
           "Aumenta ou diminui o volume do que é gravado: microfone, som do "
@@ -873,8 +884,9 @@ EVENTOS_SOM = (
      "downloads automáticos não tocam."),
     ("tarefa_pronta", "backup, restauração ou conversa salva",
      "Tocado quando terminam tarefas longas, como fazer o backup, restaurar "
-     "ou salvar o conteúdo de uma conversa. Com o som padrão, toca o mesmo "
-     "som de mensagem enviada."),
+     "ou salvar o conteúdo de uma conversa, e quando a atualização da lista "
+     "de conversas (F5) termina. Com o som padrão, toca o mesmo som de "
+     "mensagem enviada."),
     ("mencao_ou_resposta", "menção ou resposta a você num grupo",
      "Tocado quando chega, num grupo, uma mensagem que cita você com @ ou "
      "que responde a uma mensagem sua. Substitui o som de mensagem recebida "
@@ -906,6 +918,10 @@ EVENTOS_SOM = (
     ("voltou", "janela trazida de volta",
      "Tocado quando a janela volta do segundo plano, pelo ícone ou pelo "
      "atalho global."),
+    ("limite_da_lista", "início ou fim de uma lista",
+     "Tocado quando você aperta a seta para cima no primeiro item ou a seta "
+     "para baixo no último, em qualquer lista do programa: conversas, "
+     "mensagens e as listas das janelas. É um toque curto e grave."),
 )
 def _opcoes_de_ia():
     from telezapp.nucleo.ia import catalogo
@@ -989,6 +1005,61 @@ OPCOES = OPCOES + (
           "silêncio.",
           escolhas=(("europa", "Europa (425 Hz, 1 s de tom e 3 s de silêncio)"),
                     ("eua", "EUA (440 e 480 Hz, 2 s de tom e 4 s de silêncio)"))),
+)
+
+
+# Perguntas de confirmacao que a pessoa pode desligar (botao Confirmacoes da
+# categoria Interface). As que protegem a conta e os dados (excluir conta,
+# restaurar, desinstalar, enviar a uma IA, permissoes de robos) nao entram.
+_SEM_PERGUNTA_APAGA_MENOS = (
+    " Desmarcada, o TeleZapp apaga sem perguntar e faz a escolha que menos "
+    "apaga: ")
+OPCOES = OPCOES + (
+    Opcao("confirmar_apagar_mensagens", "Perguntar antes de apagar mensagens",
+          "Interface", True,
+          "Ao apagar uma mensagem, ou várias marcadas, o TeleZapp pergunta "
+          "antes e, nas suas, se é para todos ou só para você."
+          + _SEM_PERGUNTA_APAGA_MENOS + "as suas mensagens saem só para "
+          "você, nunca para todos.", grupo="Confirmações"),
+    Opcao("confirmar_apagar_conversas", "Perguntar antes de apagar conversas",
+          "Interface", True,
+          "Ao apagar uma conversa, ou várias marcadas, o TeleZapp pergunta "
+          "antes e, quando dá para apagar também no celular, se é aqui e no "
+          "celular ou só aqui." + _SEM_PERGUNTA_APAGA_MENOS + "a conversa "
+          "sai só deste computador. Sair de um grupo continua perguntando.",
+          grupo="Confirmações"),
+    Opcao("confirmar_limpeza", "Perguntar antes de limpar mídias e mensagens",
+          "Interface", True,
+          "Na janela Limpar mídias e mensagens, o botão Apagar diz quantos "
+          "itens saem e quanto espaço é liberado, e pergunta se pode "
+          "continuar. Desmarcada, apaga direto; o resultado continua sendo "
+          "mostrado no fim.", grupo="Confirmações"),
+    Opcao("confirmar_aviso_celular",
+          "Lembrar de abrir o WhatsApp no celular antes de apagar lá",
+          "Interface", True,
+          "Quando você escolhe apagar também no celular, o TeleZapp lembra "
+          "de deixar o WhatsApp aberto na tela do celular, para ele apagar "
+          "junto, e espera o OK. Desmarcada, segue sem esse aviso.",
+          grupo="Confirmações", servico="whatsapp"),
+    Opcao("confirmar_grupos_e_canais",
+          "Perguntar antes de entrar ou sair de grupos e canais",
+          "Interface", True,
+          "Pergunta antes de entrar num grupo ou canal por um link ou pela "
+          "busca, de sair de um grupo pelos detalhes e de seguir ou deixar "
+          "de seguir um canal. Desmarcada, faz na hora.",
+          grupo="Confirmações"),
+    Opcao("confirmar_bloqueio",
+          "Perguntar antes de bloquear ou desbloquear contatos",
+          "Interface", True,
+          "Pergunta antes de bloquear ou desbloquear alguém, um contato ou "
+          "vários marcados. Desmarcada, faz na hora.",
+          grupo="Confirmações"),
+    Opcao("confirmar_remover_pessoas",
+          "Perguntar antes de remover contatos e participantes",
+          "Interface", True,
+          "Pergunta antes de remover alguém dos contatos do TeleZapp, de "
+          "remover um participante de um grupo e de recusar pedidos de "
+          "entrada. Desmarcada, faz na hora.", grupo="Confirmações"),
 )
 
 

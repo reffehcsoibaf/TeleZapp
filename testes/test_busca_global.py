@@ -34,3 +34,77 @@ def test_linhas_juntam_chats_mensagens_e_posts_na_ordem():
     assert bg.resumo(1, 2, 0) == "1 conversa, 2 mensagens"
     assert bg.resumo(0, 0, 1) == "1 post público"
     assert bg.ResultadoGlobal().vazio()
+
+
+class _ThreadNaHora:
+    def __init__(self, target=None, **k):
+        self.target = target
+
+    def start(self):
+        self.target()
+
+
+def _dialogo(monkeypatch, buscar, falar=None):
+    import sys
+    from testes import wx_falso
+    sys.modules["wx"] = wx_falso
+    from telezapp.interface import busca_global as ibg
+    monkeypatch.setattr(ibg.threading, "Thread", _ThreadNaHora)
+    return ibg, ibg.DialogoBuscaGlobal(None, [("t1", "Tele")], buscar,
+                                       falar=falar)
+
+
+def _achado(id_):
+    conv = m.Conversa("t1", "9", "Canal", "telegram", "canal")
+    x = m.Mensagem("t1", "9", str(id_), autor="Canal", texto="bolo %s" % id_,
+                   data=1_700_000_000)
+    return bg_busca.achado_do_servidor(x, conv, "bolo")
+
+
+from telezapp.nucleo import busca as bg_busca  # noqa: E402
+
+
+def test_dialogo_ver_mais_acrescenta_mensagens_ate_acabar(monkeypatch):
+    paginas = {None: ([("mensagem", _achado(1), "um"),
+                       ("mensagem", _achado(2), "dois")], [], {"mensagens": "C1"}),
+               "C1": ([("mensagem", _achado(2), "dois"),
+                       ("mensagem", _achado(3), "tres")], [], {"mensagens": "C2"}),
+               "C2": ([("mensagem", _achado(3), "tres")], [], None)}
+    pedidos, ditas = [], []
+
+    def buscar(conta, texto, modo, filtro, cursor=None):
+        pedidos.append((texto, modo, cursor))
+        return paginas[cursor if cursor is None else cursor["mensagens"]]
+    ibg, d = _dialogo(monkeypatch, buscar, ditas.append)
+    d.termo.SetValue("bolo")
+    d.buscar()
+    assert len(d.linhas) == 2 and d.proximo == {"mensagens": "C1"}
+    assert d.b_mais.IsEnabled()
+    d.termo.SetValue("outra coisa")         # nao muda o que Ver mais continua
+    d.ver_mais()
+    assert [t for _, _, t in d.linhas] == ["um", "dois", "tres"]
+    assert pedidos[1][0] == "bolo" and pedidos[1][2] == {"mensagens": "C1"}
+    assert d.lista.GetSelection() == 2
+    d.ver_mais()                            # so repetidos: acabou
+    assert d.fim and not d.b_mais.IsEnabled()
+    assert ditas[-1] == "O Telegram não tem mais resultados."
+    d.ver_mais()
+    assert ditas[-1] == "Não há mais resultados."
+
+
+def test_dialogo_ver_mais_antes_de_buscar_e_estado_guardam_o_cursor(
+        monkeypatch):
+    ditas = []
+    ibg, d = _dialogo(
+        monkeypatch, lambda *a: ([("mensagem", _achado(1), "um")], [],
+                                 {"posts": "P1"}), ditas.append)
+    d.ver_mais()
+    assert ditas[-1] == "Faça uma busca antes."
+    d.termo.SetValue("bolo")
+    d.buscar()
+    estado = d.estado()
+    outro = ibg.DialogoBuscaGlobal(None, [("t1", "Tele")],
+                                   lambda *a: ([], []))
+    outro.restaurar(estado)
+    assert outro.proximo == {"posts": "P1"} and outro._pedido is not None
+    assert outro.linhas == d.linhas

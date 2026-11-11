@@ -593,7 +593,7 @@ def conteudo(m, com_estado=True):
     if m.tipo == VIDEO:
         return _partes("vídeo", dur, tam, legenda)
     if m.tipo == VOZ:
-        return _partes("mensagem de voz", dur, ouvida)
+        return _partes("mensagem de voz", dur, ouvida, legenda)
     if m.tipo == AUDIO:
         return _partes("áudio", m.nome_arquivo, dur, tam, ouvida, legenda)
     if m.tipo == DOCUMENTO:
@@ -1103,7 +1103,7 @@ def conteudos_copiaveis(msg, maximo_links=12):
         return [("texto", "Copiar texto", conteudo(msg))]
     ia = extras_de(msg)["ia"].get("texto")
     midia = msg.tipo in (FOTO, VIDEO, VOZ, AUDIO, DOCUMENTO, FIGURINHA)
-    if msg.texto and msg.tipo not in (VOZ, FIGURINHA):
+    if msg.texto and msg.tipo != FIGURINHA:
         itens.append(("texto", "Copiar legenda" if midia else "Copiar texto",
                       msg.texto))
     if midia:

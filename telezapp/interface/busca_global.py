@@ -20,6 +20,7 @@ import threading
 
 import wx
 
+from telezapp.interface import dialogos
 from telezapp.nucleo import busca_global as bg
 
 
@@ -38,6 +39,9 @@ class DialogoBuscaGlobal(wx.Dialog):
         self.entrar_fn = entrar
         self.falar = falar or (lambda texto: None)
         self.linhas = []                  # [(tipo, objeto, texto)]
+        self.proximo = None               # onde continuar (opaco), se houver
+        self._pedido = None               # (conta, texto, modo, filtro)
+        self.fim = False
         self.escolhido = None             # (tipo, objeto), ao fechar com OK
         self.ocupada = False
 
@@ -72,25 +76,30 @@ class DialogoBuscaGlobal(wx.Dialog):
                                 name="Tipo de conteúdo das mensagens")
         self.filtro.SetSelection(0)
         lay.Add(self.filtro, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
-        botoes = wx.BoxSizer(wx.HORIZONTAL)
         self.b_buscar = wx.Button(self, wx.ID_ANY, "&Buscar")
-        self.b_abrir = wx.Button(self, wx.ID_ANY, "&Abrir")
-        self.b_entrar = wx.Button(self, wx.ID_ANY, "&Entrar no grupo ou canal")
-        self.b_fechar = wx.Button(self, wx.ID_CANCEL, "&Fechar")
-        for b in (self.b_buscar, self.b_abrir, self.b_entrar, self.b_fechar):
-            botoes.Add(b, 0, wx.RIGHT, 6)
-        lay.Add(botoes, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
+        lay.Add(self.b_buscar, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
         self.rotulo = wx.StaticText(self, label="Resultados: ainda não "
                                     "buscou.")
         lay.Add(self.rotulo, 0, wx.LEFT | wx.RIGHT, 8)
         self.lista = wx.ListBox(self, name="Resultados da busca global")
         lay.Add(self.lista, 1, wx.EXPAND | wx.ALL, 8)
+        # os botoes de acao vem DEPOIS da lista: da lista, o Tab chega a eles
+        botoes = wx.BoxSizer(wx.HORIZONTAL)
+        self.b_abrir = wx.Button(self, wx.ID_ANY, "&Abrir")
+        self.b_entrar = wx.Button(self, wx.ID_ANY, "&Entrar no grupo ou canal")
+        self.b_mais = wx.Button(self, wx.ID_ANY, "Ver &mais")
+        self.b_fechar = wx.Button(self, wx.ID_CANCEL, "&Fechar")
+        for b in (self.b_abrir, self.b_entrar, self.b_mais, self.b_fechar):
+            botoes.Add(b, 0, wx.RIGHT, 6)
+        lay.Add(botoes, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
         self.SetSizer(lay)
         self.b_buscar.SetDefault()
         self.b_abrir.Enable(False)
         self.b_entrar.Enable(False)
+        self.b_mais.Enable(False)
 
         self.b_buscar.Bind(wx.EVT_BUTTON, lambda e: self.buscar())
+        self.b_mais.Bind(wx.EVT_BUTTON, lambda e: self.ver_mais())
         self.termo.Bind(wx.EVT_TEXT_ENTER, lambda e: self.buscar())
         self.b_abrir.Bind(wx.EVT_BUTTON, lambda e: self._abrir())
         self.b_entrar.Bind(wx.EVT_BUTTON, lambda e: self._entrar())
@@ -126,54 +135,148 @@ class DialogoBuscaGlobal(wx.Dialog):
         if self.ocupada:
             self.falar("Já estou buscando.")
             return
+        self._pedido = (self._conta_escolhida(), texto, modo, filtro)
+        self._pedir(None, "Buscando no Telegram.", False)
+
+    def ver_mais(self):
+        """A pagina seguinte de mensagens e posts da ultima busca, no fim da
+        lista (pessoas, grupos e canais vem todos na primeira)."""
+        if self.ocupada:
+            self.falar("Já estou buscando.")
+            return
+        if self._pedido is None:
+            self.falar("Faça uma busca antes.")
+            return
+        if self.fim or not self.proximo:
+            self.falar("Não há mais resultados.")
+            return
+        self._pedir(self.proximo, "Buscando mais resultados.", True)
+
+    def _pedir(self, cursor, aviso, acrescentar):
+        conta_id, texto, modo, filtro = self._pedido
         self.ocupada = True
-        self.b_buscar.Enable(False)
-        self.b_abrir.Enable(False)
-        self.b_entrar.Enable(False)
-        self.rotulo.SetLabel("Resultados: buscando no Telegram...")
-        self.falar("Buscando no Telegram.")
-        conta_id = self._conta_escolhida()
+        for b in (self.b_buscar, self.b_abrir, self.b_entrar, self.b_mais):
+            b.Enable(False)
+        self.rotulo.SetLabel("Resultados: " + aviso.lower())
+        self.falar(aviso)
 
         def trabalho():
             try:
-                linhas, avisos, erro = (*self.buscar_fn(
-                    conta_id, texto, modo, filtro), "")
+                resposta = self.buscar_fn(conta_id, texto, modo, filtro,
+                                          cursor)
+                linhas, avisos = resposta[0], resposta[1]
+                proximo = resposta[2] if len(resposta) > 2 else None
+                erro = ""
             except RuntimeError as e:
-                linhas, avisos, erro = [], [], str(e)
+                linhas, avisos, proximo, erro = [], [], None, str(e)
             except Exception:
-                linhas, avisos, erro = [], [], "Algo deu errado na busca."
-            wx.CallAfter(self._mostrar, linhas, avisos, erro)
+                linhas, avisos, proximo, erro = (
+                    [], [], None, "Algo deu errado na busca.")
+            wx.CallAfter(self._mostrar, linhas, avisos, erro, proximo,
+                         acrescentar)
         threading.Thread(target=trabalho, daemon=True,
                          name="busca-global").start()
 
-    def _mostrar(self, linhas, avisos, erro):
+    def _mostrar(self, linhas, avisos, erro, proximo=None,
+                 acrescentar=False):
         if not self:                        # a janela ja foi fechada
             return
         self.ocupada = False
         self.b_buscar.Enable(True)
         if erro:
-            self.linhas = []
-            self.lista.Set([])
+            if not acrescentar:
+                self.linhas = []
+                self.proximo = None
+                self.lista.Set([])
             self.rotulo.SetLabel("Resultados: " + erro)
             self.falar(erro)
             self._ajustar_botoes()
             return
-        self.linhas = list(linhas)
-        self.lista.Set([t for _, _, t in self.linhas])
-        n = len(self.linhas)
-        if n == 0:
-            texto = "Nada encontrado."
+        if acrescentar:
+            vistos = {self._chave(o) for _, o, _ in self.linhas}
+            novas = [x for x in linhas if self._chave(x[1]) not in vistos]
+            primeira = len(self.linhas)
+            self.linhas.extend(novas)
+            for _, _, t in novas:
+                self.lista.Append(t)
+            self.proximo = proximo if novas else None
+            self.fim = not self.proximo
+            if novas:
+                self.lista.SetSelection(primeira)
+                texto = "%d resultados a mais, %d no total." % (
+                    len(novas), len(self.linhas)) if len(novas) > 1 else \
+                    "1 resultado a mais, %d no total." % len(self.linhas)
+            else:
+                texto = "O Telegram não tem mais resultados."
         else:
-            texto = bg.resumo(*(sum(1 for t, _, _ in self.linhas if t == k)
-                                for k in ("chat", "mensagem", "post"))) + "."
-            self.lista.SetSelection(0)
+            self.linhas = list(linhas)
+            self.proximo = proximo
+            self.fim = False
+            self.lista.Set([t for _, _, t in self.linhas])
+            n = len(self.linhas)
+            if n == 0:
+                texto = "Nada encontrado."
+            else:
+                texto = bg.resumo(*(sum(1 for t, _, _ in self.linhas
+                                        if t == k)
+                                    for k in ("chat", "mensagem",
+                                              "post"))) + "."
+                self.lista.SetSelection(0)
+        if self.proximo:
+            texto += " Há mais: Alt M, ou o botão Ver mais depois da lista."
         if avisos:
             texto += " " + " ".join(avisos)
         self.rotulo.SetLabel("Resultados: " + texto)
         self.falar(texto)
         self._ajustar_botoes()
-        if n:
+        if self.linhas:
             self.lista.SetFocus()
+
+    @staticmethod
+    def _chave(objeto):
+        """Identifica um resultado para nao repeti-lo ao acrescentar."""
+        x = getattr(objeto, "mensagem", None)
+        if x is not None:
+            return ("m", x.conta_id, x.conversa_id, x.id)
+        c = getattr(objeto, "conversa", None)
+        return ("c", c.conta_id, c.id) if c is not None else id(objeto)
+
+    # ------------------------------------------- voltar a uma busca
+    def estado(self):
+        """O que a pessoa tinha na janela, para voltar a ela depois de abrir
+        um resultado (Esc na conversa)."""
+        return {"conta": self.caixa_conta.GetSelection()
+                if self.caixa_conta else 0,
+                "termo": self.termo.GetValue(),
+                "modo": self.modo.GetSelection(),
+                "filtro": self.filtro.GetSelection(),
+                "linhas": list(self.linhas),
+                "escolhido": self.lista.GetSelection(),
+                "proximo": self.proximo, "fim": self.fim,
+                "pedido": self._pedido}
+
+    def restaurar(self, estado):
+        """Refaz a janela como estava, sem buscar de novo, com o foco no
+        resultado em que a pessoa parou."""
+        if self.caixa_conta and 0 <= estado["conta"] < len(self.contas):
+            self.caixa_conta.SetSelection(estado["conta"])
+        self.termo.SetValue(estado["termo"])
+        self.modo.SetSelection(max(estado["modo"], 0))
+        self.filtro.SetSelection(max(estado["filtro"], 0))
+        self._ajustar_filtro()
+        self.linhas = list(estado["linhas"])
+        self.proximo = estado.get("proximo")
+        self.fim = estado.get("fim", False)
+        self._pedido = estado.get("pedido")
+        self.lista.Set([t for _, _, t in self.linhas])
+        n = len(self.linhas)
+        if n:
+            self.lista.SetSelection(
+                min(max(estado["escolhido"], 0), n - 1))
+            self.rotulo.SetLabel("Resultados: voltei à busca anterior, %d "
+                                 "resultados." % n)
+            self.lista.SetFocus()
+        self._ajustar_botoes()
 
     # ------------------------------------------------------- escolha
     def _atual(self):
@@ -186,6 +289,10 @@ class DialogoBuscaGlobal(wx.Dialog):
         self.b_entrar.Enable(
             atual is not None and atual[0] == "chat"
             and atual[1].pode_entrar() and self.entrar_fn is not None)
+        # sempre ligado depois de uma busca (assim o leitor de tela o acha);
+        # sem mais paginas, apertar explica
+        self.b_mais.Enable(self._pedido is not None and not self.fim
+                           and not self.ocupada)
 
     def _tecla_da_lista(self, evt):
         if evt.GetKeyCode() in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) and \
@@ -209,7 +316,7 @@ class DialogoBuscaGlobal(wx.Dialog):
             self.falar("Escolha um grupo ou canal em que você ainda não está.")
             return
         c = atual[1].conversa
-        r = wx.MessageBox(
+        r = dialogos.perguntar("confirmar_grupos_e_canais", 
             "Entrar em %s? Quem administra e os outros membros passam a ver "
             "que você está lá." % c.nome, "Entrar no grupo ou canal",
             wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)

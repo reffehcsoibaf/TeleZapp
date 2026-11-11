@@ -17,7 +17,8 @@ GRUPOS = {
     ("Mídias", "Gravação"): {
         "gravar_som_com_microfone", "gravar_microfone_estereo",
         "gravar_som_estereo", "qualidade_gravacao_mono",
-        "qualidade_gravacao_estereo", "volume_gravacao"},
+        "qualidade_gravacao_estereo", "volume_gravacao",
+        "calar_avisos_ao_gravar"},
     ("Mídias", "Chamadas de voz e vídeo"): {
         "chamada_eco", "chamada_ruido", "video_camera_ao_atender",
         "chamada_retornar_sem_audio", "chamada_retorno"},

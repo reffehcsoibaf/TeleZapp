@@ -86,6 +86,10 @@ class ResultadoGlobal:
     mensagens: list = field(default_factory=list)   # [(Mensagem, Conversa)]
     posts: list = field(default_factory=list)       # [(Mensagem, Conversa)]
     avisos: list = field(default_factory=list)      # o que nao deu para buscar
+    # onde continuar: {"mensagens": cursor, "posts": cursor} (so as partes que
+    # ainda tem mais); None se nao ha mais nada. O cursor e opaco para quem
+    # chama: so volta ao provedor em `buscar_global(..., cursor=...)`.
+    proximo: object = None
 
     def vazio(self):
         return not (self.chats or self.mensagens or self.posts)

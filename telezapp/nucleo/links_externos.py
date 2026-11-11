@@ -123,3 +123,36 @@ def interpretar(url):
     if host in HOSTS_TELEGRAM:
         return _telegram_web(partes, q)
     return _whatsapp_web(host, partes, q, url)
+
+
+def resumo_para_log(url):
+    """O endereco sem o que identifica alguem: so o servico e o formato
+    (esquema, host, se tem caminho e se tem parametros)."""
+    try:
+        from urllib.parse import urlsplit
+        p = urlsplit(str(url or "").strip())
+    except ValueError:
+        return "endereço ilegível"
+    return "esquema %s, host %s, %s, %s" % (
+        p.scheme or "(nenhum)", p.netloc or "(nenhum)",
+        "com caminho" if p.path.strip("/") else "sem caminho",
+        "com parâmetros" if p.query else "sem parâmetros")
+
+
+def motivo_de_nao_achar(erro):
+    """Por que o @usuario de um link nao foi achado, em uma frase para dizer
+    em voz alta. O erro vem do Telethon (ou de outro lugar); a classe diz o
+    que houve."""
+    nome = type(erro).__name__
+    if nome in ("UsernameNotOccupiedError", "ValueError"):
+        return ("Esse nome não existe: o robô ou canal pode ter sido apagado "
+                "ou trocado de nome.")
+    if nome == "UsernameInvalidError":
+        return "O nome do link não é um nome válido do Telegram."
+    if nome == "FloodWaitError":
+        segundos = getattr(erro, "seconds", 0)
+        return ("O Telegram pediu para esperar%s antes de buscar de novo." %
+                (" %d segundos" % segundos if segundos else ""))
+    if nome in ("TimeoutError", "ConnectionError", "RuntimeError"):
+        return "O Telegram não respondeu. Tente de novo em instantes."
+    return ""

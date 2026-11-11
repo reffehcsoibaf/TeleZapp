@@ -141,6 +141,9 @@ class ChamadasTelegram:
         self._ultimo_quadro = {}    # chat_id -> quando chegou o ultimo
         self._vigias = {}       # chat_id -> tarefa que vigia o video
         self._formato_visto = False
+        self._t0 = {}               # chat_id -> quando a chamada apareceu
+        self._t_em_chamada = {}     # chat_id -> quando entrou em chamada
+        self._lista_logada = None
 
     # ---------------------------------------------------------- inicio
     async def iniciar(self):
@@ -182,6 +185,10 @@ class ChamadasTelegram:
         try:
             self._nomes = ([d.title for d in self.motor.microfones()],
                            [d.title for d in self.motor.saidas()])
+            if self._nomes != self._lista_logada:
+                self._lista_logada = self._nomes
+                log.info("dispositivos de áudio do Telegram: microfones=%s "
+                         "saídas=%s", self._nomes[0], self._nomes[1])
         except Exception:
             log.exception("erro ao listar dispositivos de áudio")
         if hasattr(self.motor, "cameras"):
@@ -229,8 +236,22 @@ class ChamadasTelegram:
         c = self.chamadas.get(chat_id)
         if c is None or not c.aplicar(estado, motivo, erro):
             return
+        agora = time.monotonic()
+        if chat_id not in self._t0:
+            self._t0[chat_id] = agora
+        if estado == ch.EM_CHAMADA:
+            self._t_em_chamada[chat_id] = agora
+        em = self._t_em_chamada.get(chat_id)
+        log.info("chamada %s: %s%s%s | %s | %.1f s desde o início%s",
+                 chat_id, estado, f" ({motivo})" if motivo else "",
+                 f" erro={erro}" if erro else "",
+                 "recebida" if c.entrante else "feita por nós",
+                 agora - self._t0[chat_id],
+                 f", {agora - em:.1f} s em chamada" if em else "")
         self._publicar(c)
         if estado == ch.ENCERRADA:
+            self._t0.pop(chat_id, None)
+            self._t_em_chamada.pop(chat_id, None)
             self.chamadas.pop(chat_id, None)
             self._escolhas.pop(chat_id, None)
             self._cam.pop(chat_id, None)
@@ -287,9 +308,20 @@ class ChamadasTelegram:
             return None
         return _escolher(self.motor.cameras(), nome)
 
+    @staticmethod
+    def _logar_escolha(tipo, pedido, dispositivo):
+        from telezapp.midia.dispositivos import parecem_o_mesmo
+        usado = getattr(dispositivo, "title", None)
+        achou = bool(pedido) and usado is not None and \
+            parecem_o_mesmo(pedido, usado)
+        log.info("áudio do Telegram, %s: pedido=%r, usado=%r (%s), 48000 Hz "
+                 "estéreo", tipo, pedido, usado,
+                 "o pedido" if achou else "padrão do sistema ou 1º da lista")
+
     def _fluxo_de_voz(self, chat_id, mic):
         """O que sai de nos: o microfone e, se a camera esta ligada, ela."""
         dispositivo = _escolher(self.motor.microfones(), mic)
+        self._logar_escolha("microfone", mic, dispositivo)
         camera = self._camera_para(chat_id)
         if camera is not None:
             return self.motor.fluxo_com_camera(camera, dispositivo), True
@@ -298,6 +330,7 @@ class ChamadasTelegram:
     def _fluxo_de_saida(self, chat_id, saida):
         """O que chega: o som e, numa chamada de video, a camera dele."""
         dispositivo = _escolher(self.motor.saidas(), saida)
+        self._logar_escolha("saída (alto-falante)", saida, dispositivo)
         c = self.chamadas.get(chat_id)
         if c is not None and c.video and \
                 hasattr(self.motor, "filtro_quadros"):
@@ -430,6 +463,8 @@ class ChamadasTelegram:
         c = self.chamadas.get(chat_id)
         if c is None:
             return
+        log.info("chamada %s encerrada por nós (estado %s)", chat_id,
+                 c.estado)
         if c.estado == ch.TOCANDO:
             motivo = ch.RECUSADA
         elif c.estado in (ch.CHAMANDO, ch.CONECTANDO):
@@ -501,6 +536,8 @@ class ChamadasTelegram:
         c = self.chamadas.get(chat_id)
         if c is None:
             return
+        log.info("chamada %s: a biblioteca avisou que saiu da chamada "
+                 "(estado %s)", chat_id, c.estado)
         if c.estado == ch.TOCANDO:
             motivo = ch.PERDIDA
         elif c.estado == ch.CHAMANDO:

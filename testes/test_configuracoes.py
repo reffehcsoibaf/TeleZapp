@@ -246,7 +246,7 @@ def test_interface_e_mensagens_reunem_as_categorias_antigas(mod):
     assert "Avisos" not in cats and "Leitura" not in cats
     assert "Escrita" not in cats
     assert "Interface" in cats and "Mensagens" in cats
-    assert mod.grupos("Interface") == ["Conteúdo falado"]
+    assert mod.grupos("Interface") == ["Conteúdo falado", "Confirmações"]
     falado = {o.chave for o in mod.opcoes_do_grupo("Interface",
                                                    "Conteúdo falado")}
     assert falado == {"falar_novas", "falar_novas_outras_conversas",

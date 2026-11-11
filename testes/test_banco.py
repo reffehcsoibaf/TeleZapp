@@ -135,3 +135,21 @@ def test_gravar_desiste_e_nao_esconde_outros_erros(monkeypatch):
     with pytest.raises(sqlite3.OperationalError):
         bd._com_tentativas(outro)
     assert len(chamadas) == 1
+
+
+def test_regravar_a_mensagem_sem_ia_mantem_a_transcricao(tmp_path):
+    from telezapp.armazenamento.banco import Banco
+    from telezapp.nucleo import modelos as m
+    b = Banco(str(tmp_path / "ia.db"))
+    voz = m.Mensagem("t1", "10", "5", data=1, tipo=m.VOZ)
+    b.salvar_mensagens([voz])
+    m.atualizar_extras(voz, ia={"genero": "audio", "texto": "olá mundo"})
+    b.salvar_mensagens([voz])
+    nova = m.Mensagem("t1", "10", "5", data=1, tipo=m.VOZ)   # veio do servico
+    b.salvar_mensagens([nova])
+    lida = b.mensagens("t1", "10")[0]
+    assert m.extras_de(lida)["ia"]["texto"] == "olá mundo"
+    assert m.extras_de(nova)["ia"]["texto"] == "olá mundo"
+    texto = m.Mensagem("t1", "10", "6", data=2, texto="oi")
+    b.salvar_mensagens([texto])
+    assert m.extras_de(b.mensagens("t1", "10")[1])["ia"] == {}

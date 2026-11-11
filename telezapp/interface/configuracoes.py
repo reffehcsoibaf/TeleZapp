@@ -131,6 +131,9 @@ class DialogoConfiguracoes(wx.Dialog):
 
     # ------------------------------------------------------------- opcoes
     def _mostrar_opcoes(self, categoria):
+        # Os controles da privacidade vao ser destruidos: uma leitura ainda em
+        # andamento nao pode mais mexer neles quando terminar.
+        self._priv_ficha = getattr(self, "_priv_ficha", 0) + 1
         self.lay_painel.Clear(delete_windows=True)
         self.controles = {}
         self.lista_sons = None

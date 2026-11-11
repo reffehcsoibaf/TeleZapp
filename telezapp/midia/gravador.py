@@ -265,6 +265,15 @@ FABRICAS = {MICROFONE: FonteMicrofone, SOM_INTERNO: FonteSomInterno,
 
 
 # --------------------------------------------------------------- gravador
+_ativos = set()
+
+
+def gravando_agora():
+    """Ha alguma gravacao capturando som (pausada tambem conta)? A janela usa
+    isto para nao falar nem tocar avisos de mensagens por cima da voz."""
+    return bool(_ativos)
+
+
 class Gravador:
     """Uma gravacao. `fabrica_fonte()` abre a fonte (dentro da thread da
     gravacao: o COM e o PortAudio gostam de ficar numa thread so)."""
@@ -462,6 +471,7 @@ class Gravador:
             with sf.SoundFile(self._wav, "w", samplerate=self._taxa,
                               channels=self._canais,
                               subtype="PCM_16") as arquivo:
+                _ativos.add(self)
                 self._pronto.set()
                 while not self._parar.is_set():
                     bloco = fonte.ler()
@@ -485,6 +495,7 @@ class Gravador:
                     "A gravação falhou (%s)." % type(e).__name__)
                 self._pronto.set()
         finally:
+            _ativos.discard(self)
             if fonte is not None:
                 fonte.fechar()
             self._pronto.set()

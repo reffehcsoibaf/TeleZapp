@@ -240,7 +240,7 @@ Em grupos, digitar @ no começo da mensagem ou depois de um espaço abre a lista
 
 No WhatsApp, o primeiro item dessa lista é "Todos do grupo, @todos ou @all", que também aparece ao filtrar por "todos" ou "all". Ele escreve @todos na mensagem, e todos os membros do grupo são avisados. Escrever @todos ou @all à mão tem o mesmo efeito. A menção a todos aparece como @todos, no TeleZapp e no celular. Em grupos com mais de 32 membros, o WhatsApp só deixa administradores mencionarem todos. O Telegram não tem esse recurso.
 
-Ctrl+V na caixa cola arquivos copiados no Explorer ou imagens. Eles esperam o Enter, e o texto da caixa, escrito antes ou depois da colagem, vira a legenda. Esc remove a mídia colada.
+Ctrl+V na caixa cola arquivos copiados no Explorer ou imagens. Eles esperam o Enter, e o texto da caixa, escrito antes ou depois da colagem, vira a legenda. Esc remove a mídia colada. Num áudio ou nota de voz, a legenda só existe no Telegram; no WhatsApp o texto vai como mensagem separada, depois da mídia.
 
 Com uma conversa aberta, o botão "Iniciar chamada", depois de "Anexar e enviar arquivo", pergunta se a chamada é de áudio ou de vídeo. Esc sai sem ligar. Se a conta não fizer vídeo, só a chamada de áudio aparece.
 
@@ -249,7 +249,7 @@ A tecla Aplicativos ou Shift+F10 abre o menu da mensagem selecionada.
 
 Editar: F2, se a mensagem de texto for sua e estiver dentro do prazo: 15 minutos no WhatsApp, 48 horas no Telegram. Enter salva a edição e Esc cancela.
 Encaminhar: Ctrl+Shift+E, para a mensagem selecionada ou as marcadas no modo de seleção. Escolha as conversas e contatos na janela de busca. A mídia precisa já estar baixada.
-Copiar: Ctrl+C copia o texto da mensagem em foco. Ctrl+Shift+C copia o conteúdo dela: se a mensagem tem só um (a foto, o áudio, o texto, o link), copia direto; se tem mais de um, como foto com legenda e link, abre uma lista para você escolher o que copiar. A mídia precisa estar baixada. O menu de contexto tem um item de cópia para cada tipo de conteúdo.
+Copiar: Ctrl+C copia o texto da mensagem em foco. Ctrl+Shift+C copia o conteúdo dela: se a mensagem tem só um (a foto, o áudio, o texto, o link), copia direto; se tem mais de um, como foto com legenda e link, abre uma lista para você escolher o que copiar. Se a mídia ainda não foi baixada, o TeleZapp baixa e copia quando terminar. O menu de contexto tem um item de cópia para cada tipo de conteúdo.
 Copiar a transcrição ou descrição: no menu Mensagens, copia o texto que a IA fez da mídia. Vem sem tecla; escolha uma em Configurações, Atalhos.
 Responder em particular: no menu de contexto de uma mensagem de outra pessoa num grupo, abre a conversa particular com ela e cita a mensagem do grupo na resposta. É do WhatsApp.
 Apagar: Delete, sempre perguntando antes.
@@ -565,6 +565,20 @@ Atualizar: lê a lista de novo.
 
 Só pessoas podem ser bloqueadas, não grupos nem canais.
 
+# Busca global no Telegram
+O item "Busca global no Telegram", no menu Conversas, procura no Telegram inteiro: pessoas, grupos e canais, mensagens de todas as suas conversas (também as que não estão neste computador) e posts públicos de canais. Cada busca traz até 50 mensagens e 50 posts e, de pessoas, grupos e canais, os que o Telegram mandar de uma vez.
+
+Os botões Abrir, Entrar no grupo ou canal, Ver mais e Fechar ficam depois da lista. "Ver mais" (Alt+M) pede a página seguinte de mensagens e posts e acrescenta ao fim da lista, quantas vezes quiser, até o Telegram não ter mais. Pessoas, grupos e canais só vêm na primeira busca. Mudar o texto na janela não muda o que "Ver mais" continua: para isso, aperte Buscar. Com um resultado aberto, Esc volta à janela, com a lista como estava.
+
+# Buscar canais do WhatsApp
+O item "Buscar canais do WhatsApp", no menu Conversas, abre uma janela que procura canais no diretório do WhatsApp, inclusive os que você ainda não segue. Ele só aparece com uma conta do WhatsApp.
+
+Digite o texto e use Enter, ou deixe o texto vazio para ver uma lista do diretório: recomendados, em alta, populares ou novos. A categoria (notícias, esportes, entretenimento e outras) restringe a busca e as listas. Cada resultado diz o nome, se é verificado, quantos seguidores tem, se você já o segue e o começo da descrição.
+
+Os botões de ação ficam depois da lista: Seguir o canal, Ver mais (Alt+M), Copiar o link e Fechar. O botão "Ver mais" pede ao WhatsApp a página seguinte da mesma busca e acrescenta os canais novos ao fim da lista, com a seleção no primeiro deles. Pode apertar de novo e de novo, até o WhatsApp não ter mais nada. A lista de recomendados vem numa página só; as listas Em alta, Populares e Novos e a busca por texto têm mais páginas. Mudar o texto ou a categoria na janela não muda a busca que "Ver mais" continua; para isso, aperte Buscar.
+
+Enter num resultado, ou o botão Seguir o canal, pede confirmação e então segue o canal: ele entra na lista de conversas. "Copiar o link" copia o endereço do canal para a área de transferência. A confirmação pode ser desligada em Configurações, Interface, Confirmações, na caixa de perguntar antes de entrar ou sair de grupos e canais.
+
 # Criar grupos, canais e comunidades
 Em Novo, Novo grupo, Novo canal e Nova comunidade abrem uma janela para a conta, o nome e a descrição. A conta só aparece se mais de uma cria aquilo.
 
@@ -686,7 +700,7 @@ Cada opção é uma caixa de seleção ou uma lista de escolhas. Logo depois que
 As mudanças só valem ao apertar OK ou Aplicar. Cancelar e Esc descartam. As mesmas opções continuam nos menus Exibir, Mídias e Depurar.
 
 Algumas categorias:
-Interface: o status de presença no título da janela, o aviso de chamadas do WhatsApp e o botão Conteúdo falado, que abre uma janela com tudo o que o leitor de tela fala: mensagens novas, mensagem enviada, reações, quantas conversas há ao trocar de filtro e a descrição de cada opção.
+Interface: o status de presença no título da janela, o aviso de chamadas do WhatsApp o botão Confirmações, com uma caixa para cada pergunta que o TeleZapp faz antes de apagar mensagens, apagar conversas, limpar mídias, entrar ou sair de grupos e canais, bloquear e remover pessoas (desmarque as que não quiser; ao apagar sem pergunta, as suas mensagens saem só para você e as conversas só deste computador), e o botão Conteúdo falado, que abre uma janela com tudo o que o leitor de tela fala: mensagens novas, mensagem enviada, reações, quantas conversas há ao trocar de filtro e a descrição de cada opção.
 Mensagens: prévia de links, quantas ficam na lista, corretor ortográfico e a tecla Enter da caixa de digitar.
 Avançado: o modo de depuração, o registro técnico do WhatsApp e o botão "Redefinir as configurações aos padrões de fábrica", que volta as opções, as listas, os atalhos e o pacote de sons ao padrão (contas, chaves de IA, privacidade e pacotes de sons que você criou não mudam; só vale ao apertar OK ou Aplicar).
 Mídias, Atalhos, Sons e as demais.

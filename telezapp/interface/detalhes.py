@@ -13,6 +13,7 @@ import traceback
 import wx
 
 from telezapp.acessibilidade.fala import bipe
+from telezapp.interface import dialogos
 from telezapp.nucleo import detalhes as det
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import pacotes_de_som
@@ -358,7 +359,7 @@ class DialogoAdministrar(wx.Dialog):
             dlg.Destroy()
 
     def _sair(self):
-        r = wx.MessageBox("Sair deste grupo?", "Sair do grupo",
+        r = dialogos.perguntar("confirmar_grupos_e_canais", "Sair deste grupo?", "Sair do grupo",
                           wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
         if r == wx.YES:
             self._acao("sair")
@@ -793,7 +794,7 @@ class ControleDetalhes:
     def limpar(self):
         """Abre a limpeza de mídias e mensagens so desta conversa; se algo
         saiu, os detalhes (contagens e mídias) são refeitos."""
-        if self.jan._limpar_conversa_com_opcoes(self.conv):
+        if self.jan._limpar_conversa_com_opcoes(self.conv, self.dlg):
             self._atualizar()
 
     def editar_contato(self):
@@ -1311,7 +1312,7 @@ class ControleDetalhes:
         wx.CallAfter(self._fechar_tudo)
 
     def _remover(self, p):
-        r = wx.MessageBox("Remover %s do grupo?" % p["nome"],
+        r = dialogos.perguntar("confirmar_remover_pessoas", "Remover %s do grupo?" % p["nome"],
                           "Remover do grupo",
                           wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
                           self.dlg)
@@ -1598,7 +1599,7 @@ class ControleDetalhes:
         self._canal("silenciar", silenciar)
 
     def seguir_canal(self):
-        r = wx.MessageBox("Seguir o canal %s? Ele passa a fazer parte das "
+        r = dialogos.perguntar("confirmar_grupos_e_canais", "Seguir o canal %s? Ele passa a fazer parte das "
                           "suas conversas no Telegram." % self.conv.nome,
                           "Seguir o canal",
                           wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
@@ -1618,7 +1619,7 @@ class ControleDetalhes:
                          name="canal").start()
 
     def deixar_de_seguir(self):
-        r = wx.MessageBox("Deixar de seguir o canal %s?" % self.conv.nome,
+        r = dialogos.perguntar("confirmar_grupos_e_canais", "Deixar de seguir o canal %s?" % self.conv.nome,
                           "Deixar de seguir",
                           wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
                           self.dlg)

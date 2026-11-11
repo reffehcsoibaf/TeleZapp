@@ -328,6 +328,33 @@ RESERVADOS_TELEGRAM = {"joinchat", "addstickers", "addemoji", "share",
                        "m", "giftcode", "confirmphone"}
 
 
+def motivo_do_convite(erro):
+    """O que dizer quando a consulta de um convite ou de um t.me/nome falha:
+    so o que o Telegram diz expirado ou cancelado e "expirou"; o resto tem a
+    sua propria frase (antes tudo virava "o convite não vale mais", e um
+    erro de rede ou uma espera do Telegram parecia um link morto)."""
+    nome = type(erro).__name__
+    if nome == "InviteHashExpiredError":
+        return "O convite expirou. Peça um link novo a quem o enviou."
+    if nome in ("InviteHashInvalidError", "InviteHashEmptyError"):
+        return "O link de convite não é válido ou foi cancelado."
+    if nome in ("UsernameNotOccupiedError", "UsernameInvalidError",
+                "ValueError"):
+        return ("Esse nome não existe no Telegram: o grupo, canal ou robô "
+                "pode ter sido apagado ou trocado de nome.")
+    if nome in ("ChannelPrivateError", "ChatForbiddenError"):
+        return ("Este grupo ou canal é privado ou você foi removido dele. "
+                "Só entra com um link de convite.")
+    if nome == "FloodWaitError":
+        segundos = getattr(erro, "seconds", 0)
+        return ("O Telegram pediu para esperar%s antes de consultar de "
+                "novo." % (" %d segundos" % segundos if segundos else ""))
+    if nome in ("TimeoutError", "ConnectionError", "RPCError",
+                "ServerError", "RuntimeError"):
+        return "O Telegram não respondeu agora. Tente de novo em instantes."
+    return "Não consegui consultar o convite (%s)." % nome
+
+
 def entradas_do_telegram(links):
     """Botoes "Entrar" para os links de convite (t.me/+codigo, joinchat) e
     de grupos e canais publicos (t.me/nome). Tipo "entrar" nas acoes."""
@@ -346,7 +373,7 @@ def entradas_do_telegram(links):
             vistos.add("usuario:" + publico.group(1).lower())
             entradas.append({"tipo": "entrar", "modo": "publico",
                              "usuario": publico.group(1),
-                             "rotulo": "Entrar em @%s (grupo ou canal)" %
+                             "rotulo": "Abrir ou entrar em @%s" %
                              publico.group(1)})
     return entradas
 
@@ -1253,6 +1280,17 @@ class ProvedorTelegram(Provedor):
     def atualizar_conversas(self):
         self._agendar(self._atualizar_conversas())
 
+    def atualizar_conversas_avisando(self, ao_terminar):
+        async def tudo():
+            ok = False
+            try:
+                await self._atualizar_conversas()
+                ok = True
+            finally:
+                ao_terminar(ok)
+        if self._agendar(tudo()) is None:
+            ao_terminar(False)
+
     async def _atualizar_conversas(self):
         inicio = time.perf_counter()
         lista = []
@@ -1785,14 +1823,16 @@ class ProvedorTelegram(Provedor):
                         "ja_participa": False}
             ent = await self.cliente.get_entity(acao["usuario"])
             if isinstance(ent, T.User):
-                return {"erro": "Este endereço é de uma pessoa ou de um bot, "
-                                "não de um grupo ou canal."}
+                # nao e grupo nem canal: a janela abre a conversa (e, num
+                # robo ainda nao iniciado, oferece iniciar)
+                return {"pessoa": True, "robo": bool(ent.bot),
+                        "nome": nome_de(ent) or acao["usuario"]}
             return {"nome": nome_de(ent), "membros": int(
                 getattr(ent, "participants_count", 0) or 0), "descricao": "",
                 "ja_participa": bool(not getattr(ent, "left", True))}
         except Exception as e:
             log.info("prévia do convite falhou: %s", type(e).__name__)
-            return {"erro": "O convite não vale mais ou foi cancelado."}
+            return {"erro": motivo_do_convite(e)}
 
     def entrar_no_grupo(self, msg, acao):
         return self._sincrono(self._entrar(acao), 30) or (
@@ -2786,18 +2826,20 @@ class ProvedorTelegram(Provedor):
     suporta_busca_global = True
 
     def buscar_global(self, texto, modo="tudo", filtro="qualquer", limite=50,
-                      espera=60):
+                      espera=60, cursor=None):
         """A busca do aplicativo do Telegram: pessoas, bots, grupos e canais
         (nas conversas da conta e publicos), mensagens de todas as conversas
         (com filtro de tipo) e posts publicos de canais. Devolve um
-        busca_global.ResultadoGlobal."""
+        busca_global.ResultadoGlobal. `cursor`: o `proximo` de um resultado
+        anterior, para trazer a pagina seguinte de mensagens e posts (as
+        pessoas, grupos e canais vem todos de uma vez)."""
         from telethon import errors
         if self._loop is None or self._loop.is_closed() or \
                 self.cliente is None:
             raise RuntimeError("A conta do Telegram não está conectada.")
         try:
             return asyncio.run_coroutine_threadsafe(
-                self._buscar_global(texto, modo, filtro, limite),
+                self._buscar_global(texto, modo, filtro, limite, cursor),
                 self._loop).result(timeout=espera)
         except errors.FloodWaitError as e:
             raise RuntimeError("O Telegram pediu para esperar %d segundos "
@@ -2809,11 +2851,14 @@ class ProvedorTelegram(Provedor):
             raise RuntimeError("Não consegui buscar no Telegram (%s)." %
                                type(e).__name__)
 
-    async def _buscar_global(self, texto, modo, filtro, limite):
+    async def _buscar_global(self, texto, modo, filtro, limite, cursor=None):
         from telethon import errors
         from telezapp.nucleo import busca_global as bg
         r = bg.ResultadoGlobal()
-        if modo in ("tudo", "chats") and texto:
+        continuando = cursor is not None
+        cursor = cursor or {}
+        proximo = {}
+        if modo in ("tudo", "chats") and texto and not continuando:
             try:
                 r.chats = await self._buscar_chats(texto)
             except errors.FloodWaitError:
@@ -2822,11 +2867,15 @@ class ProvedorTelegram(Provedor):
                 log.info("busca de conversas falhou: %r", e)
                 r.avisos.append("Não consegui buscar pessoas, grupos e "
                                 "canais.")
-        if modo in ("tudo", "mensagens"):
-            r.mensagens = await self._buscar_mensagens(texto, filtro, limite)
-        if modo in ("tudo", "posts") and texto:
+        if modo in ("tudo", "mensagens") and (
+                not continuando or cursor.get("mensagens")):
+            r.mensagens, proximo["mensagens"] = await self._buscar_mensagens(
+                texto, filtro, limite, cursor.get("mensagens"))
+        if modo in ("tudo", "posts") and texto and (
+                not continuando or cursor.get("posts")):
             try:
-                r.posts = await self._buscar_posts(texto, limite)
+                r.posts, proximo["posts"] = await self._buscar_posts(
+                    texto, limite, cursor.get("posts"))
             except errors.FloodWaitError:
                 raise
             except Exception as e:
@@ -2835,6 +2884,12 @@ class ProvedorTelegram(Provedor):
                     r.avisos.append("O Telegram não fez a busca de posts "
                                     "públicos agora (%s). Ela tem limite "
                                     "por dia." % type(e).__name__)
+        r.proximo = {k: v for k, v in proximo.items() if v} or None
+        log.info("busca global: %d conversas, %d mensagens, %d posts "
+                 "(%s); mais: %s", len(r.chats), len(r.mensagens),
+                 len(r.posts), "página seguinte" if continuando
+                 else "primeira página",
+                 ", ".join(sorted(r.proximo)) if r.proximo else "não")
         return r
 
     async def _buscar_chats(self, texto):
@@ -2877,38 +2932,68 @@ class ProvedorTelegram(Provedor):
                 pid in meus or cid in self._conversas, bot))
         return saida
 
-    async def _buscar_mensagens(self, texto, filtro, limite):
-        """Mensagens de todas as conversas da conta, no servidor."""
-        from telethon.tl import types as T
+    async def _buscar_mensagens(self, texto, filtro, limite, cursor=None):
+        """Mensagens de todas as conversas da conta, no servidor, uma pagina
+        por vez. Devolve ([(Mensagem, Conversa)], cursor da seguinte ou
+        None)."""
+        from telethon.tl import functions, types as T
         from telezapp.nucleo import busca_global as bg
         nome = bg.filtro_do_telegram(filtro)
-        extra = {"filter": getattr(T, nome)} if nome else {}
-        achados = []
-        async for msg in self.cliente.iter_messages(
-                None, search=texto, limit=limite, **extra):
-            par = await self._achado_de_mensagem(msg)
-            if par is not None:
-                achados.append(par)
-        return achados
+        filtro_tl = getattr(T, nome)() if nome else T.InputMessagesFilterEmpty()
+        taxa, par, ultimo_id = cursor or (0, T.InputPeerEmpty(), 0)
+        r = await self.cliente(functions.messages.SearchGlobalRequest(
+            q=texto or "", filter=filtro_tl, min_date=None, max_date=None,
+            offset_rate=taxa, offset_peer=par, offset_id=ultimo_id,
+            limit=limite))
+        return await self._pagina_de_achados(r, limite)
 
-    async def _buscar_posts(self, texto, limite):
-        """Posts publicos de canais, mesmo de canais que a conta nao segue."""
-        from telethon import utils
+    async def _buscar_posts(self, texto, limite, cursor=None):
+        """Posts publicos de canais, mesmo de canais que a conta nao segue,
+        uma pagina por vez. Devolve (achados, cursor da seguinte ou None)."""
         from telethon.tl import functions, types as T
+        taxa, par, ultimo_id = cursor or (0, T.InputPeerEmpty(), 0)
         r = await self.cliente(functions.channels.SearchPostsRequest(
-            offset_rate=0, offset_peer=T.InputPeerEmpty(), offset_id=0,
+            offset_rate=taxa, offset_peer=par, offset_id=ultimo_id,
             limit=limite, query=texto))
+        return await self._pagina_de_achados(r, limite)
+
+    async def _pagina_de_achados(self, r, limite):
+        """Converte uma pagina de mensagens do servidor e calcula o cursor da
+        seguinte: o mesmo que o Telethon usa (taxa da resposta, conversa e id
+        da ultima mensagem). Sem cursor quando a pagina veio menor que o
+        pedido ou nao e uma fatia."""
+        from telethon import utils
+        from telethon.tl import types as T
         entidades = {}
         for e in list(getattr(r, "users", [])) + list(
                 getattr(r, "chats", [])):
             entidades[utils.get_peer_id(e)] = e
-        achados = []
+        achados, ultima = [], None
         for msg in getattr(r, "messages", []):
+            if isinstance(msg, T.MessageEmpty):
+                continue
+            try:
+                msg._finish_init(self.cliente, entidades, None)
+            except Exception:
+                pass
+            ultima = msg
             par = await self._achado_de_mensagem(
                 msg, entidades.get(utils.get_peer_id(msg.peer_id)))
             if par is not None:
                 achados.append(par)
-        return achados
+        proximo = None
+        if ultima is not None and not isinstance(r, T.messages.Messages) \
+                and len(getattr(r, "messages", [])) >= limite:
+            entrada = getattr(ultima, "input_chat", None)
+            if entrada is None:
+                try:
+                    entrada = utils.get_input_peer(
+                        entidades[utils.get_peer_id(ultima.peer_id)])
+                except Exception:
+                    entrada = T.InputPeerEmpty()
+            proximo = (int(getattr(r, "next_rate", 0) or 0), entrada,
+                       ultima.id)
+        return achados, proximo
 
     async def _achado_de_mensagem(self, msg, chat=None):
         """(Mensagem, Conversa) de uma mensagem devolvida pela busca. A
