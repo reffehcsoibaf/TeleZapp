@@ -109,6 +109,24 @@ def arquivos_do_pacote(pacote_id):
     return []
 
 
+def sons_para_escolher(ativo):
+    """[(rotulo, caminho)] dos sons de todos os pacotes, o ativo primeiro:
+    "Cristal: nova". E a lista do som proprio de uma conversa."""
+    ids = [i for i, _ in listar()]
+    if ativo in ids:
+        ids.remove(ativo)
+        ids.insert(0, ativo)
+    achados = []
+    for pid in ids:
+        if pid == PADRAO:
+            continue                      # bips do sistema: nao ha arquivos
+        nome = nome_do_pacote(pid)
+        for arq, caminho in arquivos_do_pacote(pid):
+            achados.append(("%s: %s" % (nome, os.path.splitext(arq)[0]),
+                            caminho))
+    return achados
+
+
 def listar():
     """[(id, nome)] dos pacotes que existem: os da casa e depois os
     personalizados, em ordem alfabetica."""

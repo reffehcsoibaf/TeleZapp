@@ -493,10 +493,10 @@ class DialogoSomDaConversa(wx.Dialog):
         self._escolher_pelo_caminho(origem, anunciar=True)
 
     def _preencher_escolha(self):
-        """Preenche o combobox com os sons do pacote de sons ativo (o tema),
-        da casa ou personalizado, e marca o som que a conversa usa."""
+        """Preenche o combobox com os sons de todos os pacotes (o ativo
+        primeiro) e marca o som que a conversa usa."""
         pacote = pacotes_de_som.EstadoDeSons(self.jan.cfg).ativo
-        self._arquivos_escolha = pacotes_de_som.arquivos_do_pacote(pacote)
+        self._arquivos_escolha = pacotes_de_som.sons_para_escolher(pacote)
         nomes = [nome for nome, _ in self._arquivos_escolha]
         if nomes != [self.cx_escolha.GetString(i)
                      for i in range(self.cx_escolha.GetCount())]:

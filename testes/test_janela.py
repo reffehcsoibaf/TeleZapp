@@ -7370,7 +7370,7 @@ def test_janela_do_som_da_conversa_tem_combobox(j, monkeypatch,
                         lambda cfg, conv: "Som das mensagens: o de nova.")
     monkeypatch.setattr(jd, "bipe", lambda tipo, valor=None: sons.append(
         (tipo, valor)))
-    monkeypatch.setattr(jd.pacotes_de_som, "arquivos_do_pacote",
+    monkeypatch.setattr(jd.pacotes_de_som, "sons_para_escolher",
                         lambda pacote_id: [("um.ogg", str(tmp_path / "um.ogg"))])
     monkeypatch.setattr(jd.pacotes_de_som, "arquivo_da_conversa",
                         lambda cfg, chave: str(tmp_path / "um.ogg"))
@@ -8967,7 +8967,8 @@ def test_combobox_do_som_da_conversa_com_pacote_da_casa_e_reabertura(
     conv = j.indice[("t1", "20")]
     try:
         d = jd.DialogoSomDaConversa(None, j, conv)
-        assert d.cx_escolha.itens == ["a.wav", "b.wav"]
+        assert d.cx_escolha.itens[:2] == ["Cristal: a", "Cristal: b"]
+        assert "Marimba: a" in d.cx_escolha.itens   # e dos outros pacotes
         d.cx_escolha.SetSelection(1)
         d._escolher()
         assert d.cx_escolha.GetSelection() == 1
