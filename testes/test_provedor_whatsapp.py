@@ -4948,3 +4948,186 @@ def test_agenda_do_whatsapp_envia_o_que_chegou_na_hora_e_separa_as_atrasadas(
     assert p.agendadas("c2")[0]["atrasada"] is False
     p.descartar_agendadas([x["id"] for x in atrasadas])
     assert p.agendadas("c2") == []
+
+
+def test_agendar_arquivo_guarda_copia_e_envia_na_hora_pelo_caminho_de_arquivo(
+        tmp_path, monkeypatch):
+    from datetime import datetime
+    from telezapp import config
+    from telezapp.midia.envio import Anexo
+    monkeypatch.setattr(config, "pasta",
+                        lambda *a: str(tmp_path / "dados"))
+    (tmp_path / "dados").mkdir()
+    p, banco = _provedor_com_cliente(tmp_path, ClienteFalso())
+    original = tmp_path / "foto.jpg"
+    original.write_bytes(b"jpeg")
+    anexo = Anexo(str(original), m.FOTO, "foto.jpg", "image/jpeg", 4)
+    quando = datetime(2026, 11, 12, 9, 0)
+    assert p.agendar_arquivo("c1", anexo, "olha", quando, "R1",
+                             [{"nome": "Ana", "id": "x"}]) == (True, "")
+    original.unlink()                           # o original pode sumir
+    itens = p.agendadas("c1")
+    assert itens[0]["texto"] == "foto (foto.jpg): olha"
+    enviados = []
+    p.enviar_arquivo = lambda c, a, legenda="", resposta="", mencoes=None: \
+        enviados.append((c, a, legenda, resposta, mencoes))
+    assert p.enviar_agendada(itens[0]["id"]) is True
+    c, a, legenda, resposta, mencoes = enviados[0]
+    assert (c, legenda, resposta) == ("c1", "olha", "R1")
+    assert mencoes == [{"nome": "Ana", "id": "x"}]
+    assert a.tipo == m.FOTO and a.temporario and os.path.isfile(a.caminho)
+    assert open(a.caminho, "rb").read() == b"jpeg"
+    assert p.agendadas("c1") == []
+
+
+def test_cancelar_agendada_com_arquivo_apaga_a_copia(tmp_path, monkeypatch):
+    from datetime import datetime
+    from telezapp import config
+    from telezapp.midia.envio import Anexo
+    monkeypatch.setattr(config, "pasta",
+                        lambda *a: str(tmp_path / "dados"))
+    (tmp_path / "dados").mkdir()
+    p, banco = _provedor_com_cliente(tmp_path, ClienteFalso())
+    arq = tmp_path / "d.pdf"
+    arq.write_bytes(b"pdf")
+    anexo = Anexo(str(arq), m.DOCUMENTO, "d.pdf", "application/pdf", 3)
+    p.agendar_arquivo("c1", anexo, "", datetime(2026, 11, 12, 9, 0))
+    copia = banco.agendadas("w1")[0]["anexo"]
+    caminho = __import__("json").loads(copia)["caminho"]
+    assert os.path.isfile(caminho) and caminho != str(arq)
+    p.cancelar_agendadas("c1", [p.agendadas("c1")[0]["id"]])
+    assert not os.path.exists(caminho) and p.agendadas("c1") == []
+
+
+def test_agendada_com_arquivo_que_sumiu_avisa_a_falha(tmp_path, monkeypatch):
+    from datetime import datetime
+    from telezapp import config
+    from telezapp.midia.envio import Anexo
+    monkeypatch.setattr(config, "pasta",
+                        lambda *a: str(tmp_path / "dados"))
+    (tmp_path / "dados").mkdir()
+    p, banco = _provedor_com_cliente(tmp_path, ClienteFalso())
+    arq = tmp_path / "f.jpg"
+    arq.write_bytes(b"x")
+    p.agendar_arquivo("c1", Anexo(str(arq), m.FOTO, "f.jpg", "image/jpeg", 1),
+                      "", datetime(2026, 11, 12, 9, 0))
+    for f in (tmp_path / "dados").iterdir():
+        f.unlink()
+    falhas = []
+    p.barramento.ouvir(lambda e: falhas.append(e))
+    p.enviar_arquivo = lambda *a, **k: falhas.append("enviou")
+    assert p.enviar_agendada(p.agendadas("c1")[0]["id"]) is True
+    assert "enviou" not in falhas
+    assert any(isinstance(e, ev.EnvioFalhou) and e.nome_arquivo == "f.jpg"
+               for e in falhas)
+
+
+def _mutacao(nome="regular_low", indice=("setting_unarchiveChats",),
+             desarquiva=False, remove=False, completo=False):
+    from neonize.proto.waSyncAction.WAWebProtobufSyncAction_pb2 import (
+        SyncActionValue, UnarchiveChatsSetting)
+    return types.SimpleNamespace(
+        Name=nome, Index=list(indice), Version=4, Remove=remove,
+        FromFullSync=completo,
+        Action=SyncActionValue(unarchiveChatsSetting=UnarchiveChatsSetting(
+            unarchiveChats=desarquiva)))
+
+
+def test_manter_arquivadas_segue_o_que_o_celular_avisa(tmp_path):
+    p, banco = _provedor_com_cliente(tmp_path, ClienteFalso())
+    assert p._manter_arquivadas_visto() is None
+    p._ao_mutacao_de_estado(None, _mutacao(desarquiva=True))   # desativado
+    assert p._manter_arquivadas_visto() is False
+    p._ao_mutacao_de_estado(None, _mutacao(desarquiva=False))  # ativado
+    assert p._manter_arquivadas_visto() is True
+    p._ao_mutacao_de_estado(None, _mutacao(desarquiva=True))
+    p._ao_mutacao_de_estado(None, _mutacao(remove=True))       # volta ao padrao
+    assert p._manter_arquivadas_visto() is True
+    # outras mutacoes nao mexem
+    p._ao_mutacao_de_estado(None, _mutacao(desarquiva=True, nome="regular_high"))
+    p._ao_mutacao_de_estado(None, _mutacao(desarquiva=True, indice=("pin_v1",)))
+    assert p._manter_arquivadas_visto() is True
+
+
+def test_privacidade_baixa_a_colecao_uma_vez_quando_nunca_viu_o_ajuste(
+        tmp_path):
+    cliente = ClienteFalso()
+    baixadas = []
+
+    def baixar(nome, full_sync=False):
+        baixadas.append((nome, full_sync))
+        cliente_p._ao_mutacao_de_estado(None, _mutacao(desarquiva=True))
+    cliente.fetch_app_state = baixar
+    cliente_p, banco = _provedor_com_cliente(tmp_path, cliente)
+    assert cliente_p._manter_arquivadas() == "unarchive"
+    assert baixadas == [("regular_low", True)]
+    assert cliente_p._manter_arquivadas() == "unarchive"       # sem baixar de novo
+    assert len(baixadas) == 1
+
+
+def test_sem_o_ajuste_no_celular_vale_o_padrao_manter(tmp_path):
+    cliente = ClienteFalso()
+    cliente.fetch_app_state = lambda nome, full_sync=False: None   # nada chega
+    p, banco = _provedor_com_cliente(tmp_path, cliente)
+    import telezapp.provedores.whatsapp as w
+    w.time.sleep = lambda s: None
+    assert p._manter_arquivadas() == "keep"
+
+
+def test_se_nao_deu_para_baixar_a_colecao_fica_sem_escolha(tmp_path):
+    cliente = ClienteFalso()
+
+    def baixar(nome, full_sync=False):
+        raise RuntimeError("sem resposta")
+    cliente.fetch_app_state = baixar
+    p, banco = _provedor_com_cliente(tmp_path, cliente)
+    assert p._manter_arquivadas() is None
+    assert p._manter_arquivadas_visto() is None
+
+
+def test_definir_manter_arquivadas_manda_o_ajuste_e_lembra(tmp_path):
+    p, banco = _provedor_com_cliente(tmp_path, ClienteFalso())
+    enviados = []
+    p._mandar_estado = enviados.append
+    p.definir_privacidade("keeparchived", "keep")
+    patch = enviados[-1]
+    assert patch.Type == patch.REGULAR_LOW
+    mut = patch.Mutations[0]
+    assert list(mut.Index) == ["setting_unarchiveChats"] and mut.Version == 4
+    # no WhatsApp o ajuste diz se DESARQUIVA: manter arquivadas = falso
+    assert mut.Value.unarchiveChatsSetting.unarchiveChats is False
+    assert p._manter_arquivadas_visto() is True
+    p.definir_privacidade("keeparchived", "unarchive")
+    assert enviados[-1].Mutations[0].Value.unarchiveChatsSetting \
+        .unarchiveChats is True
+    assert p._manter_arquivadas_visto() is False
+
+
+def test_go_sem_preempcao_assincrona_acrescenta_ao_godebug():
+    amb = {}
+    assert wa.go_sem_preempcao_assincrona(amb) is True
+    assert amb["GODEBUG"] == "asyncpreemptoff=1"
+    assert wa.go_sem_preempcao_assincrona(amb) is False        # ja esta
+    assert amb["GODEBUG"] == "asyncpreemptoff=1"
+    amb = {"GODEBUG": "madvdontneed=1"}                        # preserva o resto
+    assert wa.go_sem_preempcao_assincrona(amb) is True
+    assert amb["GODEBUG"] == "madvdontneed=1,asyncpreemptoff=1"
+    amb = {"GODEBUG": "asyncpreemptoff=0"}                     # a pessoa decidiu
+    assert wa.go_sem_preempcao_assincrona(amb) is False
+    assert amb["GODEBUG"] == "asyncpreemptoff=0"
+
+
+def test_so_no_windows_arm_o_go_perde_a_preempcao_assincrona(monkeypatch):
+    import os
+    chamadas = []
+    monkeypatch.setattr(wa, "go_sem_preempcao_assincrona",
+                        lambda amb=None: chamadas.append(1))
+    monkeypatch.setattr(wa.sysconfig, "get_platform", lambda: "win-amd64")
+    monkeypatch.setattr(wa.platform, "machine", lambda: "AMD64")
+    with wa.arquitetura_do_processo():
+        pass
+    assert chamadas == []                                      # x64 de verdade
+    monkeypatch.setattr(wa.platform, "machine", lambda: "ARM64")
+    with wa.arquitetura_do_processo():
+        pass
+    assert chamadas == [1]                                     # ARM emulando x64

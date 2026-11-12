@@ -1,0 +1,134 @@
+diff --git a/appstate.go b/appstate.go
+index 3cb31ba..0a41969 100644
+--- a/appstate.go
++++ b/appstate.go
+@@ -190,6 +190,20 @@ func (cli *Client) collectEventsToDispatch(
+ 		if eventsToDispatch != nil && mutation.Operation == waServerSync.SyncdMutation_SET {
+ 			*eventsToDispatch = append(*eventsToDispatch, &events.AppState{Index: mutation.Index, SyncActionValue: mutation.Action})
+ 		}
++		raw := &events.AppStateMutation{
++			Name:         name,
++			Index:        mutation.Index,
++			Version:      mutation.Version,
++			Remove:       mutation.Operation == waServerSync.SyncdMutation_REMOVE,
++			Action:       mutation.Action,
++			FromFullSync: fullSync,
++		}
++		if eventsToDispatch != nil {
++			*eventsToDispatch = append(*eventsToDispatch, raw)
++		} else {
++			// A full sync without EmitAppStateEventsOnFullSync dispatches nothing else.
++			cli.dispatchEvent(raw)
++		}
+ 		evt := cli.dispatchAppState(ctx, name, mutation, fullSync)
+ 		if eventsToDispatch != nil && evt != nil {
+ 			*eventsToDispatch = append(*eventsToDispatch, evt)
+@@ -541,6 +555,32 @@ func (cli *Client) sendAppState(ctx context.Context, patch appstate.PatchInfo, a
+ 	if cli == nil {
+ 		return ErrClientIsNil
+ 	}
++	// The read-encode-send-apply below works on the stored version and hash, so
++	// it holds the same lock fetchAppState does. Without it, two sends (or a
++	// send and a fetch started by a server notification) read the same version;
++	// the loser got 409 and applied the conflicting patches on top of a version
++	// the other had already moved past, leaving a mismatching LTHash.
++	cli.appStateSyncLock.Lock()
++	err := cli.sendAppStateLocked(ctx, patch, allowRetry)
++	cli.appStateSyncLock.Unlock()
++	if err != nil {
++		return err
++	}
++	eventsToDispatch, err := cli.fetchAppState(ctx, patch.Type, false, false)
++	if err != nil {
++		return fmt.Errorf("failed to fetch app state after sending update: %w", err)
++	}
++	go func() {
++		for _, evt := range eventsToDispatch {
++			cli.dispatchEvent(evt)
++		}
++	}()
++
++	return nil
++}
++
++// sendAppStateLocked sends the patch; the caller holds appStateSyncLock.
++func (cli *Client) sendAppStateLocked(ctx context.Context, patch appstate.PatchInfo, allowRetry bool) error {
+ 	version, hash, err := cli.Store.AppState.GetAppStateVersion(ctx, string(patch.Type))
+ 	if err != nil {
+ 		return err
+@@ -611,21 +651,11 @@ func (cli *Client) sendAppState(ctx context.Context, patch appstate.PatchInfo, a
+ 						cli.dispatchEvent(evt)
+ 					}
+ 				}()
+-				return cli.sendAppState(ctx, patch, false)
++				return cli.sendAppStateLocked(ctx, patch, false)
+ 			}
+ 		}
+ 		return mainErr
+ 	}
+-	eventsToDispatch, err := cli.fetchAppState(ctx, patch.Type, false, false)
+-	if err != nil {
+-		return fmt.Errorf("failed to fetch app state after sending update: %w", err)
+-	}
+-	go func() {
+-		for _, evt := range eventsToDispatch {
+-			cli.dispatchEvent(evt)
+-		}
+-	}()
+-
+ 	return nil
+ }
+ 
+diff --git a/appstate/encode.go b/appstate/encode.go
+index c101a55..a09d4b2 100644
+--- a/appstate/encode.go
++++ b/appstate/encode.go
+@@ -24,6 +24,9 @@ type MutationInfo struct {
+ 	Version int32
+ 	// Value contains the data for the mutation.
+ 	Value *waSyncAction.SyncActionValue
++	// Operation is SET (the zero value) or REMOVE. A REMOVE deletes the entry at Index;
++	// it still carries an encrypted value, and the entry must have been SET before.
++	Operation waServerSync.SyncdMutation_SyncdOperation
+ }
+ 
+ // PatchInfo contains information about a patch to the app state.
+@@ -296,11 +299,12 @@ func (proc *Processor) EncodePatch(ctx context.Context, keyID []byte, state Hash
+ 			return nil, fmt.Errorf("failed to encrypt mutation: %w", err)
+ 		}
+ 
+-		valueMac := generateContentMAC(waServerSync.SyncdMutation_SET, encryptedContent, keyID, keys.ValueMAC)
++		operation := mutationInfo.Operation
++		valueMac := generateContentMAC(operation, encryptedContent, keyID, keys.ValueMAC)
+ 		indexMac := concatAndHMAC(sha256.New, keys.Index, indexBytes)
+ 
+ 		mutations = append(mutations, &waServerSync.SyncdMutation{
+-			Operation: waServerSync.SyncdMutation_SET.Enum(),
++			Operation: operation.Enum(),
+ 			Record: &waServerSync.SyncdRecord{
+ 				Index: &waServerSync.SyncdIndex{Blob: indexMac},
+ 				Value: &waServerSync.SyncdValue{Blob: append(encryptedContent, valueMac...)},
+diff --git a/types/events/appstate.go b/types/events/appstate.go
+index 2b58517..3c0b83b 100644
+--- a/types/events/appstate.go
++++ b/types/events/appstate.go
+@@ -191,6 +191,19 @@ type AppState struct {
+ 	*waSyncAction.SyncActionValue
+ }
+ 
++// AppStateMutation is emitted for every app state mutation, set or remove, with the
++// collection it came from and its version. Unlike AppState it is also emitted during a
++// full sync (except for the contacts a full sync stores in bulk), so a client can keep
++// its own copy of the entries whatsmeow has no event for (labels, status privacy...).
++type AppStateMutation struct {
++	Name         appstate.WAPatchName
++	Index        []string
++	Version      int32
++	Remove       bool
++	Action       *waSyncAction.SyncActionValue
++	FromFullSync bool
++}
++
+ // AppStateSyncComplete is emitted when app state is resynced.
+ type AppStateSyncComplete struct {
+ 	Name     appstate.WAPatchName

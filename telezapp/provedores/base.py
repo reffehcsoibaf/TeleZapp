@@ -506,6 +506,12 @@ class Provedor(ABC):
         (True, "") ou (False, motivo)."""
         raise NotImplementedError
 
+    def agendar_arquivo(self, conversa_id, anexo, legenda, quando,
+                        resposta_a="", mencoes=None):
+        """Agenda um arquivo (`anexo`, ja preparado) com a legenda para
+        `quando`. Bloqueia; (True, "") ou (False, motivo)."""
+        raise NotImplementedError
+
     def agendadas(self, conversa_id):
         """As mensagens agendadas da conversa, da mais proxima para a mais
         distante: [{"id", "quando" (datetime local), "texto"}]. Bloqueia."""

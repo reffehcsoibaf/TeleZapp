@@ -160,7 +160,8 @@ CREATE TABLE IF NOT EXISTS agendadas (
     quando REAL NOT NULL,
     resposta_a TEXT NOT NULL DEFAULT '',
     mencoes TEXT NOT NULL DEFAULT '',
-    atrasada INTEGER NOT NULL DEFAULT 0
+    atrasada INTEGER NOT NULL DEFAULT 0,
+    anexo TEXT NOT NULL DEFAULT ''
 );
 -- Estrutura original das mensagens, so com o modo de depuracao ligado.
 CREATE TABLE IF NOT EXISTS depuracao (
@@ -254,6 +255,11 @@ class Banco:
         if "comunidade" not in conv:
             self._con.execute("ALTER TABLE conversas ADD COLUMN "
                               "comunidade INTEGER NOT NULL DEFAULT 0")
+        agendadas = {linha[1] for linha in self._con.execute(
+            "PRAGMA table_info(agendadas)")}
+        if "anexo" not in agendadas:
+            self._con.execute("ALTER TABLE agendadas ADD COLUMN anexo "
+                              "TEXT NOT NULL DEFAULT ''")
         colunas = {linha[1] for linha in self._con.execute(
             "PRAGMA table_info(mensagens)")}
         if "remetente" not in colunas:
@@ -936,23 +942,25 @@ class Banco:
 
     # ----------------------------------------------- mensagens agendadas
     def guardar_agendada(self, conta_id, conversa_id, texto, quando,
-                         resposta_a="", mencoes=""):
+                         resposta_a="", mencoes="", anexo=""):
         """Guarda uma mensagem para o TeleZapp enviar em `quando` (epoch);
-        devolve o numero dela."""
+        devolve o numero dela. `anexo`: o JSON do arquivo a enviar (o
+        `texto` e a legenda dele)."""
         with self._trava, self._con:
             return self._con.execute(
                 "INSERT INTO agendadas (conta_id, conversa_id, texto, quando,"
-                " resposta_a, mencoes) VALUES (?,?,?,?,?,?)",
+                " resposta_a, mencoes, anexo) VALUES (?,?,?,?,?,?,?)",
                 (conta_id, conversa_id, texto, quando, resposta_a or "",
-                 mencoes or "")).lastrowid
+                 mencoes or "", anexo or "")).lastrowid
 
     def _agendada(self, linha):
         return {"id": linha[0], "conta_id": linha[1], "conversa_id": linha[2],
                 "texto": linha[3], "quando": linha[4], "resposta_a": linha[5],
-                "mencoes": linha[6], "atrasada": bool(linha[7])}
+                "mencoes": linha[6], "atrasada": bool(linha[7]),
+                "anexo": linha[8]}
 
     _COLUNAS_AGENDADA = ("id, conta_id, conversa_id, texto, quando, "
-                         "resposta_a, mencoes, atrasada")
+                         "resposta_a, mencoes, atrasada, anexo")
 
     def agendadas(self, conta_id, conversa_id=None):
         """As agendadas da conta (ou so de uma conversa), da mais proxima."""

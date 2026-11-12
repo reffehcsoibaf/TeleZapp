@@ -2898,7 +2898,7 @@ def test_menu_unico_com_submenus_na_ordem_pedida(j):
     assert [r.replace("&", "") for r, _ in barra] == ["Menu"]
     raiz = barra[0][1]
     rotulos = [r.replace("&", "") for r, _ in raiz.submenus]
-    assert rotulos == ["Novo", "Ir para", "Mensagens", "Conversas",
+    assert rotulos == ["Novo", "Ir para", "Mensagens", "Conversas", "Busca",
                        "Contatos", "Chamadas", "Mídias", "Exibir",
                        "Ferramentas", "Ajuda"]
     menus = {r.replace("&", ""): mn for r, mn in raiz.submenus}
@@ -2926,6 +2926,19 @@ def test_menu_unico_com_submenus_na_ordem_pedida(j):
         "Menção ou resposta a mim anterior",
         "Mostrar a janela oculta"]
     assert "Escrever mensagem" not in nomes(menus["Conversas"])
+    # Busca junta tudo o que e busca; Conversas ficou sem eles (e sem o
+    # item de ouvir a ultima mensagem, que saiu do menu)
+    busca = nomes(menus["Busca"])
+    assert busca[:2] == ["Buscar conversa", "Busca por critérios..."]
+    assert busca[-1] == "Buscar mensagens que faltam no celular"
+    # a busca global (Telegram) e a de canais (WhatsApp) so aparecem com uma
+    # conta do servico: as que ha no menu estao entre as duas pontas
+    assert set(busca[2:-1]) <= {"Busca global no Telegram...",
+                                "Buscar canais do WhatsApp..."}
+    conversas = " | ".join(nomes(menus["Conversas"]))
+    for fora in ("Busca", "Buscar", "Ouvir a última mensagem"):
+        assert fora not in conversas
+    assert "ler_ultima" not in j.itens
     # Contas deixou de ser um menu: o que sobrou foi para Ferramentas
     assert "Contas" not in menus
     assert nomes(menus["Ferramentas"])[:2] == [
@@ -8336,7 +8349,7 @@ def test_atualizar_sem_avisar_nao_fala_no_fim(j, monkeypatch):
 # ------------------------------------- confirmacoes que podem ser desligadas
 def test_confirmacoes_estao_no_botao_da_categoria_interface():
     grupo = [o for o in config.OPCOES if o.grupo == "Confirmações"]
-    assert len(grupo) == 7
+    assert len(grupo) == 8
     assert all(o.categoria == "Interface" and o.padrao is True
                and o.chave.startswith("confirmar_") for o in grupo)
 
@@ -8629,13 +8642,18 @@ def test_robo_sem_conversa_oferece_iniciar_e_manda_o_start(j, monkeypatch):
 
 
 # ------------------------------------------------ mensagens agendadas
+editaveis = []
+
+
 def _dialogo_de_agendar(monkeypatch, resultado, resposta):
     from telezapp.interface import agendadas as ja
     criados = []
+    del editaveis[:]
 
     class Dialogo:
         def __init__(self, pai, destino, texto="", **k):
             criados.append((destino, texto))
+            editaveis.append(k.get("editar_texto", True))
 
         def ShowModal(self):
             return resposta
@@ -8684,6 +8702,7 @@ def test_agendar_leva_o_texto_da_caixa_e_limpa_ao_dar_certo(j, monkeypatch):
     j.caixa.SetValue("bom dia")
     j._agendar_mensagem()
     assert criados[0][1] == "bom dia"               # a janela abre com o texto
+    assert editaveis == [False]                     # ja digitado: so leitura
     assert pedidos == [("20", "bom dia", quando, "")]
     assert j.caixa.GetValue() == ""
     assert ditas[-1].startswith("Mensagem agendada para amanhã às ")
@@ -9009,3 +9028,326 @@ def test_reacao_e_voto_usam_o_som_proprio_da_conversa(j, monkeypatch,
     finally:
         for e in pk.EVENTOS_DA_CONVERSA:
             pk.remover_som_da_conversa(j.cfg, conv.chave, e)
+
+
+def test_agendar_com_anexos_agenda_cada_arquivo_e_a_legenda_na_primeira(
+        j, monkeypatch, tmp_path):
+    from datetime import datetime, timedelta
+    from telezapp.midia.envio import Anexo
+    _abrir_com_caixa(j)
+    j.estados["t1"] = ev.CONECTADA
+    j.contas.p.PODE_AGENDAR = True
+    arq = tmp_path / "a.jpg"
+    arq.write_bytes(b"x")
+    foto = Anexo(str(arq), m.FOTO, "a.jpg", "image/jpeg", 1)
+    doc = Anexo(str(arq), m.DOCUMENTO, "d.pdf", "application/pdf", 1)
+    j.anexos[:] = [foto, doc]
+    feitos = []
+    j.contas.p.agendar_arquivo = lambda c, a, leg, q, r="", mencoes=None:         feitos.append((c, a.tipo, leg, q, r)) or (True, "")
+    textos = []
+    j.contas.p.agendar_texto = lambda *a, **k: textos.append(a) or (True, "")
+    quando = datetime.now() + timedelta(days=1)
+    criados = []
+    _dialogo_de_agendar(monkeypatch, ("olha", quando), jm.wx.ID_OK)
+    monkeypatch.setattr(jm.threading, "Thread", _ThreadAgendar)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.caixa.SetValue("olha")
+    j._agendar_mensagem()
+    assert feitos == [("20", m.FOTO, "olha", quando, ""),
+                      ("20", m.DOCUMENTO, "", quando, "")]
+    assert textos == []                    # a legenda ja levou o texto
+    assert j.anexos == [] and j.caixa.GetValue() == ""
+    assert "(2 mídias)" in ditas[-1]
+
+
+def test_agendar_so_audio_no_whatsapp_manda_o_texto_depois(
+        j, monkeypatch, tmp_path):
+    from datetime import datetime, timedelta
+    from telezapp.midia.envio import Anexo
+    _abrir_com_caixa(j)
+    j.estados["t1"] = ev.CONECTADA
+    j.contas.p.PODE_AGENDAR = True
+    monkeypatch.setattr(j, "_aceita_legenda", lambda tipo: False)
+    arq = tmp_path / "a.ogg"
+    arq.write_bytes(b"x")
+    j.anexos[:] = [Anexo(str(arq), m.AUDIO, "a.ogg", "audio/ogg", 1)]
+    feitos, textos = [], []
+    j.contas.p.agendar_arquivo = lambda c, a, leg, q, r="", mencoes=None:         feitos.append(leg) or (True, "")
+    j.contas.p.agendar_texto = lambda c, t, q, r="", mencoes=None:         textos.append(t) or (True, "")
+    _dialogo_de_agendar(monkeypatch,
+                        ("depois", datetime.now() + timedelta(days=1)),
+                        jm.wx.ID_OK)
+    monkeypatch.setattr(jm.threading, "Thread", _ThreadAgendar)
+    j.fala.falar = lambda t, interromper=False: None
+    j.caixa.SetValue("depois")
+    j._agendar_mensagem()
+    assert feitos == [""] and textos == ["depois"]
+    assert j.caixa.GetValue() == "" and j.anexos == []
+
+
+def test_agendar_com_anexos_que_falha_no_segundo_deixa_o_resto(
+        j, monkeypatch, tmp_path):
+    from datetime import datetime, timedelta
+    from telezapp.midia.envio import Anexo
+    _abrir_com_caixa(j)
+    j.estados["t1"] = ev.CONECTADA
+    j.contas.p.PODE_AGENDAR = True
+    arq = tmp_path / "a.jpg"
+    arq.write_bytes(b"x")
+    a1 = Anexo(str(arq), m.FOTO, "1.jpg", "image/jpeg", 1)
+    a2 = Anexo(str(arq), m.FOTO, "2.jpg", "image/jpeg", 2)
+    j.anexos[:] = [a1, a2]
+    chamadas = []
+
+    def agendar(c, a, leg, q, r="", mencoes=None):
+        chamadas.append(a.nome)
+        return (True, "") if len(chamadas) == 1 else (False, "sem espaço")
+    j.contas.p.agendar_arquivo = agendar
+    _dialogo_de_agendar(monkeypatch,
+                        ("", datetime.now() + timedelta(days=1)),
+                        jm.wx.ID_OK)
+    monkeypatch.setattr(jm.threading, "Thread", _ThreadAgendar)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._agendar_mensagem()
+    assert chamadas == ["1.jpg", "2.jpg"]
+    assert j.anexos == [a2]
+    assert "sem espaço" in ditas[-1] and "1 já ficou agendado" in ditas[-1]
+
+
+def test_botao_agendar_envio_fica_logo_depois_de_enviar_e_agenda(j,
+                                                                 monkeypatch):
+    botoes = list(j.botoes_envio)
+    assert botoes[botoes.index(j.botao_enviar) + 1] is j.botao_agendar
+    assert j.botao_agendar.label.startswith("Agendar envio")
+    assert j.botao_agendar in [c[0] for c in j._controles_atalho]
+
+
+def _bot_tradutor(j, monkeypatch, respostas):
+    """Liga o bot tradutor e devolve (pedidos, falas, provedor)."""
+    j.cfg.set("ia_bot_traduzir", True)
+    j.cfg.set("ia_bot_traducao_nome", "@tradutor")
+    pedidos = []
+
+    def perguntar(bot, texto, idioma=None, **k):
+        pedidos.append((bot, texto, idioma))
+        r = respostas.pop(0)
+        if isinstance(r, Exception):
+            raise r
+        return r
+    prov = j.contas.p
+    prov.perguntar_bot_texto = perguntar
+    monkeypatch.setattr(j, "_conta_para_bot", lambda: prov)
+    monkeypatch.setattr(jm.threading, "Thread", _ThreadAgendar)
+    falas = []
+    j.fala.falar = lambda t, interromper=False: falas.append(t)
+    return pedidos, falas, prov
+
+
+def test_traduzir_o_texto_digitado_pelo_bot_pergunta_o_idioma_e_o_repassa(
+        j, monkeypatch):
+    pedidos, falas, _ = _bot_tradutor(j, monkeypatch, ["Good morning"])
+    monkeypatch.setattr(j, "_idioma_de_traducao", lambda: "English")
+    _abrir_com_caixa(j)
+    j.caixa.SetValue("Bom dia")
+    j._ia_traduzir_caixa()
+    assert pedidos == [("@tradutor", "Bom dia", "English")]
+    assert j.caixa.GetValue() == "Good morning"
+    assert "Good morning" in falas[-1] and not j._ia_texto_ocupada
+
+
+def test_bot_tradutor_que_falha_segue_pelos_provedores(j, monkeypatch):
+    pedidos, falas, _ = _bot_tradutor(
+        j, monkeypatch, [RuntimeError("o bot não respondeu a tempo")])
+    chamadas = []
+    perguntas = []
+    monkeypatch.setattr(j, "_idioma_de_traducao",
+                        lambda: perguntas.append(1) or "English")
+    monkeypatch.setattr(j, "_ia_texto", lambda op, texto, pronto, **k:
+                        chamadas.append((texto, k)))
+    _abrir_com_caixa(j)
+    j.caixa.SetValue("Bom dia")
+    j._ia_traduzir_caixa()
+    assert pedidos == [("@tradutor", "Bom dia", "English")]
+    assert chamadas == [("Bom dia", {"destino": "English"})]
+    assert len(perguntas) == 1               # o idioma e perguntado uma vez
+    assert "não traduziu" in " ".join(falas)
+    assert not j._ia_texto_ocupada
+
+
+def test_sem_a_opcao_ou_sem_nome_a_traducao_segue_so_pelos_provedores(
+        j, monkeypatch):
+    chamadas = []
+    monkeypatch.setattr(j, "_idioma_de_traducao", lambda: "English")
+    monkeypatch.setattr(j, "_ia_texto", lambda op, texto, pronto, **k:
+                        chamadas.append(texto))
+    _abrir_com_caixa(j)
+    j.caixa.SetValue("Bom dia")
+    j.cfg.set("ia_bot_traduzir", False)
+    j.cfg.set("ia_bot_traducao_nome", "@tradutor")
+    j._ia_traduzir_caixa()
+    j.cfg.set("ia_bot_traduzir", True)
+    j.cfg.set("ia_bot_traducao_nome", "")
+    j._ia_traduzir_caixa()
+    assert chamadas == ["Bom dia", "Bom dia"]
+
+
+def test_traduzir_a_mensagem_selecionada_pelo_bot_mostra_a_traducao(
+        j, monkeypatch):
+    pedidos, falas, _ = _bot_tradutor(j, monkeypatch, ["Hello"])
+    mostradas = []
+    monkeypatch.setattr(jm.dialogos, "mostrar_texto",
+                        lambda pai, titulo, texto, *a, **k:
+                        mostradas.append((titulo, texto)))
+    monkeypatch.setattr(j, "_mensagem_selecionada", lambda: object())
+    monkeypatch.setattr(j, "_texto_para_ia", lambda x: "Olá")
+    monkeypatch.setattr(j, "_idioma_de_traducao", lambda: "English")
+    j._ia_traduzir_mensagem()
+    assert pedidos == [("@tradutor", "Olá", "English")]
+    assert mostradas == [("Tradução da mensagem", "Hello")]
+
+
+def test_manter_posicao_das_fixadas_ignora_a_atividade_mas_nao_as_outras(j):
+    def conv(id_, fixada, data):
+        return m.Conversa("t1", id_, "Conv " + id_, "telegram", "privada",
+                          fixada=fixada, data=data)
+    j.indice.clear()
+    for c in (conv("A", True, 100), conv("B", True, 300), conv("C", True, 200),
+              conv("D", False, 900), conv("E", False, 800)):
+        j.indice[c.chave] = c
+    j.cfg.set("ordem_das_fixadas", [])
+    nomes = lambda: [c.id for c in j.conversas]
+    j.cfg.set("manter_posicao_fixadas", False)
+    j._ordenar()
+    assert nomes() == ["B", "C", "A", "D", "E"]       # fixadas por atividade
+    j.cfg.set("manter_posicao_fixadas", True)
+    j._ordenar()
+    assert nomes() == ["B", "C", "A", "D", "E"]       # parte da ordem atual
+    j.indice[("t1", "A")].data = 1000                  # A recebe mensagem
+    j.indice[("t1", "E")].data = 2000                  # E tambem, mas nao fixada
+    j._ordenar()
+    assert nomes() == ["B", "C", "A", "E", "D"]       # A nao subiu; E subiu
+    j.indice[("t1", "D")].fixada = True                # D fixada agora
+    j._ordenar()
+    assert nomes()[0] == "D" and nomes()[1:4] == ["B", "C", "A"]
+    j.indice[("t1", "C")].fixada = False               # C desafixada
+    j._ordenar()
+    assert nomes() == ["D", "B", "A", "C", "E"] or \
+        nomes()[:3] == ["D", "B", "A"]
+    assert j.cfg.get("ordem_das_fixadas")[:3] == ["t1|D", "t1|B", "t1|A"]
+    # o filtro nao desfaz a ordem guardada de quem ficou de fora
+    guardada = list(j.cfg.get("ordem_das_fixadas"))
+    j.busca = "zzz"
+    j._ordenar()
+    assert j.cfg.get("ordem_das_fixadas") == guardada
+
+
+def test_marcar_a_opcao_das_fixadas_reordena_a_lista_na_hora(j, monkeypatch):
+    chamadas = []
+    monkeypatch.setattr(j, "_ordenar", lambda: chamadas.append("ordenar"))
+    monkeypatch.setattr(j, "_preencher_conversas",
+                        lambda *a, **k: chamadas.append("preencher"))
+    j._aplicar_opcao("manter_posicao_fixadas", True)
+    assert j.cfg.get("manter_posicao_fixadas") is True
+    assert chamadas == ["ordenar", "preencher"]
+
+
+class _ThreadDireta:
+    def __init__(self, target=None, args=(), **k):
+        self.t, self.a = target, args
+
+    def start(self):
+        self.t(*self.a)
+
+
+def _com_celular(j, monkeypatch):
+    """A conta t1 apaga no celular; devolve a lista dos pedidos de limpeza."""
+    pedidos = []
+    prov = j.contas.provedor("t1")
+    prov.APAGA_NA_CONTA = True
+    prov.limpar_conversa = lambda cid, ultima: pedidos.append(cid) or True
+    j.estados["t1"] = ev.CONECTADA
+    monkeypatch.setattr(jm.threading, "Thread", _ThreadDireta)
+    return pedidos
+
+
+def test_item_limpar_a_conversa_fica_no_menu_conversas_e_age_na_em_foco(
+        j, monkeypatch):
+    assert "limpar_conversa" in j.itens
+    menu = j._menu_do_item["limpar_conversa"]
+    assert menu is j._menu_do_item["silenciar"]
+    chamadas = []
+    monkeypatch.setattr(j, "_conversa_em_foco",
+                        lambda: j.indice[("t1", "20")])
+    monkeypatch.setattr(j, "_limpar_conversa",
+                        lambda c: chamadas.append(c.id))
+    j._limpar_conversa_do_menu()
+    assert chamadas == ["20"]
+    monkeypatch.setattr(j, "_conversa_em_foco", lambda: None)
+    falas = []
+    j.fala.falar = lambda t, interromper=False: falas.append(t)
+    j._limpar_conversa_do_menu()
+    assert chamadas == ["20"] and falas[-1] == "Nenhuma conversa selecionada."
+
+
+def test_limpar_conversa_com_a_confirmacao_desligada_limpa_aqui_e_no_celular(
+        j, monkeypatch):
+    conv = j.indice[("t1", "20")]
+    j.banco.salvar_mensagens([m.Mensagem("t1", "20", "L1", texto="oi")])
+    pedidos = _com_celular(j, monkeypatch)
+    j.cfg.set("confirmar_limpar_conversa", False)
+    j.cfg.set("confirmar_aviso_celular", False)
+    monkeypatch.setattr(j, "_perguntar_celular", lambda *a: pytest.fail(
+        "nao devia perguntar"))
+    j._limpar_conversa(conv)
+    assert pedidos == ["20"]                       # tambem no celular
+    assert not j.banco.mensagens("t1", "20", 1)    # e aqui
+
+
+def test_limpar_conversa_com_a_confirmacao_ligada_ainda_pergunta(
+        j, monkeypatch):
+    conv = j.indice[("t1", "20")]
+    j.banco.salvar_mensagens([m.Mensagem("t1", "20", "L1", texto="oi")])
+    perguntas = []
+    monkeypatch.setattr(j, "_perguntar_celular",
+                        lambda *a: perguntas.append(a[2]) or False)
+    j.cfg.set("confirmar_limpar_conversa", True)
+    j._limpar_conversa(conv)
+    assert perguntas == ["Limpar conversa"]
+
+
+def test_limpar_varias_conversas_marcadas_com_uma_pergunta_so(j, monkeypatch):
+    c1 = j.indice[("t1", "20")]
+    c2 = m.Conversa("t1", "21", "Outra", "telegram", "privada", data=AGORA)
+    j.indice[c2.chave] = c2
+    for cid in ("20", "21"):
+        j.banco.salvar_mensagens([m.Mensagem("t1", cid, "x" + cid,
+                                             texto="oi")])
+    pedidos = _com_celular(j, monkeypatch)
+    dialogos_vistos = []
+
+    class Dlg:
+        def __init__(self, *a, **k):
+            dialogos_vistos.append(a[1])
+
+        def SetYesNoCancelLabels(self, *a):
+            pass
+
+        def ShowModal(self):
+            return jm.wx.ID_YES
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(jm.wx, "MessageDialog", Dlg, raising=False)
+    j.cfg.set("confirmar_limpar_conversa", True)
+    j.cfg.set("confirmar_aviso_celular", False)
+    falas = []
+    j.fala.falar = lambda t, interromper=False: falas.append(t)
+    j._limpar_varias_conversas([c1, c2], "2 conversas")
+    assert len(dialogos_vistos) == 1                # uma pergunta so
+    assert sorted(pedidos) == ["20", "21"]
+    assert not j.banco.mensagens("t1", "20", 1)
+    assert not j.banco.mensagens("t1", "21", 1)
+    assert c1.chave in j.indice and c2.chave in j.indice   # seguem na lista
+    assert "2 conversas limpadas" in falas[-1] and "celular" in falas[-1]

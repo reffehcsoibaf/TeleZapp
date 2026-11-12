@@ -783,13 +783,13 @@ def trecho_da_previa(msg):
     return "prévia do link: " + texto if texto else ""
 
 
-def _so_link(m):
-    """Verdadeiro se a mensagem e um texto que e apenas um link e tem previa."""
+def _previa_na_frente_do_texto(m):
+    """Verdadeiro se a mensagem e um texto com link que tem previa: a previa
+    vem antes do texto, para saber do que se trata sem ouvir o endereco
+    inteiro. Vale tambem quando ha mais texto alem do link."""
     if m.tipo != TEXTO or extras_de(m)["apagada"] or not (m.texto or "").strip():
         return False
-    achados = extrair_links(m.texto)
-    return len(achados) == 1 and m.texto.strip().rstrip(_FIM_DE_LINK) == \
-        achados[0][1] and bool(trecho_da_previa(m))
+    return bool(trecho_da_previa(m))
 
 
 LIMITE_IA_NA_LINHA = {"descricao": 0, "transcricao": 1000}
@@ -856,10 +856,10 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None,
         itens = lista_mensagens.ativos(base)
         if autor_so_quando_muda is None:
             autor_so_quando_muda = base["autor_so_quando_muda"]
-    so_link = _so_link(m)
-    # a previa de um link sozinho vem antes dele, para saber do que se trata
-    # sem ouvir o endereco inteiro
-    previa_na_frente = so_link and "conteudo" in itens and "previa" in itens
+    # a previa de um link vem antes do texto da mensagem, para saber do que se
+    # trata sem ouvir o endereco inteiro (com mais texto junto, tambem)
+    previa_na_frente = _previa_na_frente_do_texto(m) and \
+        "conteudo" in itens and "previa" in itens
 
     def bloco_conteudo():
         cont = conteudo(m).replace(chr(13), " ").replace(chr(10), " ")

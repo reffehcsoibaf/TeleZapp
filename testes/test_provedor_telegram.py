@@ -1992,7 +1992,10 @@ def test_bot_de_descricao_so_vale_a_resposta_ao_pedido(monkeypatch):
     async def rapido(_):
         return None
     monkeypatch.setattr(tg.asyncio, "sleep", rapido)
-    fake = types.SimpleNamespace(cliente=Cliente())
+    fake = types.SimpleNamespace(cliente=Cliente(), _conversas={},
+                                 _rearquivando=set())
+    fake._conversar_com_o_bot = types.MethodType(
+        tg.ProvedorTelegram._conversar_com_o_bot, fake)
     texto = asyncio.run(tg.ProvedorTelegram._perguntar_bot(
         fake, "AmelieTelegramBot", "x.jpg", False, 5, 0.0))
     assert texto == "Um cachorro na grama."
@@ -2247,7 +2250,7 @@ def test_agendadas_listam_em_ordem_e_cancelam_e_mudam_a_hora(ambiente):
     p.cliente = cliente
     itens = asyncio.run(p._agendadas("10"))
     assert [x["id"] for x in itens] == [7, 8]          # da mais proxima
-    assert itens[0]["texto"] == "(mídia)" and itens[1]["texto"] == "depois"
+    assert itens[0]["texto"] == "mídia" and itens[1]["texto"] == "depois"
     assert itens[0]["quando"].tzinfo is None
     assert asyncio.run(p._cancelar_agendadas("10", [7, 8])) == (True, "")
     cancelar = cliente.requisicoes[-1]
@@ -2402,3 +2405,257 @@ def test_grupo_com_topicos_lidos_e_lido_inteiro_mesmo_contando_zero(ambiente):
     cliente.lidas = []
     asyncio.run(p._marcar_lida("-1009#5"))
     assert cliente.lidas == ["grupo"]
+
+
+def test_agendar_arquivo_manda_o_arquivo_com_a_data_ao_telegram(ambiente,
+                                                                tmp_path):
+    import asyncio
+    from telezapp.midia.envio import Anexo
+    cliente = _cliente_de_agendadas()
+    enviados = []
+
+    async def send_file(ent, caminho, caption=None, schedule=None,
+                        reply_to=None, force_document=False, **kw):
+        if caption == "falhar":
+            raise errors.ChatWriteForbiddenError(None)
+        enviados.append((caminho, caption, schedule, reply_to,
+                         force_document, kw))
+    cliente.send_file = send_file
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    arq = tmp_path / "a.jpg"
+    arq.write_bytes(b"x")
+    anexo = Anexo(str(arq), m.FOTO, "a.jpg", "image/jpeg", 1)
+    quando = datetime.datetime(2026, 11, 12, 9, 0)
+    assert asyncio.run(p._agendar_arquivo(
+        "10", anexo, "olha isso", quando, "", None)) == (True, "")
+    caminho, legenda, agendada, resposta, doc, extra = enviados[0]
+    assert caminho == str(arq) and legenda == "olha isso" and not doc
+    assert agendada.replace(tzinfo=None) == quando and agendada.tzinfo
+    voz = Anexo(str(arq), m.VOZ, "v.ogg", "audio/ogg", 1, segundos=4)
+    asyncio.run(p._agendar_arquivo("10", voz, "", quando, "", None))
+    assert enviados[1][5]["voice_note"] is True
+    doc = Anexo(str(arq), m.DOCUMENTO, "d.pdf", "application/pdf", 1)
+    asyncio.run(p._agendar_arquivo("10", doc, "", quando, "", None))
+    assert enviados[2][4] is True               # force_document
+    ok, motivo = asyncio.run(p._agendar_arquivo(
+        "10", anexo, "falhar", quando, "", None))
+    assert not ok and "permissão" in motivo
+
+
+def test_agendada_com_midia_aparece_com_o_tipo_na_lista(ambiente):
+    import asyncio
+    cliente = _cliente_de_agendadas()
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    itens = asyncio.run(p._agendadas("10"))
+    assert itens[0]["texto"] == "mídia"
+    assert tg._rotulo_da_midia(types.SimpleNamespace(photo=object())) == "foto"
+    assert tg._rotulo_da_midia(types.SimpleNamespace(
+        voice=object())) == "mensagem de voz"
+
+
+def test_perguntar_bot_texto_manda_o_texto_e_devolve_a_resposta(ambiente):
+    import asyncio
+    textos = []
+
+    class Cliente(ClienteFalso):
+        async def get_entity(self, quem):
+            return quem
+
+        async def send_message(self, ent, texto="", **kw):
+            textos.append((ent, texto))
+            return types.SimpleNamespace(id=100)
+
+        async def get_messages(self, ent, min_id=0, limit=20):
+            return [types.SimpleNamespace(
+                id=101, out=False, message="Good morning",
+                reply_to=types.SimpleNamespace(reply_to_msg_id=100))]
+    cliente = Cliente()
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    r = asyncio.run(p._perguntar_bot("tradutor", None, False, 5, 0.0,
+                                     "Bom dia"))
+    assert r == "Good morning" and textos == [("@tradutor", "Bom dia")]
+    with pytest.raises(RuntimeError) as erro:
+        p.perguntar_bot_texto("tradutor", "x" * (tg.LIMITE_DE_TEXTO_AO_BOT + 1))
+    assert "grande demais" in str(erro.value)
+
+
+class _Botao:
+    def __init__(self, texto):
+        self.text = texto
+
+
+def _bot_que_pede_o_idioma(rotulos, apos_clique, edita=False):
+    """Cliente falso de um bot tradutor: responde com o pedido de idioma
+    (e botoes) e, depois do clique, com a traducao (nova mensagem ou o
+    mesmo pedido editado)."""
+    estado = {"cliques": []}
+
+    class Pedido:
+        id = 101
+        out = False
+        reply_to = types.SimpleNamespace(reply_to_msg_id=100)
+
+        @property
+        def message(self):
+            return apos_clique if (edita and estado["cliques"]) else \
+                "Seleccioná el idioma de destino"
+
+        @property
+        def buttons(self):
+            return None if (edita and estado["cliques"]) else [
+                [_Botao(t) for t in linha] for linha in rotulos]
+
+        async def click(self, i, j):
+            estado["cliques"].append((i, j))
+
+    class Cliente(ClienteFalso):
+        async def get_entity(self, quem):
+            return quem
+
+        async def send_message(self, ent, texto="", **kw):
+            return types.SimpleNamespace(id=100)
+
+        async def get_messages(self, ent, min_id=0, limit=20):
+            achadas = [Pedido()]
+            if estado["cliques"] and not edita:
+                achadas.append(types.SimpleNamespace(
+                    id=102, out=False, message=apos_clique, buttons=None,
+                    reply_to=types.SimpleNamespace(reply_to_msg_id=101)))
+            return achadas
+    return Cliente(), estado
+
+
+@pytest.mark.parametrize("edita", [False, True])
+def test_bot_tradutor_aperta_o_botao_do_idioma_e_devolve_a_traducao(
+        ambiente, edita):
+    import asyncio
+    rotulos = [["\U0001f1ea\U0001f1f8 Español", "\U0001f1fa\U0001f1f8 Inglés"],
+               ["\U0001f1e7\U0001f1f7 Português"]]
+    cliente, estado = _bot_que_pede_o_idioma(rotulos, "Good morning", edita)
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    r = asyncio.run(p._perguntar_bot("tradutor", None, False, 8, 0.0,
+                                     "Bom dia", "English"))
+    assert r == "Good morning"
+    assert estado["cliques"] == [(0, 1)]          # o botao de Inglés
+
+
+def test_bot_tradutor_sem_o_botao_do_idioma_avisa(ambiente):
+    import asyncio
+    cliente, estado = _bot_que_pede_o_idioma([["Klingon"]], "x")
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    with pytest.raises(RuntimeError) as erro:
+        asyncio.run(p._perguntar_bot("tradutor", None, False, 8, 0.0,
+                                     "Bom dia", "English"))
+    assert "botão de English" in str(erro.value) and not estado["cliques"]
+
+
+def test_achar_o_botao_do_idioma_por_nome_ou_bandeira():
+    from telezapp.nucleo.ia import catalogo as cat
+    rotulos = [["Español", "English"], ["\U0001f1e7\U0001f1f7"],
+               ["Français", "Deutsch", "Italiano"]]
+    assert cat.botao_do_idioma(rotulos, "English") == (0, 1)
+    assert cat.botao_do_idioma(rotulos, "Spanish") == (0, 0)
+    assert cat.botao_do_idioma(rotulos, "Brazilian Portuguese") == (1, 0)
+    assert cat.botao_do_idioma(rotulos, "French") == (2, 0)
+    assert cat.botao_do_idioma(rotulos, "German") == (2, 1)
+    assert cat.botao_do_idioma(rotulos, "Italian") == (2, 2)
+    assert cat.botao_do_idioma([["Português (Portugal)",
+                                 "Português (Brasil)"]],
+                               "Brazilian Portuguese") == (0, 1)
+    assert cat.botao_do_idioma([["Klingon"]], "English") is None
+
+
+def _cliente_de_bot_com_conversa(respostas, resposta_final="ok"):
+    from telethon.tl import types as tt
+    chamadas = []
+
+    class Cliente(ClienteFalso):
+        async def get_entity(self, quem):
+            return tt.User(id=77)
+
+        async def send_message(self, ent, texto="", **kw):
+            return types.SimpleNamespace(id=100)
+
+        async def get_messages(self, ent, min_id=0, limit=20):
+            if isinstance(respostas, Exception):
+                raise respostas
+            return [types.SimpleNamespace(
+                id=101, out=False, message=resposta_final, buttons=None,
+                reply_to=types.SimpleNamespace(reply_to_msg_id=100))]
+
+        async def send_read_acknowledge(self, ent, *a, **k):
+            chamadas.append(("lida", ent))
+
+        async def edit_folder(self, ent, pasta):
+            chamadas.append(("pasta", pasta))
+    return Cliente(), chamadas
+
+
+@pytest.mark.parametrize("arquivada,deve", [(True, True), (False, False)])
+def test_conversa_arquivada_com_o_bot_volta_para_arquivadas(
+        ambiente, arquivada, deve):
+    import asyncio
+    cliente, chamadas = _cliente_de_bot_com_conversa([])
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    p._conversas["77"] = m.Conversa("t1", "77", "Bot", "telegram", "privada",
+                                    arquivada=arquivada, nao_lidas=2)
+    r = asyncio.run(p._perguntar_bot("tradutor", None, False, 5, 0.0, "oi"))
+    assert r == "ok"
+    assert (("pasta", 1) in chamadas) is deve
+    assert (("lida", None) in [(a, None) for a, _ in chamadas]) is deve
+    assert not p._rearquivando
+    if deve:
+        assert p._conversas["77"].arquivada and p._conversas["77"].nao_lidas == 0
+
+
+def test_conversa_arquivada_com_o_bot_volta_mesmo_se_o_pedido_falha(
+        ambiente):
+    import asyncio
+    cliente, chamadas = _cliente_de_bot_com_conversa(
+        ValueError("sem rede"))
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    p._conversas["77"] = m.Conversa("t1", "77", "Bot", "telegram", "privada",
+                                    arquivada=True)
+    with pytest.raises(ValueError):
+        asyncio.run(p._perguntar_bot("tradutor", None, False, 5, 0.0, "oi"))
+    assert ("pasta", 1) in chamadas and not p._rearquivando
+
+
+def test_privacidade_manter_arquivadas_do_telegram_le_e_grava(ambiente):
+    import asyncio
+    from telethon.tl import types as tt
+
+    class Cliente(ClienteFalso):
+        def __init__(self):
+            super().__init__()
+            self.gravadas = []
+            self.global_ = tt.GlobalPrivacySettings(
+                keep_archived_unmuted=False, keep_archived_folders=False,
+                hide_read_marks=False)
+
+        async def __call__(self, req):
+            nome = type(req).__name__
+            if nome == "GetGlobalPrivacySettingsRequest":
+                return self.global_
+            if nome == "SetGlobalPrivacySettingsRequest":
+                self.gravadas.append(req.settings)
+                self.global_ = req.settings
+                return req.settings
+            return types.SimpleNamespace(rules=[])
+    cliente = Cliente()
+    p = ambiente.criar(cliente)
+    p.cliente = cliente
+    assert asyncio.run(p._ler_privacidade())["keeparchived"] == "unarchive"
+    asyncio.run(p._gravar_privacidade("keeparchived", "keep"))
+    gravada = cliente.gravadas[-1]
+    assert gravada.keep_archived_unmuted and gravada.keep_archived_folders
+    assert asyncio.run(p._ler_privacidade())["keeparchived"] == "keep"
+    asyncio.run(p._gravar_privacidade("keeparchived", "unarchive"))
+    assert not cliente.gravadas[-1].keep_archived_unmuted

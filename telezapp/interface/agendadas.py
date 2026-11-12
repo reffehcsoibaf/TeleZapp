@@ -17,15 +17,18 @@ from telezapp.nucleo import agendamento as ag
 
 class DialogoAgendar(wx.Dialog):
     """Texto (quando for novo), data e hora. `escolhido()` devolve
-    (texto, datetime) depois do OK."""
+    (texto, datetime) depois do OK. Com `resumo` (as midias a agendar), o
+    texto e a legenda e pode ficar vazio."""
 
     def __init__(self, pai, destino, texto="", editar_texto=True,
                  titulo="Agendar mensagem", agora=None, quando=None,
-                 local=False):
+                 local=False, resumo="", falar=None):
         super().__init__(pai, title=titulo,
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self._agora = agora or datetime.now
         self._resultado = None
+        self._resumo = resumo
+        self._falar = falar or (lambda texto: None)
         data, hora = ag.sugestao(self._agora())
         if quando is not None:
             data, hora = quando.strftime("%d/%m/%Y"), quando.strftime("%H:%M")
@@ -42,21 +45,28 @@ class DialogoAgendar(wx.Dialog):
         texto_aviso = wx.StaticText(self, label=aviso)
         texto_aviso.Wrap(460)
         lay.Add(texto_aviso, 0, wx.ALL, 10)
-        lay.Add(wx.StaticText(self, label="&Mensagem:"), 0,
-                wx.LEFT | wx.RIGHT, 10)
+        if resumo:
+            lay.Add(wx.StaticText(self, label="Para agendar: %s." % resumo),
+                    0, wx.LEFT | wx.RIGHT, 10)
+        lay.Add(wx.StaticText(self, label=(
+            "&Legenda (pode ficar vazia):" if resumo else "&Mensagem:")), 0,
+            wx.LEFT | wx.RIGHT, 10)
         self.caixa = wx.TextCtrl(self, value=texto, name="Mensagem",
                                  style=wx.TE_MULTILINE | wx.TE_READONLY
                                  if not editar_texto else wx.TE_MULTILINE,
                                  size=(460, 110))
         lay.Add(self.caixa, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
         lay.Add(wx.StaticText(self, label=(
-            "&Data (hoje, amanhã ou dia/mês/ano):")), 0,
+            "&Data (setas mudam o dia; ou digite, como 25122026):")), 0,
             wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.data = wx.TextCtrl(self, value=data, name="Data")
+        self.data.Bind(wx.EVT_KEY_DOWN, self._tecla_da_data)
         lay.Add(self.data, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
-        lay.Add(wx.StaticText(self, label="&Hora (por exemplo 14:30):"), 0,
-                wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        lay.Add(wx.StaticText(self, label=(
+            "&Hora (setas mudam o horário; ou digite, como 1430):")), 0,
+            wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.hora = wx.TextCtrl(self, value=hora, name="Hora")
+        self.hora.Bind(wx.EVT_KEY_DOWN, self._tecla_da_hora)
         lay.Add(self.hora, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
         botoes = wx.BoxSizer(wx.HORIZONTAL)
         self.b_ok = wx.Button(self, wx.ID_OK, "&Agendar")
@@ -69,9 +79,42 @@ class DialogoAgendar(wx.Dialog):
         self.CentreOnParent()
         (self.caixa if editar_texto and not texto else self.data).SetFocus()
 
+    @staticmethod
+    def _direcao(evt):
+        """(direcao, grande) das setas e de Page Up/Down; None nas demais
+        teclas (e com Ctrl, Alt ou Shift)."""
+        codigo = evt.GetKeyCode()
+        if evt.HasAnyModifiers():
+            return None
+        return {wx.WXK_UP: (1, False), wx.WXK_DOWN: (-1, False),
+                wx.WXK_PAGEUP: (1, True),
+                wx.WXK_PAGEDOWN: (-1, True)}.get(codigo)
+
+    def _tecla_da_data(self, evt):
+        passo = self._direcao(evt)
+        if passo is None:
+            evt.Skip()
+            return
+        texto, falado = ag.mudar_data(self.data.GetValue(), *passo,
+                                      self._agora().date())
+        self.data.SetValue(texto)
+        self.data.SelectAll()
+        self._falar(falado)
+
+    def _tecla_da_hora(self, evt):
+        passo = self._direcao(evt)
+        if passo is None:
+            evt.Skip()
+            return
+        texto, falado = ag.mudar_hora(self.hora.GetValue(), *passo,
+                                      self._agora())
+        self.hora.SetValue(texto)
+        self.hora.SelectAll()
+        self._falar(falado)
+
     def _ok(self, evt):
         texto = self.caixa.GetValue().strip()
-        if not texto:
+        if not texto and not self._resumo:
             wx.MessageBox("Escreva a mensagem.", "Agendar mensagem",
                           wx.OK | wx.ICON_WARNING, self)
             self.caixa.SetFocus()
