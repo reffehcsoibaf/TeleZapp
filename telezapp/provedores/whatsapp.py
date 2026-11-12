@@ -192,12 +192,30 @@ def arquitetura_do_processo():
     exemplo) o TeleZapp x64 roda emulado e a conta pedia a DLL arm64, que
     nao existe: durante a importacao, diz a arquitetura do proprio processo."""
     real = platform.machine
-    if sysconfig.get_platform() == "win-amd64" and             real().lower() not in ("amd64", "x86_64"):
+    if sysconfig.get_platform() == "win-amd64" and \
+            real().lower() not in ("amd64", "x86_64"):
         platform.machine = lambda: "AMD64"
+        go_sem_preempcao_assincrona()
     try:
         yield
     finally:
         platform.machine = real
+
+
+def go_sem_preempcao_assincrona(ambiente=None):
+    """Num Windows ARM o TeleZapp x64 roda emulado, e a DLL em Go do neonize
+    morria sem deixar rastro quando comecava a conectar (relato de pareamento,
+    11/11/2026, Windows 11 build 22631). O Go interrompe as threads com
+    SuspendThread/SetThreadContext (preempcao assincrona), que o emulador x64
+    do Windows ARM trata mal; GODEBUG=asyncpreemptoff=1 desliga isso. Vale para
+    o processo e tem de estar no ambiente antes de a DLL carregar."""
+    ambiente = os.environ if ambiente is None else ambiente
+    atual = [x for x in (ambiente.get("GODEBUG") or "").split(",") if x]
+    if any(x.startswith("asyncpreemptoff=") for x in atual):
+        return False
+    ambiente["GODEBUG"] = ",".join(atual + ["asyncpreemptoff=1"])
+    log.info("Windows ARM com o TeleZapp x64: GODEBUG=%s", ambiente["GODEBUG"])
+    return True
 
 
 def eventos_do_neonize():
@@ -1485,6 +1503,8 @@ class ProvedorWhatsApp(Provedor):
                                  ("ChatMuteEv", self._ao_silenciar),
                                  ("ChatDeleteEv", self._ao_apagar_conversa),
                                  ("ChatClearEv", self._ao_limpar_conversa),
+                                 ("AppStateMutationEv",
+                                  self._ao_mutacao_de_estado),
                                  ("ChatMarkAsReadEv", self._ao_marcar_lida)):
                 classe = getattr(nev, nome, None)
                 if classe is not None:
@@ -2237,6 +2257,9 @@ class ProvedorWhatsApp(Provedor):
                            *extra],
                     Version=versao, Value=valor)])
             self._mandar_estado(patch)
+            log.info("aviso de estado %s enviado e aceito pelo servidor "
+                     "(coleção %s)", indice,
+                     COLECAO_DO_TIPO.get(int(tipo), "?"))
             return True
         except ColecaoFora as e:
             log.warning("aviso %s não enviado: estado %s fora de sincronia",
@@ -3500,7 +3523,106 @@ class ProvedorWhatsApp(Provedor):
                 "status": v(c.Status), "readreceipts": v(c.ReadReceipts),
                 "groupadd": v(c.GroupAdd)}
 
+    # "Manter conversas arquivadas" (Configuracoes do WhatsApp, Conversas) e um
+    # ajuste do estado do aplicativo (`setting_unarchiveChats`, colecao
+    # regular_low) que o neonize so repassa pelo aviso AppStateMutationEv, a
+    # cada mutacao, inclusive no download completo da colecao. O valor visto
+    # fica num arquivo da conta; o WhatsApp so guarda o ajuste depois que
+    # alguem o muda, e sem ele o padrao e manter arquivadas.
+    INDICE_MANTER_ARQUIVADAS = "setting_unarchiveChats"
+
+    def _arquivo_manter_arquivadas(self):
+        return os.path.join(self.pasta_sessoes, "%s-manter-arquivadas.json"
+                            % self.conta.id)
+
+    def _manter_arquivadas_visto(self):
+        """True/False como o aviso do celular disse; None se nunca vimos."""
+        try:
+            with open(self._arquivo_manter_arquivadas(),
+                      encoding="utf-8") as f:
+                valor = json.load(f).get("manter")
+            return valor if isinstance(valor, bool) else None
+        except (OSError, ValueError):
+            return None
+
+    def _guardar_manter_arquivadas(self, manter):
+        try:
+            with open(self._arquivo_manter_arquivadas(), "w",
+                      encoding="utf-8") as f:
+                json.dump({"manter": bool(manter)}, f)
+        except OSError:
+            log.warning("não guardei o ajuste de manter arquivadas")
+
+    def _ao_mutacao_de_estado(self, cliente, evento):
+        """Todo aviso de mutacao do estado do aplicativo; so interessa o
+        ajuste de manter arquivadas (no WhatsApp o campo diz se a conversa
+        DESARQUIVA ao chegar mensagem: manter e o contrario)."""
+        try:
+            indice = list(evento.Index)
+            if str(evento.Name) != "regular_low" or \
+                    indice != [self.INDICE_MANTER_ARQUIVADAS]:
+                return
+            if evento.Remove:
+                self._guardar_manter_arquivadas(True)   # volta ao padrao
+                manter = True
+            else:
+                manter = not evento.Action.unarchiveChatsSetting \
+                    .unarchiveChats
+                self._guardar_manter_arquivadas(manter)
+            log.info("manter conversas arquivadas, como o celular diz: %s%s",
+                     "sim" if manter else "não",
+                     " (baixando a coleção)" if evento.FromFullSync else "")
+        except Exception:
+            log.exception("erro ao tratar o aviso do estado do aplicativo")
+
+    def _manter_arquivadas(self):
+        """"keep"/"unarchive" para a caixa da privacidade, ou None. Sem ter
+        visto o ajuste, baixa a coleção regular_low uma vez nesta sessao: se
+        o baixou e o ajuste nao existe, vale o padrao do WhatsApp (manter)."""
+        visto = self._manter_arquivadas_visto()
+        if visto is None and not getattr(self, "_semeou_manter", False):
+            self._semeou_manter = True
+            try:
+                self.cliente.fetch_app_state("regular_low", full_sync=True)
+            except Exception as e:
+                log.info("manter arquivadas: não baixei regular_low (%s: %s)",
+                         type(e).__name__, e)
+                return None
+            for _ in range(20):          # o aviso chega em outra thread
+                visto = self._manter_arquivadas_visto()
+                if visto is not None:
+                    break
+                time.sleep(0.25)
+            if visto is None:
+                self._guardar_manter_arquivadas(True)     # nao existe: padrao
+                visto = True
+        if visto is None:
+            return None
+        return "keep" if visto else "unarchive"
+
+    def _definir_manter_arquivadas(self, manter):
+        """Manda o ajuste ao celular (REGULAR_LOW, versao 4, o mesmo do
+        WhatsApp Web e do WinZapp). O envio roda sob o lock da sincronizacao
+        da DLL; sem isso a colecao ficava fora de sincronia."""
+        from neonize.proto.Neonize_pb2 import MutationInfo, PatchInfo
+        from neonize.proto.waSyncAction.WAWebProtobufSyncAction_pb2 import (
+            SyncActionValue, UnarchiveChatsSetting)
+        patch = PatchInfo(
+            Timestamp=time.time_ns(), Type=PatchInfo.REGULAR_LOW,
+            Mutations=[MutationInfo(
+                Index=[self.INDICE_MANTER_ARQUIVADAS], Version=4,
+                Value=SyncActionValue(
+                    unarchiveChatsSetting=UnarchiveChatsSetting(
+                        unarchiveChats=not manter)))])
+        self._mandar_estado(patch)
+        self._guardar_manter_arquivadas(manter)
+        log.info("manter conversas arquivadas enviado ao celular: %s",
+                 "sim" if manter else "não")
+
     def definir_privacidade(self, campo, valor):
+        if campo == "keeparchived":
+            self._definir_manter_arquivadas(valor == "keep")
+            return
         from neonize.utils.enum import PrivacySetting, PrivacySettingType
         self.cliente.set_privacy_setting(PrivacySettingType(campo),
                                          PrivacySetting(valor))
@@ -4852,13 +4974,66 @@ class ProvedorWhatsApp(Provedor):
                  len(texto))
         return True, ""
 
+    def agendar_arquivo(self, conversa_id, anexo, legenda, quando,
+                        resposta_a="", mencoes=None):
+        """Guarda uma copia do arquivo (o original pode sumir) e o anexo
+        no banco; na hora, sai pelo caminho de um arquivo comum."""
+        import dataclasses
+        import shutil
+        try:
+            pasta = config.pasta("agendadas")
+            destino = os.path.join(pasta, "%s-%s" % (
+                uuid.uuid4().hex[:12], os.path.basename(anexo.caminho)))
+            shutil.copyfile(anexo.caminho, destino)
+        except OSError as e:
+            log.warning("agendar arquivo: copia falhou: %r", e)
+            return False, "não consegui guardar uma cópia do arquivo"
+        copia = dataclasses.replace(anexo, caminho=destino, temporario=True)
+        self.banco.guardar_agendada(
+            self.conta.id, conversa_id, legenda or "", quando.timestamp(),
+            resposta_a or "", json.dumps(mencoes) if mencoes else "",
+            json.dumps(envio.anexo_em_dicionario(copia)))
+        log.info("%s agendado para enviar daqui (%d bytes)", anexo.tipo,
+                 anexo.tamanho)
+        return True, ""
+
+    def _anexo_da_agendada(self, x):
+        """O Anexo guardado na agendada, ou None se ela e so texto."""
+        if not x.get("anexo"):
+            return None
+        try:
+            return envio.anexo_de_dicionario(json.loads(x["anexo"]))
+        except (ValueError, TypeError):
+            return None
+
+    def _apagar_copias(self, ids):
+        """Apaga as copias dos arquivos de agendadas que nao vao mais sair."""
+        for id_ in ids:
+            x = self.banco.agendada(id_)
+            anexo = self._anexo_da_agendada(x) if x else None
+            if anexo is not None:
+                try:
+                    os.remove(anexo.caminho)
+                except OSError:
+                    pass
+
     def agendadas(self, conversa_id):
         from datetime import datetime
-        return [{"id": x["id"], "texto": x["texto"], "atrasada": x["atrasada"],
-                 "quando": datetime.fromtimestamp(x["quando"])}
-                for x in self.banco.agendadas(self.conta.id, conversa_id)]
+        from telezapp.nucleo import agendamento as ag
+        itens = []
+        for x in self.banco.agendadas(self.conta.id, conversa_id):
+            texto = x["texto"]
+            anexo = self._anexo_da_agendada(x)
+            if anexo is not None:
+                texto = ag.com_midia(m.NOMES_TIPOS.get(anexo.tipo, "mídia"),
+                                     texto, anexo.nome)
+            itens.append({"id": x["id"], "texto": texto,
+                          "atrasada": x["atrasada"],
+                          "quando": datetime.fromtimestamp(x["quando"])})
+        return itens
 
     def cancelar_agendadas(self, conversa_id, ids):
+        self._apagar_copias(ids)
         self.banco.tirar_agendadas(ids)
         return True, ""
 
@@ -4889,12 +5064,28 @@ class ProvedorWhatsApp(Provedor):
         except ValueError:
             mencoes = None
         self.banco.tirar_agendadas([id_])
+        anexo = self._anexo_da_agendada(x)
+        if anexo is not None:
+            if not os.path.isfile(anexo.caminho):
+                log.warning("agendada com arquivo que sumiu: %s", anexo.nome)
+                self.barramento.publicar(ev.EnvioFalhou(
+                    self.conta.id, x["conversa_id"], x["texto"],
+                    "o arquivo agendado não existe mais",
+                    devolver_texto=False, tipo=anexo.tipo,
+                    nome_arquivo=anexo.nome))
+                return True
+            self.enviar_arquivo(x["conversa_id"], anexo, x["texto"],
+                                x["resposta_a"], mencoes)
+            log.info("%s agendado enviado (%d bytes)", anexo.tipo,
+                     anexo.tamanho)
+            return True
         self.enviar_texto(x["conversa_id"], x["texto"], x["resposta_a"],
                           mencoes)
         log.info("mensagem agendada enviada (%d caracteres)", len(x["texto"]))
         return True
 
     def descartar_agendadas(self, ids):
+        self._apagar_copias(ids)
         self.banco.tirar_agendadas(ids)
 
     def enviar_contatos(self, conversa_id, contatos):

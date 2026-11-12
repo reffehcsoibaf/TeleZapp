@@ -378,7 +378,8 @@ OPCOES = (
     Opcao("previa_links", "Prévia dos links nas mensagens", "Mensagens",
           "completa",
           "Quando quem enviou mandou junto a prévia de um link (título e "
-          "descrição), ela é lida na linha da mensagem. O TeleZapp não abre "
+          "descrição), ela é lida na linha da mensagem, antes do texto, "
+          "seja a mensagem só o link ou um texto com link. O TeleZapp não abre "
           "o link para montar uma prévia. Nos detalhes da mensagem (Alt "
           "Enter) a prévia aparece sempre.",
           (("completa", "Título e descrição"), ("titulo", "Só o título"),
@@ -441,6 +442,16 @@ OPCOES = (
           "avisa quando encontra alguma. O celular precisa estar ligado e "
           "com internet. Desmarcada, só a busca que você pede em Buscar "
           "mensagens que faltam no celular."),
+    Opcao("manter_posicao_fixadas", "Manter a posição das conversas fixadas",
+          "Interface", False,
+          "Marcada, as conversas fixadas ficam no topo da lista sempre na "
+          "mesma ordem, e uma mensagem nova não sobe a conversa para o "
+          "primeiro lugar entre as fixadas. Ao marcar, a ordem de partida é a "
+          "que a lista tem naquele momento; uma conversa que você fixa depois "
+          "entra no primeiro lugar, e a que você desafixa sai da ordem. "
+          "Desmarcada, as fixadas ficam no topo, mas a que recebeu mensagem "
+          "mais recentemente fica em primeiro lugar entre elas. As conversas "
+          "que não estão fixadas seguem sempre pela mensagem mais recente."),
     Opcao("ocultar_contatos_duplicados", "Ocultar contatos duplicados",
           "Interface", True,
           "Nas listas de contatos (Contatos e a escolha de quem recebe em "
@@ -1009,6 +1020,27 @@ def _opcoes_de_ia():
               "Telegram conectada; sem ela, vale a ordem dos provedores. "
               "Quando as duas estão marcadas, o bot vem antes da Meta AI. "
               "Desmarcada, nada muda.", servico="telegram"),
+        Opcao("ia_bot_traduzir", "Traduzir primeiro por um bot do Telegram",
+              "Inteligência artificial", False, "Marcada, \"Traduzir o texto "
+              "digitado\" e \"Traduzir a mensagem selecionada\" tentam "
+              "primeiro o bot do Telegram escolhido abaixo, pela sua conta do "
+              "Telegram, sem abrir janela. O TeleZapp pergunta o idioma, manda "
+              "o texto como uma mensagem comum e, se o bot pedir para "
+              "escolher o idioma por botões, aperta o botão desse idioma e "
+              "espera a tradução. O bot tem de responder sozinho, sem "
+              "comando. Se ele não responder a tempo, ou não tiver o botão "
+              "do idioma, vale a ordem dos provedores, como sempre. Privacidade: o bot é um serviço de "
+              "terceiros, que não é do TeleZapp nem do Telegram. O texto "
+              "vai para quem mantém o bot, pela sua conta do Telegram, e o "
+              "que ele faz com os dados depende dele. O pedido e a resposta "
+              "ficam na sua conversa com o bot. Marque só se aceita isso, e "
+              "evite com textos sensíveis. Precisa de uma conta do Telegram "
+              "conectada e do @nome do bot abaixo. Desmarcada, nada muda.",
+              servico="telegram"),
+        Opcao("ia_bot_traducao_nome", "Bot do Telegram para traduzir",
+              "Inteligência artificial", "@traduciendobot", "O @nome do bot que recebe o "
+              "texto quando \"Traduzir primeiro por um bot do Telegram\" "
+              "está marcada.", texto=True, servico="telegram"),
         Opcao("ia_bot_nome", "Bot do Telegram para descrever e transcrever",
               "Inteligência artificial", "@AmelieTelegramBot", "O @nome do "
               "bot que recebe os arquivos quando \"Tentar primeiro por um bot "
@@ -1057,6 +1089,18 @@ OPCOES = OPCOES + (
           "itens saem e quanto espaço é liberado, e pergunta se pode "
           "continuar. Desmarcada, apaga direto; o resultado continua sendo "
           "mostrado no fim.", grupo="Confirmações"),
+    Opcao("confirmar_limpar_conversa",
+          "Perguntar antes de limpar uma conversa",
+          "Interface", True,
+          "Ao limpar uma conversa (o item Limpar a conversa do menu "
+          "Conversas ou a opção de limpar ao apagar um grupo), ou várias "
+          "marcadas, o TeleZapp pergunta antes e, quando dá "
+          "para limpar também no celular, se é aqui e no celular ou só aqui. "
+          "Desmarcada, limpa na hora, aqui e também no celular quando a conta "
+          "está conectada e deixa (o lembrete de abrir o WhatsApp no celular "
+          "continua, se estiver marcado abaixo). A conversa continua na "
+          "lista; as mensagens e as mídias dela é que saem.",
+          grupo="Confirmações"),
     Opcao("confirmar_aviso_celular",
           "Lembrar de abrir o WhatsApp no celular antes de apagar lá",
           "Interface", True,
@@ -1144,6 +1188,7 @@ PADROES.update({
     "atalhos": {},           # funcao -> combinacao escolhida ("" = sem atalho)
     "participantes_silenciados": {},  # ver nucleo/silenciados.py
     "sons_de_conversa": {},  # "conta|conversa" -> arquivo em sons/conversas
+    "ordem_das_fixadas": [],  # "conta|conversa" na ordem em que as fixadas ficam
     "ia_ordem": {},          # tarefa -> provedores ligados, na ordem de tentativa
     "ia_lista_modelos": {},  # provedor -> modelos que ele ofereceu
     "ia_modelos": {},        # provedor -> modelo escolhido ("" = o padrao)

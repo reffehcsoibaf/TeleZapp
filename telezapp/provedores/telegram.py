@@ -20,6 +20,7 @@ from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import mencoes as nucleo_mencoes
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import localizacao, ponte_web_app, previa_links, robos
+from telezapp.nucleo.ia import catalogo
 from telezapp.provedores.base import (PEDIR_CODIGO, PEDIR_SENHA,
                                       PEDIR_TELEFONE, DownloadCancelado,
                                       ErroBloqueio, ErroMidia, ErroPerfil,
@@ -756,6 +757,9 @@ class ProvedorTelegram(Provedor):
         self._observada = None                  # conversa com a presenca aberta
         self._historias_em = 0.0                # ultima busca de historias
         self._conversas = {}                    # conversa_id -> Conversa
+        # conversas com bots que estavam arquivadas e ficam assim, mesmo que
+        # o Telegram as tire da pasta enquanto o bot responde
+        self._rearquivando = set()
         self._foruns = set()                    # grupos com topicos (ids)
         self._usuarios = {}                     # @usuario -> dados ou None
         self._pronto = threading.Event()
@@ -841,7 +845,20 @@ class ProvedorTelegram(Provedor):
         return cid, nome_de(entidade)
 
     # ------------------------------------------- bot de descricao (IA)
-    def perguntar_bot(self, bot, caminho, voz, tempo=120, calma=6.0):
+    def perguntar_bot_texto(self, bot, texto, idioma=None, tempo=60,
+                            calma=4.0):
+        """Manda o texto ao bot (@nome) e devolve o que ele responder (a
+        traducao, no caso do bot tradutor). Como `perguntar_bot`. Com
+        `idioma` (nome em ingles, como em IDIOMAS), se o bot responder pedindo
+        para escolher o idioma por botoes, aperta o botao desse idioma e
+        espera a traducao."""
+        if len(texto) > LIMITE_DE_TEXTO_AO_BOT:
+            raise RuntimeError("o texto é grande demais para o bot")
+        return self.perguntar_bot(bot, None, False, tempo, calma, texto,
+                                  idioma)
+
+    def perguntar_bot(self, bot, caminho, voz, tempo=120, calma=6.0,
+                      texto=None, idioma=None):
         """Manda o arquivo ao bot (@nome) e devolve o texto que ele responder.
         Bloqueia: chamar fora da janela. So vale o que o bot manda depois do
         envio e que cita este envio (ou nao cita nada); o texto que ele
@@ -855,7 +872,8 @@ class ProvedorTelegram(Provedor):
         self._bot_ocupado = True
         try:
             return asyncio.run_coroutine_threadsafe(
-                self._perguntar_bot(bot, caminho, voz, tempo, calma),
+                self._perguntar_bot(bot, caminho, voz, tempo, calma, texto,
+                                    idioma),
                 self._loop).result(timeout=tempo + calma + 60)
         except RuntimeError:
             raise
@@ -864,27 +882,102 @@ class ProvedorTelegram(Provedor):
         finally:
             self._bot_ocupado = False
 
-    async def _perguntar_bot(self, bot, caminho, voz, tempo, calma):
+    async def _perguntar_bot(self, bot, caminho, voz, tempo, calma,
+                             texto=None, idioma=None):
         bot = "@" + bot.lstrip("@")
         ent = await self.cliente.get_entity(bot)
-        enviada = await self.cliente.send_file(ent, caminho, voice_note=voz)
-        log.info("pedido enviado ao bot de descrição")
+        # Quem arquiva a conversa com o bot quer que ele trabalhe nos
+        # bastidores: o Telegram tira a conversa da pasta quando se escreve
+        # nela e quando o bot responde, entao ela volta para la no fim
+        try:
+            from telethon import utils
+            cid = str(utils.get_peer_id(ent))
+        except Exception:
+            cid = None
+        conv = self._conversas.get(cid) if cid else None
+        estava_arquivada = bool(conv is not None and conv.arquivada)
+        if estava_arquivada:
+            self._rearquivando.add(cid)
+        try:
+            return await self._conversar_com_o_bot(
+                ent, caminho, voz, tempo, calma, texto, idioma)
+        finally:
+            if estava_arquivada:
+                await self._rearquivar(ent, cid)
+
+    async def _rearquivar(self, ent, cid):
+        """Marca como lida e poe de volta em Arquivadas a conversa com o bot
+        que estava arquivada antes do pedido."""
+        try:
+            await self.cliente.send_read_acknowledge(ent)
+        except Exception as e:
+            log.info("conversa com o bot: não marquei como lida (%s)",
+                     type(e).__name__)
+        try:
+            await self.cliente.edit_folder(ent, 1)
+            log.info("conversa com o bot arquivada de novo")
+        except Exception as e:
+            log.warning("conversa com o bot: não arquivei de novo (%s)",
+                        type(e).__name__)
+        finally:
+            self._rearquivando.discard(cid)
+        conv = self._conversas.get(cid)
+        if conv is not None:
+            conv.arquivada = True
+            conv.nao_lidas = 0
+
+    async def _conversar_com_o_bot(self, ent, caminho, voz, tempo, calma,
+                                   texto, idioma):
+        if texto is not None:
+            enviada = await self.cliente.send_message(ent, texto)
+            log.info("texto enviado ao bot (%d caracteres)", len(texto))
+        else:
+            enviada = await self.cliente.send_file(ent, caminho,
+                                                   voice_note=voz)
+            log.info("pedido enviado ao bot de descrição")
         fim = time.monotonic() + tempo
         visto, mudou_em = None, None
+        aceitos = {enviada.id}      # as respostas podem citar o pedido ou o
+        #                             pedido de idioma que o bot mandou
+        pedido_de_idioma = {}       # id -> texto, depois de apertar o botao
+        apertou = False
         while time.monotonic() < fim:
             await asyncio.sleep(1.5)
             achadas = await self.cliente.get_messages(
                 ent, min_id=enviada.id, limit=20)
             textos = []
             for x in sorted(achadas, key=lambda y: y.id):
-                if x.out or not (x.message or "").strip():
+                if x.out:
+                    continue
+                conteudo = (x.message or "").strip()
+                botoes = getattr(x, "buttons", None)
+                if idioma and not apertou and botoes:
+                    rotulos = [[b.text for b in linha] for linha in botoes]
+                    alvo = catalogo.botao_do_idioma(rotulos, idioma)
+                    log.info("o bot pede o idioma; botões: %s", rotulos)
+                    if alvo is None:
+                        raise RuntimeError(
+                            "o bot pede para escolher o idioma e não achei "
+                            "o botão de %s" % idioma)
+                    await x.click(*alvo)
+                    apertou = True
+                    pedido_de_idioma[x.id] = conteudo
+                    aceitos.add(x.id)
+                    visto, mudou_em = None, None
+                    log.info("botão de idioma apertado: %s",
+                             rotulos[alvo[0]][alvo[1]])
+                    continue
+                if x.id in pedido_de_idioma and \
+                        conteudo == pedido_de_idioma[x.id]:
+                    continue        # ainda e o pedido de idioma, sem mudar
+                if not conteudo:
                     continue
                 ref = getattr(getattr(x, "reply_to", None),
                               "reply_to_msg_id", None)
-                if ref and ref != enviada.id:
+                if ref and ref not in aceitos:
                     log.info("resposta do bot a outro pedido ignorada")
                     continue
-                textos.append(x.message.strip())
+                textos.append(conteudo)
             if not textos:
                 continue
             agora = time.monotonic()
@@ -928,6 +1021,8 @@ class ProvedorTelegram(Provedor):
             functions.account.GetGlobalPrivacySettingsRequest())
         valores["readreceipts"] = "none" if getattr(
             g, "hide_read_marks", False) else "all"
+        valores["keeparchived"] = "keep" if getattr(
+            g, "keep_archived_unmuted", False) else "unarchive"
         return valores
 
     def definir_privacidade(self, campo, valor):
@@ -943,10 +1038,17 @@ class ProvedorTelegram(Provedor):
 
     async def _gravar_privacidade(self, campo, valor):
         from telethon.tl import functions, types
-        if campo == "readreceipts":
+        if campo in ("readreceipts", "keeparchived"):
             atual = await self.cliente(
                 functions.account.GetGlobalPrivacySettingsRequest())
-            atual.hide_read_marks = valor == "none"
+            if campo == "readreceipts":
+                atual.hide_read_marks = valor == "none"
+            else:
+                # o Telegram tira a conversa de Arquivadas quando chega
+                # mensagem, a nao ser que esteja silenciada; com isto ligado
+                # ela fica, como no WhatsApp (tambem as de pastas)
+                atual.keep_archived_unmuted = valor == "keep"
+                atual.keep_archived_folders = valor == "keep"
             await self.cliente(functions.account.SetGlobalPrivacySettingsRequest(
                 settings=atual))
             return
@@ -1318,7 +1420,8 @@ class ProvedorTelegram(Provedor):
                     nao_lidas=d.unread_count or 0,
                     data=d.date.timestamp() if d.date else 0.0,
                     lidas_ate=getattr(d.dialog, "read_outbox_max_id", 0) or 0,
-                    arquivada=getattr(d, "folder_id", None) == 1,
+                    arquivada=getattr(d, "folder_id", None) == 1 or
+                    cid in self._rearquivando,
                     fixada=bool(getattr(d, "pinned", False)),
                     silenciada_ate=silencio_do_dialogo(d),
                     somente_leitura=somente_leitura_do_telegram(
@@ -3237,6 +3340,32 @@ class ProvedorTelegram(Provedor):
         log.info("mensagem agendada (%d caracteres)", len(texto))
         return True, ""
 
+    def agendar_arquivo(self, conversa_id, anexo, legenda, quando,
+                        resposta_a="", mencoes=None):
+        # o envio do arquivo para o Telegram pode demorar: tempo largo
+        return self._sincrono(
+            self._agendar_arquivo(conversa_id, anexo, legenda, quando,
+                                  resposta_a, mencoes), 3600) or (
+            False, "O Telegram não respondeu. O arquivo não foi agendado.")
+
+    async def _agendar_arquivo(self, conversa_id, anexo, legenda, quando,
+                               resposta_a, mencoes):
+        try:
+            ent = await self._entidade(conversa_id)
+            texto_legenda, entidades = await self._com_mencoes(legenda,
+                                                               mencoes)
+            await self.cliente.send_file(
+                ent, anexo.caminho, caption=texto_legenda or None,
+                schedule=quando.astimezone(),
+                reply_to=self._resposta_em(conversa_id, resposta_a),
+                force_document=anexo.tipo == m.DOCUMENTO,
+                **_extras_do_anexo(anexo, entidades))
+        except Exception as e:
+            log.warning("agendar %s falhou: %s", anexo.tipo, type(e).__name__)
+            return False, _motivo(e)
+        log.info("%s agendado (%d bytes)", anexo.tipo, anexo.tamanho)
+        return True, ""
+
     def agendadas(self, conversa_id):
         resposta = self._sincrono(self._agendadas(conversa_id), 30)
         if resposta is None:
@@ -3254,8 +3383,9 @@ class ProvedorTelegram(Provedor):
             if data is None:
                 continue
             texto = getattr(msg, "message", "") or ""
-            if not texto and getattr(msg, "media", None) is not None:
-                texto = "(mídia)"
+            if getattr(msg, "media", None) is not None:
+                from telezapp.nucleo import agendamento as ag
+                texto = ag.com_midia(_rotulo_da_midia(msg), texto)
             itens.append({"id": int(msg.id), "texto": texto,
                           "quando": data.astimezone().replace(tzinfo=None)})
         itens.sort(key=lambda x: (x["quando"], x["id"]))
@@ -3352,18 +3482,7 @@ class ProvedorTelegram(Provedor):
             ent = await self._entidade(conversa_id)
             texto_legenda, entidades = await self._com_mencoes(legenda,
                                                                mencoes)
-            extra = {"formatting_entities": entidades} if entidades else {}
-            if anexo.tipo == m.VOZ:
-                extra.update(voice_note=True, attributes=[
-                    types.DocumentAttributeAudio(duration=anexo.segundos,
-                                                 voice=True)])
-            elif anexo.tipo == m.AUDIO:
-                extra.update(attributes=[types.DocumentAttributeAudio(
-                    duration=anexo.segundos, title=anexo.nome)])
-            elif anexo.tipo == m.VIDEO:
-                extra.update(attributes=[types.DocumentAttributeVideo(
-                    duration=anexo.segundos, w=anexo.largura,
-                    h=anexo.altura, supports_streaming=True)])
+            extra = _extras_do_anexo(anexo, entidades)
             ultimo = [-1]
 
             def andamento(feito, total):
@@ -4058,6 +4177,41 @@ class ProvedorTelegram(Provedor):
                 ev.LeituraConfirmada(self.conta.id, cid, ate))
         except Exception:
             log.exception("erro ao tratar confirmacao de leitura")
+
+
+# o Telegram nao aceita mensagem de texto maior que isto
+LIMITE_DE_TEXTO_AO_BOT = 4000
+
+
+def _extras_do_anexo(anexo, entidades=None):
+    """Os argumentos de `send_file` que dependem do tipo do anexo (voz,
+    audio e video levam atributos) e as entidades da legenda."""
+    from telethon.tl import types
+    extra = {"formatting_entities": entidades} if entidades else {}
+    if anexo.tipo == m.VOZ:
+        extra.update(voice_note=True, attributes=[
+            types.DocumentAttributeAudio(duration=anexo.segundos,
+                                         voice=True)])
+    elif anexo.tipo == m.AUDIO:
+        extra.update(attributes=[types.DocumentAttributeAudio(
+            duration=anexo.segundos, title=anexo.nome)])
+    elif anexo.tipo == m.VIDEO:
+        extra.update(attributes=[types.DocumentAttributeVideo(
+            duration=anexo.segundos, w=anexo.largura,
+            h=anexo.altura, supports_streaming=True)])
+    return extra
+
+
+def _rotulo_da_midia(msg):
+    """"foto", "vídeo", "mensagem de voz"... da mensagem agendada."""
+    for atributo, rotulo in (("photo", "foto"), ("voice", "mensagem de voz"),
+                             ("video_note", "vídeo redondo"),
+                             ("video", "vídeo"), ("audio", "áudio"),
+                             ("sticker", "figurinha"),
+                             ("document", "documento")):
+        if getattr(msg, atributo, None):
+            return rotulo
+    return "mídia"
 
 
 def _motivo(erro):

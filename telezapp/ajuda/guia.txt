@@ -190,8 +190,6 @@ Nos grupos do Telegram, a lista também mostra quem entrou, saiu, foi adicionado
 
 Enter numa mensagem de texto abre o texto numa caixa somente leitura, com os botões Copiar texto e Fechar. Esc também fecha.
 
-Ctrl+R ouve a última mensagem da conversa aberta.
-
 Uma resposta mostra, depois do texto dela, um trecho da mensagem original: a resposta, em resposta a Ana: "o texto da mensagem". Se a original é muito antiga e não está guardada, a linha diz que é uma resposta a uma mensagem mais antiga.
 
 Em Ir para, "Próxima menção ou resposta a mim" e "Menção ou resposta a mim anterior" levam a seleção até a mensagem seguinte ou anterior que menciona você ou responde a uma mensagem sua, nesta conversa. As que estão fora da lista são trazidas das guardadas no computador, e Esc volta para onde você estava. Elas nascem sem tecla: escolha as suas em Configurações, Atalhos.
@@ -320,13 +318,15 @@ Para quem não está na agenda, use "Digitar um contato...": o nome e o telefone
 
 No WhatsApp, os marcados vão juntos em uma mensagem. No Telegram, vai uma mensagem para cada contato.
 
-Mensagens agendadas: escreva a mensagem na caixa e use "Agendar a mensagem digitada...", no menu Mensagem (Control Shift P). Na janela, confira o texto e digite a data (hoje, amanhã ou dia/mês/ano, como 25/12/2026) e a hora (como 14:30).
+Mensagens agendadas: escreva a mensagem na caixa e use o botão "Agendar envio", logo depois do botão Enviar, ou "Agendar a mensagem digitada...", no menu Mensagem (Control Shift P). Na janela, confira o texto e escolha a data e a hora. Nos dois campos, as setas para cima e para baixo escolhem: na data, um dia a cada toque (Page Up e Page Down, uma semana; nunca antes de hoje nem além de um ano); na hora, de quinze em quinze minutos (Page Up e Page Down, uma hora). O leitor de tela diz o valor novo, e a data vem com o dia da semana. Também dá para digitar: a data como hoje, amanhã ou só os números (25122026, 251226 ou 2512 para o dia e o mês; só o dia, como 25, vale para o próximo dia 25), e a hora como 14:30 ou só os números (1430 ou 9).
+
+Também dá para agendar fotos, vídeos, áudios, mensagens de voz e documentos: cole ou anexe os arquivos como faria para enviar (eles ficam esperando na caixa) e use o mesmo comando. Na janela, o texto vira a legenda e pode ficar vazio. Cada arquivo é agendado para a mesma hora; a legenda vai no primeiro que aceita (no WhatsApp, áudio e voz não têm legenda, então o texto vai como uma mensagem à parte). A resposta em andamento e as menções também valem. Se algum arquivo não puder ser agendado, os que já foram ficam agendados e o restante continua nos anexos.
 
 No Telegram, o servidor guarda a mensagem e a envia na hora marcada, mesmo com o TeleZapp fechado e o computador desligado.
 
 O WhatsApp não guarda mensagens agendadas: o TeleZapp as guarda e envia na hora marcada. Por isso ele precisa estar aberto e conectado nessa hora. Se estiver fechado ou sem conexão, ao abrir ele avisa quantas passaram da hora e pergunta: Sim envia agora, Não descarta, Cancelar deixa na lista para decidir depois.
 
-"Mensagens agendadas...", no mesmo menu, lista as da conversa aberta, da mais próxima para a mais distante. Nela, "Mudar o horário" e "Cancelar o envio" (que pede confirmação). Só texto por enquanto.
+"Mensagens agendadas...", no mesmo menu, lista as da conversa aberta, da mais próxima para a mais distante. Nela, "Mudar o horário" e "Cancelar o envio" (que pede confirmação). Um arquivo agendado aparece com o tipo e o nome, como "foto (a.jpg): legenda". No WhatsApp o TeleZapp guarda uma cópia do arquivo até a hora de enviar, então ele pode ser apagado do computador depois de agendado.
 
 # Robôs do Telegram
 "Comandos do robô...", no menu Conversas e no menu de contexto da conversa, lista os comandos do robô da conversa, ou dos robôs do grupo, com a descrição de cada um. Ao escolher, o comando é enviado na conversa. Se houver algo escrito na caixa de mensagem, envie ou apague primeiro.
@@ -353,7 +353,7 @@ O TeleZapp também aparece entre as opções do Windows para abrir links tg:// e
 Um link com texto só preenche a caixa de mensagem: nada é enviado sem você mandar.
 
 # Busca por critérios
-O botão "Busca por critérios", entre o campo de busca e o botão Sair, e o item de mesmo nome no menu Conversas abrem uma janela para achar mensagens guardadas neste computador.
+O botão "Busca por critérios", entre o campo de busca e o botão Sair, e o item de mesmo nome no menu Busca abrem uma janela para achar mensagens guardadas neste computador.
 
 Cada critério tem uma caixa de marcar. Ao marcar, os campos dele ficam disponíveis, e só os critérios marcados valem. Todos os marcados valem juntos. Dentro de uma lista, basta uma opção, exceto em "Situação da conversa", "Características da mensagem" e "Mensagens enviadas", em que todas as marcadas precisam valer.
 
@@ -587,12 +587,12 @@ Atualizar: lê a lista de novo.
 Só pessoas podem ser bloqueadas, não grupos nem canais.
 
 # Busca global no Telegram
-O item "Busca global no Telegram", no menu Conversas, procura no Telegram inteiro: pessoas, grupos e canais, mensagens de todas as suas conversas (também as que não estão neste computador) e posts públicos de canais. Cada busca traz até 50 mensagens e 50 posts e, de pessoas, grupos e canais, os que o Telegram mandar de uma vez.
+O item "Busca global no Telegram", no menu Busca, procura no Telegram inteiro: pessoas, grupos e canais, mensagens de todas as suas conversas (também as que não estão neste computador) e posts públicos de canais. Cada busca traz até 50 mensagens e 50 posts e, de pessoas, grupos e canais, os que o Telegram mandar de uma vez.
 
 Os botões Abrir, Entrar no grupo ou canal, Ver mais e Fechar ficam depois da lista. "Ver mais" (Alt+M) pede a página seguinte de mensagens e posts e acrescenta ao fim da lista, quantas vezes quiser, até o Telegram não ter mais. Pessoas, grupos e canais só vêm na primeira busca. Mudar o texto na janela não muda o que "Ver mais" continua: para isso, aperte Buscar. Com um resultado aberto, Esc volta à janela, com a lista como estava.
 
 # Buscar canais do WhatsApp
-O item "Buscar canais do WhatsApp", no menu Conversas, abre uma janela que procura canais no diretório do WhatsApp, inclusive os que você ainda não segue. Ele só aparece com uma conta do WhatsApp.
+O item "Buscar canais do WhatsApp", no menu Busca, abre uma janela que procura canais no diretório do WhatsApp, inclusive os que você ainda não segue. Ele só aparece com uma conta do WhatsApp.
 
 Digite o texto e use Enter, ou deixe o texto vazio para ver uma lista do diretório: recomendados, em alta, populares ou novos. A categoria (notícias, esportes, entretenimento e outras) restringe a busca e as listas. Cada resultado diz o nome, se é verificado, quantos seguidores tem, se você já o segue e o começo da descrição.
 
@@ -653,6 +653,12 @@ Marcar como lida: em Conversas, "Marcar a conversa como lida", também no menu d
 
 Arquivadas: em Conversas, "Arquivar ou desarquivar a conversa", também no menu de contexto da lista e na seleção em massa, tira a conversa da lista principal e a põe no tipo Arquivadas. A mudança vale também na sua conta, no WhatsApp e no Telegram, e o que você arquiva ou desarquiva no celular aparece no TeleZapp.
 
+Limpar a conversa: o item "Limpar a conversa (aqui e no celular)", no menu Conversas, limpa as mensagens e as mídias da conversa selecionada (ou das marcadas, no modo de seleção) deste computador e também do celular, se a conta estiver conectada e deixar. A conversa continua na lista. Ele pergunta uma vez: limpar aqui e no celular, só aqui ou cancelar. Para limpar com uma tecla, dê um atalho a ele em Configurações, Atalhos. Em Configurações, Interface, Confirmações, desmarcar "Perguntar antes de limpar uma conversa" faz a limpeza sair na hora, aqui e no celular. O botão Limpar dos detalhes da conversa abre a janela de limpeza completa, com mais opções.
+
+Conversas fixadas: ficam no topo da lista. Por padrão, entre elas a que recebeu mensagem mais recentemente fica em primeiro lugar. Em Configurações, Interface, a caixa "Manter a posição das conversas fixadas" faz as fixadas ficarem sempre na mesma ordem, sem subir quando chega mensagem: ao marcar, a ordem de partida é a que a lista tem naquele momento; uma conversa que você fixa depois entra no primeiro lugar, e a que você desafixa sai. As conversas que não estão fixadas seguem sempre pela mensagem mais recente. A mudança vale na hora.
+
+Manter arquivadas: no WhatsApp, a conversa arquivada fica arquivada quando chega mensagem nova se "Manter conversas arquivadas" estiver ligada no celular (Configurações do WhatsApp, Conversas); isso se muda só pelo celular. No Telegram, uma conversa arquivada volta para a lista principal com a mensagem nova, a não ser que esteja silenciada. Em Configurações, Privacidade, a caixa "Manter arquivadas, mesmo com mensagem nova, as conversas que não estão silenciadas" (só aparece para contas do Telegram) liga isso na conta, para todas as conversas arquivadas, sem precisar silenciá-las. É útil para deixar arquivadas as conversas com os bots que trabalham nos bastidores.
+
 Trancadas: conversas só se trancam e se destrancam pelo celular; no WhatsApp, em "Trancar conversa". O TeleZapp só mostra o que o celular trancou. Uma conversa trancada sai das listas e fica escondida atrás de um código secreto.
 
 Defina o código em Configurações, Privacidade: marque a caixa e preencha o código novo duas vezes. Depois, digite o código no campo Buscar conversa (Ctrl+F), e o tipo Trancadas no celular aparece no fim da caixa de tipos.
@@ -671,6 +677,8 @@ Redigir a mensagem a partir do que digitei: transforma uma ideia escrita na caix
 Redigir com um tom à escolha: pergunta o tom na hora (natural, amigável, formal, direto ou descontraído), sem mudar a opção "Tom ao redigir com a IA" de Configurações.
 Traduzir o texto digitado: pergunta o idioma (português, inglês, espanhol, francês, alemão ou italiano; lembra o último) e troca o texto da caixa.
 Traduzir a mensagem selecionada: mostra a tradução numa janela.
+Os dois podem tentar primeiro um bot do Telegram: em Configurações, Inteligência artificial, marque "Traduzir primeiro por um bot do Telegram" e digite o @nome do bot em "Bot do Telegram para traduzir". O TeleZapp pergunta o idioma e manda o texto ao bot como uma mensagem comum, pela sua conta do Telegram. Se o bot pedir para escolher o idioma por botões (como o @traduciendobot), o TeleZapp aperta sozinho o botão do idioma que você escolheu, pelo nome (português, inglês, espanhol, francês, alemão ou italiano) ou pela bandeira, e espera a tradução. O bot tem de responder sozinho, sem comando. Se ele não responder a tempo, ou não tiver o botão do idioma, o TeleZapp avisa e usa os provedores, como sempre. O bot é um serviço de terceiros: o texto vai para quem o mantém, e o pedido e a resposta ficam na sua conversa com ele. Evite com textos sensíveis.
+Se você deixa a conversa com o bot arquivada, para ele trabalhar nos bastidores, o TeleZapp a põe de volta em Arquivadas, já lida, depois de cada pedido, e não avisa nem toca som por causa das respostas dele.
 Resumir a mensagem selecionada e Resumir a conversa: as últimas 50 mensagens, numa janela de leitura.
 Resumir as mensagens não lidas: só as que chegaram depois do marcador, até 300.
 

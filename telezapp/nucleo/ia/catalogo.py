@@ -92,6 +92,43 @@ IDIOMAS = (("Brazilian Portuguese", "Português do Brasil"),
            ("English", "Inglês"), ("Spanish", "Espanhol"),
            ("French", "Francês"), ("German", "Alemão"),
            ("Italian", "Italiano"))
+# Como achar o botao de um idioma num bot tradutor que pede para escolher:
+# grupos de pedacos (sem acento, em minusculas) que tem de aparecer todos no
+# nome do botao; vale o primeiro grupo que algum botao satisfaz. Os nomes
+# vem em portugues, espanhol e ingles, e a bandeira tambem serve.
+PADROES_DE_BOTAO = {
+    "Brazilian Portuguese": (
+        ("portugu", "brasil"), ("portugu", "brazil"), ("portugu",),
+        ("brasil",), ("brazil",), ("\U0001f1e7\U0001f1f7",)),
+    "English": (("ingl",), ("english",), ("\U0001f1fa\U0001f1f8",),
+                ("\U0001f1ec\U0001f1e7",)),
+    "Spanish": (("espan",), ("spanish",), ("castell",),
+                ("\U0001f1ea\U0001f1f8",)),
+    "French": (("franc",), ("french",), ("\U0001f1eb\U0001f1f7",)),
+    "German": (("alem",), ("german",), ("deutsch",),
+               ("\U0001f1e9\U0001f1ea",)),
+    "Italian": (("ital",), ("\U0001f1ee\U0001f1f9",)),
+}
+
+
+def _sem_acento(texto):
+    import unicodedata
+    base = unicodedata.normalize("NFKD", texto)
+    return "".join(c for c in base if not unicodedata.combining(c)).lower()
+
+
+def botao_do_idioma(rotulos, idioma):
+    """(linha, coluna) do botao do `idioma` (nome em ingles, como em
+    IDIOMAS) entre os `rotulos` (lista de linhas de textos de botao), ou
+    None se nenhum serve."""
+    for grupo in PADROES_DE_BOTAO.get(idioma, ()):
+        for i, linha in enumerate(rotulos):
+            for j, texto in enumerate(linha):
+                if all(p in _sem_acento(texto) for p in grupo):
+                    return i, j
+    return None
+
+
 # Mais que isso do texto da pessoa ou da conversa nao viaja (fica o final)
 MAX_ENTRADA_TEXTO = 24_000
 MAX_RESPOSTA_BYTES = 8 * 1024 * 1024

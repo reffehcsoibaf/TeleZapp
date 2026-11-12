@@ -258,7 +258,7 @@ def test_interface_e_mensagens_reunem_as_categorias_antigas(mod):
     mod.cfg.salvar_conta({"id": "t1", "servico": "telegram"})
     soltas = {o.chave for o in mod.opcoes("Interface")}
     assert soltas == {"status_no_titulo", "avisar_chamadas_whatsapp",
-                      "ocultar_contatos_duplicados",
+                      "ocultar_contatos_duplicados", "manter_posicao_fixadas",
                       "trazer_contatos_ao_abrir",
                       "como_me_chamar", "tamanho_letra"}
     assert "prioridade_abertura" in {o.chave for o in mod.opcoes("Sistema")}
