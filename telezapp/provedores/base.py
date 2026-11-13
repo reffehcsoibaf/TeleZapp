@@ -278,6 +278,11 @@ class Provedor(ABC):
         avisado; False quando so da para guardar no TeleZapp."""
         return False
 
+    def trancar_conversa(self, conversa_id, trancar):
+        """Tranca (ou destranca) a conversa na conta. True se o servico foi
+        avisado; False quando nao da (so o WhatsApp tem)."""
+        return False
+
     def silenciar_conversa(self, conversa_id, silenciar, segundos=0):
         """Silencia a conversa por `segundos` (0 = para sempre) ou tira o
         silencio. True se o servico foi avisado."""

@@ -72,6 +72,7 @@ from telezapp.nucleo import aparencia
 from telezapp.nucleo.ia import catalogo as cat_ia
 from telezapp.nucleo.ia import cofre as cofre_ia
 from telezapp.nucleo.ia import prompts as prompts_ia
+from telezapp.nucleo.ia.cabecalho_de_bot import sem_cabecalho_de_idiomas
 from telezapp.nucleo.ia import servico as servico_ia
 from telezapp.nucleo.ia.provedores import ErroIA
 from telezapp.nucleo import backup
@@ -670,8 +671,6 @@ class Janela(wx.Frame):
         item(m_conv, "limpar_conversa",
              "Lim&par a conversa (aqui e no celular)")
         item(m_conv, "atualizar", "A&tualizar a lista de conversas\tF5")
-        item(m_conv, "esconder_trancadas",
-             "Esconder as conversas tr&ancadas\tCtrl+Shift+T")
 
         m_busca = wx.Menu()
         item(m_busca, "buscar_conv", "Bus&car conversa\tCtrl+F")
@@ -906,7 +905,6 @@ class Janela(wx.Frame):
             "busca_global": lambda e: self._busca_global(),
             "busca_canais": lambda e: self._busca_canais(),
             "ver_chamadas": lambda e: self._ver_chamadas(),
-            "esconder_trancadas": lambda e: self._esconder_trancadas(),
             "contatos": lambda e: self._gerenciar_contatos(),
             "salvar_pessoa": lambda e: self._salvar_pessoa(),
             "salvar_conv": lambda e: self._salvar_conversa(),
@@ -2885,6 +2883,8 @@ class Janela(wx.Frame):
                     log.exception("erro ao arquivar na conta")
                     so_aqui = True
                 c.arquivada = arquivar
+                if arquivar and self.contas.servico(c.conta_id) == "whatsapp":
+                    c.fixada = False  # no WhatsApp arquivar desafixa
             texto = "%s %s%s." % (
                 quantas, "arquivadas" if arquivar else "desarquivadas",
                 ", algumas só no TeleZapp" if so_aqui else "")
@@ -3189,6 +3189,8 @@ class Janela(wx.Frame):
         except Exception:
             log.exception("erro ao arquivar na conta")
         conv.arquivada = arquivar
+        if arquivar and self.contas.servico(conv.conta_id) == "whatsapp":
+            conv.fixada = False       # no WhatsApp arquivar desafixa
         self.banco.salvar_conversas([conv])
         if self.atual == conv.chave:
             self._fechar_conversa()
@@ -3253,6 +3255,28 @@ class Janela(wx.Frame):
         self.fala.falar("Conversa fixada e desarquivada." if desarquivou
                         else "Conversa fixada." if fixar
                         else "Conversa desafixada.", interromper=True)
+
+    def _trancar_conversa(self, conv=None):
+        """Tranca a conversa do WhatsApp no celular (ela sai da lista comum e
+        passa a aparecer em Trancadas) ou a destranca."""
+        conv = conv or self._conversa_em_foco()
+        if conv is None:
+            self.fala.falar("Nenhuma conversa selecionada.")
+            return
+        if self.contas.servico(conv.conta_id) != "whatsapp":
+            self.fala.falar("Só as conversas do WhatsApp podem ser "
+                            "trancadas.", interromper=True)
+            return
+        trancar = not conv.trancada
+        conv.trancada = trancar
+        if trancar and self.atual == conv.chave:
+            self._fechar_conversa()
+        self._depois_de_mudar_conversa(conv)
+        self._avisar_conta(
+            conv, lambda p: p.trancar_conversa(conv.id, trancar),
+            "O serviço não aceitou. A mudança ficou só no TeleZapp.")
+        self.fala.falar("Conversa trancada." if trancar
+                        else "Conversa destrancada.", interromper=True)
 
     DURACOES_SILENCIO = (("8 horas", 8 * 3600), ("1 semana", 7 * 86400),
                          ("Sempre", 0))
@@ -6856,6 +6880,7 @@ class Janela(wx.Frame):
     @seguro
     def _traduziu_por_bot(self, resposta, erro, pronto, senao, nome):
         self._ia_texto_ocupada = False
+        resposta = sem_cabecalho_de_idiomas(resposta.strip())             if resposta else resposta
         if resposta and resposta.strip():
             bipe("tarefa_pronta")
             pronto(SimpleNamespace(texto=resposta.strip(),

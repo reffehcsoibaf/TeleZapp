@@ -1261,3 +1261,52 @@ Retorno (11/11/2026): um canal do Telegram (ele seguidor, 2160 seguidores) conti
 Retorno (11/11/2026, à tarde): canais e grupos com tópicos. Canais: o Telethon mandava `channels.ReadHistory` com `max_id=0`; agora vai até a última mensagem do servidor, e o log diz como a conversa ficou no servidor ("servidor depois da leitura: N não lidas..."). Tópicos: só eram lidos se houvesse mensagem do tópico guardada aqui; agora `_ler_topicos` lê até a última mensagem de cada tópico no servidor, com menções e reações. Mesmo assim o celular continuou contando: o log mostrou o tópico lido no servidor e o **diálogo do grupo** ainda com 50 não lidas ("tópicos com não lidas: nenhum"). Ler um tópico não zera a contagem do grupo e só gera o aviso de "tópico lido", que clientes de terceiros que mostram o grupo como uma conversa só (no celular ele usa um desses) não entendem. Mudança: com todos os tópicos lidos, o TeleZapp lê também o grupo inteiro até a última mensagem (`_conferir_grupo_de_topicos`); com algum tópico pendente, não lê, para não esconder o que não foi lido.
 
 - **Verificado ao vivo pelo responsável (11/11/2026):** o grupo com tópicos ficou sem não lidas no celular assim que ele abriu no TeleZapp (log: "grupo com tópicos lido como um todo: agora 0 não lidas"). Ele observou também que cada aplicativo (celular, Telegram para Windows) acompanha a leitura no seu tempo; o critério combinado é a linha do log: se o servidor diz 0, a diferença é do aplicativo. **Não verificado:** "Marcar a conversa como lida" no grupo com tópicos pela lista, tópico com menções e reações, e o canal TJR FREE #2 com a correção do `max_id`.
+
+## Fixar e desafixar conversa individual no iPhone (12/11/2026)
+
+- **Sintoma:** fixar pelo TeleZapp refletia no iPhone, mas desafixar não, só em conversas individuais; em grupo funcionava. O log mostrava os dois avisos `pin_v1` aceitos pelo servidor, com endereço `@s.whatsapp.net`.
+- **Correção:** o aviso de fixar e desafixar de conversa individual vai também no endereço `@lid` (dois lançamentos no mesmo envio), quando o `@lid` é conhecido. Grupos seguem como antes.
+- **Verificado ao vivo pelo responsável (12/11/2026):** fixar e desafixar conversa individual agora refletem no iPhone.
+- **Junto:** arquivar uma conversa fixada no WhatsApp agora também a desafixa (celular e TeleZapp), como faz a biblioteca de referência. Sem teste ao vivo.
+
+## Arquivadas individuais: leitura do armazém pelo LID primeiro (12/11/2026)
+
+- **Sintoma:** de 4 conversas individuais arquivadas pelo iPhone, só 2 ficaram arquivadas no TeleZapp. O log mostrava os 4 avisos aplicados e, 8 s depois, "arquivadas conferidas: 2 conversas mudaram de lugar" (a conferência desfazia).
+- **Causa:** `_ajustes_no_celular` lia o armazém primeiro pelo número; o iPhone grava sob o `@lid`, e um registro antigo sob o número dizia "não arquivada".
+- **Correção:** o `@lid` é consultado primeiro, o número só se não houver `@lid`. Vale também para fixada e silenciada.
+- **Verificado ao vivo pelo responsável (12/11/2026):** ao reabrir o TeleZapp com a correção, as conversas que já estavam arquivadas no celular e apareciam fora do lugar no TeleZapp foram para arquivadas sozinhas.
+- **Silenciar (12/11/2026):** verificado ao vivo pelo responsável: silenciar e reativar o som de conversa individual refletem no iPhone com o aviso nos dois endereços. Favoritar mensagem, apagar para mim, marcar como lida pelo estado, limpar e apagar conversa foram para os dois endereços sem teste ao vivo.
+
+## Trancar e destrancar pelo TeleZapp, para teste (12/11/2026)
+
+- A decisão de 23/10 (trancar só pelo celular) foi suspensa a pedido do responsável, para testar se o aviso chega ao iPhone. Item "Trancar ou destrancar a conversa (WhatsApp)" no menu Conversa e no menu de contexto; sem atalho e sem seleção em massa.
+- Aviso `lock` (`LockChatAction`), coleção `regular_low`, versão 5, índice `["lock", jid]`, enviado nos dois endereços (número e `@lid`). Formato do Baileys, ainda não confirmado no iPhone.
+- **Pendente:** teste ao vivo dele. Se o iPhone ignorar, o item sai e vale de novo "só pelo celular".
+- **Verificado ao vivo pelo responsável (12/11/2026):** trancar e destrancar pelo TeleZapp refletem no iPhone. A funcionalidade fica; a decisão de 23/10 (só pelo celular) está revogada.
+- **Onde fica (12/11/2026, pedido do responsável):** a função de trancar e destrancar fica só na janela de detalhes da conversa (botão); fora do menu Conversa e do menu de contexto.
+
+## Cabeçalho de idiomas do bot tradutor (12/11/2026)
+
+- O @traduciendobot põe uma linha "idioma → idioma" antes da tradução. O TeleZapp a tira (`nucleo/ia/cabecalho_de_bot.py`) só quando é um cabeçalho curto, sem pontuação de frase, e sobra texto depois.
+- **Verificado ao vivo pelo responsável (12/11/2026):** a linha deixou de aparecer.
+
+## Erro de conexão por conflito de importação (12/11/2026)
+
+- 13:00:43: `_DeadlockError` ao importar o neonize em threads diferentes na abertura; o erro virou o alerta "Erro na conexão do WhatsApp" e a reconexão automática funcionou 2 s depois.
+- `eventos_do_neonize()` importa sob uma trava (`_TRAVA_IMPORTACAO`) com até 3 tentativas. Como há muitas outras importações do neonize fora da trava, `_uma_conexao` também repete em silêncio (até 3 vezes, 0,5 s) quando o erro é de deadlock; só depois das tentativas aparece o alerta. Outros erros mostram o alerta na hora.
+- Sem teste ao vivo: procurar no log "conflito de importação ao conectar".
+- **Novidades:** por decisão do responsável, isso não entra na janela de novidades (o usuário comum não percebe); fica só aqui.
+
+## Verificado ao vivo pelo responsável: favoritar mensagem (12/11/2026)
+
+- Favoritar e desfavoritar mensagem (aviso de estado `star` nos dois endereços, número e `@lid`) refletem no celular e no TeleZapp.
+
+- **Arquivar conversa fixada (12/11/2026):** o responsável confirma que é o comportamento já conhecido do WhatsApp: ao ser arquivada, a conversa deixa de ser fixada. O TeleZapp faz o mesmo (desafixa no celular e na lista).
+
+- **Marcar como lida pelo estado (12/11/2026):** o responsável vê no dia a dia que ler a conversa no TeleZapp a deixa lida no iPhone; funcionando bem.
+
+- **Pendentes de teste por falta de caso real (12/11/2026):** respostas a convites de evento (`encEventResponseMessage`) e detalhes de pagamento/pedido de empresas dependem de receber uma mensagem assim; o responsável testa quando chegar uma.
+
+- **Limpar no iPhone não limpou no TeleZapp (12/11/2026):** não era falha. O aviso chegou (log "conversa limpa no celular: mantida aqui") e a opção `manter_apagadas_no_celular` estava marcada, que de propósito ignora limpeza e exclusão feitas no celular. Com ela desmarcada vale (confirmado ao vivo em 08/11).
+
+- **Sem teste ao vivo, vão para os usuários (12/11/2026):** apagar só para mim e limpar/apagar conversa individual pelo TeleZapp (dois endereços), além de eventos e pagamentos. O responsável decidiu deixar que os usuários testem e relatem.
