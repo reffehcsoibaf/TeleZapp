@@ -868,6 +868,10 @@ class ControleDetalhes:
         botoes.append(("Mensagens fi&xadas", self.fixadas))
         if self.conv.tipo == "grupo":
             botoes.append(("Participantes si&lenciados", self.silenciados))
+        if self.conv.servico == "whatsapp" and                 self.conv.tipo in ("privada", "grupo"):
+            botoes.append(("Des&trancar a conversa"
+                           if self._conv_atual().trancada
+                           else "Tra&ncar a conversa", self.trancar))
         botoes.append(("&Limpar a conversa...", self.limpar))
         return botoes
 
@@ -886,6 +890,13 @@ class ControleDetalhes:
             dlg.ShowModal()
         finally:
             dlg.Destroy()
+        self.dlg.definir(self._linhas() if self.dados is not None
+                         else self._linhas_locais(), self._botoes())
+
+    def trancar(self):
+        """Tranca ou destranca a conversa no celular e refaz os botoes (o
+        rotulo troca)."""
+        self.jan._trancar_conversa(self._conv_atual())
         self.dlg.definir(self._linhas() if self.dados is not None
                          else self._linhas_locais(), self._botoes())
 

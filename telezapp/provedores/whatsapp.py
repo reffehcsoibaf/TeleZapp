@@ -84,7 +84,10 @@ SO_CONTROLE = {"senderKeyDistributionMessage", "messageContextInfo",
                "messageHistoryNotice",
                # edicao de um evento ou de uma enquete, cifrada com o segredo
                # da mensagem original: nao traz mensagem nova
-               "secretEncryptedMessage"}
+               "secretEncryptedMessage",
+               # resposta a um convite de evento (vou / nao vou), cifrada com
+               # o segredo do evento: nao traz mensagem nova
+               "encEventResponseMessage"}
 # Tipos de recibo do neonize (Receipt.Type)
 RECIBO_ENTREGUE, RECIBO_LIDO, RECIBO_LIDO_POR_MIM, RECIBO_OUVIDO = 1, 4, 5, 6
 RECIBO_OUVIDO_POR_MIM = 7     # toquei a voz ou audio no celular
@@ -218,14 +221,29 @@ def go_sem_preempcao_assincrona(ambiente=None):
     return True
 
 
+_TRAVA_IMPORTACAO = threading.RLock()
+
+
 def eventos_do_neonize():
     """O modulo de eventos do neonize. E o primeiro a importar o neonize na
     conexao (o pacote carrega a DLL), entao tambem precisa da arquitetura
     certa: sem isso, num Windows ARM a DLL arm64 era pedida e a conta nao
     pareava."""
-    with arquitetura_do_processo():
-        import neonize.events as nev
-    return nev
+    # Duas contas conectando ao mesmo tempo importavam o neonize em threads
+    # diferentes e o Python acusava _DeadlockError (13:00 de 12/11): uma de
+    # cada vez, e mais uma tentativa se o erro vier mesmo assim
+    with _TRAVA_IMPORTACAO:
+        for tentativa in range(3):
+            try:
+                with arquitetura_do_processo():
+                    import neonize.events as nev
+                return nev
+            except Exception as e:
+                if "deadlock" not in type(e).__name__.lower() or tentativa == 2:
+                    raise
+                log.warning("importação do neonize em conflito; tentando de "
+                            "novo")
+                time.sleep(0.2)
 
 
 # ----------------------------------------------------- conversao (testavel)
@@ -545,13 +563,88 @@ NOMES_ACOES_INTERATIVAS = {
 }
 
 
+ACOES_DE_PAGAMENTO = ("payment_info", "review_and_pay", "order_details")
+
+
+def _valor_em_dinheiro(v, moeda=""):
+    """{'value': 12990, 'offset': 100} -> 'R$ 129,90'."""
+    try:
+        if isinstance(v, dict):
+            desloc = int(v.get("offset") or 100)
+            numero = int(v.get("value")) / desloc
+        else:
+            numero = float(v)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return ""
+    texto = ("%.2f" % numero).replace(".", ",")
+    inteiro, dec = texto.split(",")
+    inteiro = "{:,}".format(int(inteiro)).replace(",", ".")
+    prefixo = "R$" if (moeda or "BRL").upper() == "BRL" else (moeda or "")
+    return "%s %s,%s" % (prefixo, inteiro, dec)
+
+
+def _detalhes_do_pagamento(dados):
+    """Linhas com valor, itens, referencia e formas de pagamento (Pix etc.)
+    de uma solicitacao de pagamento. Tolerante: campo que falta e pulado."""
+    if not isinstance(dados, dict):
+        return []
+    moeda = str(dados.get("currency") or "")
+    linhas = []
+    pedido = dados.get("order") if isinstance(dados.get("order"), dict) \
+        else {}
+    for item in pedido.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        nome = str(item.get("name") or "").strip()
+        preco = _valor_em_dinheiro(item.get("amount"), moeda)
+        qtd = item.get("quantity")
+        linhas.append(_partes_texto(
+            ("%s x " % qtd if qtd and str(qtd) != "1" else "") + nome,
+            preco).replace("\n", ", "))
+    total = _valor_em_dinheiro(dados.get("total_amount"), moeda)
+    if total:
+        linhas.append("Total: " + total)
+    if dados.get("reference_id"):
+        linhas.append("Referência: " + str(dados["reference_id"]))
+    for forma in dados.get("payment_settings") or []:
+        if not isinstance(forma, dict):
+            continue
+        tipo = str(forma.get("type") or "")
+        d = forma.get(tipo) if isinstance(forma.get(tipo), dict) else {}
+        if tipo == "pix_static_code":
+            linhas.append("Pix: " + ", ".join(p for p in (
+                str(d.get("key") or ""), str(d.get("merchant_name") or ""))
+                if p))
+        elif tipo == "pix_dynamic_code":
+            linhas.append("Pix copia e cola: " + str(d.get("code") or ""))
+        elif tipo == "payment_link":
+            linhas.append("Link de pagamento: " + str(d.get("uri") or ""))
+        elif tipo == "boleto":
+            linhas.append("Boleto: " + str(d.get("digitable_line") or ""))
+        elif tipo:
+            linhas.append("Pagamento: " + tipo)
+    return [l for l in linhas if l.strip()]
+
+
 def _texto_interativo(x):
     texto = _partes_texto(x.header.title, x.body.text, x.footer.text)
-    if texto or not x.HasField("nativeFlowMessage"):
+    if not x.HasField("nativeFlowMessage"):
         return texto
+    detalhes = []
+    for b in x.nativeFlowMessage.buttons:
+        if b.name in ACOES_DE_PAGAMENTO:
+            try:
+                detalhes += _detalhes_do_pagamento(
+                    json.loads(b.buttonParamsJSON or "{}"))
+            except ValueError:
+                pass
+    if texto:
+        return _partes_texto(texto, "\n".join(detalhes))
     nomes = [NOMES_ACOES_INTERATIVAS.get(b.name, b.name)
              for b in x.nativeFlowMessage.buttons if b.name]
-    return ("mensagem interativa: " + ", ".join(nomes)) if nomes else ""
+    return _partes_texto(
+        ("mensagem interativa: " + ", ".join(nomes)) if nomes else "",
+        "\n".join(detalhes))
 
 
 def botoes_do_whatsapp(interna):
@@ -1450,7 +1543,7 @@ class ProvedorWhatsApp(Provedor):
             self.barramento.publicar(ev.ProgressoSincronia(
                 self.conta.id, pct, interrompida=True))
 
-    def _uma_conexao(self):
+    def _uma_conexao(self, _repeticao=0):
         """Cria o cliente e conecta (bloqueia ate a conexao acabar).
         Devolve False se houve erro que nao adianta repetir."""
         try:
@@ -1520,7 +1613,15 @@ class ProvedorWhatsApp(Provedor):
             self.cliente.connect()   # bloqueia ate parar()
             log.info("connect() retornou")
             return True
-        except Exception:
+        except Exception as e:
+            # conflito de importacao entre threads: passa sozinho, entao tenta
+            # de novo em silencio antes de incomodar quem usa
+            if "deadlock" in type(e).__name__.lower() and _repeticao < 3 \
+                    and not self._parar.is_set():
+                log.warning("conflito de importação ao conectar; tentando de "
+                            "novo (%d)", _repeticao + 1)
+                time.sleep(0.5)
+                return self._uma_conexao(_repeticao + 1)
             if not self._parar.is_set():
                 log.exception("erro na conexão do WhatsApp")
                 self._estado(ev.ERRO, "falha na conexão")
@@ -2080,7 +2181,10 @@ class ProvedorWhatsApp(Provedor):
         if servidor == "s.whatsapp.net":
             lid = self._lid_do_pn(jid)      # o armazem pode guardar sob o LID
             if lid is not None and lid.User:
-                candidatos.append(lid)
+                # o celular grava sob o LID; um registro antigo sob o numero
+                # dizia "nao arquivada" e desfazia o que o celular acabou de
+                # arquivar. O LID vale primeiro
+                candidatos.insert(0, lid)
         for alvo in candidatos:
             try:
                 dados = self.cliente.chat_settings.get_chat_settings(alvo)
@@ -2241,7 +2345,7 @@ class ProvedorWhatsApp(Provedor):
         raise ColecaoFora(nome)
 
     def _enviar_estado(self, indice, versao, tipo, valor, conversa_id,
-                       extra=()):
+                       extra=(), tambem_lid=False):
         """Manda um aviso de estado (fixar, silenciar...) ao WhatsApp, como
         o celular faz para os outros aparelhos. True se foi aceito."""
         if self.cliente is None or not self._conectada or \
@@ -2250,16 +2354,27 @@ class ProvedorWhatsApp(Provedor):
         try:
             from neonize.proto.Neonize_pb2 import MutationInfo, PatchInfo
             usuario, servidor = jid_de_texto(conversa_id)
+            enderecos = ["%s@%s" % (usuario, servidor)]
+            if tambem_lid and servidor == "s.whatsapp.net":
+                # o iPhone guarda conversa individual sob o endereco LID:
+                # avisar so o numero fixa, mas nao desafixa. Vai o aviso
+                # nos dois enderecos
+                lid = self._lid_do_pn(_jid_obj(usuario, servidor))
+                if lid is not None and lid.User:
+                    enderecos.append("%s@%s" % (lid.User, lid.Server))
             patch = PatchInfo(
                 Timestamp=time.time_ns(), Type=tipo,
                 Mutations=[MutationInfo(
-                    Index=[indice, "%s@%s" % (usuario, servidor),
-                           *extra],
-                    Version=versao, Value=valor)])
+                    Index=[indice, alvo, *extra],
+                    Version=versao, Value=valor) for alvo in enderecos])
             self._mandar_estado(patch)
             log.info("aviso de estado %s enviado e aceito pelo servidor "
-                     "(coleção %s)", indice,
-                     COLECAO_DO_TIPO.get(int(tipo), "?"))
+                     "(coleção %s, endereço @%s, valor %s)", indice,
+                     COLECAO_DO_TIPO.get(int(tipo), "?"), servidor,
+                     " ".join(str(valor).split())[:80])
+            if len(enderecos) > 1:
+                log.info("aviso %s também no endereço @%s", indice,
+                         enderecos[1].split("@")[1])
             return True
         except ColecaoFora as e:
             log.warning("aviso %s não enviado: estado %s fora de sincronia",
@@ -2283,7 +2398,20 @@ class ProvedorWhatsApp(Provedor):
         return self._enviar_estado(
             "pin_v1", 5, PatchInfo.REGULAR_LOW,
             SyncActionValue(pinAction=PinAction(pinned=bool(fixar))),
-            conversa_id)
+            conversa_id, tambem_lid=True)
+
+    def trancar_conversa(self, conversa_id, trancar):
+        """Tranca (ou destranca) a conversa no celular: aviso de estado
+        `lock` (LockChatAction), regular_low, versao 5, como o Baileys.
+        Sem teste no iPhone ate o responsavel conferir."""
+        from neonize.proto.Neonize_pb2 import PatchInfo
+        from neonize.proto.waSyncAction.WAWebProtobufSyncAction_pb2 import (
+            LockChatAction, SyncActionValue)
+        return self._enviar_estado(
+            "lock", 5, PatchInfo.REGULAR_LOW,
+            SyncActionValue(lockChatAction=LockChatAction(
+                locked=bool(trancar))),
+            conversa_id, tambem_lid=True)
 
     def arquivar_conversa(self, conversa_id, arquivar):
         """Arquiva (ou desarquiva) a conversa no celular: o aviso de estado
@@ -2294,13 +2422,22 @@ class ProvedorWhatsApp(Provedor):
         with self._trava:
             conv = self._conversas.get(conversa_id)
             ultima = int(conv.data) if conv is not None and conv.data else                 int(time.time())
-        return self._enviar_estado(
+            estava_fixada = bool(conv is not None and conv.fixada)
+        ok = self._enviar_estado(
             "archive", 3, PatchInfo.REGULAR_LOW,
             SyncActionValue(archiveChatAction=ArchiveChatAction(
                 archived=bool(arquivar),
                 messageRange=SyncActionMessageRange(
                     lastMessageTimestamp=ultima))),
-            conversa_id)
+            conversa_id, tambem_lid=True)
+        if ok and arquivar and estava_fixada:
+            # arquivar desafixa no WhatsApp (o whatsmeow manda os dois
+            # avisos juntos); sem isto o celular e o TeleZapp divergem
+            self.fixar_conversa(conversa_id, False)
+            with self._trava:
+                conv.fixada = False
+            self.banco.salvar_conversas([conv])
+        return ok
 
     def silenciar_conversa(self, conversa_id, silenciar, segundos=0):
         from neonize.proto.Neonize_pb2 import PatchInfo
@@ -2312,7 +2449,8 @@ class ProvedorWhatsApp(Provedor):
                 if segundos else -1
         return self._enviar_estado(
             "mute", 2, PatchInfo.REGULAR_HIGH,
-            SyncActionValue(muteAction=acao), conversa_id)
+            SyncActionValue(muteAction=acao), conversa_id,
+            tambem_lid=True)
 
     APAGA_NA_CONTA = True
 
@@ -2371,9 +2509,19 @@ class ProvedorWhatsApp(Provedor):
                 pedido = ["deleteChat", jid, "1"]
                 valor = SyncActionValue(deleteChatAction=DeleteChatAction(
                     messageRange=faixa))
+            lancamentos = [MutationInfo(Index=pedido, Version=6, Value=valor)]
+            if servidor == "s.whatsapp.net":
+                # o iPhone guarda a conversa individual sob o LID: vai o
+                # aviso nos dois enderecos
+                lid = self._lid_do_pn(_jid_obj(usuario, servidor))
+                if lid is not None and lid.User:
+                    outro = list(pedido)
+                    outro[1] = "%s@%s" % (lid.User, lid.Server)
+                    lancamentos.append(
+                        MutationInfo(Index=outro, Version=6, Value=valor))
             patch = PatchInfo(
                 Timestamp=time.time_ns(), Type=PatchInfo.REGULAR_HIGH,
-                Mutations=[MutationInfo(Index=pedido, Version=6, Value=valor)])
+                Mutations=lancamentos)
             self._mandar_estado(patch)
             return True
         except ColecaoFora as e:
@@ -3213,7 +3361,8 @@ class ProvedorWhatsApp(Provedor):
             "star", 2, PatchInfo.REGULAR_HIGH,
             SyncActionValue(starAction=StarAction(starred=bool(favoritar))),
             mensagem.conversa_id,
-            extra=(mensagem.id, "1" if mensagem.minha else "0", remetente))
+            extra=(mensagem.id, "1" if mensagem.minha else "0", remetente),
+            tambem_lid=True)
 
     def apagar_mensagem(self, mensagem, para_todos=False):
         """Apaga a mensagem no WhatsApp: para todos (so as minhas, o mesmo
@@ -3275,7 +3424,8 @@ class ProvedorWhatsApp(Provedor):
             SyncActionValue(
                 deleteMessageForMeAction=DeleteMessageForMeAction(
                     deleteMedia=True, messageTimestamp=int(data))),
-            conversa_id, extra=(mensagem_id, "1" if minha else "0", remetente))
+            conversa_id, extra=(mensagem_id, "1" if minha else "0", remetente),
+            tambem_lid=True)
         if aceito:
             log.info("apagar para mim enviado (%s)", forma_da_exclusao(
                 conversa_id, minha, "" if remetente == "0" else remetente))
@@ -4471,6 +4621,13 @@ class ProvedorWhatsApp(Provedor):
             info = evento.Info
             with self._trava:
                 repetida = info.ID in self._vistas
+            if info.MessageSource.IsFromMe:
+                # diagnostico: mensagem que eu mandei de outro aparelho
+                log.info("chegou mensagem minha de outro aparelho: id=%s "
+                         "chat=@%s repetida=%s campos=%s", info.ID,
+                         info.MessageSource.Chat.Server, repetida,
+                         ", ".join(sorted(set(campos(
+                             desembrulhar(evento.Message))))) or "(nenhum)")
             self._registrar_localizacao_ao_vivo(evento, repetida)
             if repetida:
                 log.info("mensagem repetida ignorada: id=%s", info.ID)
@@ -6214,7 +6371,7 @@ class ProvedorWhatsApp(Provedor):
                 read=True,
                 messageRange=SyncActionMessageRange(
                     lastMessageTimestamp=ultima))),
-            conversa_id)
+            conversa_id, tambem_lid=True)
         log.info("conversa lida avisada ao celular pelo estado "
                  "(mensagem apagada pelo autor): %s",
                  "aceito" if ok else "não aceito")
@@ -6625,6 +6782,11 @@ class ProvedorWhatsApp(Provedor):
                 data = max(data, max(x.data for x in novas))
             with self._trava:
                 conv = self._conversas.get(cid)
+                if conv is None and not grupo and not novas and not data                         and not c.unreadCount and not c.pinned:
+                    # entrada de contato da agenda, sem conversa iniciada
+                    # (sem mensagem, hora nem nao lida): o celular nao a
+                    # mostra, entao o TeleZapp tambem nao cria
+                    continue
                 if conv is None:
                     if not nome:
                         nome = "Grupo" if grupo else self._nome_por_texto(

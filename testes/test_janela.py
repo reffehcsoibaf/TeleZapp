@@ -73,6 +73,10 @@ class ProvedorFalso:
         self.pedidos.append(("arquivar", cid, arquivar))
         return True
 
+    def trancar_conversa(self, cid, trancar):
+        self.pedidos.append(("trancar", cid, trancar))
+        return True
+
     def pedir_codigo_pareamento(self, telefone):
         self.pedidos.append(("codigo", telefone))
 
@@ -5716,7 +5720,33 @@ def test_tranca_local_de_versao_anterior_e_desfeita_ao_carregar(j):
     j._juntar_conversas("t1", [local, celular])
     assert not local.trancada and celular.trancada
     assert j.cfg.get("trancadas_locais") == []
-    assert not hasattr(j, "_trancar_conversa")
+
+
+def test_trancar_e_destrancar_avisam_o_celular(j, monkeypatch):
+    import time as _t
+    conv = next(iter(j.indice.values()))
+    monkeypatch.setattr(j.contas, "servico", lambda c: "whatsapp",
+                        raising=False)
+    conv.trancada = False
+    j._trancar_conversa(conv)
+    assert conv.trancada
+    j._trancar_conversa(conv)                  # de volta
+    assert not conv.trancada
+    for _ in range(50):
+        feitos = [p for p in j.contas.p.pedidos if p[0] == "trancar"]
+        if len(feitos) == 2:
+            break
+        _t.sleep(0.1)
+    assert [p[2] for p in feitos] == [True, False]
+
+
+def test_trancar_so_vale_para_o_whatsapp(j, monkeypatch):
+    conv = next(iter(j.indice.values()))
+    monkeypatch.setattr(j.contas, "servico", lambda c: "telegram",
+                        raising=False)
+    conv.trancada = False
+    j._trancar_conversa(conv)
+    assert not conv.trancada
 
 
 def test_atalho_do_som_com_microfone_grava_os_dois(j, monkeypatch, tmp_path):

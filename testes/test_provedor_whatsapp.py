@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Provedor do WhatsApp com mensagens protobuf de verdade do neonize e um
 cliente simulado (sem rede)."""
+import json
 import contextlib
 import time
 import logging
@@ -581,6 +582,20 @@ def test_historico_guarda_conversas_nomes_e_mensagens(amb):
     esperar(amb.fila, ev.MensagemNova)
     assert amb.c.lidas == [(["H3"], "5551988887777@s.whatsapp.net",
                             "5551988887777")]
+
+
+def test_historico_ignora_contato_sem_conversa_iniciada(amb):
+    h = H.HistorySync(syncType=3, conversations=[
+        H.Conversation(ID="5551900000001@s.whatsapp.net", name="So agenda"),
+        H.Conversation(ID="5551900000002@s.whatsapp.net", unreadCount=2),
+        H.Conversation(ID="5551900000003@s.whatsapp.net",
+                       conversationTimestamp=TS),
+        H.Conversation(ID="456@g.us", name="Grupo vazio")])
+    amb.p.guardar_historico(h)
+    ids = {c.id for c in amb.banco.conversas("w1")}
+    assert "5551900000001@s.whatsapp.net" not in ids
+    assert {"5551900000002@s.whatsapp.net", "5551900000003@s.whatsapp.net",
+            "456@g.us"} <= ids
 
 
 def test_recentes_guarda_tudo_que_vier(amb):
@@ -1189,6 +1204,27 @@ def test_pagamento_interativo_sem_texto_vira_solicitacao_de_pagamento():
         "w1", "c")
     assert msg.tipo == m.TEXTO
     assert msg.texto == "mensagem interativa: solicitação de pagamento"
+
+
+def test_pagamento_interativo_mostra_valor_itens_e_pix():
+    params = json.dumps({
+        "currency": "BRL", "reference_id": "A123",
+        "total_amount": {"value": 125990, "offset": 100},
+        "order": {"items": [
+            {"name": "Cadeira", "quantity": 2,
+             "amount": {"value": 62995, "offset": 100}}]},
+        "payment_settings": [{"type": "pix_static_code", "pix_static_code": {
+            "key": "12345678900", "merchant_name": "Loja"}}]})
+    nf = E.InteractiveMessage.NativeFlowMessage(buttons=[
+        E.InteractiveMessage.NativeFlowMessage.NativeFlowButton(
+            name="review_and_pay", buttonParamsJSON=params)])
+    msg, _ = wa.converter(evento("PG2", E.Message(
+        interactiveMessage=E.InteractiveMessage(nativeFlowMessage=nf))),
+        "w1", "c")
+    assert msg.texto == (
+        "mensagem interativa: solicitação de pagamento\n"
+        "2 x Cadeira, R$ 629,95\nTotal: R$ 1.259,90\nReferência: A123\n"
+        "Pix: 12345678900, Loja")
 
 
 def _modelo_com_botoes():
@@ -1833,6 +1869,9 @@ def test_tipos_novos_ganham_texto_e_o_de_edicao_nao_vira_mensagem():
     # edicao de evento ou enquete (cifrada): so controle, nao e mensagem
     assert wa.conteudo_de(E.Message(
         secretEncryptedMessage=E.SecretEncryptedMessage())) is None
+    # resposta cifrada a convite de evento (vou / nao vou): so controle
+    assert wa.conteudo_de(E.Message(
+        encEventResponseMessage=E.EncEventResponseMessage())) is None
 
 
 def test_contato_salvo_no_telezapp_vai_ao_whatsapp_sem_tocar_a_agenda(amb):
