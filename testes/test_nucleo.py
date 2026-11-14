@@ -1020,6 +1020,30 @@ def test_encaminhar_destinos_inclui_grupos_da_conta_e_filtra_por_modo():
     assert nomes("grupos") == ["Família", "Time"]
 
 
+def test_encaminhar_meu_status_no_topo_sem_status_de_outros_e_regras():
+    from telezapp.nucleo import encaminhar as enc
+    conversas = [m.Conversa("a", "1", "Bia"),
+                 m.Conversa("a", "status@x", "Ana", tipo="status")]
+    d = enc.destinos(conversas, [], lambda c: c in ("a", "b"),
+                     contas_status=["a", "b", "c"])
+    assert [(x[0], x[2]) for x in d] == [("a", "Meu status"),
+                                         ("b", "Meu status"), ("a", "Bia")]
+    assert [enc.eh_status(x) for x in d] == [True, True, False]
+    cat = enc.categorias(conversas, [], ())
+    assert [x[2] for x in enc.do_modo(d, "conversas", cat)] == [
+        "Meu status", "Bia"]
+    texto, foto = enc.Item("texto", "oi"), enc.Item("arquivo", "", "x", m.FOTO)
+    assert enc.para_status(texto, "whatsapp") == ""
+    assert "Telegram" in enc.para_status(texto, "telegram")
+    assert "700" in enc.para_status(enc.Item("texto", "a" * 701), "whatsapp")
+    assert enc.para_status(foto, "telegram") == ""
+    voz = enc.Item("arquivo", "", "x", m.VOZ)
+    assert enc.para_status(voz, "whatsapp") == ""
+    assert enc.para_status(voz, "telegram") != ""
+    assert enc.para_status(enc.Item("arquivo", "", "x", m.DOCUMENTO),
+                           "whatsapp") != ""
+
+
 def test_nova_mensagem_grupos_candidatos_com_e_sem_conversa():
     from telezapp.nucleo import nova_mensagem as nm
     conversas = [m.Conversa("a", "g1", "Time", tipo="grupo"),

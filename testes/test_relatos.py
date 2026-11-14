@@ -27,6 +27,21 @@ def test_contato_e_obrigatorio_e_descricao_so_sem_logs():
     assert rl.falta("a@b", "algo", False) == ""
 
 
+def test_contato_leva_a_via_e_confere_o_formato():
+    assert rl.contato_de("whatsapp", "(21) 97742-5383") == (
+        "WhatsApp: +5521977425383", "")
+    assert rl.contato_de("whatsapp", "abc")[0] == ""
+    assert rl.contato_de("email", "a@b.com") == ("E-mail: a@b.com", "")
+    assert rl.contato_de("email", "a@b")[1]
+    assert rl.contato_de("telegram", "fulano_1") == ("Telegram: @fulano_1", "")
+    assert rl.contato_de("telegram", "@fulano_1")[0] == "Telegram: @fulano_1"
+    assert rl.contato_de("telegram", "ab")[1]
+    assert rl.contato_de("telegram", "21 99999-8888") == (
+        "Telegram: +5521999998888", "")
+    assert [rl.via_de(x) for x in ("a@b.com", "21977425383", "@fulano")] == [
+        "email", "whatsapp", "telegram"]
+
+
 def test_logs_ficam_no_limite_e_guardam_o_fim(tmp_path):
     (tmp_path / "falha-nativa.log").write_bytes(b"queda\n")
     (tmp_path / "telezapp.log").write_bytes(b"velha\n" * 100 + b"ultima\n")
