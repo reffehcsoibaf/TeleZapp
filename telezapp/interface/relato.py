@@ -20,7 +20,7 @@ SOBRE_OS_LOGS = (
 
 
 class DialogoRelato(wx.Dialog):
-    def __init__(self, pai, nome="", contato="", falar=None):
+    def __init__(self, pai, nome="", contato="", falar=None, via=""):
         super().__init__(pai, title="Feedback do %s" % NOME, size=(620, 620),
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self._falar = falar or (lambda texto: None)
@@ -43,9 +43,21 @@ class DialogoRelato(wx.Dialog):
             return controle
 
         self.nome = texto("Seu nome", nome)
-        self.contato = texto(
-            "Como falar com você (obrigatório): e-mail, usuário do Telegram "
-            "ou WhatsApp com DDD", contato)
+        rotulo_via = "Retorno via"
+        lay.Add(wx.StaticText(self, label=rotulo_via), 0,
+                wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        self.via = wx.Choice(self, choices=[r for _, r in relatos.VIAS],
+                             name=rotulo_via)
+        chaves = [c for c, _ in relatos.VIAS]
+        via = via if via in chaves else relatos.via_de(contato)
+        self.via.SetSelection(chaves.index(via))
+        lay.Add(self.via, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
+        self.rotulo_contato = wx.StaticText(self, label="")
+        lay.Add(self.rotulo_contato, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        self.contato = wx.TextCtrl(self, value=contato, name="Contato")
+        lay.Add(self.contato, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
+        self.via.Bind(wx.EVT_CHOICE, lambda e: self._ao_trocar_via())
+        self._ao_trocar_via()
         self.descricao = texto(
             "Descrição (opcional com os logs): o que você fez, o que esperava "
             "e o que aconteceu", estilo=wx.TE_MULTILINE)
@@ -69,6 +81,14 @@ class DialogoRelato(wx.Dialog):
         self.tipo.SetFocus()
         self.CentreOnParent()
 
+    def _via(self):
+        return relatos.VIAS[max(self.via.GetSelection(), 0)][0]
+
+    def _ao_trocar_via(self):
+        self.rotulo_contato.SetLabel(
+            relatos.DICAS[self._via()] + " (obrigatório)")
+        self.Layout()
+
     def _ao_fechar(self, evento):
         if not self._enviando:
             self.EndModal(wx.ID_CANCEL)
@@ -90,8 +110,14 @@ class DialogoRelato(wx.Dialog):
             self._avisar(frase, wx.ICON_WARNING)
             controle.SetFocus()
             return
+        contato, erro = relatos.contato_de(self._via(),
+                                           self.contato.GetValue())
+        if erro:
+            self._avisar(erro, wx.ICON_WARNING)
+            self.contato.SetFocus()
+            return
         dados = (TIPOS[self.tipo.GetSelection()][1], self.nome.GetValue(),
-                 self.contato.GetValue(), self.descricao.GetValue(),
+                 contato, self.descricao.GetValue(),
                  self.quando.GetValue(), com_logs)
         self._enviando = True
         self._botoes(False)
@@ -130,10 +156,12 @@ class DialogoRelato(wx.Dialog):
 def mostrar_relato(pai, cfg, falar=None):
     """Abre a janela; quem enviou nao precisa escrever nome e contato de novo."""
     dlg = DialogoRelato(pai, cfg.get("relato_nome") or "",
-                        cfg.get("relato_contato") or "", falar)
+                        cfg.get("relato_contato") or "", falar,
+                        cfg.get("relato_via") or "")
     try:
         if dlg.ShowModal() == wx.ID_OK:
             cfg.set("relato_nome", dlg.nome.GetValue().strip())
             cfg.set("relato_contato", dlg.contato.GetValue().strip())
+            cfg.set("relato_via", dlg._via())
     finally:
         dlg.Destroy()

@@ -10,7 +10,7 @@ aviso "Encaminhada").
 import os
 from dataclasses import dataclass
 
-from telezapp.nucleo import modelos as m
+from telezapp.nucleo import modelos as m, publicar_status as ps
 
 
 @dataclass
@@ -43,10 +43,41 @@ def preparar(msg, caminho_da_midia):
     return Item("texto", texto), ""
 
 
-def destinos(conversas, contatos, conectada, trancadas=False, grupos=()):
+STATUS_ID = "__meu_status__"     # destino especial: publicar como status
+STATUS_TIPO = "status"
+
+
+def eh_status(destino):
+    return destino[1] == STATUS_ID
+
+
+def para_status(item, servico):
+    """"" se o item pode virar status (WhatsApp) ou historia (Telegram), ou o
+    motivo de nao poder."""
+    if item.tipo == "texto":
+        if servico == "telegram":
+            return "no Telegram a história precisa de foto ou vídeo"
+        limite = ps.LIMITE_TEXTO.get(servico, 700)
+        if len(item.texto) > limite:
+            return "texto com mais de %d letras" % limite
+        return ""
+    if item.tipo_midia in (m.FOTO, m.VIDEO):
+        limite = ps.LIMITE_TEXTO.get(servico, 700)
+        if len(item.texto) > limite:
+            return "legenda com mais de %d letras" % limite
+        return ""
+    if item.tipo_midia in (m.VOZ, m.AUDIO) and servico != "telegram":
+        return ""
+    return "só dá para publicar texto, foto, vídeo ou voz"
+
+
+def destinos(conversas, contatos, conectada, trancadas=False, grupos=(),
+             contas_status=()):
     """[(conta_id, conversa_id, nome, tipo)] para onde encaminhar, por nome:
     as conversas de contas conectadas (sem as trancadas, a menos que
-    `trancadas`) e os contatos que ainda nao tem conversa.
+    `trancadas`) e os contatos que ainda nao tem conversa. Antes de todos, o
+    "Meu status" de cada conta de `contas_status` ([conta_id]; conversa_id
+    STATUS_ID). As conversas de status de outras pessoas nao entram.
 
     conversas: [Conversa]; contatos: [(conta_id, id, nome, telefone)];
     conectada(conta_id) -> bool; grupos: [(conta_id, id, nome)] de que a
@@ -54,7 +85,7 @@ def destinos(conversas, contatos, conectada, trancadas=False, grupos=()):
     achados, vistos = [], set()
     for c in conversas:
         if not conectada(c.conta_id) or c.somente_leitura or (
-                c.trancada and not trancadas):
+                c.trancada and not trancadas) or c.tipo == STATUS_TIPO:
             continue
         achados.append((c.conta_id, c.id, c.nome, c.tipo))
         vistos.add((c.conta_id, c.id))
@@ -68,7 +99,9 @@ def destinos(conversas, contatos, conectada, trancadas=False, grupos=()):
             continue
         vistos.add((conta_id, id_))
         achados.append((conta_id, id_, nome or id_, "grupo"))
-    return sorted(achados, key=lambda d: d[2].lower())
+    meu_status = [(cid, STATUS_ID, "Meu status", STATUS_TIPO)
+                  for cid in contas_status if conectada(cid)]
+    return meu_status + sorted(achados, key=lambda d: d[2].lower())
 
 
 def filtrar(lista, busca):
@@ -86,6 +119,9 @@ def categorias(conversas, contatos, grupos=()):
     """{(conta_id, id): {"conversas", "contatos", "grupos"}} de cada destino:
     tem conversa, esta na agenda, e um grupo."""
     cat = {}
+    for cid in {c.conta_id for c in conversas} | {t[0] for t in contatos} | \
+            {g[0] for g in grupos}:
+        cat[(cid, STATUS_ID)] = {"conversas"}
     for c in conversas:
         s = cat.setdefault((c.conta_id, c.id), set())
         s.add("conversas")

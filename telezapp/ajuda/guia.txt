@@ -259,7 +259,7 @@ Com uma conversa aberta, o botão "Iniciar chamada", depois de "Anexar e enviar 
 A tecla Aplicativos ou Shift+F10 abre o menu da mensagem selecionada.
 
 Editar: F2, se a mensagem de texto for sua e estiver dentro do prazo: 15 minutos no WhatsApp, 48 horas no Telegram. Enter salva a edição e Esc cancela.
-Encaminhar: Ctrl+Shift+E, para a mensagem selecionada ou as marcadas no modo de seleção. Escolha as conversas e contatos na janela de busca. A mídia precisa já estar baixada.
+Encaminhar: Ctrl+Shift+E, para a mensagem selecionada ou as marcadas no modo de seleção. Escolha as conversas e contatos na janela de busca. A mídia precisa já estar baixada. Na lista, "Meu status" aparece no topo: marcando, o conteúdo é publicado como status (WhatsApp: texto, foto, vídeo e voz) ou história (Telegram: foto e vídeo), depois de uma confirmação. O que não cabe no status é pulado.
 Copiar: Ctrl+C copia o texto da mensagem em foco. Ctrl+Shift+C copia o conteúdo dela: se a mensagem tem só um (a foto, o áudio, o texto, o link), copia direto; se tem mais de um, como foto com legenda e link, abre uma lista para você escolher o que copiar. Se a mídia ainda não foi baixada, o TeleZapp baixa e copia quando terminar. O menu de contexto tem um item de cópia para cada tipo de conteúdo.
 Copiar a transcrição ou descrição: no menu Mensagens, copia o texto que a IA fez da mídia. Vem sem tecla; escolha uma em Configurações, Atalhos.
 Responder em particular: no menu de contexto de uma mensagem de outra pessoa num grupo, abre a conversa particular com ela e cita a mensagem do grupo na resposta. É do WhatsApp.
@@ -793,7 +793,7 @@ Nunca mande as pastas de sessões, o config.json, o banco de conversas, as chave
 
 Na Ajuda ficam também:
 Página do projeto na internet: abre o site do TeleZapp no navegador.
-Feedback: abre uma janela do próprio TeleZapp, sem navegador, para relatar um problema, sugerir algo ou tirar uma dúvida, sem precisar de conta em lugar nenhum. Escreva como falar com você e aperte Enviar com os logs: os registros vão juntos, sem precisar procurar arquivos, e a descrição é opcional. Enviar sem os logs manda só o que você escreveu, e aí a descrição é obrigatória.
+Feedback: abre uma janela do próprio TeleZapp, sem navegador, para relatar um problema, sugerir algo ou tirar uma dúvida, sem precisar de conta em lugar nenhum. Escolha em Retorno via (Telegram, WhatsApp ou e-mail), escreva o contato (usuário, número com DDD ou endereço) e aperte Enviar com os logs: os registros vão juntos, sem precisar procurar arquivos, e a descrição é opcional. Enviar sem os logs manda só o que você escreveu, e aí a descrição é obrigatória.
 Entrar no grupo de suporte no WhatsApp: leva ao grupo onde se tiram dúvidas e se conversa com quem desenvolve o TeleZapp e com outros usuários. Com uma conta de WhatsApp conectada, o TeleZapp mostra o nome e o número de membros do grupo e pergunta se você quer entrar; com mais de uma conta, pergunta com qual. Sem conta conectada, abre o convite no navegador.
 
 Os dois primeiros itens nascem sem atalho; dê um em Configurações, Atalhos.

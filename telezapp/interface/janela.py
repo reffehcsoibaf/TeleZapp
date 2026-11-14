@@ -2834,6 +2834,8 @@ class Janela(wx.Frame):
             ("%s %s" % ("Reativar o som de" if all(
                 c.silenciada() for c in convs) else "Silenciar", n),
              lambda: self._massa_conversas("silenciar")),
+            ("Limpar %s (aqui e no celular)" % n,
+             lambda: self._massa_conversas("limpar")),
             ("Apagar %s..." % n, lambda: self._massa_conversas("apagar")),
             ("Desfazer a seleção",
              lambda: self._sair_selecao(self.lista_conv))]
@@ -3697,9 +3699,11 @@ class Janela(wx.Frame):
                      self.contas.provedor(cid) is not None)
         conversas, contatos = list(self.indice.values()), self.banco.contatos()
         grupos = self._grupos_das_contas()
+        contas_status = [d["id"] for d in self.cfg.contas() if getattr(
+            self.contas.provedor(d["id"]), "PODE_PUBLICAR_STATUS", False)]
         destinos = enc.destinos(conversas, contatos, conectada,
                                 trancadas=self.trancadas_liberadas,
-                                grupos=grupos)
+                                grupos=grupos, contas_status=contas_status)
         if not destinos:
             self.fala.falar("Nenhuma conversa de conta conectada para "
                             "receber.", interromper=True)
@@ -3707,6 +3711,8 @@ class Janela(wx.Frame):
 
         def rotulo(d):
             partes = [d[2]]
+            if enc.eh_status(d):
+                partes.append("publicar como status")
             if d[3] == "grupo":
                 partes.append("grupo")
             if varias:
@@ -3727,11 +3733,33 @@ class Janela(wx.Frame):
             escolhidos = dlg.escolhidos()
         finally:
             dlg.Destroy()
+        status = [d for d in escolhidos if enc.eh_status(d)]
+        if status:
+            # publicar e visivel a quem ve os meus status: confirmar antes
+            r = wx.MessageBox(
+                "Publicar %s como status (%s)? Quem vê os seus status vai ver "
+                "o conteúdo. Cada mensagem vira um status, e o que não cabe "
+                "no status é pulado." % (
+                    "1 mensagem" if len(itens) == 1 else
+                    "%d mensagens" % len(itens),
+                    ", ".join(nomes_contas.get(d[0], d[0]) for d in status)),
+                "Encaminhar para o status",
+                wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
+            if r != wx.YES:
+                escolhidos = [d for d in escolhidos if not enc.eh_status(d)]
+                if not escolhidos:
+                    return
         enviadas = falhas = 0
         for conta_id, conversa_id, nome, tipo in escolhidos:
             prov = self.contas.provedor(conta_id)
             if prov is None:
                 falhas += len(itens)
+                continue
+            if enc.eh_status((conta_id, conversa_id)):
+                e, f, p = self._encaminhar_para_status(
+                    prov, self.contas.servico(conta_id), itens)
+                enviadas, falhas = enviadas + e, falhas + f
+                pulados.extend(p)
                 continue
             if (conta_id, conversa_id) not in self.indice:
                 conv = m.Conversa(conta_id, conversa_id, nome,
@@ -3770,6 +3798,28 @@ class Janela(wx.Frame):
             texto += " Não foram encaminhadas: %s." % "; ".join(sorted(
                 set(pulados)))
         self.fala.falar(texto, interromper=True)
+
+    def _encaminhar_para_status(self, prov, servico, itens):
+        """Publica cada item como status ou historia. -> (publicados, falhas,
+        [motivo dos pulados])."""
+        ok = falhas = 0
+        pulados = []
+        for item in itens:
+            motivo = enc.para_status(item, servico)
+            if motivo:
+                pulados.append(motivo)
+                continue
+            try:
+                anexo = None
+                if item.tipo == "arquivo":
+                    anexo = envio.preparar(
+                        item.caminho, voz=item.tipo_midia == m.VOZ)
+                prov.publicar_status(item.texto, anexo)
+                ok += 1
+            except Exception as e:
+                log.warning("encaminhar para o status falhou: %r", e)
+                falhas += 1
+        return ok, falhas, pulados
 
     def _caminho_da_midia(self, x):
         if self.midias is None or self.banco.foi_limpa(
@@ -8785,6 +8835,8 @@ class Janela(wx.Frame):
             if self._ia_auto_ligada(conv.chave) else
             "Ligar a transcrição e descrição automáticas",
             lambda: self._alternar_ia_auto(conv)))
+        opcoes.append(("Limpar a conversa (aqui e no celular)",
+                       lambda: self._limpar_conversa_do_menu(conv)))
         opcoes.append(("Apagar conversa...",
                        lambda: self._apagar_conversa(conv)))
         if conv.tipo == "privada":
