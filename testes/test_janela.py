@@ -9658,3 +9658,93 @@ def test_backup_completo_leva_tudo_e_o_seletivo_mostra_as_partes():
     assert d.contas() == ["t1"]
     d.caixas["filtros"].SetValue(False)
     assert "filtros" not in d.partes()
+
+
+# ------------------------------------------- tela e som do computador
+def com_compartilhar(chamadas):
+    p = com_video(chamadas)
+    p.suporta_som_pc = True
+    p.telas = lambda: [("Tela 1", (0, 0, 10, 10)), ("Tela 2", (10, 0, 5, 5))]
+    p.saidas_do_computador = lambda: ["Alto-falantes", "Fones"]
+    for nome in ("compartilhar_tela", "parar_tela", "trocar_tela",
+                 "compartilhar_som", "parar_som"):
+        setattr(p, nome, lambda *a, _n=nome: p.comandos.append((_n,) + a))
+    return p
+
+
+def em_chamada_com(j, **extra):
+    j.b.publicar(ev.EstadoChamada(
+        "t1", "10", "em chamada", "Ana", False, video=True,
+        suporta_video=True, suporta_tela=True, suporta_som_pc=True, **extra))
+
+
+def test_botoes_de_tela_e_som_aparecem_so_se_a_conta_sabe(chamadas):
+    ch = chamadas.ch
+    j = chamadas.j
+    com_compartilhar(chamadas)
+    em_chamada_com(j)
+    botoes = ch.apresentar(j.chamada).botoes
+    assert ch.TELA in botoes and ch.SOM_PC in botoes
+    j2 = ch.Chamada("t1", "10", "Ana", estado=ch.EM_CHAMADA,
+                    suporta_video=True)
+    assert ch.TELA not in ch.apresentar(j2).botoes
+    assert ch.SOM_PC not in ch.apresentar(j2).botoes
+
+
+def test_alternar_a_tela_usa_a_tela_e_o_som_escolhidos(chamadas):
+    j = chamadas.j
+    p = com_compartilhar(chamadas)
+    em_chamada_com(j)
+    j.cfg.set("chamada_tela", "Tela 2")
+    j._alternar_tela()
+    assert p.comandos == [("compartilhar_tela", "10", "Tela 2", True)]
+    em_chamada_com(j, camera=True, tela=True, som_pc=True)
+    j._alternar_tela()
+    assert p.comandos[-1] == ("parar_tela", "10")
+    j.cfg.set("chamada_tela_com_som", False)
+    em_chamada_com(j)
+    j._alternar_tela()
+    assert p.comandos[-1] == ("compartilhar_tela", "10", "Tela 2", False)
+
+
+def test_alternar_o_som_do_computador(chamadas):
+    j = chamadas.j
+    p = com_compartilhar(chamadas)
+    em_chamada_com(j)
+    j.cfg.set("chamada_saida_pc", "Fones")
+    j._alternar_som_pc()
+    assert p.comandos == [("compartilhar_som", "10", "Fones")]
+    em_chamada_com(j, som_pc=True)
+    j._alternar_som_pc()
+    assert p.comandos[-1] == ("parar_som", "10")
+    j._trocar_som_pc("Alto-falantes")        # trocando com o som ligado
+    assert p.comandos[-1] == ("compartilhar_som", "10", "Alto-falantes")
+    assert j.cfg.get("chamada_saida_pc") == "Alto-falantes"
+
+
+def test_compartilhamento_e_falado_sem_dizer_camera(chamadas):
+    j = chamadas.j
+    com_compartilhar(chamadas)
+    em_chamada_com(j)
+    chamadas.falas.clear()
+    em_chamada_com(j, camera=True, tela=True, som_pc=True)
+    assert chamadas.falas == ["Compartilhando a tela e o som do computador."]
+    chamadas.falas.clear()
+    em_chamada_com(j, som_pc=True)           # parou so a tela
+    assert chamadas.falas == ["Você parou de compartilhar a tela."]
+    chamadas.falas.clear()
+    em_chamada_com(j)
+    assert chamadas.falas == [
+        "Você parou de compartilhar o som do computador."]
+
+
+def test_sem_suporte_diz_que_a_conta_nao_compartilha(chamadas):
+    j = chamadas.j
+    com_video(chamadas)
+    j.b.publicar(ev.EstadoChamada("t1", "10", "em chamada", "Ana", False,
+                                  video=True, suporta_video=True))
+    chamadas.falas.clear()
+    j._alternar_tela()
+    j._alternar_som_pc()
+    assert "não compartilha a tela" in chamadas.falas[0]
+    assert "não compartilha o som" in chamadas.falas[1]

@@ -1368,6 +1368,9 @@ PADROES.update({
     "chamada_microfone": "",     # nome do microfone usado nas chamadas
     "chamada_saida": "",         # nome da saida de som das chamadas
     "chamada_camera": "",        # nome da camera das chamadas de video
+    "chamada_tela": "",          # nome da tela compartilhada nas chamadas
+    "chamada_saida_pc": "",      # saida de som do computador compartilhada
+    "chamada_tela_com_som": True,  # compartilhar a tela leva o som junto
     "notificacao_saida": "",     # nome da saida dos sons de aviso do app
     "telegram_api_id": 0,
     "telegram_api_hash": "",

@@ -6532,6 +6532,33 @@ class ProvedorWhatsApp(Provedor):
     def desligar_camera(self, conversa_id):
         self._comando_de_chamada("desligar_camera", conversa_id)
 
+    @property
+    def suporta_som_pc(self):
+        return self._voz is not None and self._voz.suporta_som_pc
+
+    def telas(self):
+        return self._voz.telas() if self._voz is not None else []
+
+    def saidas_do_computador(self):
+        return (self._voz.saidas_do_computador()
+                if self._voz is not None else [])
+
+    def compartilhar_tela(self, conversa_id, nome="", com_som=True):
+        self._comando_de_chamada("compartilhar_tela", conversa_id, nome,
+                                 com_som)
+
+    def parar_tela(self, conversa_id):
+        self._comando_de_chamada("parar_tela", conversa_id)
+
+    def trocar_tela(self, conversa_id, nome):
+        self._comando_de_chamada("trocar_tela", conversa_id, nome)
+
+    def compartilhar_som(self, conversa_id, saida=""):
+        self._comando_de_chamada("compartilhar_som", conversa_id, saida)
+
+    def parar_som(self, conversa_id):
+        self._comando_de_chamada("parar_som", conversa_id)
+
     def definir_destino_video(self, destino):
         self._destino_video = destino
         if self._voz is not None:

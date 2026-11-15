@@ -774,6 +774,10 @@ class Janela(wx.Frame):
         item(m_cham, "ligar", "&Ligar para esta conversa\tCtrl+Shift+L")
         item(m_cham, "ligar_video", "Ligar com &vídeo")
         item(m_cham, "chamada_camera", "Ligar ou desligar a &câmera")
+        item(m_cham, "chamada_tela",
+             "Compartilhar ou parar de compartilhar a &tela")
+        item(m_cham, "chamada_som_pc",
+             "Compartilhar ou parar de compartilhar o so&m do computador")
         item(m_cham, "chamada_janela",
              "Mostrar a &janela da chamada\tCtrl+Shift+J")
         item(m_cham, "chamada_mudo",
@@ -1062,6 +1066,8 @@ class Janela(wx.Frame):
             "ligar": lambda e: self._ligar(),
             "ligar_video": lambda e: self._ligar(video=True),
             "chamada_camera": lambda e: self._alternar_camera(),
+            "chamada_tela": lambda e: self._alternar_tela(),
+            "chamada_som_pc": lambda e: self._alternar_som_pc(),
             "chamada_janela": lambda e: self._mostrar_chamada(),
             "mostrar_oculta": lambda e: self._mostrar_oculta(),
             "chamada_mudo": lambda e: self._alternar_mudo(),
@@ -4939,19 +4945,32 @@ class Janela(wx.Frame):
             c = self.chamada = ch.Chamada(
                 e.conta_id, e.conversa_id, e.nome, e.entrante, e.estado,
                 video=e.video, camera=e.camera,
-                video_remoto=e.video_remoto, suporta_video=e.suporta_video)
+                video_remoto=e.video_remoto, suporta_video=e.suporta_video,
+                tela=e.tela, som_pc=e.som_pc, suporta_tela=e.suporta_tela,
+                suporta_som_pc=e.suporta_som_pc)
             mudou = True
         else:
             if e.nome and not c.nome:
                 c.nome = e.nome
             mudou = c.aplicar(e.estado, e.motivo, e.erro)
             antes = (c.video, c.camera, c.video_remoto)
-            if c.aplicar_video(e.video, e.camera, e.video_remoto,
-                               e.suporta_video) and not mudou:
-                # so o video mudou: diz o que foi, sem repetir o estado
-                self.fala.falar(ch.fala_do_video(
-                    antes, (c.video, c.camera, c.video_remoto), c.nome),
-                    interromper=True)
+            antes_pc = (c.tela, c.som_pc)
+            mudou_video = c.aplicar_video(e.video, e.camera, e.video_remoto,
+                                          e.suporta_video)
+            mudou_pc = c.aplicar_compartilhamento(
+                e.tela, e.som_pc, e.suporta_tela, e.suporta_som_pc)
+            if (mudou_video or mudou_pc) and not mudou:
+                # so o video ou o compartilhamento mudou: diz o que foi, sem
+                # repetir o estado
+                fala = " ".join(t for t in (
+                    ch.fala_do_video(
+                        antes, (c.video, c.camera, c.video_remoto), c.nome)
+                    if mudou_video and not (
+                        mudou_pc and c.tela != antes_pc[0]) else "",
+                    ch.fala_compartilhamento(antes_pc, (c.tela, c.som_pc))
+                    if mudou_pc else "") if t)
+                if fala:
+                    self.fala.falar(fala, interromper=True)
                 self._atualizar_dialogo_chamada(c)
                 return
         if not mudou:
@@ -4993,9 +5012,18 @@ class Janela(wx.Frame):
         com_video = bool(p is not None and getattr(p, "suporta_video", False))
         if com_video:
             self._registrar_destino_de_video(p)
+        com_tela = bool(p is not None and getattr(p, "suporta_video", False)
+                        and hasattr(p, "telas"))
+        com_som_pc = bool(p is not None
+                          and getattr(p, "suporta_som_pc", False))
         acoes = {
             "camera": self._alternar_camera,
             "trocar_camera": self._trocar_camera,
+            "tela": self._alternar_tela,
+            "trocar_tela": self._trocar_tela,
+            "tela_com_som": self._tela_com_som,
+            "som_pc": self._alternar_som_pc,
+            "trocar_som_pc": self._trocar_som_pc,
             "atender": self._atender_chamada,
             "recusar": self._desligar_chamada,
             "desligar": self._desligar_chamada,
@@ -5008,7 +5036,12 @@ class Janela(wx.Frame):
             mics, saidas, mic, saida, ao_fechar=self._chamada_fechada,
             ao_ocultar=lambda d: self._ocultar_janela(d, "Janela da chamada"),
             cameras=p.cameras() if com_video else (),
-            camera=self.cfg.get("chamada_camera") or "")
+            camera=self.cfg.get("chamada_camera") or "",
+            telas=[n for n, _ in p.telas()] if com_tela else (),
+            tela=self.cfg.get("chamada_tela") or "",
+            saidas_pc=p.saidas_do_computador() if com_som_pc else (),
+            saida_pc=self.cfg.get("chamada_saida_pc") or "",
+            tela_com_som=bool(self.cfg.get("chamada_tela_com_som")))
         self.dlg_chamada.Show()
         if hasattr(self.dlg_chamada, "Raise"):
             self.dlg_chamada.Raise()
@@ -5060,6 +5093,68 @@ class Janela(wx.Frame):
         if c is not None and p is not None and c.camera:
             p.desligar_camera(c.conversa_id)
             p.ligar_camera(c.conversa_id, nome)
+
+    @seguro
+    def _alternar_tela(self):
+        c = self._chamada_em_curso()
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if c is None:
+            return
+        if p is None or not c.suporta_tela:
+            self.fala.falar("Esta conta ainda não compartilha a tela.",
+                            interromper=True)
+            return
+        if c.estado != ch.EM_CHAMADA:
+            self.fala.falar("A tela só pode ser compartilhada durante a "
+                            "conversa.", interromper=True)
+            return
+        if c.tela:
+            p.parar_tela(c.conversa_id)
+        else:
+            p.compartilhar_tela(
+                c.conversa_id, self.cfg.get("chamada_tela") or "",
+                bool(self.cfg.get("chamada_tela_com_som")) and
+                bool(c.suporta_som_pc))
+
+    @seguro
+    def _trocar_tela(self, nome):
+        self.cfg.set("chamada_tela", nome)
+        c = self.chamada
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if c is not None and p is not None and c.tela:
+            p.trocar_tela(c.conversa_id, nome)
+
+    @seguro
+    def _tela_com_som(self, marcada):
+        self.cfg.set("chamada_tela_com_som", bool(marcada))
+
+    @seguro
+    def _alternar_som_pc(self):
+        c = self._chamada_em_curso()
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if c is None:
+            return
+        if p is None or not c.suporta_som_pc:
+            self.fala.falar("Esta conta ainda não compartilha o som do "
+                            "computador.", interromper=True)
+            return
+        if c.estado != ch.EM_CHAMADA:
+            self.fala.falar("O som do computador só pode ser compartilhado "
+                            "durante a conversa.", interromper=True)
+            return
+        if c.som_pc:
+            p.parar_som(c.conversa_id)
+        else:
+            p.compartilhar_som(c.conversa_id,
+                               self.cfg.get("chamada_saida_pc") or "")
+
+    @seguro
+    def _trocar_som_pc(self, nome):
+        self.cfg.set("chamada_saida_pc", nome)
+        c = self.chamada
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if c is not None and p is not None and c.som_pc:
+            p.compartilhar_som(c.conversa_id, nome)
 
     def _chamada_em_curso(self):
         if self.chamada is None or not self.chamada.ativa:
