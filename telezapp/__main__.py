@@ -366,6 +366,8 @@ def main():
         from telezapp.nucleo import migracao
         migracao.migrar(cfg)
         etapa(log, "dados das contas nas pastas proprias")
+        for aviso in migracao.AVISOS:
+            wx.MessageBox(aviso, "TeleZapp", wx.OK | wx.ICON_WARNING)
         banco = Bancos(cfg)
         etapa(log, "bancos por conta prontos")
         barramento = Barramento(wx.CallAfter)

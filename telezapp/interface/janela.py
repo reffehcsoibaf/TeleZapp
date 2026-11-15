@@ -1946,13 +1946,46 @@ class Janela(wx.Frame):
         from telezapp.interface.gerenciar_contas import DialogoContas
         dlg = DialogoContas(self, self._itens_de_contas, self._marcar_conta,
                             self._excluir_conta_id, self._renomear_conta_id,
-                            self._adicionar_conta_pelo_menu)
+                            self._adicionar_conta_pelo_menu,
+                            dados=(self.cfg.get("contas_em_pastas"),
+                                   self.cfg.get("contas_pasta") or ""))
         try:
             dlg.ShowModal()
+            mudou = self._salvar_dados_das_contas(dlg.valores())
         finally:
             dlg.Destroy()
+        if mudou:
+            self._oferecer_reinicio(
+                "Onde ficam os dados das contas só muda quando o %s abre "
+                "de novo." % NOME)
         # A conta em foco pode ter sido excluída: devolve o foco à janela.
         self.lista_conv.SetFocus()
+
+    def _salvar_dados_das_contas(self, valores):
+        """Guarda a caixa de separar os dados por conta e a pasta escolhida
+        (Gerenciar contas). True se algo mudou (so vale ao reabrir). Uma
+        pasta que nao da para criar nao e guardada."""
+        if valores is None:
+            return False
+        separar, pasta = bool(valores[0]), valores[1]
+        if separar and pasta:
+            try:
+                os.makedirs(pasta, exist_ok=True)
+            except OSError as erro:
+                log.warning("pasta das contas recusada (%r): %s", pasta, erro)
+                wx.MessageBox("Não consegui usar a pasta %s: %s. A pasta "
+                              "dos dados das contas não foi mudada." % (
+                                  pasta, erro), NOME, wx.OK | wx.ICON_WARNING,
+                              self)
+                pasta = self.cfg.get("contas_pasta") or ""
+        mudou = False
+        for chave, valor in (("contas_em_pastas", separar),
+                             ("contas_pasta", pasta)):
+            if self.cfg.get(chave) != valor:
+                self.cfg.set(chave, valor)
+                log.info("configuração mudada: %s = %r", chave, valor)
+                mudou = True
+        return mudou
 
     def _marcar_conta(self, conta_id, ativa):
         """Liga ou desliga uma conta e diz o que aconteceu."""

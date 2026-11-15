@@ -162,19 +162,18 @@ def test_sem_separacao_as_listas_globais_nao_duplicam(cfg):
 # -------------------------------------------------------------- pasta da conta
 def test_pasta_personalizada_das_contas(cfg, tmp_path):
     escolhida = str(tmp_path / "escolhida")
-    cfg.set("contas_pasta_personalizada", True)
-    cfg.set("contas_pasta", escolhida)
+    cfg.set("contas_pasta", escolhida)           # com a separacao marcada
     assert config.pasta_da_conta("t1") == os.path.join(escolhida, "t1")
     assert config.pasta_da_conta("t2") == os.path.join(escolhida, "t2")
     assert armazem.pasta_midias("t1") == os.path.join(escolhida, "t1",
                                                       "midias")
-    cfg.set("contas_pasta_personalizada", False)
-    assert config.pasta_da_conta("t1") == os.path.join(
-        config.pasta(), "contas", "t1")      # desmarcada: a padrao
-    cfg.set("contas_pasta_personalizada", True)
-    cfg.set("contas_pasta", "")              # marcada, sem pasta: a padrao
+    cfg.set("contas_pasta", "")                  # vazia: a padrao
     assert config.pasta_da_conta("t1") == os.path.join(
         config.pasta(), "contas", "t1")
+    cfg.set("contas_pasta", escolhida)
+    cfg.set("contas_em_pastas", False)           # sem separacao: nao vale
+    assert config.pasta_escolhida_das_contas() == ""
+    assert config.pasta_do_layout_antigo() == config.pasta_dados()
 
 
 def test_preparar_e_limpar_a_pasta(cfg):
@@ -310,7 +309,6 @@ def test_migracao_leva_para_a_pasta_escolhida(cfg, tmp_path):
                                    "a.jpg"), 3, 1.0)
     b.fechar()
     padrao = config.pasta_da_conta("t1")      # a de antes, a padrao
-    cfg.set("contas_pasta_personalizada", True)
     cfg.set("contas_pasta", str(tmp_path / "escolhida"))
     assert migracao.migrar(cfg) == 1
     destino = os.path.join(str(tmp_path / "escolhida"), "t1")
@@ -339,7 +337,6 @@ def test_migracao_acerta_caminhos_quando_a_origem_ja_foi_embora(
     destino = os.path.join(escolhida, "t1")
     shutil.copytree(padrao, destino)        # como uma copia que ficou
     shutil.rmtree(padrao)                   # e a origem ja foi apagada
-    cfg.set("contas_pasta_personalizada", True)
     cfg.set("contas_pasta", escolhida)
     assert migracao.migrar(cfg) == 0        # nada a mover: so acertar
     b2 = Bancos(cfg)
@@ -363,7 +360,6 @@ def test_migracao_para_a_pasta_escolhida_espera_o_banco_soltar(
     padrao = config.pasta_da_conta("t1")
     escolhida = str(tmp_path / "escolhida")
     destino = os.path.join(escolhida, "t1")
-    cfg.set("contas_pasta_personalizada", True)
     cfg.set("contas_pasta", escolhida)
     real = migracao._acertar_caminhos_da_pasta
 
@@ -371,15 +367,15 @@ def test_migracao_para_a_pasta_escolhida_espera_o_banco_soltar(
         raise sqlite3.OperationalError("unable to open database file")
     monkeypatch.setattr(migracao, "_acertar_caminhos_da_pasta", sem_abrir)
     assert migracao.migrar(cfg) == 1
-    assert os.path.isdir(padrao)                       # a origem ficou
+    # no mesmo disco a pasta so foi renomeada: o banco ja esta no destino
     assert os.path.isfile(os.path.join(destino, "conversas.db"))
-    b2 = Bancos(cfg)                     # o app abre mesmo assim
+    b2 = Bancos(cfg)                     # o app abre mesmo assim, com tudo
+    assert [x.texto for x in b2.mensagens("t1", "1")] == ["oi"]
     caminho = b2.midia("t1", "1", "1")[0]
-    assert caminho.startswith(padrao)                  # e a midia vale
-    assert os.path.isfile(caminho)
+    assert caminho.startswith(padrao)    # caminho velho, ate a proxima
     b2.fechar()
     monkeypatch.setattr(migracao, "_acertar_caminhos_da_pasta", real)
-    assert migracao.migrar(cfg) == 1                   # o que sobrou vai
+    assert migracao.migrar(cfg) == 0                   # so acerta
     assert not os.path.exists(padrao)
     b3 = Bancos(cfg)
     caminho = b3.midia("t1", "1", "1")[0]
@@ -482,105 +478,6 @@ def test_voltar_ao_banco_unico_nao_cai_com_erro_inesperado(cfg, monkeypatch):
     b2.fechar()
 
 
-def test_pasta_personalizada_no_layout_antigo(cfg, tmp_path):
-    """Com a separacao desmarcada, a pasta personalizada tambem vale: o
-    banco unico, as sessoes e as midias vao para a pasta escolhida, e os
-    caminhos das midias sao acertados; desmarcar devolve tudo."""
-    cfg.salvar_conta({"id": "t1", "servico": "telegram"})
-    cfg.set("contas_em_pastas", False)
-    b = Bancos(cfg)
-    b.salvar_mensagens([m.Mensagem("t1", "1", "1", texto="oi", data=1)])
-    raiz = config.pasta_dados()
-    na_raiz = os.path.join(raiz, "midias", "t1")
-    os.makedirs(na_raiz)
-    arquivo = os.path.join(na_raiz, "a.jpg")
-    open(arquivo, "wb").write(b"JPG")
-    b.registrar_midia("t1", "1", "1", m.FOTO, arquivo, 3, 1.0)
-    b.fechar()
-    os.makedirs(os.path.join(raiz, "sessoes"), exist_ok=True)
-    open(os.path.join(raiz, "sessoes", "t1.session"), "wb").write(b"s")
-    escolhida = str(tmp_path / "escolhida")
-    cfg.set("contas_pasta_personalizada", True)
-    cfg.set("contas_pasta", escolhida)
-    assert config.pasta_do_layout_antigo() == raiz   # o banco ainda esta la
-    # enquanto a migracao nao roda, sessoes e midias seguem a raiz em uso
-    assert config.pasta_sessoes("t1") == os.path.join(raiz, "sessoes")
-    assert armazem.pasta_midias("t1") == os.path.join(raiz, "midias")
-    assert migracao.migrar(cfg) == 0
-    assert os.path.isfile(os.path.join(escolhida, "telezapp.db"))
-    assert not os.path.exists(os.path.join(raiz, "telezapp.db"))
-    assert not os.path.exists(na_raiz)
-    assert os.path.isfile(os.path.join(escolhida, "sessoes", "t1.session"))
-    assert not os.path.exists(os.path.join(raiz, "sessoes"))
-    assert config.pasta_do_layout_antigo() == escolhida
-    assert config.pasta_sessoes("t1") == os.path.join(escolhida, "sessoes")
-    assert armazem.pasta_midias("t1") == os.path.join(escolhida, "midias")
-    b2 = Bancos(cfg)             # abre o banco unico da pasta escolhida
-    assert [x.texto for x in b2.mensagens("t1", "1")] == ["oi"]
-    caminho = b2.midia("t1", "1", "1")[0]
-    assert caminho.startswith(os.path.join(escolhida, "midias"))
-    assert os.path.isfile(caminho)
-    b2.fechar()
-    assert migracao.migrar(cfg) == 0        # ja esta tudo no lugar
-
-    # desmarcar a pasta personalizada devolve tudo para a pasta de dados
-    cfg.set("contas_pasta_personalizada", False)
-    assert migracao.migrar(cfg) == 0
-    assert os.path.isfile(os.path.join(raiz, "telezapp.db"))
-    assert not os.path.exists(os.path.join(escolhida, "telezapp.db"))
-    assert os.path.isfile(os.path.join(raiz, "sessoes", "t1.session"))
-    assert os.path.isfile(os.path.join(raiz, "midias", "t1", "a.jpg"))
-    b3 = Bancos(cfg)
-    caminho = b3.midia("t1", "1", "1")[0]
-    assert caminho.startswith(os.path.join(raiz, "midias"))
-    assert os.path.isfile(caminho)
-    b3.fechar()
-
-
-def test_pasta_personalizada_no_layout_antigo_nao_cai_se_a_troca_falha(
-        cfg, tmp_path, monkeypatch):
-    """Se a troca dos caminhos falhar ao levar o layout antigo para a
-    pasta escolhida, a abertura nao cai: o banco fica na pasta de dados
-    (os caminhos antigos valem) e a proxima abertura termina."""
-    cfg.salvar_conta({"id": "t1", "servico": "telegram"})
-    cfg.set("contas_em_pastas", False)
-    b = Bancos(cfg)
-    b.salvar_mensagens([m.Mensagem("t1", "1", "1", texto="oi", data=1)])
-    raiz = config.pasta_dados()
-    na_raiz = os.path.join(raiz, "midias", "t1")
-    os.makedirs(na_raiz)
-    arquivo = os.path.join(na_raiz, "a.jpg")
-    open(arquivo, "wb").write(b"JPG")
-    b.registrar_midia("t1", "1", "1", m.FOTO, arquivo, 3, 1.0)
-    b.fechar()
-    escolhida = str(tmp_path / "escolhida")
-    cfg.set("contas_pasta_personalizada", True)
-    cfg.set("contas_pasta", escolhida)
-    real = backup._acertar_caminhos_das_midias
-
-    def sem_escrever(*a, **k):
-        raise sqlite3.OperationalError("unable to open database file")
-    monkeypatch.setattr(backup, "_acertar_caminhos_das_midias", sem_escrever)
-    assert migracao.migrar(cfg) == 0
-    assert os.path.isfile(os.path.join(raiz, "telezapp.db"))
-    assert not os.path.isfile(os.path.join(escolhida, "telezapp.db"))
-    assert config.pasta_do_layout_antigo() == raiz
-    b2 = Bancos(cfg)                     # o app abre mesmo assim
-    caminho = b2.midia("t1", "1", "1")[0]
-    assert caminho.startswith(na_raiz)              # e a midia vale
-    assert os.path.isfile(caminho)
-    b2.fechar()
-    monkeypatch.setattr(backup, "_acertar_caminhos_das_midias", real)
-    migracao.migrar(cfg)                 # a proxima abertura termina
-    assert os.path.isfile(os.path.join(escolhida, "telezapp.db"))
-    assert not os.path.exists(os.path.join(raiz, "telezapp.db"))
-    b3 = Bancos(cfg)
-    caminho = b3.midia("t1", "1", "1")[0]
-    assert caminho.startswith(os.path.join(escolhida, "midias"))
-    assert os.path.isfile(caminho)
-    b3.fechar()
-
-
 def test_desmarcar_as_duas_devolve_da_pasta_escolhida(cfg, tmp_path):
     """Desmarcar a separacao e a pasta personalizada (as duas caixas): as
     contas que estavam em pastas na pasta escolhida voltam para o layout
@@ -601,7 +498,6 @@ def test_desmarcar_as_duas_devolve_da_pasta_escolhida(cfg, tmp_path):
 
     # as duas caixas marcadas: a conta vai para a pasta dela
     cfg.set("contas_em_pastas", True)
-    cfg.set("contas_pasta_personalizada", True)
     escolhida = str(tmp_path / "escolhida")
     cfg.set("contas_pasta", escolhida)
     assert migracao.migrar(cfg) >= 1
@@ -613,7 +509,6 @@ def test_desmarcar_as_duas_devolve_da_pasta_escolhida(cfg, tmp_path):
 
     # as duas caixas desmarcadas: tudo volta para a pasta de dados
     cfg.set("contas_em_pastas", False)
-    cfg.set("contas_pasta_personalizada", False)
     # uma sessao nova (sem autorizacao) que a abertura bugada deixou la
     open(os.path.join(raiz, "sessoes", "t1.session"), "wb").write(b"nova")
     assert migracao.migrar(cfg) >= 1
@@ -691,7 +586,7 @@ def test_o_padrao_e_um_banco_so_sem_pastas_por_conta(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "_cfg_de_contas", c)
     assert c.get("contas_em_pastas") is False
     assert config.contas_separadas() is False
-    assert not c.get("contas_pasta_personalizada")
+    assert c.get("contas_pasta") == ""
 
 
 def test_mover_pasta_no_mesmo_disco_renomeia_sem_copiar(tmp_path, monkeypatch):
@@ -722,3 +617,44 @@ def test_mover_pasta_copia_quando_nao_da_para_renomear(tmp_path, monkeypatch):
     migracao._mover_pasta(str(origem), str(destino))
     assert (destino / "f.bin").read_bytes() == b"123"
     assert not origem.exists()
+
+
+def test_sem_espaco_entre_discos_nao_mexe_em_nada_e_avisa(
+        cfg, tmp_path, monkeypatch):
+    """Entre discos copiar precisa de espaco: antes de comecar, a migracao
+    confere; sem espaco, nada e mexido e fica um aviso para a abertura."""
+    from collections import namedtuple
+    cfg.salvar_conta({"id": "t1", "servico": "telegram"})
+    b = Bancos(cfg)
+    b.salvar_mensagens([m.Mensagem("t1", "1", "1", texto="oi", data=1)])
+    arquivo = os.path.join(armazem.pasta_da_conversa("t1", "1"), "a.jpg")
+    open(arquivo, "wb").write(b"JPG" * 1000)
+    b.registrar_midia("t1", "1", "1", m.FOTO, arquivo, 3, 1.0)
+    b.fechar()
+    padrao = config.pasta_da_conta("t1")
+    cfg.set("contas_pasta", str(tmp_path / "outro_disco"))
+    monkeypatch.setattr(migracao, "_mesmo_disco", lambda a, b: False)
+    Uso = namedtuple("Uso", "total used free")
+    monkeypatch.setattr(migracao.shutil, "disk_usage",
+                        lambda p: Uso(100, 100, 0))
+    assert migracao.migrar(cfg) == 0
+    assert os.path.isfile(os.path.join(padrao, "conversas.db"))
+    assert os.path.isfile(arquivo)
+    assert not os.path.exists(str(tmp_path / "outro_disco" / "t1"))
+    assert len(migracao.AVISOS) == 1 and "espaço" in migracao.AVISOS[0]
+    # com espaco, a mesma migracao segue
+    monkeypatch.setattr(migracao.shutil, "disk_usage",
+                        lambda p: Uso(10 ** 12, 0, 10 ** 12))
+    assert migracao.migrar(cfg) == 1
+    assert migracao.AVISOS == []
+    assert os.path.isfile(str(tmp_path / "outro_disco" / "t1"
+                              / "conversas.db"))
+
+
+def test_o_layout_antigo_nao_depende_da_pasta_escolhida(cfg, tmp_path):
+    """A pasta escolhida so vale com a separacao marcada."""
+    cfg.set("contas_pasta", str(tmp_path / "x"))
+    cfg.set("contas_em_pastas", False)
+    assert config.pasta_do_layout_antigo() == config.pasta_dados()
+    assert config.pasta_sessoes("t1") == os.path.join(config.pasta_dados(),
+                                                      "sessoes")

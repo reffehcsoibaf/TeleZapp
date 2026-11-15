@@ -203,49 +203,35 @@ def _mesmo_caminho(a, b):
 
 
 def pasta_escolhida_do_layout_antigo(cfg=None):
-    """A pasta pedida para os dados do layout antigo (o banco unico, as
-    sessoes e as midias): a personalizada, se marcada, ou a pasta de
-    dados. E para onde a migracao leva os dados; para saber onde eles
-    estao agora, ver pasta_do_layout_antigo. Nao cria nada."""
-    if cfg is None:
-        cfg = _cfg_de_contas
-    if cfg is not None and cfg.get("contas_pasta_personalizada"):
-        escolhida = (cfg.get("contas_pasta") or "").strip()
-        if escolhida:
-            return escolhida
+    """Onde ficam o banco unico, as sessoes e as midias do layout antigo
+    (sem separacao por conta): sempre a pasta de dados. A pasta que a
+    pessoa escolhe so vale com a separacao por conta marcada."""
     return pasta_dados()
 
 
 def pasta_do_layout_antigo(cfg=None):
-    """Onde os dados do layout antigo estao de fato: a pasta escolhida ou,
-    enquanto o banco unico ainda estiver na outra (a mudanca de pasta nao
-    terminou, ou ainda vai acontecer), aquela que tem o banco — assim os
-    dados antigos continuam valendo e a proxima abertura termina a
-    mudanca. As opcoes, os logs, os sons e os backups continuam sempre em
-    pasta_dados()."""
+    """Onde os dados do layout antigo estao: a pasta de dados. As opcoes,
+    os logs, os sons e os backups tambem ficam sempre nela."""
+    return pasta_dados()
+
+
+def pasta_escolhida_das_contas(cfg=None):
+    """A pasta que a pessoa escolheu para as pastas das contas ("" se nao
+    escolheu ou se a separacao por conta esta desmarcada)."""
     if cfg is None:
         cfg = _cfg_de_contas
-    escolhida = pasta_escolhida_do_layout_antigo(cfg)
-    dados = pasta_dados()
-    outra = dados
-    if _mesmo_caminho(escolhida, dados):
-        outra = (cfg.get("contas_pasta") or "").strip() if cfg else ""
-    if outra and not _mesmo_caminho(outra, escolhida) and \
-            not os.path.isfile(os.path.join(escolhida, "telezapp.db")) and \
-            os.path.isfile(os.path.join(outra, "telezapp.db")):
-        return outra
-    return escolhida
+    if cfg is None or not cfg.get("contas_em_pastas"):
+        return ""
+    return (cfg.get("contas_pasta") or "").strip()
 
 
 def pasta_das_contas():
     """A pasta que abriga a pasta de cada conta: a que a pessoa escolheu
-    (opcao "contas_pasta", com "contas_pasta_personalizada" marcada) ou a
-    padrao, <dados>\\contas. Nao cria nada."""
-    cfg = _cfg_de_contas
-    if cfg is not None and cfg.get("contas_pasta_personalizada"):
-        escolhida = (cfg.get("contas_pasta") or "").strip()
-        if escolhida:
-            return escolhida
+    (opcao "contas_pasta", em Gerenciar contas) ou a padrao,
+    a pasta contas dentro da de dados. Nao cria nada."""
+    escolhida = pasta_escolhida_das_contas()
+    if escolhida:
+        return escolhida
     return os.path.join(pasta_dados(), "contas")
 
 
@@ -634,35 +620,25 @@ OPCOES = (
           "como ao ligar o computador. Se o TeleZapp demora a responder "
           "quando é aberto depois de outros aplicativos, deixe marcada. "
           "Vale na próxima abertura.", reabrir=True),
+    # As duas opcoes abaixo aparecem em Gerenciar contas (nao em
+    # Configuracoes): ver Janela._gerenciar_contas
     Opcao("contas_em_pastas",
           "Guardar os dados de cada conta em uma pasta separada",
           "Sistema", False,
           "Cada conta tem uma pasta própria, com o banco de conversas, as "
           "sessões e as mídias dentro dela. Desmarcada, todas as contas "
-          "dividem os mesmos dados no lugar de sempre, como nas versões "
-          "antigas: um banco só, as sessões e as mídias na pasta de dados "
-          "do TeleZapp (ou na personalizada, se escolhida). Ao desmarcar, "
-          "na próxima abertura o TeleZapp devolve os dados de cada conta "
-          "para o lugar comum; ao marcar de novo, ele os separa outra "
-          "vez. Vale na próxima abertura.",
+          "dividem os mesmos dados na pasta de dados do TeleZapp, como nas "
+          "versões antigas: um banco só. Ao marcar, na próxima abertura o "
+          "TeleZapp separa os dados de cada conta; ao desmarcar, ele os "
+          "junta de novo. Vale na próxima abertura.",
           reabrir=True),
-    Opcao("contas_pasta_personalizada",
-          "Guardar os dados das contas em uma pasta personalizada",
-          "Sistema", False,
-          "Os dados das contas ficam dentro da pasta que você escolher (a "
-          "de baixo): com \"Guardar os dados de cada conta em uma pasta "
-          "separada\" marcada, cada conta numa subpasta com o nome dela; "
-          "desmarcada, o banco único com tudo direto nela. Ao marcar, na "
-          "próxima abertura o que estiver na pasta padrão vai para a pasta "
-          "escolhida. Vale na próxima abertura.", reabrir=True),
     Opcao("contas_pasta", "Pasta dos dados das contas", "Sistema", "",
-          "A pasta em que ficam os dados das contas (o banco de conversas, "
-          "as sessões e as mídias): com a separação, em subpastas com o "
-          "nome das contas; sem ela, o banco único com tudo direto nela. "
-          "Escolha uma pasta vazia, de preferência fora da pasta de dados "
-          "do TeleZapp. Só vale com a pasta personalizada marcada. Na "
-          "próxima abertura, o que estiver na pasta padrão vai para lá "
-          "(com conferência), e as contas voltam conectadas no lugar.",
+          "A pasta em que ficam as pastas das contas, uma subpasta para "
+          "cada conta. Vazia, usa a pasta padrão do TeleZapp. Só vale com "
+          "a separação por conta marcada. Na próxima abertura, o que "
+          "estiver na pasta padrão vai para a escolhida (no mesmo disco "
+          "é instantâneo; em outro disco é preciso ter espaço livre para "
+          "tudo).",
           texto=True, pasta=True, reabrir=True),
     Opcao("barra_abre_comandos",
           "Barra na caixa de digitar abre os comandos do robô",
@@ -1354,6 +1330,10 @@ def buscar_opcoes(texto):
         if all(p in alvo for p in palavras):
             achadas.append(o)
     return achadas
+
+
+# Opcoes que ficam na janela Gerenciar contas, nao em Configuracoes
+OPCOES_DE_GERENCIAR_CONTAS = ("contas_em_pastas", "contas_pasta")
 
 
 PADROES = {o.chave: o.padrao for o in OPCOES}

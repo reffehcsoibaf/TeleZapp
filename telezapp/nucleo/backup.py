@@ -246,11 +246,9 @@ def _pasta_da_conta_no_disco(pasta_dados, conta_id):
     de Sistema (com a configuracao ativa) ou a padrao na pasta de dados
     passada (que pode ser de teste, e nao a pasta de dados de verdade;
     config.pasta_da_conta consultaria o ambiente real)."""
-    cfg = config._cfg_de_contas
-    if cfg is not None and cfg.get("contas_pasta_personalizada"):
-        escolhida = (cfg.get("contas_pasta") or "").strip()
-        if escolhida:
-            return os.path.join(escolhida, conta_id)
+    escolhida = config.pasta_escolhida_das_contas()
+    if escolhida:
+        return os.path.join(escolhida, conta_id)
     return os.path.join(pasta_dados, "contas", conta_id)
 
 

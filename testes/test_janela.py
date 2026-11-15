@@ -9433,3 +9433,27 @@ def test_limpar_varias_conversas_marcadas_com_uma_pergunta_so(j, monkeypatch):
     assert not j.banco.mensagens("t1", "21", 1)
     assert c1.chave in j.indice and c2.chave in j.indice   # seguem na lista
     assert "2 conversas limpadas" in falas[-1] and "celular" in falas[-1]
+
+
+def test_dados_das_contas_em_gerenciar_contas(j, monkeypatch, tmp_path):
+    """A caixa de separar por conta e a pasta moram em Gerenciar contas e
+    so valem ao reabrir; uma pasta que nao da para criar nao e guardada."""
+    assert j._salvar_dados_das_contas(None) is False
+    assert j._salvar_dados_das_contas((False, "")) is False   # nada mudou
+    pasta = str(tmp_path / "contas")
+    assert j._salvar_dados_das_contas((True, pasta)) is True
+    assert j.cfg.get("contas_em_pastas") is True
+    assert j.cfg.get("contas_pasta") == pasta
+    assert os.path.isdir(pasta)
+    assert j._salvar_dados_das_contas((True, pasta)) is False
+    avisos = []
+    monkeypatch.setattr(jm.wx, "MessageBox",
+                        lambda *a, **k: avisos.append(a[0]))
+
+    def recusa(p, exist_ok=False):
+        raise OSError("sem permissao")
+    monkeypatch.setattr(jm.os, "makedirs", recusa)
+    assert j._salvar_dados_das_contas((True, "Z:/nao/existe")) is False
+    assert j.cfg.get("contas_pasta") == pasta        # a anterior fica
+    assert avisos and "Z:" in avisos[0]
+

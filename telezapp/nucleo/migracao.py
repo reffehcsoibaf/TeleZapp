@@ -5,16 +5,18 @@
 Com a separacao marcada (opcao "contas_em_pastas"), cada conta tem a
 propria pasta (ver config.pasta_da_conta): conversas.db, sessoes\\ e
 midias\\ dentro dela; a raiz das pastas das contas e a pasta de dados do
-TeleZapp (\\contas) ou a pasta escolhida nas configuracoes (opcao
+TeleZapp (\\contas) ou a pasta escolhida em Gerenciar contas (opcao
 "contas_pasta"). Desmarcada, todas as contas dividem o layout antigo: um
-banco so, as sessoes e as midias na raiz do layout antigo — a pasta
-escolhida, se a personalizada estiver marcada, ou a pasta de dados
+banco so, as sessoes e as midias na pasta de dados
 (<dados>\\telezapp.db, <dados>\\sessoes e <dados>\\midias\\<conta>).
 
 migrar(cfg), na abertura, poe os dados no layout que as opcoes pedem:
 para as pastas (do banco antigo, ou da pasta padrao para a escolhida) ou
 de volta ao banco unico. Tudo pode ser interrompido: recomeca de onde
-parou, e nada e apagado da origem sem conferir o destino.
+parou, e nada e apagado da origem sem conferir o destino. No mesmo disco,
+mover pastas e arquivos e so renomear (instantaneo, sem gastar espaco);
+entre discos copia, e antes de comecar confere se ha espaco: se nao ha,
+nao mexe em nada e deixa um aviso em AVISOS (a abertura o mostra).
 """
 import logging
 import os
@@ -172,112 +174,67 @@ def _juntar_pasta(origem, destino, apagar=True):
         _rmtree_com_espera(origem)
 
 
-# ---------------------------------------------- o layout antigo mudando
-def _mesma_pasta(a, b):
-    """Os dois caminhos apontam para a mesma pasta?"""
-    return os.path.normcase(os.path.abspath(a)) == \
-        os.path.normcase(os.path.abspath(b))
+# ------------------------------------------------------------- o espaco
+# Avisos que a abertura mostra (nada foi mexido quando ha um aviso)
+AVISOS = []
 
 
-def _raizes_conhecidas_do_layout_antigo(cfg):
-    """As pastas onde o layout antigo pode estar: a de dados e a pasta
-    escolhida (mesmo desmarcada, pode ter ficado de uma configuracao
-    anterior)."""
-    saida = []
-    for pasta in (config.pasta_dados(),
-                  (cfg.get("contas_pasta") or "").strip()):
-        if not pasta or any(_mesma_pasta(pasta, p) for p in saida):
-            continue
-        saida.append(pasta)
-    return saida
+def _tamanho(caminho):
+    """Bytes de um arquivo ou de uma pasta inteira (0 se nao existe)."""
+    if os.path.isfile(caminho):
+        return os.path.getsize(caminho)
+    total = 0
+    for pasta, _, arquivos in os.walk(caminho):
+        for a in arquivos:
+            try:
+                total += os.path.getsize(os.path.join(pasta, a))
+            except OSError:
+                pass
+    return total
 
 
-def _copiar_o_que_falta(origem, destino):
-    """Copia de `origem` para `destino` so o que falta (o que o destino ja
-    tem fica), conferindo o tamanho de cada copia. A origem fica no
-    lugar."""
-    for raiz, _, arquivos in os.walk(origem):
-        rel = os.path.relpath(raiz, origem)
-        alvo = destino if rel == "." else os.path.join(destino, rel)
-        os.makedirs(alvo, exist_ok=True)
-        for nome in arquivos:
-            de, para = os.path.join(raiz, nome), os.path.join(alvo, nome)
-            if os.path.isfile(para) and \
-                    os.path.getsize(para) == os.path.getsize(de):
-                continue        # ja esta la (e inteiro)
-            _copiar_arquivo(de, para)
+def _existente(caminho):
+    """O caminho ou, se ele ainda nao existe, o primeiro ancestral que
+    existe (onde o disco e o mesmo)."""
+    caminho = os.path.abspath(caminho)
+    while not os.path.exists(caminho):
+        pai = os.path.dirname(caminho)
+        if pai == caminho:
+            break
+        caminho = pai
+    return caminho
 
 
-SUFIXOS_DO_BANCO = ("", "-wal", "-shm", "-journal")
+def _mesmo_disco(a, b):
+    """Os dois caminhos ficam no mesmo disco (entao mover e so renomear)?"""
+    try:
+        return os.stat(_existente(a)).st_dev == os.stat(_existente(b)).st_dev
+    except OSError:
+        return False
 
 
-def _levar_uma_raiz_antiga(origem, destino):
-    """Leva o banco unico, as sessoes e as midias de `origem` para
-    `destino`. Primeiro copia tudo (conferindo), depois acerta os caminhos
-    das midias no banco novo e so entao apaga a origem: se algo falhar no
-    meio, a origem fica inteira e a proxima abertura tenta de novo. Se as
-    duas pastas ja tem banco unico, nao mexe em nada."""
-    db_origem = os.path.join(origem, "telezapp.db")
-    db_destino = os.path.join(destino, "telezapp.db")
-    midias_origem = os.path.join(origem, "midias")
-    midias_destino = os.path.join(destino, "midias")
-    sessoes_origem = os.path.join(origem, "sessoes")
-    sessoes_destino = os.path.join(destino, "sessoes")
-    tem_db = os.path.isfile(db_origem)
-    if tem_db and os.path.isfile(db_destino):
-        log.warning("há um banco único em %s e outro em %s; não mexo em "
-                    "nenhum dos dois", origem, destino)
-        return
-    mudou = False
-    if os.path.isdir(midias_origem) and os.listdir(midias_origem):
-        _copiar_o_que_falta(midias_origem, midias_destino)
-        mudou = True
-    if os.path.isdir(sessoes_origem) and os.listdir(sessoes_origem):
-        _copiar_o_que_falta(sessoes_origem, sessoes_destino)
-        mudou = True
-    if tem_db:
-        os.makedirs(destino, exist_ok=True)
-        for sufixo in SUFIXOS_DO_BANCO:
-            de = db_origem + sufixo
-            if os.path.exists(de):
-                _copiar_arquivo(de, db_destino + sufixo)
-        try:
-            # os caminhos guardados no banco apontam para a pasta antiga:
-            # trocam para a nova antes de a origem sair
-            _acertar_caminhos_da_pasta(db_destino, midias_origem,
-                                       midias_destino)
-        except (sqlite3.Error, OSError):
-            for sufixo in SUFIXOS_DO_BANCO:
-                _apagar_com_espera(db_destino + sufixo)
-            raise
-        mudou = True
-    if not mudou:
-        return
-    # tudo copiado e conferido: so agora a origem sai
-    for sufixo in SUFIXOS_DO_BANCO:
-        _apagar_com_espera(db_origem + sufixo)
-    if os.path.isdir(midias_origem):
-        _rmtree_com_espera(midias_origem)
-    if os.path.isdir(sessoes_origem):
-        _rmtree_com_espera(sessoes_origem)
-
-
-def _levar_o_layout_antigo(cfg):
-    """Leva o layout antigo inteiro (o banco unico, as sessoes e as
-    midias) para a pasta escolhida ou, quando a pasta personalizada e
-    desmarcada, de volta para a pasta de dados. Nao derruba a abertura: o
-    que falhar fica onde esta, os caminhos antigos continuam valendo e a
-    proxima abertura tenta de novo."""
-    destino = config.pasta_escolhida_do_layout_antigo(cfg)
-    for origem in _raizes_conhecidas_do_layout_antigo(cfg):
-        if _mesma_pasta(origem, destino):
-            continue
-        try:
-            _levar_uma_raiz_antiga(origem, destino)
-        except (sqlite3.Error, OSError) as erro:
-            log.warning("não consegui levar os dados de %s para %s (%r); "
-                        "ficam onde estão e a próxima abertura tenta de "
-                        "novo", origem, destino, erro)
+def _ha_espaco(destino, necessario, quem):
+    """True se o disco do destino tem `necessario` bytes livres (mais uma
+    folga). Sem espaco, deixa um aviso e devolve False: quem chama nao
+    mexe em nada e a proxima abertura tenta de novo."""
+    if necessario <= 0:
+        return True
+    try:
+        livre = shutil.disk_usage(_existente(destino)).free
+    except OSError:
+        return True         # nao deu para medir: segue, como antes
+    precisa = int(necessario * 1.05) + 64 * 1024 * 1024
+    if livre >= precisa:
+        return True
+    gb = 1024 ** 3
+    texto = ("Não há espaço livre suficiente para levar os dados de %s "
+             "para %s: faltam cerca de %.1f GB. Liberte espaço nesse "
+             "disco (ou escolha outra pasta em Gerenciar contas) e abra "
+             "o TeleZapp de novo. Nada foi mexido: seus dados continuam "
+             "onde estavam." % (quem, destino, (precisa - livre) / gb))
+    log.warning(texto)
+    AVISOS.append(texto)
+    return False
 
 
 # ------------------------------------------------------------- a migracao
@@ -285,13 +242,10 @@ def migrar(cfg):
     """Uma vez por abertura: poe os dados das contas no layout que as
     opcoes de Sistema pedem. Devolve quantas contas mudaram de lugar."""
     config.definir_cfg(cfg)
+    del AVISOS[:]
     if config.contas_separadas():
         n = _migrar_para_pastas(cfg) + _levar_para_a_pasta_escolhida(cfg)
     else:
-        # primeiro o layout antigo inteiro (banco, sessoes e midias) vai
-        # para a pasta escolhida, se a pasta mudou; so entao as contas
-        # voltam para o banco unico, ja no lugar certo
-        _levar_o_layout_antigo(cfg)
         n = _voltar_ao_layout_antigo(cfg)
     if n:
         log.info("migracao das pastas das contas: %d conta(s)", n)
@@ -307,6 +261,14 @@ def _migrar_para_pastas(cfg):
     raiz = config.pasta_do_layout_antigo()
     antigo_db = os.path.join(raiz, "telezapp.db")
     if not os.path.isfile(antigo_db):
+        return 0
+    destino_raiz = config.pasta_das_contas()
+    precisa = sum(_tamanho(antigo_db + suf) for suf in
+                  ("", "-wal", "-shm", "-journal"))     # as linhas copiadas
+    for resto in ("midias", "sessoes"):
+        if not _mesmo_disco(os.path.join(raiz, resto), destino_raiz):
+            precisa += _tamanho(os.path.join(raiz, resto))
+    if not _ha_espaco(destino_raiz, precisa, "todas as contas"):
         return 0
     antigo = Banco(antigo_db)       # tambem atualiza o esquema se faltar
     migradas = 0
@@ -453,9 +415,23 @@ def _levar_para_a_pasta_escolhida(cfg):
             continue
         banco = os.path.join(destino, NOME_ARQUIVO)
         tem_origem = os.path.isdir(origem)
+        if (tem_origem and not _mesmo_disco(origem, destino)
+                and not _ha_espaco(destino, _tamanho(origem), conta_id)):
+            continue
         if tem_origem:
             if not os.path.isfile(banco):
-                if os.path.isfile(os.path.join(origem, NOME_ARQUIVO)):
+                if (_mesmo_disco(origem, destino)
+                        and not os.path.exists(destino)):
+                    try:        # mesmo disco: so renomeia, sem gastar nada
+                        os.makedirs(os.path.dirname(destino),
+                                    exist_ok=True)
+                        os.rename(origem, destino)
+                        tem_origem = False
+                    except OSError:
+                        pass
+                if not tem_origem:
+                    pass
+                elif os.path.isfile(os.path.join(origem, NOME_ARQUIVO)):
                     _copiar_pasta(origem, destino)  # a origem fica por ora
                 else:
                     _juntar_pasta(origem, destino, apagar=False)
@@ -478,6 +454,10 @@ def _levar_para_a_pasta_escolhida(cfg):
             log.warning("nao consegui acertar os caminhos das midias de %s "
                         "(%r); a pasta antiga fica para a proxima abertura",
                         conta_id, erro)
+            # (se a pasta foi renomeada, o banco ja esta no destino, que e
+            # o que as opcoes pedem: as midias so aparecem quando a
+            # proxima abertura acertar os caminhos; abrir a conta vazia
+            # no destino seria pior)
             continue
         if tem_origem:
             _rmtree_com_espera(origem)
@@ -486,13 +466,23 @@ def _levar_para_a_pasta_escolhida(cfg):
 
 def _voltar_ao_layout_antigo(cfg):
     """Com a separacao desmarcada: devolve os dados de cada conta para o
-    layout antigo (o banco unico, as sessoes e as midias na raiz do
-    layout antigo: a pasta personalizada, se escolhida, ou a pasta de
+    layout antigo (o banco unico, as sessoes e as midias na pasta de
     dados). O banco unico e criado se nao existe; a pasta da conta e
     apagada so quando tudo conferiu (o que ficou para tras e tentado de
     novo na proxima abertura)."""
     raiz = config.pasta_do_layout_antigo()
     os.makedirs(raiz, exist_ok=True)
+    precisa = 0
+    for dados in cfg.contas():
+        pasta = _pasta_com_dados(dados.get("id") or "", cfg)
+        if pasta is None:
+            continue
+        precisa += _tamanho(os.path.join(pasta, NOME_ARQUIVO))
+        for resto in ("midias", "sessoes"):
+            if not _mesmo_disco(os.path.join(pasta, resto), raiz):
+                precisa += _tamanho(os.path.join(pasta, resto))
+    if not _ha_espaco(raiz, precisa, "todas as contas"):
+        return 0
     sessoes_raiz = os.path.join(raiz, "sessoes")
     midias_raiz = os.path.join(raiz, "midias")
     unicos = []
@@ -529,16 +519,13 @@ def _voltar_ao_layout_antigo(cfg):
 
 def _pasta_com_dados(conta_id, cfg=None):
     """A pasta da conta que de fato tem dados: a das contas no lugar que
-    as opcoes pedem agora, ou em qualquer lugar que elas ja pediram (a
-    pasta configurada, mesmo desmarcada agora, pode ter as pastas das
-    contas que ficaram para tras). None se nenhuma existe ou esta
-    vazia."""
+    as opcoes pedem agora ou a padrao (a pasta contas dentro da de dados), de quando a pasta
+    escolhida ainda nao existia, ou a escolhida mesmo com a separacao
+    desmarcada agora (os dados ficaram la). None se nenhuma existe ou esta vazia."""
     vistas = set()
-    configurada = (cfg.get("contas_pasta") or "").strip() if cfg else ""
+    configurada = ((cfg.get("contas_pasta") or "").strip() if cfg else "")
     for pasta in (config.pasta_da_conta(conta_id),
                   os.path.join(config.pasta_dados(), "contas", conta_id),
-                  os.path.join(config.pasta_escolhida_do_layout_antigo(cfg),
-                               conta_id),
                   os.path.join(configurada, conta_id) if configurada
                   else None):
         if pasta is None:

@@ -2,8 +2,9 @@
 # Copyright (C) 2026 Fábio Scheffer Moraes
 """Janela de Gerenciar contas: uma lista em que cada conta tem uma caixa de
 marcar (marcada = ativada, desmarcada = desativada), e, com a conta em foco,
-os botões Nova conta, Excluir e Renomear (Tab). Quem muda as
-contas é a Janela; aqui só fica a tela."""
+os botões Nova conta, Excluir e Renomear (Tab) e, depois deles, a caixa de
+guardar os dados de cada conta em uma pasta separada, com o campo da pasta.
+Quem muda as contas é a Janela; aqui só fica a tela."""
 import wx
 
 
@@ -12,10 +13,12 @@ class DialogoContas(wx.Dialog):
     `ao_excluir(conta_id)` e `ao_renomear(conta_id)` devolvem True se mudou
     algo (a lista é refeita). `ao_adicionar()` abre o fluxo de criar uma
     conta nova (o login pode demorar; a lista se refaz quando o diálogo
-    volta a ficar ativo)."""
+    volta a ficar ativo). `dados`: (separar, pasta) com o que as opcoes
+    dizem agora de onde ficam os dados das contas; sem ele, essa parte
+    nao aparece. `valores()` devolve o que a pessoa deixou nela."""
 
     def __init__(self, pai, itens, ao_marcar, ao_excluir, ao_renomear,
-                 ao_adicionar):
+                 ao_adicionar, dados=None):
         super().__init__(pai, title="Gerenciar contas",
                          style=wx.DEFAULT_DIALOG_STYLE)
         self._itens, self._ao_marcar = itens, ao_marcar
@@ -38,9 +41,13 @@ class DialogoContas(wx.Dialog):
         self.excluir = wx.Button(self, label="&Excluir...")
         self.renomear = wx.Button(self, label="&Renomear...")
         fechar = wx.Button(self, wx.ID_CANCEL, "&Fechar")
-        for b in (self.adicionar, self.excluir, self.renomear, fechar):
+        for b in (self.adicionar, self.excluir, self.renomear):
             linha.Add(b, 0, wx.RIGHT, 8)
         lay.Add(linha, 0, wx.ALL, 10)
+        self.separar = self.pasta = self.escolher = self.rotulo_pasta = None
+        if dados is not None:
+            self._criar_dados(lay, *dados)
+        lay.Add(fechar, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
         self.SetSizerAndFit(lay)
         self.SetEscapeId(wx.ID_CANCEL)
         self.Bind(wx.EVT_CHECKLISTBOX, self._marcou, self.lista)
@@ -53,6 +60,54 @@ class DialogoContas(wx.Dialog):
         self._preencher(0)
         self.CentreOnParent()
         self.lista.SetFocus()
+
+    def _criar_dados(self, lay, separar, pasta):
+        """Onde ficam os dados das contas: uma caixa e, so com ela
+        marcada, o campo da pasta (rotulo antes do campo, para o leitor
+        de tela)."""
+        self.separar = wx.CheckBox(
+            self, label="&Guardar os dados de cada conta em uma pasta "
+                        "separada", name="Dados de cada conta em pasta "
+                                         "separada")
+        self.separar.SetValue(bool(separar))
+        lay.Add(self.separar, 0, wx.LEFT | wx.RIGHT, 10)
+        self.rotulo_pasta = wx.StaticText(
+            self, label="Pasta dos dados das &contas (vazia: a pasta "
+                        "padrão do TeleZapp):")
+        lay.Add(self.rotulo_pasta, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.pasta = wx.TextCtrl(self, value=pasta or "", size=(440, -1),
+                                 name="Pasta dos dados das contas")
+        lay.Add(self.pasta, 0, wx.LEFT | wx.RIGHT, 10)
+        self.escolher = wx.Button(self, label="Escolher a pas&ta...")
+        lay.Add(self.escolher, 0, wx.ALL, 10)
+        self.Bind(wx.EVT_CHECKBOX, self._mostrou_dados, self.separar)
+        self.Bind(wx.EVT_BUTTON, self._clicou_escolher, self.escolher)
+        self._mostrar_dados()
+
+    def _mostrar_dados(self):
+        visivel = self.separar.GetValue()
+        for parte in (self.rotulo_pasta, self.pasta, self.escolher):
+            parte.Show(visivel)
+        self.Layout()
+        self.Fit()
+
+    def _mostrou_dados(self, evt):
+        self._mostrar_dados()
+
+    def _clicou_escolher(self, evt):
+        dlg = wx.DirDialog(self, "Escolha a pasta dos dados das contas",
+                           defaultPath=self.pasta.GetValue().strip())
+        try:
+            if dlg.ShowModal() == wx.ID_OK:
+                self.pasta.SetValue(dlg.GetPath())
+        finally:
+            dlg.Destroy()
+
+    def valores(self):
+        """(separar, pasta) como a pessoa deixou; None sem essa parte."""
+        if self.separar is None:
+            return None
+        return self.separar.GetValue(), self.pasta.GetValue().strip()
 
     def _preencher(self, selecionar):
         itens = self._itens()
