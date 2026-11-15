@@ -3431,6 +3431,19 @@ def test_grupo_limpar_conversa_apaga_mensagens_e_mantem_na_lista(j):
     assert chave in j.indice
 
 
+def test_limpar_conversa_zera_as_nao_lidas_na_lista_na_hora(j):
+    _abrir_com_caixa(j)
+    chave = ("t1", "20")
+    j.banco.salvar_mensagens([m.Mensagem("t1", "20", "5", texto="oi",
+                                         data=AGORA)])
+    j.indice[chave].nao_lidas = 3
+    j._refazer_lista()
+    assert "3 não lidas" in j._rotulos_conv[j._chaves_conv.index(chave)]
+    j._limpar_conversa(j.indice[chave])
+    assert j.indice[chave].nao_lidas == 0
+    assert "não lida" not in j._rotulos_conv[j._chaves_conv.index(chave)]
+
+
 def test_grupo_sair_so_apaga_da_lista_se_o_servico_aceitou(j):
     chave = ("t1", "20")
     j._saiu_do_grupo(j.indice[chave], True, False)       # falhou

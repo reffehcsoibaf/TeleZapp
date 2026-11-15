@@ -9,6 +9,14 @@ Antes de escrever aqui, confira a versão em vigor: `git fetch --tags` e
 
 ## Próxima versão (ainda sem número)
 
+## 2026.11.14.0
+
+- Chamada antiga não toca ao sincronizar mensagens antigas (relato repetido): `_ao_chamada` já tratava como velha a oferta com mais de 60 s só antes do fim da fila offline (`_fila_entregue`); passada a fila, uma oferta de tempos atrás (sincronização pedida ao celular, pareamento) tocava como nova. Agora, com mais de `OFERTA_ANTIGA_S` (600 s), a oferta é velha em qualquer momento (linha "encerrada", sem janela nem som); até 10 min de diferença do relógio ainda toca. Testes ajustados (ofertas recentes nos testes de chamada).
+- Chamada da fila: a DLL (whatsmeow `call.go`, diff em `docs/neonize/whatsmeow-call-marca-offline.diff`) repassa a marca `offline` do aviso nos atributos do nó `offer`; com a marca e mais de 60 s de idade a oferta é velha mesmo depois do fim da fila (`_veio_da_fila`). DLL nova 5e7eb833... compilada, NÃO instalada (instalar com o TeleZapp fechado: `Backup\instalar-dll-com-marca-offline.cmd`; voltar: `Backup
+estaurar-dll-antes-da-marca-offline.cmd`). Com DLL antiga vale só a idade.
+- Limpar conversa daqui zera na hora as não lidas, as menções e as reações novas da linha da lista (e marca como lida na conta), sem esperar abrir a conversa (`_sem_nao_lidas_apos_limpar`).
+- Lentidão com milhares de conversas (medido com 4.060 conversas e 187 mil mensagens): (1) a lista de conversas (`ListaDeTextos`) é virtual (`wx.LC_VIRTUAL`, textos em `itens`, `OnGetItemText`): recriar 4.060 linhas caiu de 6 a 7 s para uns 50 ms; (2) `ListaDeTextos.Atualizar` troca os textos em bloco e `_preencher_conversas` o usa no lugar do laço de `Delete`/`Append`: a troca de filtro caiu de 2 a 3 s para 5 a 70 ms; (3) índice `mensagens_por_remetente (conta_id, remetente, data)`, criado em `Banco._atualizar_esquema` (depois da coluna, para bancos antigos): `nome_do_remetente` caiu de 170 ms para 0,75 ms por chamada e `_previas_prontas`, que travava a abertura por 18,6 s, passou a menos de 1 s; (4) `_rotulo_da_conversa(c, em_uso)` normaliza a lista uma vez só por montagem; (5) `lista_msgs.Freeze()`/`Thaw()` ao refazer a lista de mensagens. `seguro` registra "lento: <tratador> demorou N s" para tratadores acima de 0,2 s (`LIMITE_LENTO_S`). A lista de mensagens continua `ListBox` (o NVDA recebe no máximo 255 caracteres de um item de `ListCtrl`, virtual ou não). `iniciar-telezapp.bat`: o `pip list` só roda quando os componentes são instalados (poupa 0,6 s por abertura).
+
 ## 2026.11.13.0
 
 "Limpar a conversa (aqui e no celular)" entrou também no menu de contexto da conversa (`_opcoes_da_conversa`, antes de Apagar) e no menu de contexto da seleção múltipla (`_opcoes_em_massa_conv`: "Limpar N conversas (aqui e no celular)", que chama `_massa_conversas("limpar")`). Status de outras pessoas seguem sem o item. **Confirmado ao vivo (limpar várias conversas).**

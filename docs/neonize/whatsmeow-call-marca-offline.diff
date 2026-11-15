@@ -1,0 +1,23 @@
+diff --git a/call.go b/call.go
+index 47b0e21..737368a 100644
+--- a/call.go
++++ b/call.go
+@@ -39,6 +39,18 @@ func (cli *Client) handleCallEvent(ctx context.Context, node *waBinary.Node) {
+ 	}
+ 	switch child.Tag {
+ 	case "offer":
++		// TeleZapp: o servidor marca com "offline" o aviso que estava na fila de
++		// quando o aparelho estava desconectado (oferta que ja nao esta tocando).
++		// O evento nao leva o no externo, entao a marca vai para os atributos
++		// do no "offer" (copiados, sem mexer no no original).
++		if marca, ok := node.Attrs["offline"]; ok {
++			attrs := make(waBinary.Attrs, len(child.Attrs)+1)
++			for k, v := range child.Attrs {
++				attrs[k] = v
++			}
++			attrs["offline"] = marca
++			child.Attrs = attrs
++		}
+ 		cli.dispatchEvent(&events.CallOffer{
+ 			BasicCallMeta: basicMeta,
+ 			CallRemoteMeta: types.CallRemoteMeta{
