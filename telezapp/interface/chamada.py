@@ -169,12 +169,25 @@ class DialogoChamada(wx.Dialog):
         self.escolha_saida.Bind(wx.EVT_CHOICE, self._dispositivo)
         self.Bind(wx.EVT_CHAR_HOOK, self._tecla)
         self.Bind(wx.EVT_CLOSE, self._ao_fechar)
+        self._estado_mostrado = None
         self.mostrar()
 
     # ------------------------------------------------------- desenho
+    def _controles_com_foco(self):
+        """Tudo o que pode ter o foco dentro desta janela."""
+        return (list(self.botoes.values())
+                + [self.b_ocultar, self.escolha_mic, self.escolha_saida,
+                   self.escolha_camera, self.escolha_tela, self.cx_tela_som,
+                   self.escolha_saida_pc])
+
     def mostrar(self):
-        """Redesenha para o estado atual de `self.chamada`."""
+        """Redesenha para o estado atual de `self.chamada`. O foco so vai
+        para o botao principal quando o ESTADO da chamada muda (tocando,
+        conversando, encerrada); ao redesenhar por outro motivo (silenciar,
+        ligar a camera, compartilhar a tela...), o foco fica onde a pessoa
+        estava, para o leitor de tela nao voltar ao inicio da janela."""
         c = self.chamada
+        foco_antes = self.FindFocus()
         a = ch.apresentar(c)
         self.SetTitle(a.titulo)
         self.situacao.SetLabel(a.situacao)
@@ -206,6 +219,12 @@ class DialogoChamada(wx.Dialog):
             w.Show(mostrar_disp)
         self.Layout()
         self.Fit()
+        mudou_o_estado = c.estado != self._estado_mostrado
+        self._estado_mostrado = c.estado
+        nosso = any(foco_antes is x for x in self._controles_com_foco())
+        if not mudou_o_estado and nosso and foco_antes.IsShown()                 and foco_antes.IsEnabled():
+            foco_antes.SetFocus()
+            return a
         foco = self.botoes.get(a.foco)
         if foco is not None:
             foco.SetFocus()

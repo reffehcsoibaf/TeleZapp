@@ -104,6 +104,15 @@ class Janela:
     def SetFocus(self):
         _foco[0] = self
 
+    def IsShown(self):
+        return getattr(self, "visivel", True) is not False
+
+    def Destroy(self):
+        self.vivo = False
+        if _foco[0] is self:
+            _foco[0] = None
+        return True
+
     def IsEnabled(self):
         return getattr(self, "ativo", True)
 
@@ -551,6 +560,9 @@ class BoxSizer:
         pass
 
     def Add(self, *a, **k):
+        pass
+
+    def Clear(self, *a, **k):
         pass
 
 

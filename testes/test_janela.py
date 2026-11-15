@@ -9764,3 +9764,53 @@ def test_caixa_do_som_junto_com_a_tela_age_na_hora(chamadas):
     em_chamada_com(j)                      # sem tela: so vale para a proxima
     j._tela_com_som(False)
     assert p.comandos == []
+
+
+# --------------------------------------- o foco nao volta ao inicio
+def test_detalhes_devolvem_o_foco_ao_botao_depois_de_refazer_os_botoes():
+    from telezapp.interface.detalhes import DialogoTexto
+    d = DialogoTexto(None, "Detalhes")
+    d.definir(["a"], [("Mensagens fi&xadas", lambda: None),
+                      ("Tra&ncar a conversa", lambda: None),
+                      ("&Limpar a conversa...", lambda: None)])
+    d.botoes[1].SetFocus()                          # a pessoa esta em Trancar
+    d.definir(["a", "b"], [("Mensagens fi&xadas", lambda: None),
+                            ("Des&trancar a conversa", lambda: None),
+                            ("&Limpar a conversa...", lambda: None)])
+    assert d.FindFocus() is d.botoes[1]             # o rotulo mudou: mesma vez
+    d.botoes[2].SetFocus()
+    d.definir(["c"], [("Mensagens fi&xadas", lambda: None),
+                      ("Des&trancar a conversa", lambda: None),
+                      ("&Limpar a conversa...", lambda: None)])
+    assert d.FindFocus() is d.botoes[2]             # mesmo rotulo
+    d.botoes[-1].SetFocus()                         # Fechar
+    d.definir(["d"], [("Outro", lambda: None)])
+    assert d.FindFocus() is d.botoes[-1]
+    # com o foco no texto (ou em nenhum botao), nada e movido
+    d.texto.SetFocus()
+    d.definir(["e"], [("Outro", lambda: None)])
+    assert d.FindFocus() is d.texto
+
+
+def test_janela_da_chamada_so_move_o_foco_quando_o_estado_muda():
+    from telezapp.interface.chamada import DialogoChamada
+    from telezapp.nucleo import chamadas as ch
+    c = ch.Chamada("t1", "10", "Ana", estado=ch.EM_CHAMADA,
+                   suporta_video=True, suporta_tela=True, suporta_som_pc=True)
+    d = DialogoChamada(None, c, {k: (lambda *a: None) for k in (
+        "atender", "recusar", "desligar", "silenciar", "tempo", "trocar",
+        "camera", "trocar_camera", "tela", "som_pc")},
+        lambda t: None, ["Mic"], ["Saida"], "Mic", "Saida", cameras=["Cam"],
+        camera="Cam", telas=["Tela 1"], saidas_pc=["Saida"])
+    assert d.FindFocus() is d.b_desligar            # abriu: foco no principal
+    d.b_silenciar.SetFocus()                        # a pessoa esta em Silenciar
+    c.mudo = True                                   # o botao muda de nome
+    d.mostrar()
+    assert d.FindFocus() is d.b_silenciar           # e o foco ficou nele
+    d.b_som_pc.SetFocus()
+    c.som_pc = True
+    d.mostrar()
+    assert d.FindFocus() is d.b_som_pc
+    c.estado = ch.ENCERRADA                         # o estado mudou: Fechar
+    d.mostrar()
+    assert d.FindFocus() is d.b_fechar

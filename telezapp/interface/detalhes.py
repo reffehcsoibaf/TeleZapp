@@ -24,6 +24,11 @@ log = logging.getLogger("telezapp.detalhes")
 
 
 # ------------------------------------------------------------ janelas
+def _sem_atalho(rotulo):
+    """O rotulo sem o & da tecla de acesso."""
+    return (rotulo or "").replace("&", "")
+
+
 class DialogoTexto(wx.Dialog):
     """Texto somente leitura (setas leem) e uma fila de botoes. Esc fecha."""
 
@@ -44,6 +49,16 @@ class DialogoTexto(wx.Dialog):
     def definir(self, linhas, botoes):
         """linhas: [texto]; botoes: [(rotulo, funcao)] (o ultimo costuma ser
         Fechar, que e o proprio Esc)."""
+        # os botoes sao refeitos: sem isto o foco (e o leitor de tela) cairia
+        # no inicio da janela depois de qualquer botao. Guarda qual botao o
+        # tinha (o rotulo e a posicao; o rotulo pode mudar, como em Trancar a
+        # conversa / Destrancar a conversa) para devolver o foco a ele.
+        foco = self.FindFocus()
+        quem = None
+        for i, b in enumerate(self.botoes):
+            if b is foco:
+                quem = (i, _sem_atalho(b.GetLabel()))
+                break
         self.texto.SetValue("\n".join(linhas))
         self.texto.SetInsertionPoint(0)
         for b in self.botoes:
@@ -59,6 +74,21 @@ class DialogoTexto(wx.Dialog):
         self.linha.Add(fechar, 0, wx.RIGHT | wx.TOP, 6)
         self.botoes.append(fechar)
         self.Layout()
+        if quem is not None:
+            self._devolver_o_foco(*quem)
+
+    def _devolver_o_foco(self, indice, rotulo):
+        """O foco volta ao botao de mesmo rotulo; se o rotulo mudou, ao que
+        esta na mesma posicao (o Fechar, que e o ultimo, continua ultimo)."""
+        iguais = [b for b in self.botoes
+                  if _sem_atalho(b.GetLabel()) == rotulo]
+        if iguais:
+            alvo = iguais[0]
+        elif indice >= len(self.botoes) - 1:
+            alvo = self.botoes[-1]
+        else:
+            alvo = self.botoes[min(indice, len(self.botoes) - 1)]
+        alvo.SetFocus()
 
 
 def _chave_do_item(dado):
