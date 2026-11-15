@@ -945,6 +945,12 @@ class ChamadasWhatsApp:
         captura = self.som_pc.CapturaDoSom(saida)
         lig.som_pc = captura
         captura.iniciar()
+        if getattr(captura, "erro", ""):
+            self._parar_som_pc(lig)
+            self.barramento.publicar(ev.Aviso(
+                self.conta_id, "Não consegui capturar o som do "
+                "computador.", False))
+            return False
         self._preparar_eco_do_som_pc(lig)
         self._marcar_compartilhamento(cid, lig, som_pc=True)
         return True
@@ -953,6 +959,10 @@ class ChamadasWhatsApp:
         """Liga o tira-voz quando a saida captada e a mesma em que a chamada
         toca (ela e o que volta para o outro lado)."""
         lig.eco_pc = None
+        if getattr(lig.som_pc, "exato", False):
+            log.info("som do computador: captura por processo, sem o som "
+                     "do TeleZapp (a voz do outro lado não entra)")
+            return
         capturada = lig.som_pc_saida or self.som_pc.saida_padrao()
         tocando = lig.saida or self.som_pc.saida_padrao()
         from telezapp.midia.dispositivos import parecem_o_mesmo

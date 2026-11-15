@@ -37,9 +37,18 @@ def misturar(a, b):
 
 
 def _abrir_loopback(nome_saida=""):
-    """Abre o loopback da saída `nome_saida` (vazio: a padrão do Windows).
-    Devolve um objeto com `nome`, `ler()` (um quadro, em bytes) e
-    `fechar()`."""
+    """Abre a captura do som do computador. Primeiro tenta o loopback por
+    processo (todo o som, menos o do TeleZapp: a voz do outro lado e os
+    avisos do programa nunca entram; `exato`); sem ele, o loopback comum da
+    saída `nome_saida` (vazio: a padrão do Windows), que capta também a voz
+    da chamada. Devolve um objeto com `nome`, `exato`, `ler()` (um quadro,
+    em bytes) e `fechar()`."""
+    try:
+        from telezapp.midia import som_por_processo
+        return som_por_processo.abrir()
+    except Exception as e:
+        log.info("loopback por processo indisponível (%s); usando o "
+                 "comum", e)
     import soundcard as sc
     from telezapp.midia import dispositivos
     saida = sc.default_speaker()
@@ -55,6 +64,7 @@ def _abrir_loopback(nome_saida=""):
 
     class Fonte:
         nome = saida.name
+        exato = False
 
         @staticmethod
         def ler():
@@ -115,21 +125,29 @@ class CapturaDoSom:
         self._parar = threading.Event()
         self._thread = None
         self.nome = ""              # a saída de fato capturada
+        self.exato = False          # sem o som do TeleZapp (por processo)
         self.erro = ""
         self.quadros = 0
+        self._aberto = threading.Event()
 
-    def iniciar(self):
+    def iniciar(self, espera_s=8.0):
+        """Abre a captura na thread dela e espera ate saber se abriu (e se e
+        a exata)."""
         self._thread = threading.Thread(target=self._laco,
                                         name="chamada-som-pc", daemon=True)
         self._thread.start()
+        self._aberto.wait(espera_s)
 
     def _laco(self):
         fonte = None
         try:
             fonte = self._abrir(self.nome_saida)
             self.nome = getattr(fonte, "nome", "") or self.nome_saida
-            log.info("som do computador capturado (%s)",
-                     self.nome or "padrão do Windows")
+            self.exato = bool(getattr(fonte, "exato", False))
+            log.info("som do computador capturado (%s%s)",
+                     self.nome or "padrão do Windows",
+                     ", sem o som do TeleZapp" if self.exato else "")
+            self._aberto.set()
             while not self._parar.is_set():
                 quadro = fonte.ler()
                 if len(quadro) == BYTES_POR_QUADRO:
@@ -141,6 +159,7 @@ class CapturaDoSom:
                 log.warning("a captura do som do computador parou: %s",
                             self.erro)
         finally:
+            self._aberto.set()
             if fonte is not None:
                 try:
                     fonte.fechar()

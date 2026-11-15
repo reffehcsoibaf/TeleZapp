@@ -896,3 +896,39 @@ def test_som_e_tela_param_quando_a_chamada_acaba(mundo_tela):
     ponte.fila.put({"ev": "end", "call": "C1", "reason": ""})
     assert esperar(lambda: captura.parada)
     assert getattr(v.video, "tela_parada", False)
+
+
+def test_captura_exata_dispensa_o_tira_voz(mundo_tela, monkeypatch):
+    v, ponte, bus = mundo_tela
+    chamadas_eco = []
+
+    class EcoFalso:
+        def __init__(self, *a, **k):
+            chamadas_eco.append(a)
+    monkeypatch.setattr(cw.midia_eco, "CancelaEco", EcoFalso)
+    original = v.som_pc.CapturaDoSom
+
+    def exata(saida=""):
+        c = original(saida)
+        c.exato = True
+        return c
+    v.som_pc.CapturaDoSom = exata
+    em_chamada(v, ponte, bus)
+    assert v.compartilhar_som(CID) is True
+    assert v.ligacoes[CID].eco_pc is None and chamadas_eco == []
+
+
+def test_som_que_nao_abre_avisa_e_nao_marca_como_compartilhado(mundo_tela):
+    v, ponte, bus = mundo_tela
+    original = v.som_pc.CapturaDoSom
+
+    def quebrada(saida=""):
+        c = original(saida)
+        c.erro = "OSError: sem saida"
+        return c
+    v.som_pc.CapturaDoSom = quebrada
+    em_chamada(v, ponte, bus)
+    assert v.compartilhar_som(CID) is False
+    assert not ultimo_estado(bus).som_pc
+    assert any("capturar o som" in getattr(e, "texto", "")
+               for e in bus.eventos)
