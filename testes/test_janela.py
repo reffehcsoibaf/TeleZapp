@@ -9748,3 +9748,19 @@ def test_sem_suporte_diz_que_a_conta_nao_compartilha(chamadas):
     j._alternar_som_pc()
     assert "não compartilha a tela" in chamadas.falas[0]
     assert "não compartilha o som" in chamadas.falas[1]
+
+
+def test_caixa_do_som_junto_com_a_tela_age_na_hora(chamadas):
+    j = chamadas.j
+    p = com_compartilhar(chamadas)
+    em_chamada_com(j, camera=True, tela=True, som_pc=True)
+    j._tela_com_som(False)
+    assert p.comandos == [("parar_som", "10")]
+    assert j.cfg.get("chamada_tela_com_som") is False
+    em_chamada_com(j, camera=True, tela=True)
+    j._tela_com_som(True)
+    assert p.comandos[-1] == ("compartilhar_som", "10", "")
+    p.comandos.clear()
+    em_chamada_com(j)                      # sem tela: so vale para a proxima
+    j._tela_com_som(False)
+    assert p.comandos == []

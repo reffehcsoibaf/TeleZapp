@@ -5126,7 +5126,19 @@ class Janela(wx.Frame):
 
     @seguro
     def _tela_com_som(self, marcada):
+        """A caixa "compartilhar tambem o som" vale para as proximas telas
+        e, com a tela sendo compartilhada agora, liga ou desliga o som na
+        hora."""
         self.cfg.set("chamada_tela_com_som", bool(marcada))
+        c = self.chamada
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if c is None or p is None or not c.ativa or not c.tela                 or c.estado != ch.EM_CHAMADA or not c.suporta_som_pc:
+            return
+        if marcada and not c.som_pc:
+            p.compartilhar_som(c.conversa_id,
+                               self.cfg.get("chamada_saida_pc") or "")
+        elif not marcada and c.som_pc:
+            p.parar_som(c.conversa_id)
 
     @seguro
     def _alternar_som_pc(self):

@@ -977,14 +977,19 @@ class ChamadasWhatsApp:
         lig.eco_pc = None
         if captura is not None:
             captura.parar()
+            log.info("som do computador parado (%d quadros captados)",
+                     getattr(captura, "quadros", 0))
 
     def _marcar_compartilhamento(self, cid, lig, tela=None, som_pc=None):
         with self._trava:
             c = lig.chamada
+            antes = (c.tela, c.som_pc)
             mudou = c.aplicar_compartilhamento(
                 c.tela if tela is None else tela,
                 c.som_pc if som_pc is None else som_pc)
         if mudou:
+            log.info("compartilhamento: tela %s -> %s, som do computador "
+                     "%s -> %s", antes[0], c.tela, antes[1], c.som_pc)
             self._publicar(c)
         return mudou
 
