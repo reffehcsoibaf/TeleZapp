@@ -9814,3 +9814,21 @@ def test_janela_da_chamada_so_move_o_foco_quando_o_estado_muda():
     c.estado = ch.ENCERRADA                         # o estado mudou: Fechar
     d.mostrar()
     assert d.FindFocus() is d.b_fechar
+
+
+def test_botao_de_chamada_some_em_grupo_e_canal(j):
+    privada = j.indice[("t1", "10")]
+    privada.tipo = "privada"
+    j._abrir_conversa_de(privada)
+    assert j.botao_chamada.visivel is not False
+    grupo = j.indice[("t1", "20")]
+    grupo.tipo = "grupo"
+    j._abrir_conversa_de(grupo)
+    assert j.botao_chamada.visivel is False       # grupo: sem botao
+    assert j.botao_enviar.visivel is not False    # o resto continua
+    canal = j.indice[("t1", "20")]
+    canal.tipo = "canal"
+    j._abrir_conversa_de(canal)
+    assert j.botao_chamada.visivel is False
+    j._abrir_conversa_de(privada)                 # volta a aparecer
+    assert j.botao_chamada.visivel is not False

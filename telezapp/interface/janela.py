@@ -1601,6 +1601,11 @@ class Janela(wx.Frame):
             w.Show(mensagens)
         for w in (self.rot_caixa, self.caixa) + self.botoes_envio:
             w.Show(escrever)
+        # chamadas so com uma pessoa (nao ha chamada em grupo nem em canal):
+        # nesses o botao some, e a ordem de Tab nao para num botao inutil
+        conv = self.indice.get(self.atual) if self.atual is not None             else None
+        if conv is not None and conv.tipo != "privada":
+            self.botao_chamada.Show(False)
         if not mensagens:
             self._botoes_chave = None
             for b in self._botoes_de_contexto():

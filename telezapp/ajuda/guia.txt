@@ -521,7 +521,7 @@ Na janela do som do computador, a caixa "Gravar também o microfone" já vem mar
 Se a gravação sair quase em silêncio, o TeleZapp avisa antes de você enviar. Ela vai como mensagem de voz, em Ogg/Opus.
 
 # Chamadas de voz
-As chamadas são feitas em conversas com uma pessoa, não em grupos nem canais. Use fones de ouvido, para a voz da outra pessoa não voltar pelo microfone.
+As chamadas são feitas em conversas com uma pessoa, não em grupos nem canais; nesses, o botão Iniciar chamada fica escondido. Use fones de ouvido, para a voz da outra pessoa não voltar pelo microfone.
 
 Ligar: abra ou selecione uma conversa e use Chamadas, Ligar para esta conversa (Ctrl+Shift+L). O TeleZapp fala "Chamando" e o nome, toca um som grave de espera e abre a janela da chamada, com o foco em Desligar. Quando a pessoa atende, ouve-se um som de conectado e a fala diz "Conectado com" o nome. Se ela não atender, recusar ou estiver ocupada, o TeleZapp diz o que aconteceu e a janela fica com o botão Fechar.
 
