@@ -210,6 +210,7 @@ class ChamadasTelegram:
         self._ultimo_quadro = {}    # chat_id -> quando chegou o ultimo
         self._vigias = {}       # chat_id -> tarefa que vigia o video
         self._formato_visto = False
+        self._envios = {}           # (chat_id, tipo) -> [aceitos, recusados]
         self._t0 = {}               # chat_id -> quando a chamada apareceu
         self._t_em_chamada = {}     # chat_id -> quando entrou em chamada
         self._lista_logada = None
@@ -586,7 +587,8 @@ class ChamadasTelegram:
                     self.motor.enviar_quadro(self.app, chat_id, "video",
                                              dados, largura, altura), loop)
                 futuro.add_done_callback(
-                    lambda f: estado.__setitem__("pendente", False))
+                    lambda f: (estado.__setitem__("pendente", False),
+                               self._contar_envio(chat_id, "video", f)))
             except Exception:
                 estado["pendente"] = False
                 log.exception("erro ao mandar um quadro da tela")
@@ -601,6 +603,29 @@ class ChamadasTelegram:
         if estado is not None and estado.get("fonte") is not None:
             estado["fonte"].parar()
             estado["fonte"] = None
+            self._resumo_do_envio(chat_id, "video")
+
+    def _contar_envio(self, chat_id, tipo, futuro):
+        """Conta os quadros que o motor aceitou e os que recusou (o primeiro
+        erro vai para o log): sem isso nao ha como saber, depois, se o
+        Telegram recebeu a tela e o som."""
+        conta = self._envios.setdefault((chat_id, tipo), [0, 0])
+        try:
+            erro = futuro.exception()
+        except Exception as e:       # cancelado
+            erro = e
+        if erro is None:
+            conta[0] += 1
+            return
+        conta[1] += 1
+        if conta[1] == 1:
+            log.warning("o Telegram recusou um quadro de %s: %r", tipo, erro)
+
+    def _resumo_do_envio(self, chat_id, tipo):
+        conta = self._envios.pop((chat_id, tipo), None)
+        if conta is not None:
+            log.info("quadros de %s mandados ao Telegram: %d aceitos, %d "
+                     "recusados", tipo, conta[0], conta[1])
 
     async def compartilhar_som(self, chat_id, saida=""):
         """Manda o som do computador junto com o microfone: o audio passa a
@@ -663,6 +688,7 @@ class ChamadasTelegram:
         estado["parar"].set()
         estado["captura"].parar()
         log.info("som do computador parado")
+        self._resumo_do_envio(chat_id, "audio")
 
     def _laco_do_audio(self, chat_id, loop, estado):
         """Microfone + som do computador -> quadros de 10 ms para o motor.
@@ -692,7 +718,8 @@ class ChamadasTelegram:
                     self.motor.enviar_quadro(self.app, chat_id, "audio",
                                              quadro), loop)
                 futuro.add_done_callback(
-                    lambda f: pendentes.__setitem__(0, pendentes[0] - 1))
+                    lambda f: (pendentes.__setitem__(0, pendentes[0] - 1),
+                               self._contar_envio(chat_id, "audio", f)))
         except Exception:
             log.exception("erro no áudio do compartilhamento")
         finally:
