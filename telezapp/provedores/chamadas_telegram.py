@@ -12,9 +12,11 @@ aplicativo segue igual.
 """
 import asyncio
 import logging
+import threading
 import time
 
 from telezapp import config
+from telezapp.midia import som_pc as midia_som_pc
 from telezapp.midia import video as midia_video
 from telezapp.nucleo import chamadas as ch
 from telezapp.nucleo import eventos as ev
@@ -26,6 +28,11 @@ ESPERA_ATENDER_S = 45
 # Sem quadros do outro lado por tanto tempo, a camera dele foi desligada
 SEM_QUADROS_S = 3.0
 LARGURA_VIDEO, ALTURA_VIDEO, QUADROS_POR_SEGUNDO = 640, 360, 15
+# Quando o audio sai de quadros nossos (som do computador somado ao microfone):
+# 48 kHz, mono, quadros de 10 ms (480 amostras de 16 bits)
+TAXA_EXTERNA = 48000
+FRAME_AUDIO = 480
+QUADROS_PENDENTES_MAX = 20
 
 
 class Motor:
@@ -48,6 +55,15 @@ class Motor:
         from pytgcalls.types.raw import VideoParameters
         self.Device, self.Direction = Device, Direction
         self.VideoParameters = VideoParameters
+        try:
+            from pytgcalls.types import ExternalMedia
+            from pytgcalls.types.raw import AudioParameters
+            from pytgcalls.types.stream.frame import Frame
+            self.ExternalMedia = ExternalMedia
+            self.AudioParameters = AudioParameters
+            self.Frame = Frame
+        except Exception:
+            log.info("quadros externos indisponíveis neste py-tgcalls")
 
     def cameras(self):
         return list(self.MediaDevices.camera_devices())
@@ -60,6 +76,42 @@ class Motor:
             video_parameters=self.VideoParameters(
                 LARGURA_VIDEO, ALTURA_VIDEO, QUADROS_POR_SEGUNDO),
             audio_path=microfone)
+
+    def fluxo_externo(self, audio, video, microfone=None, camera=None):
+        """Fluxo de saida com quadros que o TeleZapp manda (compartilhar a
+        tela e o som do computador). `audio`: True quando o audio sai de
+        quadros nossos (microfone somado ao som do computador); senao vem do
+        dispositivo `microfone`. `video`: "externo" (quadros nossos, a tela),
+        "camera" (o dispositivo `camera`) ou None."""
+        qualidade = self.AudioParameters(TAXA_EXTERNA, 1) if audio \
+            else self.AudioQuality.HIGH
+        video_params = self.VideoParameters(
+            LARGURA_VIDEO, ALTURA_VIDEO, QUADROS_POR_SEGUNDO)
+        ext = self.ExternalMedia
+        if audio and video == "externo":
+            return self.MediaStream(
+                ext.AUDIO | ext.VIDEO, audio_parameters=qualidade,
+                video_parameters=video_params)
+        if audio and video == "camera":
+            return self.MediaStream(
+                camera, audio_parameters=qualidade,
+                video_parameters=video_params, audio_path=ext.AUDIO)
+        if audio:
+            return self.MediaStream(ext.AUDIO, audio_parameters=qualidade)
+        return self.MediaStream(
+            ext.VIDEO, audio_parameters=qualidade,
+            video_parameters=video_params, audio_path=microfone)
+
+    async def enviar_quadro(self, app, chat_id, tipo, dados, largura=0,
+                            altura=0):
+        """Um quadro nosso: `tipo` "audio" (PCM s16le, 48 kHz, mono, 10 ms)
+        ou "video" (I420, `largura` x `altura`)."""
+        if tipo == "audio":
+            await app.send_frame(chat_id, self.Device.MICROPHONE, dados)
+        else:
+            await app.send_frame(
+                chat_id, self.Device.CAMERA, dados,
+                self.Frame.Info(int(time.time() * 1000), largura, altura))
 
     def filtro_quadros(self):
         """Os quadros de camera que chegam do outro lado."""
@@ -102,6 +154,18 @@ def disponivel():
         return False
 
 
+def _abrir_microfone(nome, taxa, amostras):
+    """O microfone do Windows, em quadros de `amostras` (PCM de 16 bits,
+    mono, `taxa` Hz), para o audio que montamos nos mesmos."""
+    import sounddevice as sd
+    from telezapp.midia import dispositivos
+    fluxo = sd.RawInputStream(
+        samplerate=taxa, channels=1, dtype="int16", blocksize=amostras,
+        device=dispositivos.indice(nome, True))
+    fluxo.start()
+    return fluxo
+
+
 def _escolher(dispositivos, nome):
     """O dispositivo com esse nome (o Windows corta os nomes que a janela de
     dispositivos mostra, entao vale tambem o nome que comeca igual); senao o
@@ -132,6 +196,11 @@ class ChamadasTelegram:
         self.app = None
         self.chamadas = {}      # chat_id -> ch.Chamada
         self._escolhas = {}     # chat_id -> (microfone, saida)
+        self._tela = {}         # chat_id -> a tela que estamos compartilhando
+        self._som = {}          # chat_id -> o som do computador que mandamos
+        self.video = midia_video        # trocavel nos testes
+        self.som_pc = midia_som_pc      # trocavel nos testes
+        self.abrir_microfone = _abrir_microfone   # idem
         self._nomes = ([], [])  # ultimos dispositivos vistos (microfones,
         #                         saidas); ver atualizar_dispositivos
         self._cameras = []      # nomes das cameras da ultima listagem
@@ -212,12 +281,53 @@ class ChamadasTelegram:
         return list(mics), list(saidas)
 
     # --------------------------------------------------------- estados
+    @property
+    def suporta_tela(self):
+        return self.suporta_video and hasattr(self.motor, "fluxo_externo")
+
+    @property
+    def suporta_som_pc(self):
+        try:
+            return self.pronta and hasattr(self.motor, "fluxo_externo") \
+                and self.som_pc.disponivel()
+        except Exception:
+            return False
+
+    def telas(self):
+        """[(nome, (x, y, largura, altura))] das telas que da para mostrar."""
+        try:
+            return self.video.listar_telas()
+        except Exception:
+            return []
+
+    def saidas_do_computador(self):
+        try:
+            return self.som_pc.saidas_do_computador()
+        except Exception:
+            return []
+
     def _publicar(self, c):
         c.suporta_video = self.suporta_video
+        c.suporta_tela = self.suporta_tela
+        c.suporta_som_pc = self.suporta_som_pc
         self.barramento.publicar(ev.EstadoChamada(
             self.conta_id, str(c.conversa_id), c.estado, c.nome, c.entrante,
             c.motivo, c.erro, c.video, c.camera, c.video_remoto,
-            c.suporta_video))
+            c.suporta_video, c.tela, c.som_pc, c.suporta_tela,
+            c.suporta_som_pc))
+
+    def _marcar_compartilhamento(self, chat_id, tela=None, som_pc=None):
+        c = self.chamadas.get(chat_id)
+        if c is None:
+            return False
+        mudou = c.aplicar_compartilhamento(
+            c.tela if tela is None else tela,
+            c.som_pc if som_pc is None else som_pc)
+        if mudou:
+            log.info("compartilhamento: tela %s, som do computador %s",
+                     c.tela, c.som_pc)
+            self._publicar(c)
+        return mudou
 
     def _marcar_video(self, chat_id, video=None, camera=None, remoto=None):
         """Muda o que e do video na chamada e avisa a janela se mudou."""
@@ -250,6 +360,7 @@ class ChamadasTelegram:
                  f", {agora - em:.1f} s em chamada" if em else "")
         self._publicar(c)
         if estado == ch.ENCERRADA:
+            self._soltar_compartilhamento(chat_id)
             self._t0.pop(chat_id, None)
             self._t_em_chamada.pop(chat_id, None)
             self.chamadas.pop(chat_id, None)
@@ -322,7 +433,15 @@ class ChamadasTelegram:
         """O que sai de nos: o microfone e, se a camera esta ligada, ela."""
         dispositivo = _escolher(self.motor.microfones(), mic)
         self._logar_escolha("microfone", mic, dispositivo)
-        camera = self._camera_para(chat_id)
+        tela = chat_id in self._tela
+        audio_nosso = chat_id in self._som
+        camera = None if tela else self._camera_para(chat_id)
+        if (tela or audio_nosso) and hasattr(self.motor, "fluxo_externo"):
+            video = "externo" if tela else (
+                "camera" if camera is not None else None)
+            return (self.motor.fluxo_externo(audio_nosso, video, dispositivo,
+                                             camera),
+                    camera is not None)
         if camera is not None:
             return self.motor.fluxo_com_camera(camera, dispositivo), True
         return self.motor.fluxo_microfone(dispositivo), False
@@ -344,6 +463,10 @@ class ChamadasTelegram:
         if c is None or c.estado != ch.EM_CHAMADA or not self.suporta_video:
             return
         self._cam[chat_id] = nome
+        if chat_id in self._tela:       # a camera toma o lugar da tela
+            self._parar_fonte_da_tela(chat_id)
+            self._tela.pop(chat_id, None)
+            self._marcar_compartilhamento(chat_id, tela=False)
         mic, saida = self._escolhas.get(chat_id, ("", ""))
         try:
             fluxo, com_camera = self._fluxo_de_voz(chat_id, mic)
@@ -364,6 +487,9 @@ class ChamadasTelegram:
         c = self.chamadas.get(chat_id)
         if c is None or not c.camera:
             return
+        if chat_id in self._tela:
+            await self.parar_tela(chat_id)
+            return
         self._cam[chat_id] = None
         mic, _saida = self._escolhas.get(chat_id, ("", ""))
         try:
@@ -372,6 +498,221 @@ class ChamadasTelegram:
         except Exception:
             log.exception("não consegui desligar a câmera")
         self._marcar_video(chat_id, camera=False)
+
+    # ----------------------------------- compartilhar a tela e o som do PC
+    async def _tocar_de_novo(self, chat_id):
+        """Refaz o fluxo de saida (o que sai de nos) e o de entrada."""
+        mic, saida = self._escolhas.get(chat_id, ("", ""))
+        fluxo, _ = self._fluxo_de_voz(chat_id, mic)
+        await self.app.play(chat_id, fluxo)
+        await self.app.record(chat_id, self._fluxo_de_saida(chat_id, saida))
+
+    def _avisar_falha(self, texto):
+        self.barramento.publicar(ev.Aviso(self.conta_id, texto, False))
+
+    async def compartilhar_tela(self, chat_id, nome="", com_som=True):
+        """Manda a tela (a `nome`; vazia = a principal) no lugar da camera.
+        Por padrao leva junto o som do computador."""
+        c = self.chamadas.get(chat_id)
+        if c is None or c.estado != ch.EM_CHAMADA or not self.suporta_tela:
+            return False
+        telas = self.telas()
+        escolhida = next((t for t in telas if t[0] == nome), None) or (
+            telas[0] if telas else None)
+        if escolhida is None:
+            self._avisar_falha("Não encontrei nenhuma tela para "
+                               "compartilhar.")
+            return False
+        if chat_id in self._tela:
+            self._parar_fonte_da_tela(chat_id)
+        self._cam[chat_id] = None           # a tela toma o lugar da camera
+        self._tela[chat_id] = {"nome": escolhida[0],
+                               "retangulo": escolhida[1], "fonte": None,
+                               "tamanho": None, "pendente": False}
+        try:
+            await self._tocar_de_novo(chat_id)
+        except Exception:
+            log.exception("não consegui compartilhar a tela")
+            self._tela.pop(chat_id, None)
+            self._avisar_falha("Não consegui compartilhar a tela.")
+            return False
+        self._iniciar_fonte_da_tela(chat_id, asyncio.get_running_loop())
+        self._marcar_video(chat_id, video=True, camera=True)
+        self._marcar_compartilhamento(chat_id, tela=True)
+        if com_som and chat_id not in self._som:
+            await self.compartilhar_som(chat_id)
+        return True
+
+    async def trocar_tela(self, chat_id, nome):
+        estado = self._tela.get(chat_id)
+        if estado is None:
+            return
+        escolhida = next((t for t in self.telas() if t[0] == nome), None)
+        if escolhida is None:
+            return
+        self._parar_fonte_da_tela(chat_id)
+        estado.update(nome=escolhida[0], retangulo=escolhida[1],
+                      tamanho=None)
+        self._iniciar_fonte_da_tela(chat_id, asyncio.get_running_loop())
+
+    async def parar_tela(self, chat_id):
+        if chat_id not in self._tela:
+            return
+        self._parar_fonte_da_tela(chat_id)
+        self._tela.pop(chat_id, None)
+        try:
+            await self._tocar_de_novo(chat_id)
+        except Exception:
+            log.exception("não consegui parar a tela")
+        self._marcar_video(chat_id, camera=False)
+        self._marcar_compartilhamento(chat_id, tela=False)
+
+    def _iniciar_fonte_da_tela(self, chat_id, loop):
+        estado = self._tela[chat_id]
+
+        def ao_quadro(quadro):
+            try:
+                if estado["pendente"]:
+                    return                      # o anterior ainda nao saiu
+                if estado["tamanho"] is None:
+                    estado["tamanho"] = self.video.tamanho_cabivel(
+                        quadro.width, quadro.height)
+                largura, altura = estado["tamanho"]
+                pronto = quadro.reformat(width=largura, height=altura,
+                                         format="yuv420p")
+                dados = pronto.to_ndarray().tobytes()
+                estado["pendente"] = True
+                futuro = asyncio.run_coroutine_threadsafe(
+                    self.motor.enviar_quadro(self.app, chat_id, "video",
+                                             dados, largura, altura), loop)
+                futuro.add_done_callback(
+                    lambda f: estado.__setitem__("pendente", False))
+            except Exception:
+                estado["pendente"] = False
+                log.exception("erro ao mandar um quadro da tela")
+        fonte = self.video.Tela(estado["retangulo"], ao_quadro,
+                                estado["nome"])
+        estado["fonte"] = fonte
+        fonte.iniciar()
+        log.info("tela compartilhada (%s)", estado["nome"])
+
+    def _parar_fonte_da_tela(self, chat_id):
+        estado = self._tela.get(chat_id)
+        if estado is not None and estado.get("fonte") is not None:
+            estado["fonte"].parar()
+            estado["fonte"] = None
+
+    async def compartilhar_som(self, chat_id, saida=""):
+        """Manda o som do computador junto com o microfone: o audio passa a
+        sair de quadros nossos (microfone somado ao som). O microfone
+        continua valendo e continua podendo ser silenciado."""
+        c = self.chamadas.get(chat_id)
+        if c is None or c.estado != ch.EM_CHAMADA or \
+                not self.suporta_som_pc:
+            return False
+        if chat_id in self._som:
+            self._parar_audio_nosso(chat_id)
+        captura = self.som_pc.CapturaDoSom(
+            saida, taxa=TAXA_EXTERNA, amostras=FRAME_AUDIO)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, captura.iniciar)
+        if getattr(captura, "erro", ""):
+            captura.parar()
+            self._avisar_falha("Não consegui capturar o som do computador.")
+            return False
+        estado = {"captura": captura, "parar": threading.Event(),
+                  "fio": None}
+        self._som[chat_id] = estado
+        try:
+            if c.mudo:                  # o mute da NTgCalls calaria tudo
+                try:
+                    await self.app.unmute(chat_id)
+                except Exception:
+                    pass
+            await self._tocar_de_novo(chat_id)
+        except Exception:
+            log.exception("não consegui compartilhar o som do computador")
+            self._parar_audio_nosso(chat_id)
+            self._avisar_falha("Não consegui compartilhar o som do "
+                               "computador.")
+            return False
+        estado["fio"] = threading.Thread(
+            target=self._laco_do_audio, args=(chat_id, loop, estado),
+            name="chamada-audio-telegram", daemon=True)
+        estado["fio"].start()
+        self._marcar_compartilhamento(chat_id, som_pc=True)
+        return True
+
+    async def parar_som(self, chat_id):
+        if chat_id not in self._som:
+            return
+        self._parar_audio_nosso(chat_id)
+        c = self.chamadas.get(chat_id)
+        try:
+            await self._tocar_de_novo(chat_id)
+            if c is not None and c.mudo:    # voltou ao microfone do motor
+                await self.app.mute(chat_id)
+        except Exception:
+            log.exception("não consegui parar o som do computador")
+        self._marcar_compartilhamento(chat_id, som_pc=False)
+
+    def _parar_audio_nosso(self, chat_id):
+        estado = self._som.pop(chat_id, None)
+        if estado is None:
+            return
+        estado["parar"].set()
+        estado["captura"].parar()
+        log.info("som do computador parado")
+
+    def _laco_do_audio(self, chat_id, loop, estado):
+        """Microfone + som do computador -> quadros de 10 ms para o motor.
+        Silenciado, o microfone entra como silencio e o som do computador
+        segue."""
+        fluxo, aberto, pendentes = None, None, [0]
+        silencio = bytes(FRAME_AUDIO * 2)
+        try:
+            while not estado["parar"].is_set():
+                c = self.chamadas.get(chat_id)
+                if c is None:
+                    break
+                mic = self._escolhas.get(chat_id, ("", ""))[0]
+                if fluxo is None or mic != aberto:
+                    self._fechar_fluxo(fluxo)
+                    fluxo = self.abrir_microfone(mic, TAXA_EXTERNA,
+                                                 FRAME_AUDIO)
+                    aberto = mic
+                dados, _ = fluxo.read(FRAME_AUDIO)
+                voz = silencio if c.mudo else bytes(dados)
+                som = estado["captura"].ler()
+                quadro = self.som_pc.misturar(voz, som)
+                if pendentes[0] >= QUADROS_PENDENTES_MAX:
+                    continue            # o motor nao deu conta: descarta
+                pendentes[0] += 1
+                futuro = asyncio.run_coroutine_threadsafe(
+                    self.motor.enviar_quadro(self.app, chat_id, "audio",
+                                             quadro), loop)
+                futuro.add_done_callback(
+                    lambda f: pendentes.__setitem__(0, pendentes[0] - 1))
+        except Exception:
+            log.exception("erro no áudio do compartilhamento")
+        finally:
+            self._fechar_fluxo(fluxo)
+
+    @staticmethod
+    def _fechar_fluxo(fluxo):
+        if fluxo is None:
+            return
+        try:
+            fluxo.stop()
+            fluxo.close()
+        except Exception:
+            pass
+
+    def _soltar_compartilhamento(self, chat_id):
+        """A chamada acabou: para tudo o que estava sendo mandado."""
+        self._parar_fonte_da_tela(chat_id)
+        self._tela.pop(chat_id, None)
+        self._parar_audio_nosso(chat_id)
 
     async def _ao_pedido(self, chat_id, video):
         """O pedido de chamada chegou (evento bruto): era de video?"""
@@ -481,6 +822,11 @@ class ChamadasTelegram:
         c = self.chamadas.get(chat_id)
         if c is None or c.estado != ch.EM_CHAMADA:
             return
+        if chat_id in self._som:
+            # o microfone entra no que montamos: o silencio e nosso (um mute
+            # da NTgCalls calaria tambem o som do computador)
+            c.mudo = bool(silenciar)
+            return
         try:
             if silenciar:
                 await self.app.mute(chat_id)
@@ -498,7 +844,7 @@ class ChamadasTelegram:
         mic, sai = microfone or mic, saida or sai
         self._escolhas[chat_id] = (mic, sai)
         try:
-            if microfone:
+            if microfone and chat_id not in self._som:
                 fluxo, _ = self._fluxo_de_voz(chat_id, mic)
                 await self.app.play(chat_id, fluxo)
             if saida:

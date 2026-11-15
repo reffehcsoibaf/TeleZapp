@@ -36,7 +36,7 @@ def misturar(a, b):
     return np.clip(soma, -32768, 32767).astype("<i2").tobytes()
 
 
-def _abrir_loopback(nome_saida=""):
+def _abrir_loopback(nome_saida="", taxa=TAXA, amostras=AMOSTRAS):
     """Abre a captura do som do computador. Primeiro tenta o loopback por
     processo (todo o som, menos o do TeleZapp: a voz do outro lado e os
     avisos do programa nunca entram; `exato`); sem ele, o loopback comum da
@@ -45,7 +45,7 @@ def _abrir_loopback(nome_saida=""):
     em bytes) e `fechar()`."""
     try:
         from telezapp.midia import som_por_processo
-        return som_por_processo.abrir()
+        return som_por_processo.abrir(None, taxa, amostras)
     except Exception as e:
         log.info("loopback por processo indisponível (%s); usando o "
                  "comum", e)
@@ -58,8 +58,8 @@ def _abrir_loopback(nome_saida=""):
                 saida = alto_falante
                 break
     captura = sc.get_microphone(id=str(saida.name), include_loopback=True)
-    gravador = captura.recorder(samplerate=TAXA, channels=2,
-                                blocksize=AMOSTRAS)
+    gravador = captura.recorder(samplerate=taxa, channels=2,
+                                blocksize=amostras)
     gravador.__enter__()
 
     class Fonte:
@@ -68,7 +68,7 @@ def _abrir_loopback(nome_saida=""):
 
         @staticmethod
         def ler():
-            dados = gravador.record(numframes=AMOSTRAS)
+            dados = gravador.record(numframes=amostras)
             mono = np.asarray(dados, dtype="float32").reshape(
                 len(dados), -1).mean(axis=1)
             return (np.clip(mono, -1.0, 1.0) * 32767).astype("<i2").tobytes()
@@ -118,10 +118,19 @@ class CapturaDoSom:
     """Captura o som do computador numa thread. `ler()` entrega o quadro
     mais antigo da fila (ou silêncio, se não há)."""
 
-    def __init__(self, nome_saida="", abrir=None):
+    def __init__(self, nome_saida="", abrir=None, taxa=TAXA,
+                 amostras=AMOSTRAS):
+        """`taxa` e `amostras` (por quadro): 16 kHz e 960 amostras (60 ms)
+        para o WhatsApp; o Telegram usa 48 kHz e 480 (10 ms)."""
         self.nome_saida = nome_saida
-        self._abrir = abrir or _abrir_loopback
-        self._fila = collections.deque(maxlen=QUADROS_NA_FILA)
+        self.taxa, self.amostras = taxa, amostras
+        self.bytes_por_quadro = amostras * 2
+        self.silencio = bytes(self.bytes_por_quadro)
+        self._abrir = abrir or (lambda nome: _abrir_loopback(
+            nome, taxa, amostras))
+        # meio segundo de quadros, no minimo 8
+        self._fila = collections.deque(
+            maxlen=max(QUADROS_NA_FILA, int(0.5 * taxa / amostras)))
         self._parar = threading.Event()
         self._thread = None
         self.nome = ""              # a saída de fato capturada
@@ -150,7 +159,7 @@ class CapturaDoSom:
             self._aberto.set()
             while not self._parar.is_set():
                 quadro = fonte.ler()
-                if len(quadro) == BYTES_POR_QUADRO:
+                if len(quadro) == self.bytes_por_quadro:
                     self._fila.append(quadro)
                     self.quadros += 1
         except Exception as e:
@@ -170,7 +179,7 @@ class CapturaDoSom:
         try:
             return self._fila.popleft()
         except IndexError:
-            return SILENCIO
+            return self.silencio
 
     @property
     def viva(self):

@@ -553,7 +553,7 @@ O leitor de tela diz quando a chamada passa para vídeo e quando a outra pessoa 
 O vídeo usa até 640 por 360 pontos e de 10 a 15 quadros por segundo. No Telegram, se o outro lado ficar alguns segundos sem mandar imagem, o TeleZapp entende que ele desligou a câmera. Chamadas de vídeo em grupo ainda não existem.
 
 # Compartilhar a tela e o som do computador na chamada
-No WhatsApp, durante uma chamada, a janela da chamada ganha os botões "Compartilhar o som do computador" e "Compartilhar a tela" (o segundo, nas contas que fazem vídeo). Os mesmos comandos estão no menu Chamadas e podem ter tecla própria em Configurações, Atalhos.
+No WhatsApp e no Telegram, durante uma chamada, a janela da chamada ganha os botões "Compartilhar o som do computador" e "Compartilhar a tela" (o segundo, nas contas que fazem vídeo). Os mesmos comandos estão no menu Chamadas e podem ter tecla própria em Configurações, Atalhos.
 
 Compartilhar o som do computador manda para a outra pessoa o que toca no computador, junto com o seu microfone. O microfone continua valendo: o botão Silenciar o microfone o cala sem parar o som do computador. No Windows 10 (versão 2004 em diante) e no Windows 11, o TeleZapp capta o som de todos os programas menos o dele mesmo. Assim a voz da outra pessoa e os avisos do próprio TeleZapp nunca vão para a chamada, e ela não ouve a própria voz de volta. Em um Windows mais antigo, ele capta a saída escolhida na lista "Saída de som do computador a compartilhar" e tira do que sai a voz da outra pessoa por processamento de áudio, que é menos exato; usar uma saída diferente da que toca a chamada evita o problema. Atenção: todos os outros programas entram, inclusive a fala do leitor de tela.
 

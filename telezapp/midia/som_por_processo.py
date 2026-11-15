@@ -207,7 +207,10 @@ class CapturaPorProcesso:
     nome = "Todo o som do computador, menos o do TeleZapp"
     exato = True
 
-    def __init__(self, pid=None):
+    def __init__(self, pid=None, taxa=TAXA, amostras=AMOSTRAS):
+        """`taxa` e `amostras` (por quadro) mandam no que `ler` devolve:
+        16 kHz e 960 amostras para o WhatsApp; o Telegram usa 48 kHz e
+        quadros de 10 ms."""
         if not disponivel():
             raise ErroPorProcesso("O Windows desta máquina não tem o "
                                   "loopback por processo.")
@@ -215,8 +218,9 @@ class CapturaPorProcesso:
         self._cliente = self._captura = None
         self._com = False
         self._canais = 1
-        self._taxa = TAXA
-        self._bytes_por_amostra = 2
+        self._alvo = taxa               # a taxa que sai de `ler`
+        self._amostras = amostras       # amostras por quadro
+        self._taxa = taxa               # a taxa que o Windows entrega
         self._acumulado = np.empty(0, dtype="float32")
         self._abrir()
 
@@ -288,7 +292,7 @@ class CapturaPorProcesso:
         (que o Windows sempre dá) e a conversão fica por nossa conta."""
         c = self._cliente
         ultimo = 0
-        for taxa, canais, extra in ((TAXA, 1, _FLAG_AUTOCONVERTPCM
+        for taxa, canais, extra in ((self._alvo, 1, _FLAG_AUTOCONVERTPCM
                                      | _FLAG_SRC_QUALIDADE),
                                     (44100, 2, 0)):
             formato = _WAVEFORMATEX(1, canais, taxa, taxa * canais * 2,
@@ -347,25 +351,26 @@ class CapturaPorProcesso:
         junto = np.concatenate(novos)
         if self._canais == 2:
             junto = junto.reshape(-1, 2).mean(axis=1)
-        if self._taxa != TAXA:
-            junto = _para_16k(junto, self._taxa)
+        if self._taxa != self._alvo:
+            junto = _para_taxa(junto, self._taxa, self._alvo)
         self._acumulado = np.concatenate((self._acumulado, junto))
 
     def ler(self):
         """Um quadro de 60 ms em bytes; sem som disponível por 100 ms, devolve
         o que há completado com silêncio (o loopback não entrega nada
         enquanto nada toca)."""
-        limite = time.monotonic() + 0.1
-        while self._acumulado.size < AMOSTRAS:
+        n = self._amostras
+        limite = time.monotonic() + max(0.1, 3.0 * n / self._alvo)
+        while self._acumulado.size < n:
             self._puxar()
-            if self._acumulado.size >= AMOSTRAS or time.monotonic() >= limite:
+            if self._acumulado.size >= n or time.monotonic() >= limite:
                 break
-            time.sleep(0.005)
-        bloco = self._acumulado[:AMOSTRAS]
-        self._acumulado = self._acumulado[AMOSTRAS:]
-        if bloco.size < AMOSTRAS:
+            time.sleep(0.002)
+        bloco = self._acumulado[:n]
+        self._acumulado = self._acumulado[n:]
+        if bloco.size < n:
             bloco = np.concatenate(
-                (bloco, np.zeros(AMOSTRAS - bloco.size, dtype="float32")))
+                (bloco, np.zeros(n - bloco.size, dtype="float32")))
         return (np.clip(bloco, -1.0, 1.0) * 32767).astype("<i2").tobytes()
 
     def fechar(self):
@@ -386,21 +391,25 @@ class CapturaPorProcesso:
                 pass
 
 
-def _para_16k(mono, taxa):
-    """Reamostra para 16 kHz (media de blocos e interpolacao: serve a voz e a
-    musica da chamada, que o Opus limita de qualquer jeito)."""
-    if taxa == TAXA or mono.size == 0:
+def _para_taxa(mono, taxa, alvo):
+    """Reamostra de `taxa` para `alvo` (media de blocos e interpolacao: serve
+    a voz e a musica da chamada, que o Opus limita de qualquer jeito)."""
+    if taxa == alvo or mono.size == 0:
         return mono
-    n = int(mono.size * TAXA / taxa)
+    n = int(mono.size * alvo / taxa)
     alvo = np.linspace(0, mono.size - 1, n)
     suave = np.convolve(mono, np.ones(3) / 3, mode="same")
     return np.interp(alvo, np.arange(mono.size), suave).astype("float32")
 
 
-def abrir(pid=None):
+def _para_16k(mono, taxa):
+    return _para_taxa(mono, taxa, TAXA)
+
+
+def abrir(pid=None, taxa=TAXA, amostras=AMOSTRAS):
     """Abre a captura por processo ou levanta ErroPorProcesso."""
     try:
-        return CapturaPorProcesso(pid)
+        return CapturaPorProcesso(pid, taxa, amostras)
     except ErroPorProcesso:
         raise
     except Exception as e:
