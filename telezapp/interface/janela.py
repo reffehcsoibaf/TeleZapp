@@ -1839,9 +1839,10 @@ class Janela(wx.Frame):
                 return
         antes = set(self.contas.provedores)
         if not self.contas.adicionar(servico, sugestao, historico):
-            wx.MessageBox("Não foi possível adicionar a conta. Sem as "
-                          "credenciais do aplicativo, o Telegram não deixa "
-                          "conectar.", NOME, wx.OK | wx.ICON_WARNING, self)
+            wx.MessageBox("Não foi possível adicionar a conta: faltam "
+                          "as credenciais do aplicativo para o Telegram, "
+                          "ou a pasta de dados da conta não pôde ser "
+                          "criada.", NOME, wx.OK | wx.ICON_WARNING, self)
             return
         self._ajustar_menu_por_contas()
         self.SetStatusText("Conectando ao %s..." % m.SERVICOS[servico])
@@ -1883,14 +1884,16 @@ class Janela(wx.Frame):
 
     @seguro
     def _gerenciar_contas(self):
-        """Lista de contas com caixa de marcar (ativada ou desativada) e,
-        com a conta em foco, os botoes Excluir e Renomear."""
+        """Lista de contas com caixa de marcar (ativada ou desativada)
+        e, com a conta em foco, os botoes Nova conta, Excluir e
+        Renomear."""
         if not self.cfg.contas():
             self.fala.falar("Não há contas. Use Novo, Nova conta.")
             return
         from telezapp.interface.gerenciar_contas import DialogoContas
         dlg = DialogoContas(self, self._itens_de_contas, self._marcar_conta,
-                            self._excluir_conta_id, self._renomear_conta_id)
+                            self._excluir_conta_id, self._renomear_conta_id,
+                            self._adicionar_conta_pelo_menu)
         try:
             dlg.ShowModal()
         finally:
@@ -10868,7 +10871,8 @@ class Janela(wx.Frame):
                 resumo = backup.criar(
                     caminho, config.pasta_dados(), dados, partes, senha,
                     copiar_banco=self.banco.copiar_para,
-                    progresso=andamento)
+                    progresso=andamento,
+                    pasta_contas=config.pasta_do_layout_antigo())
                 texto = "Backup salvo em %s%s." % (
                     caminho, " (com senha)" if senha else "")
                 grave = False

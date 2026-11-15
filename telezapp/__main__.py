@@ -260,7 +260,7 @@ def main():
 
     try:
         import wx
-        from telezapp.armazenamento.banco import Banco
+        from telezapp.armazenamento.bancos import Bancos
         from telezapp.interface.janela import Janela
         from telezapp.nucleo.contas import Contas
         from telezapp.nucleo.eventos import Barramento
@@ -324,7 +324,12 @@ def main():
     config.limpar_temporarios()   # sobras de uma abertura anterior
     try:
         from telezapp.nucleo import backup
-        trocadas = backup.aplicar_pendente(config.pasta_dados())
+        # a configuracao ainda nao foi registrada: le-la aqui para saber
+        # onde ficam o banco unico, as sessoes e as midias do layout antigo
+        cfg_restauracao = config.Config()
+        trocadas = backup.aplicar_pendente(
+            config.pasta_dados(),
+            config.pasta_do_layout_antigo(cfg_restauracao))
         if trocadas:
             log.info("backup restaurado: %s", ", ".join(trocadas))
     except Exception:
@@ -355,8 +360,12 @@ def main():
 
     try:
         cfg = config.Config()
-        banco = Banco(os.path.join(config.pasta(), "telezapp.db"))
-        etapa(log, "banco aberto")
+        config.definir_cfg(cfg)
+        from telezapp.nucleo import migracao
+        migracao.migrar(cfg)
+        etapa(log, "dados das contas nas pastas proprias")
+        banco = Bancos(cfg)
+        etapa(log, "bancos por conta prontos")
         barramento = Barramento(wx.CallAfter)
         janela = Janela(cfg, banco, barramento)
         janela.vigiar_o_fim = _vigiar_o_fim

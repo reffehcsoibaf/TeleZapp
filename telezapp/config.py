@@ -165,6 +165,150 @@ def limpar_temporarios():
         shutil.rmtree(caminho, ignore_errors=True)
 
 
+# ------------------------------------------- pastas de dados por conta
+_cfg_de_contas = None
+
+
+def definir_cfg(cfg):
+    """Lembra a configuracao ativa: as funcoes abaixo consultam o registro
+    de cada conta para achar a pasta de dados dela."""
+    global _cfg_de_contas
+    _cfg_de_contas = cfg
+
+
+def contas_separadas():
+    """True quando cada conta guarda os dados em uma pasta propria (o
+    banco de conversas, as sessoes e as midias). False (opcao
+    "contas_em_pastas" desmarcada): todas dividem o layout antigo, um
+    banco so, no lugar de sempre."""
+    cfg = _cfg_de_contas
+    if cfg is None:
+        return True
+    return bool(cfg.get("contas_em_pastas"))
+
+
+def ids_das_contas():
+    """Os ids das contas conhecidas (na configuracao ativa), ou None se
+    nao ha configuracao carregada."""
+    cfg = _cfg_de_contas
+    if cfg is None:
+        return None
+    return [c["id"] for c in cfg.contas() if c.get("id")]
+
+
+def _mesmo_caminho(a, b):
+    """Os dois caminhos apontam para a mesma pasta?"""
+    return os.path.normcase(os.path.abspath(a)) == \
+        os.path.normcase(os.path.abspath(b))
+
+
+def pasta_escolhida_do_layout_antigo(cfg=None):
+    """A pasta pedida para os dados do layout antigo (o banco unico, as
+    sessoes e as midias): a personalizada, se marcada, ou a pasta de
+    dados. E para onde a migracao leva os dados; para saber onde eles
+    estao agora, ver pasta_do_layout_antigo. Nao cria nada."""
+    if cfg is None:
+        cfg = _cfg_de_contas
+    if cfg is not None and cfg.get("contas_pasta_personalizada"):
+        escolhida = (cfg.get("contas_pasta") or "").strip()
+        if escolhida:
+            return escolhida
+    return pasta_dados()
+
+
+def pasta_do_layout_antigo(cfg=None):
+    """Onde os dados do layout antigo estao de fato: a pasta escolhida ou,
+    enquanto o banco unico ainda estiver na outra (a mudanca de pasta nao
+    terminou, ou ainda vai acontecer), aquela que tem o banco — assim os
+    dados antigos continuam valendo e a proxima abertura termina a
+    mudanca. As opcoes, os logs, os sons e os backups continuam sempre em
+    pasta_dados()."""
+    if cfg is None:
+        cfg = _cfg_de_contas
+    escolhida = pasta_escolhida_do_layout_antigo(cfg)
+    dados = pasta_dados()
+    outra = dados
+    if _mesmo_caminho(escolhida, dados):
+        outra = (cfg.get("contas_pasta") or "").strip() if cfg else ""
+    if outra and not _mesmo_caminho(outra, escolhida) and \
+            not os.path.isfile(os.path.join(escolhida, "telezapp.db")) and \
+            os.path.isfile(os.path.join(outra, "telezapp.db")):
+        return outra
+    return escolhida
+
+
+def pasta_das_contas():
+    """A pasta que abriga a pasta de cada conta: a que a pessoa escolheu
+    (opcao "contas_pasta", com "contas_pasta_personalizada" marcada) ou a
+    padrao, <dados>\\contas. Nao cria nada."""
+    cfg = _cfg_de_contas
+    if cfg is not None and cfg.get("contas_pasta_personalizada"):
+        escolhida = (cfg.get("contas_pasta") or "").strip()
+        if escolhida:
+            return escolhida
+    return os.path.join(pasta_dados(), "contas")
+
+
+def pasta_da_conta(conta_id):
+    """A pasta de dados de uma conta: <pasta das contas>\\<conta_id>.
+    Nao cria nada; para criar, ver preparar_pasta_da_conta. Sem separacao
+    (contas_em_pastas desmarcada) a conta nao tem pasta propria: as
+    sessoes ficam em pasta_sessoes e as midias na pasta comum."""
+    return os.path.join(pasta_das_contas(), conta_id)
+
+
+def pasta_sessoes(conta_id):
+    """Onde ficam os arquivos de sessao da conta: na pasta dela (com
+    separacao) ou na pasta de sessoes do layout antigo (a personalizada,
+    se escolhida; senao, <dados>\\sessoes)."""
+    if not contas_separadas():
+        return os.path.join(pasta_do_layout_antigo(), "sessoes")
+    return os.path.join(pasta_da_conta(conta_id), "sessoes")
+
+
+def pastas_das_contas():
+    """As pastas de dados de cada conta conhecida, sem repetir (para somar
+    tamanhos, por exemplo)."""
+    vistas, saida = set(), []
+    cfg = _cfg_de_contas
+    if cfg is not None:
+        for dados in cfg.contas():
+            pasta = pasta_da_conta(dados["id"])
+            if pasta not in vistas:
+                vistas.add(pasta)
+                saida.append(pasta)
+    return saida
+
+
+def preparar_pasta_da_conta(conta_id):
+    """Cria as pastas que a conta precisa: a dela e a de sessoes (com
+    separacao), ou so a pasta de sessoes comum. False se nao conseguir
+    (ex.: a unidade da pasta escolhida esta desligada): a conta fica sem
+    ligar ate a pasta voltar."""
+    try:
+        os.makedirs(pasta_sessoes(conta_id), exist_ok=True)
+        return True
+    except OSError as erro:
+        log.warning("não consegui preparar a pasta da conta %s: %r",
+                    conta_id, erro)
+        return False
+
+
+def limpar_pasta_da_conta(conta_id):
+    """Depois de remover a conta: apaga a pasta dela, se tiver ficado
+    vazia (a escolhida pela pessoa tambem — mas so se nao tiver mais nada
+    dentro)."""
+    pasta = pasta_da_conta(conta_id)
+    try:
+        os.rmdir(os.path.join(pasta, "sessoes"))
+    except OSError:
+        pass
+    try:
+        os.rmdir(pasta)
+    except OSError:
+        pass
+
+
 # ------------------------------------------------- opcoes de configuracao
 @dataclass(frozen=True)
 class Opcao:
@@ -479,6 +623,36 @@ OPCOES = (
           "como ao ligar o computador. Se o TeleZapp demora a responder "
           "quando é aberto depois de outros aplicativos, deixe marcada. "
           "Vale na próxima abertura.", reabrir=True),
+    Opcao("contas_em_pastas",
+          "Guardar os dados de cada conta em uma pasta separada",
+          "Sistema", True,
+          "Cada conta tem uma pasta própria, com o banco de conversas, as "
+          "sessões e as mídias dentro dela. Desmarcada, todas as contas "
+          "dividem os mesmos dados no lugar de sempre, como nas versões "
+          "antigas: um banco só, as sessões e as mídias na pasta de dados "
+          "do TeleZapp (ou na personalizada, se escolhida). Ao desmarcar, "
+          "na próxima abertura o TeleZapp devolve os dados de cada conta "
+          "para o lugar comum; ao marcar de novo, ele os separa outra "
+          "vez. Vale na próxima abertura.",
+          reabrir=True),
+    Opcao("contas_pasta_personalizada",
+          "Guardar os dados das contas em uma pasta personalizada",
+          "Sistema", False,
+          "Os dados das contas ficam dentro da pasta que você escolher (a "
+          "de baixo): com \"Guardar os dados de cada conta em uma pasta "
+          "separada\" marcada, cada conta numa subpasta com o nome dela; "
+          "desmarcada, o banco único com tudo direto nela. Ao marcar, na "
+          "próxima abertura o que estiver na pasta padrão vai para a pasta "
+          "escolhida. Vale na próxima abertura.", reabrir=True),
+    Opcao("contas_pasta", "Pasta dos dados das contas", "Sistema", "",
+          "A pasta em que ficam os dados das contas (o banco de conversas, "
+          "as sessões e as mídias): com a separação, em subpastas com o "
+          "nome das contas; sem ela, o banco único com tudo direto nela. "
+          "Escolha uma pasta vazia, de preferência fora da pasta de dados "
+          "do TeleZapp. Só vale com a pasta personalizada marcada. Na "
+          "próxima abertura, o que estiver na pasta padrão vai para lá "
+          "(com conferência), e as contas voltam conectadas no lugar.",
+          texto=True, pasta=True, reabrir=True),
     Opcao("barra_abre_comandos",
           "Barra na caixa de digitar abre os comandos do robô",
           "Mensagens", True,

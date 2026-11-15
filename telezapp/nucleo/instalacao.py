@@ -154,6 +154,13 @@ def _copiar_dados(origem, destino, progresso=None):
     bk._acertar_caminhos_das_midias(
         os.path.join(destino, "telezapp.db"),
         os.path.join(origem, "midias"), os.path.join(destino, "midias"))
+    base = os.path.join(destino, "contas")
+    if os.path.isdir(base):
+        for conta_id in os.listdir(base):
+            bk._acertar_caminhos_das_midias(
+                os.path.join(base, conta_id, "conversas.db"),
+                os.path.join(origem, "contas", conta_id, "midias"),
+                os.path.join(base, conta_id, "midias"))
 
 
 def _guardar_pasta(caminho, sufixo):

@@ -45,16 +45,20 @@ class Contas:
             return ProvedorTelegram(
                 conta, self.barramento, self.banco,
                 lambda etapa, erro: self.pedir(conta, etapa, erro), cred,
+                pasta_sessoes=config.pasta_sessoes(conta.id),
                 perguntar_telefone=conta.id in self._novas)
         if conta.servico == "whatsapp":
             from telezapp.provedores.whatsapp import ProvedorWhatsApp
             return ProvedorWhatsApp(
                 conta, self.barramento, self.banco,
+                pasta_sessoes=config.pasta_sessoes(conta.id),
                 historico=self._historico.get(conta.id, "recentes"))
         log.warning("serviço ainda sem suporte: %s", conta.servico)
         return None
 
     def _ligar(self, conta):
+        if not config.preparar_pasta_da_conta(conta.id):
+            return False
         p = self.fabrica(conta)
         if p is None:
             return False
@@ -205,6 +209,7 @@ class Contas:
             self.banco.apagar_conta(conta_id)
         apagar_sessao(conta_id)
         armazem.apagar_conta(conta_id)
+        config.limpar_pasta_da_conta(conta_id)
         log.info("conta %s removida", conta_id)
 
     def provedor(self, conta_id):
@@ -278,7 +283,7 @@ class Contas:
 
 def apagar_sessao(conta_id, pasta=None):
     """Apaga os arquivos de sessao da conta (Telegram e WhatsApp)."""
-    pasta = pasta or config.pasta("sessoes")
+    pasta = pasta or config.pasta_sessoes(conta_id)
     for caminho in glob.glob(os.path.join(pasta, glob.escape(conta_id) + "*")):
         nome = os.path.basename(caminho)
         if nome == conta_id + ".db" or nome.startswith(conta_id + ".db-") \

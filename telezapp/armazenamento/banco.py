@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Fábio Scheffer Moraes
-"""Banco local (SQLite): conversas e mensagens de todas as contas.
+"""Banco local (SQLite) de UMA conta: conversas, mensagens, contatos e
+midias dela (o resto do programa conversa com todos eles pelo
+armazenamento.bancos.Bancos, que despacha por conta).
 
 Serve para abrir o app ja com as conversas na tela, antes da rede responder,
 e, no WhatsApp, para guardar o historico (que so chega como eventos).
-Uma conexao compartilhada protegida por trava: as threads dos provedores e a
-da interface podem chamar qualquer metodo.
+Uma conexao protegida por trava: as threads dos provedores e a da interface
+podem chamar qualquer metodo.
 """
 import logging
 import sqlite3
@@ -173,6 +175,12 @@ CREATE TABLE IF NOT EXISTS depuracao (
 """
 
 MAX_DEPURACAO = 500
+
+# Todas as tabelas (todas tem conta_id): a migracao e a remocao de conta
+# percorrem todas.
+TABELAS = ("conversas", "mensagens", "recibos", "status", "fichas",
+           "posicoes", "midias", "limpas", "apagadas", "apagar_pendente",
+           "contatos", "agendadas", "depuracao")
 
 _CAMPOS_CONV = [f.name for f in fields(Conversa)]
 _CAMPOS_MSG = [f.name for f in fields(Mensagem)]
@@ -358,6 +366,20 @@ class Banco:
             self._agenda = None
             self._limpas = None
             self._apagadas = None
+
+    def copiar_conta_de(self, conta_id, origem):
+        """Migracao: copia para ca as linhas da conta que estao no banco
+        antigo (compartilhado). Os esquemas dos dois bancos sao os mesmos;
+        linhas que ja existam aqui sao regravadas por cima."""
+        with origem._trava, self._trava, self._con:
+            for tabela in TABELAS:
+                linhas = origem._con.execute(
+                    "SELECT * FROM %s WHERE conta_id=?" % tabela,
+                    (conta_id,)).fetchall()
+                if linhas:
+                    self._con.executemany(
+                        "INSERT OR REPLACE INTO %s VALUES (%s)" % (
+                            tabela, ", ".join("?" * len(linhas[0]))), linhas)
 
     # ------------------------------------------------------------- contatos
     def contatos(self, conta_id=None):
@@ -965,7 +987,9 @@ class Banco:
             return [self._agendada(x) for x in self._con.execute(
                 sql + " ORDER BY quando, id", args)]
 
-    def agendada(self, id_):
+    def agendada(self, id_, conta_id=None):
+        """conta_id e redundante aqui (o banco ja e de uma conta so): e a
+        forma de chamar que a fachada Bancos espalha para o resto do app."""
         with self._trava:
             linha = self._con.execute(
                 "SELECT %s FROM agendadas WHERE id=?" % self._COLUNAS_AGENDADA,
@@ -986,13 +1010,15 @@ class Banco:
                 "UPDATE agendadas SET atrasada=1 WHERE id=?",
                 [(i,) for i in ids])
 
-    def mudar_agendada(self, id_, quando):
+    def mudar_agendada(self, id_, quando, conta_id=None):
+        """conta_id: ver agendada."""
         with self._trava, self._con:
             self._con.execute(
                 "UPDATE agendadas SET quando=?, atrasada=0 WHERE id=?",
                 (quando, id_))
 
-    def tirar_agendadas(self, ids):
+    def tirar_agendadas(self, ids, conta_id=None):
+        """conta_id: ver agendada."""
         with self._trava, self._con:
             self._con.executemany("DELETE FROM agendadas WHERE id=?",
                                   [(i,) for i in ids])

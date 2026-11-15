@@ -90,6 +90,7 @@ class Manifesto:
     partes: list = field(default_factory=list)
     pasta_midias: str = ""      # onde estavam as midias (os caminhos no banco)
     formato: int = 1            # 2: atalhos e sons sao partes proprias
+    pasta_por_conta: bool = False   # uma pasta de dados por conta
 
 
 # ------------------------------------------------------------- opcoes
@@ -240,6 +241,37 @@ def _copia_consistente(origem, destino):
     shutil.copyfile(origem, destino)
 
 
+def _pasta_da_conta_no_disco(pasta_dados, conta_id):
+    """A pasta de dados da conta para o backup: a escolhida nas opcoes
+    de Sistema (com a configuracao ativa) ou a padrao na pasta de dados
+    passada (que pode ser de teste, e nao a pasta de dados de verdade;
+    config.pasta_da_conta consultaria o ambiente real)."""
+    cfg = config._cfg_de_contas
+    if cfg is not None and cfg.get("contas_pasta_personalizada"):
+        escolhida = (cfg.get("contas_pasta") or "").strip()
+        if escolhida:
+            return os.path.join(escolhida, conta_id)
+    return os.path.join(pasta_dados, "contas", conta_id)
+
+
+def _contas_do_backup(pasta_dados):
+    """No formato novo (uma pasta de dados por conta): os ids das contas
+    com pasta de dados propria (a escolhida ou a padrao). Sem separacao
+    (ou sem nenhuma pasta), vazio: o backup sai no formato antigo, tudo
+    na raiz da pasta de dados."""
+    if not config.contas_separadas():
+        return []
+    ids = config.ids_das_contas()
+    if ids is not None:
+        return sorted(i for i in ids
+                      if os.path.isdir(config.pasta_da_conta(i)))
+    base = os.path.join(pasta_dados, "contas")
+    if not os.path.isdir(base):
+        return []
+    return sorted(n for n in os.listdir(base)
+                  if os.path.isdir(os.path.join(base, n)))
+
+
 def _contar_arquivos(pasta, excluir=()):
     n = 0
     for _, _, arquivos in os.walk(pasta):
@@ -248,15 +280,19 @@ def _contar_arquivos(pasta, excluir=()):
 
 
 def criar(destino, pasta_dados, cfg_dados, partes, senha="",
-          copiar_banco=None, progresso=None):
+          copiar_banco=None, progresso=None, pasta_contas=None):
     """Grava o backup em `destino`. `cfg_dados`: o dicionario do config.json;
-    `copiar_banco(caminho)`: grava uma copia consistente do banco (se for
-    None, copia o arquivo). `progresso(pct, texto)`: o avanco, de 0 a 100,
-    por arquivo gravado. Devolve {parte: quantidade de arquivos}. Em erro
-    apaga o arquivo parcial e deixa a excecao subir."""
+    `copiar_banco(caminho, conta_id=None)`: grava uma copia consistente
+    do banco da conta (se for None, copia o arquivo). `progresso(pct, texto)`: o avanco, de 0 a 100,
+    por arquivo gravado. `pasta_contas`: onde ficam o banco unico, as
+    sessoes e as midias do layout antigo, quando a pasta personalizada
+    esta marcada (o padrao e a propria `pasta_dados`). Devolve {parte:
+    quantidade de arquivos}. Em erro apaga o arquivo parcial e deixa a
+    excecao subir."""
     partes = [p for p, _ in PARTES if p in partes]
     if not partes:
         raise ErroBackup("Escolha pelo menos uma parte para o backup.")
+    raiz_antiga = pasta_contas or pasta_dados
     temporarios = os.path.join(pasta_dados, "temp", "backup-%d" %
                                int(time.time()))
     os.makedirs(temporarios, exist_ok=True)
@@ -267,14 +303,22 @@ def criar(destino, pasta_dados, cfg_dados, partes, senha="",
         total += 1
     if "sons" in partes:
         total += _contar_arquivos(os.path.join(pasta_dados, "sons"))
+    contas_no_disco = _contas_do_backup(pasta_dados)
     if "contas" in partes:
-        total += 1 + _contar_arquivos(os.path.join(pasta_dados, "sessoes"),
-                                      ("-wal", "-shm", ".tmp"))
-    if "conversas" in partes:
         total += 1
+        for sessao in ([os.path.join(_pasta_da_conta_no_disco(
+                            pasta_dados, c), "sessoes")
+                        for c in contas_no_disco] or
+                       [os.path.join(raiz_antiga, "sessoes")]):
+            total += _contar_arquivos(sessao, ("-wal", "-shm", ".tmp"))
+    if "conversas" in partes:
+        total += len(contas_no_disco) or 1
     if "midias" in partes:
-        total += _contar_arquivos(os.path.join(pasta_dados, "midias"),
-                                  (".parte",))
+        for raiz in ([os.path.join(_pasta_da_conta_no_disco(
+                          pasta_dados, c), "midias")
+                      for c in contas_no_disco] or
+                     [os.path.join(raiz_antiga, "midias")]):
+            total += _contar_arquivos(raiz, (".parte",))
     feitos = [0]
 
     def andou(texto):
@@ -287,8 +331,10 @@ def criar(destino, pasta_dados, cfg_dados, partes, senha="",
             if senha:
                 z.setpassword(senha.encode("utf-8"))
                 z.setencryption(pyzipper.WZ_AES, nbits=256)
-            midias = os.path.join(pasta_dados, "midias")
-            manifesto = Manifesto(VERSAO, time.time(), partes, midias, FORMATO)
+            midias = os.path.join(raiz_antiga, "midias")
+            manifesto = Manifesto(VERSAO, time.time(), partes,
+                                  pasta_dados if contas_no_disco else midias,
+                                  FORMATO, bool(contas_no_disco))
             z.writestr(MANIFESTO, json.dumps(manifesto.__dict__,
                                              ensure_ascii=False, indent=1))
             if grupos:
@@ -320,42 +366,75 @@ def criar(destino, pasta_dados, cfg_dados, partes, senha="",
                     {c: cfg_dados[c] for c in CHAVES_CONTAS if c in cfg_dados},
                     ensure_ascii=False, indent=1))
                 n = 0
-                sessoes = os.path.join(pasta_dados, "sessoes")
-                for atual, _, arquivos in os.walk(sessoes):
-                    for a in arquivos:
-                        if a.endswith(("-wal", "-shm", ".tmp")):
-                            continue
-                        origem = os.path.join(atual, a)
-                        copia = os.path.join(temporarios, "s%d" % n)
-                        _copia_consistente(origem, copia)
-                        z.write(copia, "sessoes/" + os.path.relpath(
-                            origem, sessoes).replace("\\", "/"))
-                        os.remove(copia)
-                        n += 1
-                        andou("Copiando as contas")
+                sessoes = [os.path.join(_pasta_da_conta_no_disco(
+                              pasta_dados, c), "sessoes")
+                           for c in contas_no_disco] or \
+                    [os.path.join(raiz_antiga, "sessoes")]
+                for sessao in sessoes:
+                    for atual, _, arquivos in os.walk(sessao):
+                        for a in arquivos:
+                            if a.endswith(("-wal", "-shm", ".tmp")):
+                                continue
+                            origem = os.path.join(atual, a)
+                            copia = os.path.join(temporarios, "s%d" % n)
+                            _copia_consistente(origem, copia)
+                            z.write(copia, "sessoes/" + os.path.relpath(
+                                origem, sessao).replace("\\", "/"))
+                            os.remove(copia)
+                            n += 1
+                            andou("Copiando as contas")
                 resumo["contas"] = n
             if "conversas" in partes:
-                copia = os.path.join(temporarios, "banco.db")
-                if copiar_banco is not None:
-                    copiar_banco(copia)
+                resumo["conversas"] = 0
+                if contas_no_disco:
+                    # formato novo: um banco por conta, em contas/<id>/
+                    for conta_id in contas_no_disco:
+                        copia = os.path.join(temporarios,
+                                             "banco-%s.db" % conta_id)
+                        if copiar_banco is not None:
+                            copiar_banco(copia, conta_id)
+                        else:
+                            _copia_consistente(
+                                os.path.join(
+                                    _pasta_da_conta_no_disco(pasta_dados,
+                                                             conta_id),
+                                    "conversas.db"), copia)
+                        z.write(copia, "contas/%s/conversas.db" % conta_id)
+                        os.remove(copia)
+                        resumo["conversas"] += 1
+                        andou("Copiando as conversas")
                 else:
-                    _copia_consistente(
-                        os.path.join(pasta_dados, "telezapp.db"), copia)
-                z.write(copia, "telezapp.db")
-                resumo["conversas"] = 1
-                andou("Copiando as conversas")
+                    copia = os.path.join(temporarios, "banco.db")
+                    if copiar_banco is not None:
+                        try:
+                            copiar_banco(copia)
+                        except ValueError:
+                            _copia_consistente(
+                                os.path.join(raiz_antiga, "telezapp.db"),
+                                copia)
+                    else:
+                        _copia_consistente(
+                            os.path.join(raiz_antiga, "telezapp.db"), copia)
+                    z.write(copia, "telezapp.db")
+                    resumo["conversas"] = 1
+                    andou("Copiando as conversas")
             if "midias" in partes:
                 n = 0
-                for atual, _, arquivos in os.walk(midias):
-                    for a in arquivos:
-                        origem = os.path.join(atual, a)
-                        if a.endswith(".parte"):
-                            continue
-                        z.write(origem, "midias/" + os.path.relpath(
-                            origem, midias).replace("\\", "/"),
-                            compress_type=pyzipper.ZIP_STORED)
-                        n += 1
-                        andou("Copiando as mídias")
+                raizes = [(c, os.path.join(_pasta_da_conta_no_disco(
+                                pasta_dados, c), "midias"))
+                          for c in contas_no_disco] or [("", midias)]
+                for conta_id, raiz in raizes:
+                    no_zip = "midias/" + (conta_id + "/" if conta_id else "")
+                    for atual, _, arquivos in os.walk(raiz):
+                        for a in arquivos:
+                            origem = os.path.join(atual, a)
+                            if a.endswith(".parte"):
+                                continue
+                            z.write(origem, no_zip + os.path.relpath(
+                                origem, raiz).replace("\\", "/"),
+                                compress_type=pyzipper.ZIP_STORED)
+                            n += 1
+                            andou("Copiando as mídias")
                 resumo["midias"] = n
     except BaseException:
         try:
@@ -412,7 +491,8 @@ def ler_manifesto(arquivo, senha=""):
                      float(dados.get("data") or 0),
                      [p for p in dados["partes"] if p in NOMES_PARTES],
                      str(dados.get("pasta_midias", "")),
-                     int(dados.get("formato") or 1))
+                     int(dados.get("formato") or 1),
+                     bool(dados.get("pasta_por_conta")))
 
 
 def _extrair(z, nome, destino):
@@ -481,7 +561,7 @@ def restaurar(arquivo, senha, partes, pasta_dados, resultado=None,
                     if nome.startswith("sons/") and not nome.endswith("/"):
                         _extrair(z, nome, pasta_dados)
             prefixos = {"contas": ("contas.json", "sessoes/"),
-                        "conversas": ("telezapp.db",),
+                        "conversas": ("telezapp.db", "contas/"),
                         "midias": ("midias/",)}
             def a_extrair(parte):
                 return [nome for nome in z.namelist()
@@ -516,7 +596,8 @@ def restaurar(arquivo, senha, partes, pasta_dados, resultado=None,
         with open(os.path.join(espera, MANIFESTO), "w",
                   encoding="utf-8") as f:
             json.dump({"partes": em_espera,
-                       "pasta_midias": manifesto.pasta_midias}, f)
+                       "pasta_midias": manifesto.pasta_midias,
+                       "pasta_por_conta": manifesto.pasta_por_conta}, f)
     return opcoes, em_espera
 
 
@@ -526,23 +607,31 @@ AVISO_CONVERSAS_SEM_CONTAS = (
     "depois de parear a conta de novo.")
 
 
-def conversas_sem_conta(pasta_dados, contas):
-    """True se o banco em espera tem conversas de contas fora de `contas`
-    (ids): depois de trocar, a lista nao as mostraria."""
-    caminho = os.path.join(pasta_dados, ESPERA, "telezapp.db")
-    if not os.path.isfile(caminho):
-        return False
+def _contas_do_banco(caminho):
+    """Os ids de conta com conversas num banco (vazio se nao abrir)."""
     con = None
     try:
         con = sqlite3.connect("file:%s?mode=ro" % caminho.replace("\\", "/"),
                               uri=True)
-        do_backup = {c for c, in con.execute(
+        return {c for c, in con.execute(
             "SELECT DISTINCT conta_id FROM conversas")}
     except sqlite3.Error:
-        return False
+        return set()
     finally:
         if con is not None:
             con.close()
+
+
+def conversas_sem_conta(pasta_dados, contas):
+    """True se os bancos em espera tem conversas de contas fora de `contas`
+    (ids): depois de trocar, a lista nao as mostraria."""
+    espera = os.path.join(pasta_dados, ESPERA)
+    do_backup = _contas_do_banco(os.path.join(espera, "telezapp.db"))
+    base = os.path.join(espera, "contas")
+    if os.path.isdir(base):
+        for conta_id in os.listdir(base):
+            do_backup |= _contas_do_banco(
+                os.path.join(base, conta_id, "conversas.db"))
     return bool(do_backup - set(contas))
 
 
@@ -556,10 +645,24 @@ def _mover(origem, destino):
         shutil.move(origem, destino)
 
 
-def aplicar_pendente(pasta_dados):
+def _pasta_da_conta_no_backup(dados, pasta_dados, conta_id):
+    """A pasta de dados da conta em um momento: a escolhida no registro
+    dela, ou a padrao `<pasta_dados>\\contas\\<conta_id>`."""
+    escolhida = ((dados or {}).get("pasta") or "").strip()
+    return escolhida or os.path.join(pasta_dados, "contas", conta_id)
+
+
+def aplicar_pendente(pasta_dados, pasta_contas=None):
     """Chamada na abertura, antes de abrir o banco: troca o que estava em
     espera pelos dados do backup, guardando o que havia em
-    `antes-da-restauracao\\<data>`. Devolve a lista de partes trocadas."""
+    `antes-da-restauracao\\<data>`. Devolve a lista de partes trocadas.
+
+    No formato novo (uma pasta de dados por conta), cada conta recebe os
+    dados dela na pasta que o registro dela diz; no legado, os dados sao
+    trocados na raiz do layout antigo (`pasta_contas`, quando a pasta
+    personalizada esta marcada; o padrao e a propria `pasta_dados`), e a
+    migracao os distribui depois."""
+    raiz_antiga = pasta_contas or pasta_dados
     espera = os.path.join(pasta_dados, ESPERA)
     marca = os.path.join(espera, MANIFESTO)
     if not os.path.isfile(marca):
@@ -569,12 +672,12 @@ def aplicar_pendente(pasta_dados):
     partes = info.get("partes", [])
     antes = os.path.join(pasta_dados, ANTES, time.strftime("%Y%m%d-%H%M%S"))
     trocadas = []
+
+    def anotar(parte):
+        if parte not in trocadas:
+            trocadas.append(parte)
+
     if "contas" in partes:
-        _mover(os.path.join(pasta_dados, "sessoes"),
-               os.path.join(antes, "sessoes"))
-        _mover(os.path.join(espera, "sessoes"),
-               os.path.join(pasta_dados, "sessoes"))
-        os.makedirs(os.path.join(pasta_dados, "sessoes"), exist_ok=True)
         caminho = os.path.join(pasta_dados, "config.json")
         atual = {}
         if os.path.isfile(caminho):
@@ -588,41 +691,149 @@ def aplicar_pendente(pasta_dados):
         with open(caminho + ".tmp", "w", encoding="utf-8") as f:
             json.dump(atual, f, ensure_ascii=False, indent=2)
         os.replace(caminho + ".tmp", caminho)
-        trocadas.append("contas")
-    if "conversas" in partes:
-        for sufixo in ("", "-wal", "-shm"):
-            _mover(os.path.join(pasta_dados, "telezapp.db" + sufixo),
-                   os.path.join(antes, "telezapp.db" + sufixo))
-        _mover(os.path.join(espera, "telezapp.db"),
-               os.path.join(pasta_dados, "telezapp.db"))
-        trocadas.append("conversas")
-    if "midias" in partes:
-        _mover(os.path.join(pasta_dados, "midias"),
-               os.path.join(antes, "midias"))
-        _mover(os.path.join(espera, "midias"),
-               os.path.join(pasta_dados, "midias"))
-        os.makedirs(os.path.join(pasta_dados, "midias"), exist_ok=True)
-        trocadas.append("midias")
-    if "conversas" in partes or "midias" in partes:
-        _acertar_caminhos_das_midias(
-            os.path.join(pasta_dados, "telezapp.db"),
-            info.get("pasta_midias", ""), os.path.join(pasta_dados, "midias"))
+
+    novo = bool(info.get("pasta_por_conta")) or \
+        os.path.isdir(os.path.join(espera, "contas"))
+    if not novo:
+        if "contas" in partes:
+            _mover(os.path.join(raiz_antiga, "sessoes"),
+                   os.path.join(antes, "sessoes"))
+            _mover(os.path.join(espera, "sessoes"),
+                   os.path.join(raiz_antiga, "sessoes"))
+            os.makedirs(os.path.join(raiz_antiga, "sessoes"), exist_ok=True)
+            anotar("contas")
+        if "conversas" in partes:
+            for sufixo in ("", "-wal", "-shm"):
+                _mover(os.path.join(raiz_antiga, "telezapp.db" + sufixo),
+                       os.path.join(antes, "telezapp.db" + sufixo))
+            _mover(os.path.join(espera, "telezapp.db"),
+                   os.path.join(raiz_antiga, "telezapp.db"))
+            anotar("conversas")
+        if "midias" in partes:
+            _mover(os.path.join(raiz_antiga, "midias"),
+                   os.path.join(antes, "midias"))
+            _mover(os.path.join(espera, "midias"),
+                   os.path.join(raiz_antiga, "midias"))
+            os.makedirs(os.path.join(raiz_antiga, "midias"), exist_ok=True)
+            anotar("midias")
+        if "conversas" in partes or "midias" in partes:
+            _acertar_caminhos_das_midias(
+                os.path.join(raiz_antiga, "telezapp.db"),
+                info.get("pasta_midias", ""),
+                os.path.join(raiz_antiga, "midias"))
+    else:
+        # cada conta recebe o que e dela: o banco (e as sessoes e as
+        # midias), na pasta que o registro dela diz
+        registros = {}
+        base = os.path.join(espera, "contas")
+        if os.path.isdir(base):
+            for conta_id in os.listdir(base):
+                if os.path.isdir(os.path.join(base, conta_id)):
+                    registros[conta_id] = {}
+        try:
+            with open(os.path.join(espera, "contas.json"),
+                      encoding="utf-8") as f:
+                for dados in json.load(f).get("contas") or []:
+                    if dados.get("id"):
+                        registros.setdefault(dados["id"], {}).update(dados)
+        except (OSError, ValueError):
+            pass
+        if "midias" in partes:
+            raiz = os.path.join(espera, "midias")
+            if os.path.isdir(raiz):
+                for conta_id in os.listdir(raiz):
+                    if os.path.isdir(os.path.join(raiz, conta_id)):
+                        registros.setdefault(conta_id, {})
+        cfg_atual = {}
+        try:
+            with open(os.path.join(pasta_dados, "config.json"),
+                      encoding="utf-8") as f:
+                cfg_atual = json.load(f)
+        except (OSError, ValueError):
+            pass
+        for dados_lidos in cfg_atual.get("contas") or []:
+            conta_id = dados_lidos.get("id")
+            if conta_id in registros and \
+                    not registros[conta_id].get("pasta"):
+                registros[conta_id]["pasta"] = \
+                    (dados_lidos.get("pasta") or "").strip()
+        for conta_id, dados in registros.items():
+            pasta = _pasta_da_conta_no_backup(dados, pasta_dados, conta_id)
+            movidas = []
+            if os.path.isdir(os.path.join(espera, "contas", conta_id)):
+                os.makedirs(antes, exist_ok=True)
+                _mover(pasta, os.path.join(antes, "contas", conta_id))
+                _mover(os.path.join(espera, "contas", conta_id), pasta)
+                movidas.append("conversas")
+            # as sessoes vao juntas no zip, com o nome dizendo a conta
+            sessoes = os.path.join(espera, "sessoes")
+            if os.path.isdir(sessoes):
+                for nome in os.listdir(sessoes):
+                    if nome.startswith(conta_id + "."):
+                        os.makedirs(os.path.join(pasta, "sessoes"),
+                                    exist_ok=True)
+                        _mover(os.path.join(sessoes, nome),
+                               os.path.join(pasta, "sessoes", nome))
+                        movidas.append("contas")
+            if "midias" in partes and \
+                    os.path.isdir(os.path.join(espera, "midias", conta_id)):
+                os.makedirs(antes, exist_ok=True)
+                _mover(os.path.join(pasta, "midias"),
+                       os.path.join(antes, "contas", conta_id, "midias"))
+                _mover(os.path.join(espera, "midias", conta_id),
+                       os.path.join(pasta, "midias"))
+                movidas.append("midias")
+            if movidas:
+                for parte in movidas:
+                    anotar(parte)
+                # os caminhos das midias no banco: de onde o backup era
+                # para onde a conta esta agora
+                _acertar_caminhos_das_midias(
+                    os.path.join(pasta, "conversas.db"),
+                    _pasta_da_conta_no_backup(
+                        dados, info.get("pasta_midias", ""), conta_id),
+                    pasta)
     shutil.rmtree(espera, ignore_errors=True)
     return trocadas
 
 
-def _acertar_caminhos_das_midias(banco, antigo, novo):
+# A troca de caminhos logo depois de o banco ser copiado pode falhar por
+# alguns segundos: o antivirus leva um tempo com o arquivo que acabou de
+# aparecer. Sao 20 tentativas de meio segundo (10 s) antes de desistir.
+ACERTO_TENTATIVAS = 20
+ACERTO_ESPERA = 0.5
+
+
+def _acertar_caminhos_das_midias(banco, antigo, novo, con=None):
     """O banco guarda o caminho completo de cada midia; se o backup veio de
-    outra pasta ou de outro usuario, troca o comeco do caminho."""
+    outra pasta ou de outro usuario, troca o comeco do caminho. Com `con`,
+    a troca roda nessa conexao ja aberta (a do banco unico durante a
+    migracao): abrir o arquivo de novo pode falhar por um instante, logo
+    depois de o banco ter sido criado (ex.: o antivirus olhando o arquivo
+    que a copia acabou de gravar)."""
     if not antigo or os.path.normpath(antigo) == os.path.normpath(novo) \
-            or not os.path.isfile(banco):
+            or (con is None and not os.path.isfile(banco)):
         return
-    con = sqlite3.connect(banco)
-    try:
-        con.execute(
+
+    def trocar(c):
+        c.execute(
             "UPDATE midias SET caminho = ? || substr(caminho, ?) "
             "WHERE substr(caminho, 1, ?) = ?",
             (novo, len(antigo) + 1, len(antigo), antigo))
-        con.commit()
-    finally:
-        con.close()
+        c.commit()
+    for tentativa in range(ACERTO_TENTATIVAS):  # abrir/gravar pode falhar
+        try:                        # por um instante (o antivirus olhando
+                                    # o arquivo recem-gravado, por exemplo)
+            c = con if con is not None else sqlite3.connect(banco)
+            try:
+                trocar(c)
+            finally:
+                if con is None:
+                    c.close()
+            return
+        except sqlite3.OperationalError as erro:
+            if tentativa == ACERTO_TENTATIVAS - 1:
+                raise
+            log.info("não consegui trocar os caminhos em %s (%r); "
+                     "tentando de novo", os.path.basename(banco), erro)
+            time.sleep(ACERTO_ESPERA)

@@ -2,27 +2,31 @@
 # Copyright (C) 2026 Fábio Scheffer Moraes
 """Janela de Gerenciar contas: uma lista em que cada conta tem uma caixa de
 marcar (marcada = ativada, desmarcada = desativada), e, com a conta em foco,
-os botões Excluir e Renomear (Tab). Quem muda as contas é a Janela; aqui só
-fica a tela."""
+os botões Nova conta, Excluir e Renomear (Tab). Quem muda as
+contas é a Janela; aqui só fica a tela."""
 import wx
 
 
 class DialogoContas(wx.Dialog):
     """`itens()`: [(conta_id, rotulo, ativa)]. `ao_marcar(conta_id, ativa)`,
     `ao_excluir(conta_id)` e `ao_renomear(conta_id)` devolvem True se mudou
-    algo (a lista é refeita)."""
+    algo (a lista é refeita). `ao_adicionar()` abre o fluxo de criar uma
+    conta nova (o login pode demorar; a lista se refaz quando o diálogo
+    volta a ficar ativo)."""
 
-    def __init__(self, pai, itens, ao_marcar, ao_excluir, ao_renomear):
+    def __init__(self, pai, itens, ao_marcar, ao_excluir, ao_renomear,
+                 ao_adicionar):
         super().__init__(pai, title="Gerenciar contas",
                          style=wx.DEFAULT_DIALOG_STYLE)
         self._itens, self._ao_marcar = itens, ao_marcar
         self._ao_excluir, self._ao_renomear = ao_excluir, ao_renomear
+        self._ao_adicionar = ao_adicionar
         self._ids = []
         lay = wx.BoxSizer(wx.VERTICAL)
         rotulo = ("Contas. Espaço marca ou desmarca: marcada fica "
                   "conectada, desmarcada não conecta (as conversas "
-                  "guardadas continuam na tela). Tab leva a Excluir e "
-                  "Renomear.")
+                  "guardadas continuam na tela). Tab leva a Nova conta, "
+                  "Excluir e Renomear.")
         explicacao = wx.StaticText(self, label=rotulo)
         explicacao.Wrap(440)
         lay.Add(explicacao, 0, wx.ALL, 10)
@@ -30,17 +34,22 @@ class DialogoContas(wx.Dialog):
                                      size=(440, 160))
         lay.Add(self.lista, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
         linha = wx.BoxSizer(wx.HORIZONTAL)
+        self.adicionar = wx.Button(self, label="&Nova conta...")
         self.excluir = wx.Button(self, label="&Excluir...")
         self.renomear = wx.Button(self, label="&Renomear...")
         fechar = wx.Button(self, wx.ID_CANCEL, "&Fechar")
-        for b in (self.excluir, self.renomear, fechar):
+        for b in (self.adicionar, self.excluir, self.renomear, fechar):
             linha.Add(b, 0, wx.RIGHT, 8)
         lay.Add(linha, 0, wx.ALL, 10)
         self.SetSizerAndFit(lay)
         self.SetEscapeId(wx.ID_CANCEL)
         self.Bind(wx.EVT_CHECKLISTBOX, self._marcou, self.lista)
+        self.Bind(wx.EVT_BUTTON, self._clicou_adicionar, self.adicionar)
         self.Bind(wx.EVT_BUTTON, self._clicou_excluir, self.excluir)
         self.Bind(wx.EVT_BUTTON, self._clicou_renomear, self.renomear)
+        # a conta nova só entra na configuração quando o login termina;
+        # ao voltar pra cá (dialogos do login fechados), refaz a lista
+        self.Bind(wx.EVT_ACTIVATE, self._ativou)
         self._preencher(0)
         self.CentreOnParent()
         self.lista.SetFocus()
@@ -65,6 +74,22 @@ class DialogoContas(wx.Dialog):
         # a lista pode ter encolhido (conta excluida) antes do aviso chegar
         if 0 <= n < min(len(self._ids), self.lista.GetCount()):
             self._ao_marcar(self._ids[n], self.lista.IsChecked(n))
+            self._preencher(n)
+
+    def _clicou_adicionar(self, evt):
+        self._ao_adicionar()
+        # a conta pode já ter sido salva (Telegram conecta na hora) ou
+        # ainda estar no login; _ativou refaz a lista ao voltar pra cá
+        self._preencher(self.lista.GetSelection())
+
+    def _ativou(self, evt):
+        evt.Skip()
+        if evt.GetActive() and not self.IsDestroyed():
+            self._preencher(self.lista.GetSelection())
+
+    def _clicou_mover(self, evt):
+        conta_id, n = self._atual()
+        if conta_id and self._ao_mover(conta_id):
             self._preencher(n)
 
     def _clicou_excluir(self, evt):

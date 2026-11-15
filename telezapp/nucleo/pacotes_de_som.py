@@ -110,10 +110,12 @@ def arquivos_do_pacote(pacote_id):
 
 
 def sons_do_evento(evento, ativo, seguem=None):
-    """[(nome do pacote, caminho)] do som desse evento em cada pacote que o
-    tem, o pacote ativo primeiro. `seguem` e o evento comum que vale quando o
-    pacote nao tem arquivo para `evento` (nova_pessoal segue nova). E a
-    lista do som proprio de uma conversa."""
+    """[(id do pacote, nome do pacote, caminho)] do som desse evento em
+    cada pacote que o tem, o pacote ativo primeiro. `seguem` e o evento
+    comum que vale quando o pacote nao tem arquivo para `evento`
+    (nova_pessoal segue nova). E a lista do som proprio de uma conversa; o
+    id diz de que pacote veio o som (a terceira lista do dialogo mostra os
+    sons desse pacote)."""
     ids = [i for i, _ in listar() if i != PADRAO]   # padrao: so bips
     if ativo in ids:
         ids.remove(ativo)
@@ -123,7 +125,7 @@ def sons_do_evento(evento, ativo, seguem=None):
         caminho = arquivo_do_evento(pid, evento) or (
             arquivo_do_evento(pid, seguem) if seguem else "")
         if caminho:
-            achados.append((nome_do_pacote(pid), caminho))
+            achados.append((pid, nome_do_pacote(pid), caminho))
     return achados
 
 

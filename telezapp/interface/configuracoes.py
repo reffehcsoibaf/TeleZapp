@@ -136,6 +136,8 @@ class DialogoConfiguracoes(wx.Dialog):
         self._priv_ficha = getattr(self, "_priv_ficha", 0) + 1
         self.lay_painel.Clear(delete_windows=True)
         self.controles = {}
+        self.rotulos = {}            # rotulos das opcoes de texto
+        self.botoes_pasta = {}       # botoes "Escolher a pasta..."
         self.lista_sons = None
         if categoria == "Sons" and not self.modelo.busca.strip():
             self._criar_sons()          # tela propria, sem opcoes comuns
@@ -619,8 +621,9 @@ class DialogoConfiguracoes(wx.Dialog):
             c.Bind(wx.EVT_TEXT, lambda e, o=o, c=c:
                    self.modelo.definir(o.chave, c.GetValue()))
         elif o.texto:
-            self.lay_painel.Add(wx.StaticText(p, label=o.rotulo + ":"), 0,
-                                wx.LEFT | wx.RIGHT | wx.TOP, 8)
+            r = wx.StaticText(p, label=o.rotulo + ":")
+            self.rotulos[o.chave] = r
+            self.lay_painel.Add(r, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
             c = wx.TextCtrl(p, value=str(self.modelo.valor(o.chave) or ""),
                             name=o.rotulo, size=(320, -1))
             if not o.pasta:
@@ -648,9 +651,13 @@ class DialogoConfiguracoes(wx.Dialog):
         if o.pasta:
             b = wx.Button(p, label="Escolher a pasta...")
             b.Bind(wx.EVT_BUTTON, lambda e, o=o, c=c: self._escolher_pasta(o, c))
+            self.botoes_pasta[o.chave] = b
             self.lay_painel.Add(b, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
         if o.chave == "trancadas_exigir_codigo":
             self._criar_campos_codigo()
+        if o.chave in ("contas_em_pastas", "contas_pasta_personalizada",
+                       "contas_pasta"):
+            self._mostrar_dados_das_contas()
         self._sincronizar_atualizacoes()
         self._sincronizar_pasta()
 
@@ -1040,10 +1047,15 @@ class DialogoConfiguracoes(wx.Dialog):
     def _ao_digitar(self, opcao, c):
         self.modelo.definir(opcao.chave, c.GetValue().strip())
         self._sincronizar_pasta()
+        if opcao.chave == "contas_pasta":
+            self._mostrar_dados_das_contas()
 
     def _escolher_pasta(self, opcao, c):
-        dlg = wx.DirDialog(self, "Escolha a pasta dos arquivos salvos",
-                           defaultPath=c.GetValue().strip())
+        titulos = {"contas_pasta": "Escolha a pasta dos dados das contas"}
+        dlg = wx.DirDialog(
+            self, titulos.get(opcao.chave,
+                              "Escolha a pasta dos arquivos salvos"),
+            defaultPath=c.GetValue().strip())
         try:
             if dlg.ShowModal() == wx.ID_OK:
                 c.SetValue(dlg.GetPath())
@@ -1057,10 +1069,25 @@ class DialogoConfiguracoes(wx.Dialog):
         if c is not None:
             c.Enable(bool(self.modelo.valor("pasta_salvar")))
 
+    def _mostrar_dados_das_contas(self):
+        """O campo da pasta das contas so aparece com a pasta
+        personalizada marcada."""
+        visivel = bool(self.modelo.valor("contas_pasta_personalizada"))
+        for parte in (self.rotulos.get("contas_pasta"),
+                      self.controles.get("contas_pasta"),
+                      self.botoes_pasta.get("contas_pasta")):
+            if parte is not None:
+                parte.Show(visivel)
+        self.painel.Layout()
+        self.painel.FitInside()
+
     def _ao_marcar(self, opcao, valor):
         self.modelo.definir(opcao.chave, valor)
         if opcao.chave == "trancadas_exigir_codigo":
             self._mostrar_campos_codigo()
+        if opcao.chave in ("contas_em_pastas",
+                           "contas_pasta_personalizada"):
+            self._mostrar_dados_das_contas()
         self._sincronizar_atualizacoes()
 
     def _sincronizar_atualizacoes(self):

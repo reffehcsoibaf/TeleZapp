@@ -4859,11 +4859,11 @@ class ProvedorWhatsApp(Provedor):
                 for x in self.banco.agendadas(self.conta.id, conversa_id)]
 
     def cancelar_agendadas(self, conversa_id, ids):
-        self.banco.tirar_agendadas(ids)
+        self.banco.tirar_agendadas(ids, self.conta.id)
         return True, ""
 
     def mudar_horario_agendada(self, conversa_id, id_, quando):
-        self.banco.mudar_agendada(id_, quando.timestamp())
+        self.banco.mudar_agendada(id_, quando.timestamp(), self.conta.id)
         return True, ""
 
     def vencidas_da_agenda(self, agora, tolerancia):
@@ -4881,7 +4881,7 @@ class ProvedorWhatsApp(Provedor):
     def enviar_agendada(self, id_):
         """Envia a agendada agora, pelo caminho de um texto comum, e a tira
         da agenda. False se ela ja nao existe."""
-        x = self.banco.agendada(id_)
+        x = self.banco.agendada(id_, self.conta.id)
         if x is None:
             return False
         try:
@@ -4895,7 +4895,7 @@ class ProvedorWhatsApp(Provedor):
         return True
 
     def descartar_agendadas(self, ids):
-        self.banco.tirar_agendadas(ids)
+        self.banco.tirar_agendadas(ids, self.conta.id)
 
     def enviar_contatos(self, conversa_id, contatos):
         contatos = list(contatos)

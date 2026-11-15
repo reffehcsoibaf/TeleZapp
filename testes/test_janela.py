@@ -8983,6 +8983,45 @@ def test_dialogo_do_som_da_conversa_escolhe_evento_e_depois_o_pacote(
             pk.remover_som_da_conversa(j.cfg, conv.chave, e)
 
 
+def test_dialogo_do_som_da_conversa_mostra_os_sons_do_pacote(
+        j, monkeypatch, tmp_path):
+    """A terceira lista traz os sons do pacote marcado na segunda, em
+    ordem; escolher um define o som do evento, sem falar por cima do
+    NVDA (que ja anuncia cada item)."""
+    pk, jd = _pacotes_falsos(monkeypatch, tmp_path, j)
+    conv = j.indice[("t1", "20")]
+    conv.tipo = "privada"
+    ditas = []
+    monkeypatch.setattr(j.fala, "falar", lambda t, **k: ditas.append(t))
+    try:
+        d = jd.DialogoSomDaConversa(None, j, conv)
+        # sem som proprio, a segunda nao marca nada: a terceira traz o
+        # pacote ativo (Marimba)
+        assert d.cx_escolha.itens == ["Marimba", "Cristal"]
+        assert d.cx_escolha.GetSelection() == -1
+        assert d._pacote_da_lista == "marimba"
+        assert d.cx_pacote.itens == ["nova.wav", "reacao_recebida.wav"]
+        d.cx_pacote.SetSelection(0)
+        d._escolher_pacote()                 # nova: o nova.wav do pacote
+        assert pk.arquivo_da_conversa(j.cfg, conv.chave) != ""
+        assert open(pk.arquivo_da_conversa(j.cfg, conv.chave),
+                    "rb").read() == b"nova-M"
+        assert ditas == []                   # so o NVDA anuncia os itens
+        # marcando Cristal na segunda, a terceira passa a mostrar Cristal
+        d.cx_escolha.SetSelection(1)
+        d._escolher()
+        assert d._pacote_da_lista == "cristal"
+        assert d._sons_do_pacote[0][1] == str(
+            tmp_path / "cristal" / "nova.wav")
+        d2 = jd.DialogoSomDaConversa(None, j, conv)  # reabre: o pacote dela
+        assert d2.cx_escolha.GetSelection() == 1     # nova: Cristal
+        assert d2._pacote_da_lista == "cristal"
+        assert d2.cx_pacote.itens == ["nova.wav", "reacao_recebida.wav"]
+    finally:
+        for e in pk.EVENTOS_DA_CONVERSA:
+            pk.remover_som_da_conversa(j.cfg, conv.chave, e)
+
+
 def test_grupo_tem_o_evento_de_mencao_na_lista(j, monkeypatch, tmp_path):
     pk, jd = _pacotes_falsos(monkeypatch, tmp_path, j)
     conv = j.indice[("t1", "20")]
