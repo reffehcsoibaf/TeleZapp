@@ -104,6 +104,10 @@ TEMPO_MAX_SINCRONIA = 45
 # que isto (s) ja nao esta tocando. So vale antes do fim da fila, para um
 # relogio errado no computador nao calar as chamadas de verdade
 OFERTA_VELHA_S = 60
+# Passada a fila, a sincronizacao de mensagens antigas (pedido ao celular, novo
+# pareamento) ainda pode trazer ofertas de chamada de tempos atras: com mais
+# que isto (s) a oferta nunca esta tocando, mesmo com o relogio meio errado
+OFERTA_ANTIGA_S = 600
 # quanto a janela de chamada espera o evento com a data da oferta (s)
 ESPERA_DATA_DA_OFERTA_S = 1.0
 # espera (segundos) antes de cada nova tentativa de conexao; a ultima repete
@@ -6556,6 +6560,14 @@ class ProvedorWhatsApp(Provedor):
             return True
         return any(self._tem_tag(n, tag) for n in no.Nodes)
 
+    @staticmethod
+    def _veio_da_fila(no):
+        """O aviso da chamada veio marcado como "offline" (guardado pelo
+        servidor com o aparelho desconectado)? A DLL passa a marca nos
+        atributos do no "offer"; DLL antiga nao passa (e a idade decide)."""
+        return no is not None and any(
+            a.name == "offline" for a in getattr(no, "Attrs", ()))
+
     def _ao_chamada(self, cliente, e):
         """Alguem esta ligando: o TeleZapp ainda nao atende chamadas do
         WhatsApp, entao so registra na conversa e avisa."""
@@ -6580,8 +6592,13 @@ class ProvedorWhatsApp(Provedor):
             conv = self._conversa(cid, criador, "", False,
                                   float(meta.timestamp or time.time()))
             inicio = float(meta.timestamp or time.time())
-            velha = not self._fila_entregue and \
-                time.time() - inicio > OFERTA_VELHA_S
+            idade = time.time() - inicio
+            # marcada como "offline": veio da fila e, com mais de um minuto,
+            # ja nao esta tocando, mesmo depois do fim da fila (sincronizacao
+            # de mensagens antigas). Sem a marca, a idade decide.
+            velha = idade > OFERTA_ANTIGA_S or (
+                idade > OFERTA_VELHA_S and (
+                    not self._fila_entregue or self._veio_da_fila(e.data)))
             if velha:
                 log.info("chamada %s veio da fila, de %d s atrás: não toca",
                          chamada, time.time() - inicio)

@@ -196,14 +196,25 @@ def texto_da_ajuda(registro):
             "Configurações, Atalhos.\n\n" + AJUDA_OUTRAS_TECLAS + AJUDA_FIM)
 
 
+LIMITE_LENTO_S = 0.2     # tratador que demora mais que isso vai para o registro
+
+
 def seguro(funcao):
-    """Registra qualquer erro de um tratador, sem derrubar a janela."""
+    """Registra qualquer erro de um tratador, sem derrubar a janela, e avisa
+    no registro os que demoram (a janela fica parada enquanto eles rodam: e o
+    que o leitor de tela sente como "pensando")."""
     def interno(*args, **kwargs):
+        inicio = time.perf_counter()
         try:
             return funcao(*args, **kwargs)
         except Exception:
             log.error("erro em %s:\n%s", funcao.__name__,
                       traceback.format_exc())
+        finally:
+            gasto = time.perf_counter() - inicio
+            if gasto > LIMITE_LENTO_S:
+                log.warning("lento: %s demorou %.2f s", funcao.__name__,
+                            gasto)
     interno.__name__ = funcao.__name__
     return interno
 
@@ -218,44 +229,75 @@ class ListaDeTextos(wx.ListCtrl):
     """Lista de uma coluna com a mesma interface de um wx.ListBox.
 
     O ListBox faz o NVDA falar o item em foco duas vezes ao chegar nele;
-    o ListCtrl de uma coluna, como nas configuracoes, fala uma so vez."""
+    o ListCtrl de uma coluna, como nas configuracoes, fala uma so vez.
+
+    E uma lista VIRTUAL: os textos ficam em `itens` e o controle so pede o
+    texto das linhas que aparecem. Com milhares de conversas, inserir uma a
+    uma num ListCtrl comum levava varios segundos (7 s com 4.000 conversas)
+    e o NVDA ficava processando cada insercao; na virtual e instantaneo."""
 
     def __init__(self, pai, name=""):
         super().__init__(pai, name=name, style=wx.LC_REPORT
-                         | wx.LC_SINGLE_SEL | wx.LC_NO_HEADER)
+                         | wx.LC_SINGLE_SEL | wx.LC_NO_HEADER
+                         | wx.LC_VIRTUAL)
+        self.itens = []
         self.InsertColumn(0, "", width=300)
         self.Bind(wx.EVT_SIZE, self._ao_redimensionar)
+
+    def OnGetItemText(self, i, coluna):
+        return self.itens[i] if 0 <= i < len(self.itens) else ""
 
     def _ao_redimensionar(self, evt):
         self.SetColumnWidth(0, max(self.GetClientSize().width - 4, 100))
         evt.Skip()
 
     def GetCount(self):
-        return self.GetItemCount()
+        return len(self.itens)
+
+    def GetItemCount(self):
+        return len(self.itens)
 
     def GetString(self, i):
-        return self.GetItemText(i)
+        return self.itens[i]
 
     def SetString(self, i, texto):
-        self.SetItemText(i, texto)
+        self.itens[i] = texto
+        self.RefreshItem(i)
 
     def Append(self, texto):
-        self.InsertItem(self.GetItemCount(), texto)
+        self.itens.append(texto)
+        self.SetItemCount(len(self.itens))
 
     def Delete(self, i):
-        self.DeleteItem(i)
+        del self.itens[i]
+        self.SetItemCount(len(self.itens))
+        self.Refresh()
 
     def Set(self, textos):
-        self.DeleteAllItems()
-        for t in textos:
-            self.InsertItem(self.GetItemCount(), t)
+        self.itens = list(textos)
+        self.SetItemCount(len(self.itens))
+        self.Refresh()
+
+    def Atualizar(self, textos):
+        """Troca os textos de uma vez (so redesenha o que mudou). Mexer uma
+        linha por vez (Append/Delete) custa ~1 ms cada com milhares de
+        conversas: trocar o filtro levava varios segundos."""
+        novos, antigos = list(textos), self.itens
+        self.itens = novos
+        if len(novos) != len(antigos):
+            self.SetItemCount(len(novos))
+            self.Refresh()
+        else:
+            for k, texto in enumerate(novos):
+                if antigos[k] != texto:
+                    self.RefreshItem(k)
 
     def GetSelection(self):
         return self.GetFirstSelected()
 
     def SetSelection(self, i):
         antes = self.GetFirstSelected()
-        if 0 <= antes < self.GetItemCount() and antes != i:
+        if 0 <= antes < len(self.itens) and antes != i:
             self.Select(antes, False)
         self.Select(i)
         self.Focus(i)
@@ -2430,12 +2472,16 @@ class Janela(wx.Frame):
     def _lista_em_uso(self):
         return lista_conv_nucleo.normalizar(self.cfg.get("lista_conversas"))
 
-    def _rotulo_da_conversa(self, c):
-        """A linha da conversa, com as informacoes e a ordem escolhidas."""
+    def _rotulo_da_conversa(self, c, em_uso=None):
+        """A linha da conversa, com as informacoes e a ordem escolhidas.
+        em_uso: a lista ja normalizada (quem monta milhares de linhas passa
+        uma vez so, em vez de normalizar a cada conversa)."""
+        if em_uso is None:
+            em_uso = self._lista_em_uso()
         _, trecho, autor, estado = self.previas.get(
             c.chave, (0, "", "", ""))
         return lista_conv_nucleo.rotulo(
-            c, self._lista_em_uso(), trecho,
+            c, em_uso, trecho,
             self.reacoes_novas.get(c.chave, 0),
             self.quem_reagiu.get(c.chave, ()), autor, estado)
 
@@ -2627,7 +2673,8 @@ class Janela(wx.Frame):
         if 0 <= i < len(self._chaves_conv):
             antes = self._chaves_conv[i]
         chaves = [c.chave for c in self.conversas]
-        rotulos = [self._com_marca(self._rotulo_da_conversa(c),
+        em_uso = self._lista_em_uso()
+        rotulos = [self._com_marca(self._rotulo_da_conversa(c, em_uso),
                                    c.chave in self.marc_conv)
                    for c in self.conversas]
         if chaves == self._chaves_conv and \
@@ -2643,14 +2690,7 @@ class Janela(wx.Frame):
             lista.SetSelection(chaves.index(antes)
                                if antes in chaves else 0)
             return
-        while lista.GetCount() > len(rotulos):
-            lista.Delete(lista.GetCount() - 1)
-        for k, novo in enumerate(rotulos):
-            if k >= lista.GetCount():
-                lista.Append(novo)
-            elif (k >= len(self._rotulos_conv)
-                    or self._rotulos_conv[k] != novo):
-                lista.SetString(k, novo)
+        lista.Atualizar(rotulos)
         self._chaves_conv, self._rotulos_conv = chaves, rotulos
         alvo = (chaves.index(antes) if antes in chaves
                 else min(max(i, 0), len(chaves) - 1))
@@ -3477,6 +3517,7 @@ class Janela(wx.Frame):
         ultima = self._ultima_guardada(conv) if celular else None
         feitos, liberados, falhas = limpeza.apagar(self.banco, sel)
         self._ao_limpar(sel)
+        self._sem_nao_lidas_apos_limpar(conv)
         if celular:
             threading.Thread(
                 target=self._limpar_no_celular,
@@ -3489,6 +3530,17 @@ class Janela(wx.Frame):
         if falhas:
             texto += " %d não puderam ser apagadas (talvez em uso)." % falhas
         self.fala.falar(texto, interromper=True)
+
+    def _sem_nao_lidas_apos_limpar(self, conv):
+        """Conversa limpa nao tem o que ler: zera as nao lidas e as citacoes
+        aqui (e avisa a conta) e atualiza a linha da lista na hora, sem
+        esperar a pessoa abrir a conversa."""
+        if conv.nao_lidas or conv.citacoes:
+            self._avisar_leitura(conv)
+            conv.citacoes = 0
+        self.reacoes_novas.pop(conv.chave, None)
+        self.quem_reagiu.pop(conv.chave, None)
+        self._refazer_lista_logo()
 
     def _limpar_conversa_do_menu(self, conv=None):
         """Menu Conversas, Limpar a conversa (aqui e no celular): a conversa
@@ -3547,6 +3599,7 @@ class Janela(wx.Frame):
             ultima = self._ultima_guardada(c) if celular else None
             feitos, _, _ = limpeza.apagar(self.banco, sel)
             self._ao_limpar(sel)
+            self._sem_nao_lidas_apos_limpar(c)
             total += feitos
             if celular:
                 threading.Thread(
@@ -5744,7 +5797,13 @@ class Janela(wx.Frame):
             self._atualizar_botoes()
             return
         i_antes = self.lista_msgs.GetSelection()
-        self.lista_msgs.Set(itens)
+        # com a tela congelada o ListBox monta milhares de itens ~3x mais
+        # rapido (sem redesenhar a cada item)
+        self.lista_msgs.Freeze()
+        try:
+            self.lista_msgs.Set(itens)
+        finally:
+            self.lista_msgs.Thaw()
         sel = len(itens) - 1
         if destino == MARCADOR:
             if MARCADOR in mapa:

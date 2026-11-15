@@ -2561,17 +2561,51 @@ def test_oferta_velha_da_fila_nao_avisa_que_esta_tocando(amb):
     amb.f["CallOffer"](amb.c, _chamada("oferta", "V2", ts=int(time.time())))
     assert esperar(amb.fila, ev.ChamadaWhatsApp).chamada_id == "V2"
     assert not amb.p._oferta_velha("V2")
-    # acabada a fila, a data nao importa: o relogio do computador pode errar
+    # acabada a fila, uns minutos de diferenca do relogio nao calam a chamada
     amb.p._ao_fim_sincronia(None, None)
-    amb.f["CallOffer"](amb.c, _chamada("oferta", "V3"))
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "V3",
+                                       ts=int(time.time()) - 300))
     assert esperar(amb.fila, ev.ChamadaWhatsApp).chamada_id == "V3"
+    # mas oferta de horas atras (sincronizacao de mensagens antigas) nao toca
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "V4",
+                                       ts=int(time.time()) - 7200))
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.mensagem.id == "chamada-V4"
+    assert nova.mensagem.texto == "Chamada de voz encerrada"
+    assert amb.p._oferta_velha("V4")
+    assert not any(isinstance(x, ev.ChamadaWhatsApp) and
+                   x.chamada_id == "V4" for x in list(amb.fila.queue))
+
+
+def test_oferta_marcada_offline_nao_toca_nem_depois_do_fim_da_fila(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.p._ao_fim_sincronia(None, None)
+    # a DLL passa a marca "offline" nos atributos do no "offer"
+    marca = N.NodeAttrs(name="offline", text="3")
+    antiga = _chamada("oferta", "M1", ts=int(time.time()) - 300)
+    antiga.data.Attrs.append(marca)
+    amb.f["CallOffer"](amb.c, antiga)
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.mensagem.texto == "Chamada de voz encerrada"
+    assert amb.p._oferta_velha("M1")
+    # a mesma idade, sem a marca (ao vivo, relogio atrasado), toca
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "M2",
+                                       ts=int(time.time()) - 300))
+    assert esperar(amb.fila, ev.ChamadaWhatsApp).chamada_id == "M2"
+    # marcada, mas de agora (tocando quando o app reconectou): toca
+    fresca = _chamada("oferta", "M3", ts=int(time.time()) - 5)
+    fresca.data.Attrs.append(marca)
+    amb.f["CallOffer"](amb.c, fresca)
+    assert esperar(amb.fila, ev.ChamadaWhatsApp).chamada_id == "M3"
 
 
 def test_chamada_recebida_vira_aviso_e_linha_na_conversa(amb):
     amb.f["Connected"](amb.c, N.Connected())
     esperar(amb.fila, ev.ContaPronta)
     amb.p._ao_fim_sincronia(None, None)
-    amb.f["CallOffer"](amb.c, _chamada("oferta", "C1", video=True))
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "C1", video=True,
+                                       ts=int(time.time())))
     nova = esperar(amb.fila, ev.MensagemNova)
     assert nova.silenciosa and nova.mensagem.id == "chamada-C1"
     assert nova.mensagem.texto == "Chamada de vídeo recebida, tocando"
@@ -2595,7 +2629,7 @@ def test_chamada_atendida_em_outro_aparelho_e_recusada(amb):
     amb.f["Connected"](amb.c, N.Connected())
     esperar(amb.fila, ev.ContaPronta)
     amb.p._ao_fim_sincronia(None, None)
-    amb.f["CallOffer"](amb.c, _chamada("oferta", "C2"))
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "C2", ts=int(time.time())))
     esperar(amb.fila, ev.ChamadaWhatsApp)
     amb.f["CallAccept"](amb.c, _chamada("atendida", "C2", ts=TS + 5))
     amb.f["CallTerminate"](amb.c, _chamada("fim", "C2", ts=TS + 70))
@@ -2603,7 +2637,7 @@ def test_chamada_atendida_em_outro_aparelho_e_recusada(amb):
         "Chamada de voz atendida em outro aparelho, durou 1 minuto e 5 segundos"
     fim = esperar(amb.fila, ev.ChamadaWhatsApp)
     assert (fim.fase, fim.segundos) == ("atendida", 65)
-    amb.f["CallOffer"](amb.c, _chamada("oferta", "C3"))
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "C3", ts=int(time.time())))
     esperar(amb.fila, ev.ChamadaWhatsApp)
     amb.f["CallTerminate"](amb.c, _chamada("fim", "C3", reason="rejected"))
     assert esperar(amb.fila, ev.ChamadaWhatsApp).fase == "recusada"
@@ -4677,7 +4711,7 @@ def test_chamada_recebida_some_por_completo_com_o_aviso_desligado(amb):
     esperar(amb.fila, ev.ContaPronta)
     amb.p._ao_fim_sincronia(None, None)
     wa.config.Config().set("avisar_chamadas_whatsapp", False)
-    amb.f["CallOffer"](amb.c, _chamada("oferta", "O1", video=True))
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "O1", video=True, ts=int(time.time())))
     amb.f["CallAccept"](amb.c, _chamada("atendida", "O1", ts=TS + 5))
     amb.f["CallTerminate"](amb.c, _chamada("fim", "O1", ts=TS + 30))
     # nem aviso, nem linha na conversa, nem nao lida, e o motor de voz ignora
@@ -4690,7 +4724,7 @@ def test_chamada_recebida_some_por_completo_com_o_aviso_desligado(amb):
     assert amb.p._chamadas_ocultas == set()      # o fim limpou
     # ligando o aviso de novo, a proxima chamada volta ao normal
     wa.config.Config().set("avisar_chamadas_whatsapp", True)
-    amb.f["CallOffer"](amb.c, _chamada("oferta", "O2"))
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "O2", ts=int(time.time())))
     assert esperar(amb.fila, ev.MensagemNova).mensagem.id == "chamada-O2"
     assert esperar(amb.fila, ev.ChamadaWhatsApp).chamada_id == "O2"
 

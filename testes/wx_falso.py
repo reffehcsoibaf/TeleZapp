@@ -31,7 +31,7 @@ WXK_DELETE, WXK_SPACE, WXK_INSERT = 127, 32, 324
 WXK_LEFT, WXK_RIGHT = 314, 316
 WXK_UP, WXK_DOWN, WXK_HOME, WXK_END, WXK_PAGEUP, WXK_PAGEDOWN = range(
     315, 321)
-LC_REPORT = LC_SINGLE_SEL = LC_NO_HEADER = 0
+LC_REPORT = LC_SINGLE_SEL = LC_NO_HEADER = LC_VIRTUAL = 0
 EVT_LIST_ITEM_ACTIVATED = object()
 EVT_CLOSE = EVT_CHAR_HOOK = EVT_MENU = EVT_LISTBOX_DCLICK = object()
 EVT_CONTEXT_MENU = EVT_KEY_DOWN = EVT_BUTTON = EVT_LISTBOX = object()
@@ -361,6 +361,12 @@ class ListBox(Janela):
         super().__init__()
         self.itens, self.sel = [], -1
 
+    def Freeze(self):
+        pass
+
+    def Thaw(self):
+        pass
+
     def Set(self, itens):
         self.itens, self.sel = list(itens), -1
 
@@ -439,6 +445,15 @@ class ListCtrl(Janela):
         pass
 
     def EnsureVisible(self, i):
+        pass
+
+    def SetItemCount(self, n):         # lista virtual: o texto fica em `itens`
+        pass
+
+    def RefreshItem(self, i):
+        pass
+
+    def Refresh(self, *a, **k):
         pass
 
     def selecionado(self):

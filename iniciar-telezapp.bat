@@ -61,10 +61,10 @@ if errorlevel 1 (
   )
   >>"%LOG%" 2>&1 "%VPY%" -m pip install --disable-pip-version-check --no-deps accessible-output2
   copy /y "%BASE%requirements.txt" "%VENV%\requirements-instalado.txt" >nul
+  >>"%LOG%" 2>&1 "%VPY%" -m pip list --disable-pip-version-check
   >>"%LOG%" echo Componentes instalados.
 )
 
->>"%LOG%" 2>&1 "%VPY%" -m pip list --disable-pip-version-check
 >>"%LOG%" echo Abrindo o TeleZapp: %DATE% %TIME%
 start "" "%VENV%\Scripts\pythonw.exe" -m telezapp %*
 

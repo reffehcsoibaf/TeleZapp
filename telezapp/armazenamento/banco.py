@@ -276,6 +276,12 @@ class Banco:
             log.info("banco atualizado: coluna expira")
         self._con.execute("CREATE INDEX IF NOT EXISTS mensagens_por_expira "
                           "ON mensagens (expira) WHERE expira > 0")
+        # Nome de quem escreveu (nome_do_remetente): sem este indice cada
+        # consulta varria todas as mensagens da conta (170 ms com 187 mil) e
+        # a abertura, que resolve o nome de dezenas de remetentes, travava a
+        # janela por ~18 s. Aqui, depois de a coluna existir (banco antigo).
+        self._con.execute("CREATE INDEX IF NOT EXISTS mensagens_por_remetente "
+                          "ON mensagens (conta_id, remetente, data)")
         # minhas mensagens que ja tinham o recibo de reproduzida guardado,
         # mas ficaram como "lida" (o estado reproduzida e mais novo)
         n = self._con.execute(
