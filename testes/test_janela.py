@@ -9474,3 +9474,166 @@ def test_dialogos_de_backup_tem_a_lista_de_contas():
     assert r.contas() is None
     r.caixas_de_contas["t1"].SetValue(False)
     assert r.contas() == ["t2"]
+
+
+def test_filtros_personalizados_tomam_o_lugar_das_caixas(j):
+    """Ativados, os filtros esconderem serviço, conta e tipo; com um filtro
+    so, nao ha caixa Filtro; com mais de um, ela aparece."""
+    assert _nomes(j) == ["Ana", "Bruno"]
+    assert j.cx_conta.visivel is not False
+    j._aplicar_filtros_personalizados({"ativo": True, "lista": [
+        {"id": "a", "nome": "Não lidas", "contas": [], "tipos": ["nao_lidas"]}]})
+    assert _nomes(j) == ["Ana"]                       # so a nao lida
+    assert j.cx_conta.visivel is False and j.cx_tipo.visivel is False
+    assert j.cx_filtro.visivel is False               # um filtro so
+    assert j.cfg.get("filtros_personalizados")["ativo"] is True
+    j._aplicar_filtros_personalizados({"ativo": True, "lista": [
+        {"id": "a", "nome": "Não lidas", "contas": [], "tipos": ["nao_lidas"]},
+        {"id": "b", "nome": "Telegram", "contas": ["telegram"],
+         "tipos": []}]})
+    assert j.cx_filtro.visivel is True
+    assert j.cx_filtro.itens == ["Não lidas", "Telegram"]
+    j.cx_filtro.SetSelection(1)
+    j._ao_filtro_pers()
+    assert _nomes(j) == ["Ana", "Bruno"]
+    assert j.cfg.get("filtro_personalizado") == "b"
+    # desativados (ou sem filtro nenhum), as caixas de sempre voltam
+    j._aplicar_filtros_personalizados({"ativo": False, "lista": [
+        {"id": "a", "nome": "X", "contas": [], "tipos": ["nao_lidas"]}]})
+    assert j.cx_conta.visivel is True and j.cx_tipo.visivel is True
+    assert j.cx_filtro.visivel is False
+    assert _nomes(j) == ["Ana", "Bruno"]
+    j._aplicar_filtros_personalizados({"ativo": True, "lista": []})
+    assert j.cx_conta.visivel is True
+
+
+def test_alt4_e_alt5_com_filtros_personalizados(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._aplicar_filtros_personalizados({"ativo": True, "lista": [
+        {"id": "a", "nome": "Grupos", "contas": [], "tipos": ["grupos"]}]})
+    j._ir_filtro_conta()
+    assert ditas[-1] == "Filtro: Grupos."
+    j._ir_filtro_tipo()
+    assert "personalizados" in ditas[-1]
+    j._ir_para_tipo("nao_lidas")                      # menu Tipo de conversa
+    assert "Filtro" in ditas[-1] and j.filtro_tipo == "todas"
+    j._aplicar_filtros_personalizados({"ativo": True, "lista": [
+        {"id": "a", "nome": "Grupos", "contas": [], "tipos": ["grupos"]},
+        {"id": "b", "nome": "Outro", "contas": [], "tipos": []}]})
+    j._ir_filtro_conta()
+    assert j.FindFocus() is j.cx_filtro
+
+
+def test_filtro_personalizado_vem_de_configuracoes(j):
+    from telezapp.nucleo.configuracoes import ModeloConfiguracoes
+    mod = ModeloConfiguracoes(j.cfg)
+    assert mod.filtros_em_uso() == {"ativo": False, "lista": []}
+    mod.filtros_definir({"ativo": True, "lista": [
+        {"id": "a", "nome": "Grupos", "contas": [], "tipos": ["grupos"]}]})
+    assert mod.filtros_pendentes is not None
+    chamadas = []
+    mod.aplicar(lambda chave, valor: chamadas.append((chave, valor)))
+    assert ("filtros_personalizados", {"ativo": True, "lista": [
+        {"id": "a", "nome": "Grupos", "contas": [], "tipos": ["grupos"]}]}) \
+        in chamadas
+    j._aplicar_opcao("filtros_personalizados", chamadas[-1][1])
+    assert j.cfg.get("filtros_personalizados")["ativo"] is True
+
+
+def _contas_para_filtros():
+    return jm.m.opcoes_de_conta([("w1", "whatsapp", "Fábio"),
+                                 ("t1", "telegram", "Tel")])
+
+
+def test_formulario_do_filtro_sugere_o_nome_e_respeita_o_que_a_pessoa_escreve():
+    from telezapp.interface import filtros as jf
+    d = jf.DialogoNovoFiltro(None, _contas_para_filtros(), [])
+    assert d.nome.GetValue() == "Todas as conversas"       # nada marcado
+    d.lista_contas.Check(2)                               # WhatsApp
+    for i, (valor, _) in enumerate(d._tipos):
+        if valor in ("nao_lidas", "grupos", "arquivadas"):
+            d.lista_tipos.Check(i)
+    d._marcou(None)
+    assert d.nome.GetValue() == "WhatsApp, Não lidas, Grupos, Arquivadas"
+    d.nome.SetValue("Meu zap")
+    d._digitou(None)                                      # a pessoa escreveu
+    d.lista_tipos.Check(0)
+    d._marcou(None)
+    assert d.nome.GetValue() == "Meu zap"                 # nao muda mais
+    filtro = d.resultado()
+    assert filtro["nome"] == "Meu zap"
+    assert filtro["contas"] == ["whatsapp"]
+    assert "trancadas" not in dict(d._tipos)              # nao ha trancadas
+    assert set(filtro["tipos"]) == {"todas", "nao_lidas", "grupos",
+                                    "arquivadas"}
+
+
+def test_formulario_do_filtro_nao_salva_vazio_e_nao_repete_nome():
+    from telezapp.interface import filtros as jf
+    wx_falso.mensagens.clear()
+    d = jf.DialogoNovoFiltro(None, _contas_para_filtros(), [
+        {"id": "f1", "nome": "Grupos", "contas": [], "tipos": ["grupos"]}])
+
+    class Evt:
+        pulou = False
+
+        def Skip(self):
+            self.pulou = True
+    e = Evt()
+    d._salvar(e)                                          # nada marcado
+    assert not e.pulou and "pelo menos um item" in wx_falso.mensagens[-1]
+    d.lista_tipos.Check(4)                                # Grupos
+    d._marcou(None)
+    e = Evt()
+    d._salvar(e)
+    assert e.pulou
+    assert d.resultado()["nome"] == "Grupos (2)"          # nome ja usado
+
+
+def test_janela_de_filtros_cria_renomeia_e_exclui(monkeypatch):
+    from telezapp.interface import filtros as jf
+    guardado = [{"ativo": False, "lista": []}]
+    dita = []
+    fala = types.SimpleNamespace(falar=lambda t, interromper=False:
+                                 dita.append(t))
+    d = jf.DialogoFiltros(None, lambda: guardado[0],
+                          lambda v: guardado.__setitem__(0, v),
+                          _contas_para_filtros, fala)
+    assert d.lista.visivel is False                        # caixa desmarcada
+    d.ativar.SetValue(True)
+    d._ativou(None)
+    assert guardado[0]["ativo"] is True and d.lista.visivel is True
+    assert "Crie o primeiro filtro" in dita[-1]
+
+    class FormularioFalso:
+        def __init__(self, *a, **k):
+            pass
+
+        def ShowModal(self):
+            return wx_falso.ID_OK
+
+        def resultado(self):
+            return {"id": "f1", "nome": "Grupos", "contas": [],
+                    "tipos": ["grupos"]}
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(jf, "DialogoNovoFiltro", FormularioFalso)
+    assert d.novo_filtro() is True
+    assert [f["nome"] for f in guardado[0]["lista"]] == ["Grupos"]
+    assert d.lista.itens == ["Grupos"]
+    wx_falso.texto_digitado[0] = "Só grupos"
+    try:
+        assert d.renomear_filtro() is True
+    finally:
+        wx_falso.texto_digitado[0] = None
+    assert guardado[0]["lista"][0]["nome"] == "Só grupos"
+    assert d.lista.itens == ["Só grupos"]
+    wx_falso.resposta_messagebox[0] = wx_falso.YES
+    try:
+        assert d.excluir_filtro() is True
+    finally:
+        wx_falso.resposta_messagebox[0] = wx_falso.YES
+    assert guardado[0]["lista"] == [] and guardado[0]["ativo"] is True
+    assert d.lista.itens == []

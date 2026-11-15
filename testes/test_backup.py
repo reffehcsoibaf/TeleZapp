@@ -569,3 +569,17 @@ def test_backup_parcial_recusa_banco_unico_com_a_separacao_ligada(tmp_path):
         json.dumps({"contas_em_pastas": True}), encoding="utf-8")
     with pytest.raises(bk.ErroBackup):
         bk.restaurar(arquivo, "", ["conversas"], str(origem))
+
+
+def test_filtros_personalizados_vao_e_voltam_no_backup():
+    valor = {"ativo": True, "lista": [
+        {"id": "a", "nome": "Grupos", "contas": ["whatsapp"],
+         "tipos": ["grupos", "trancadas"]}]}
+    levadas = bk.opcoes_do_backup({"filtros_personalizados": valor})
+    assert levadas["filtros_personalizados"] == valor
+    voltou = bk.opcoes_validas({"filtros_personalizados": valor})
+    assert voltou["filtros_personalizados"] == {"ativo": True, "lista": [
+        {"id": "a", "nome": "Grupos", "contas": ["whatsapp"],
+         "tipos": ["grupos"]}]}                       # sem trancadas
+    assert "filtros_personalizados" not in bk.opcoes_validas(
+        {"filtros_personalizados": "lixo"})

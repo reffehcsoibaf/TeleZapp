@@ -39,6 +39,7 @@ EVT_CHAR = object()
 EVT_SET_FOCUS = object()
 TE_PASSWORD = 2048
 EVT_CHOICE = EVT_TEXT = EVT_CHECKBOX = EVT_SPINCTRL = object()
+EVT_CHECKLISTBOX = object()
 DefaultPosition = (-1, -1)
 mensagens = []          # o que passou por MessageBox
 resposta_messagebox = [NO]
@@ -200,6 +201,17 @@ class SingleChoiceDialog:
 
     def Destroy(self):
         pass
+
+
+texto_digitado = [None]    # o que o TextEntryDialog "devolve" (None: o inicial)
+
+
+class TextEntryDialog(SingleChoiceDialog):
+    def __init__(self, pai, texto, titulo, valor=""):
+        self.valor = valor
+
+    def GetValue(self):
+        return self.valor if texto_digitado[0] is None else texto_digitado[0]
 
 
 class MultiChoiceDialog(SingleChoiceDialog):
@@ -394,6 +406,22 @@ class ListBox(Janela):
 
     def selecionado(self):
         return self.itens[self.sel] if self.sel >= 0 else None
+
+
+class CheckListBox(ListBox):
+    def __init__(self, *a, choices=(), **k):
+        super().__init__()
+        self.itens, self.marcas = list(choices), {}
+
+    def Set(self, itens):
+        super().Set(itens)
+        self.marcas = {}
+
+    def Check(self, i, marcar=True):
+        self.marcas[i] = bool(marcar)
+
+    def IsChecked(self, i):
+        return self.marcas.get(i, False)
 
 
 class ListCtrl(Janela):

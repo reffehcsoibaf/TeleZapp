@@ -8,6 +8,7 @@ from telezapp import config
 from telezapp.midia import velocidade as vel
 from telezapp.nucleo import atalhos as nucleo_atalhos
 from telezapp.nucleo import codigo_secreto as cs
+from telezapp.nucleo import filtros_personalizados as fp
 from telezapp.nucleo import lista_conversas as lc
 from telezapp.nucleo import lista_mensagens as lm
 from telezapp.nucleo import pacotes_de_som
@@ -149,6 +150,7 @@ class ModeloConfiguracoes:
         self.lista_pendente = None       # lista de conversas ainda nao aplicada
         self.lista_msg_pendente = None   # lista de mensagens, idem
         self.aviso_pendente = None       # aviso de mensagem nova, idem
+        self.filtros_pendentes = None    # filtros personalizados, idem
 
     # ------------------------------------------------------------ consulta
     def lista_de_categorias(self):
@@ -194,6 +196,10 @@ class ModeloConfiguracoes:
             _destinos_da_lista("lista_mensagens", "Lista de mensagens", lm) +
             _destinos_da_lista("aviso_nova", "Aviso de mensagem nova",
                                _aviso()) +
+            [Destino("Filtros: ativar e criar filtros personalizados",
+                     "filtros", "", "Abre a janela Filtros.",
+                     "filtro personalizado conta servico tipo conversa "
+                     "novo renomear excluir")] +
             _destinos_dos_sons(self.sons) + _destinos_da_privacidade() +
             _destinos_do_codigo() + _destinos_da_ia())
             if casa(d.rotulo, d.descricao, d.termos)]
@@ -496,11 +502,31 @@ class ModeloConfiguracoes:
         else:
             self.aviso_pendente = valor
 
+    # ------------------------------------------ filtros personalizados
+    def filtros_atuais(self):
+        """O que esta guardado: {"ativo", "lista"}."""
+        return fp.normalizar(self.cfg.get("filtros_personalizados"))
+
+    def filtros_em_uso(self):
+        """Os filtros personalizados com o que ainda nao foi aplicado."""
+        if self.filtros_pendentes is not None:
+            return self.filtros_pendentes
+        return self.filtros_atuais()
+
+    def filtros_definir(self, valor):
+        valor = fp.normalizar(valor)
+        if valor == self.filtros_atuais():
+            self.filtros_pendentes = None
+        else:
+            self.filtros_pendentes = valor
+
     def aplicar(self, aplicador):
         """Entrega cada mudanca ao aplicador(chave, valor) e zera."""
         feitas = self.mudancas()
         aviso = self.aviso_pendente
         self.aviso_pendente = None
+        filtros = self.filtros_pendentes
+        self.filtros_pendentes = None
         atalhos = self.atalhos_pendentes
         self.atalhos_pendentes = None
         lista = self.lista_pendente
@@ -538,6 +564,9 @@ class ModeloConfiguracoes:
         if aviso is not None:
             aplicador("aviso_nova", aviso)
             feitas.append(("aviso_nova", aviso))
+        if filtros is not None:
+            aplicador("filtros_personalizados", filtros)
+            feitas.append(("filtros_personalizados", filtros))
         if atalhos is not None:
             aplicador("atalhos", atalhos)
             feitas.append(("atalhos", atalhos))

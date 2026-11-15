@@ -100,7 +100,7 @@ class Manifesto:
 EXTRAS = ("ia_ordem", "ia_modelos", "pacote_de_sons", "sons_desativados",
           "sons_de_conversa",
           "atalhos", "lista_conversas", "lista_mensagens", "aviso_nova",
-          "participantes_silenciados")
+          "participantes_silenciados", "filtros_personalizados")
 
 
 def opcoes_do_backup(dados, partes=None):
@@ -198,6 +198,11 @@ def opcoes_validas(lidas, partes=None):
         for chave, nucleo in (("lista_conversas", lista_conversas),
                               ("lista_mensagens", lista_mensagens)):
             boas[chave] = nucleo.definir_digitar(boas.get(chave), "campo")
+    filtros = lidas.get("filtros_personalizados")
+    if isinstance(filtros, dict):
+        from telezapp.nucleo import filtros_personalizados
+        boas["filtros_personalizados"] = filtros_personalizados.normalizar(
+            filtros)
     por_conversa = lidas.get("sons_de_conversa")
     if isinstance(por_conversa, dict):
         boas["sons_de_conversa"] = {

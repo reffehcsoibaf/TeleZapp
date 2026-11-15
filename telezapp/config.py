@@ -1341,6 +1341,9 @@ PADROES.update({
     "estilo": 1,             # antigo "Como cada mensagem e lida"; so migra
     "atalhos": {},           # funcao -> combinacao escolhida ("" = sem atalho)
     "participantes_silenciados": {},  # ver nucleo/silenciados.py
+    "filtros_personalizados": {"ativo": False, "lista": []},  # ver
+    #                                nucleo/filtros_personalizados.py
+    "filtro_personalizado": "",       # o filtro escolhido na tela principal
     "sons_de_conversa": {},  # "conta|conversa" -> arquivo em sons/conversas
     "ordem_das_fixadas": [],  # "conta|conversa" na ordem em que as fixadas ficam
     "ia_ordem": {},          # tarefa -> provedores ligados, na ordem de tentativa

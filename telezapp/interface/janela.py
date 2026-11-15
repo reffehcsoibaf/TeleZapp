@@ -45,6 +45,7 @@ from telezapp.interface.busca import DialogoBusca
 from telezapp.interface.busca_canais import DialogoBuscaDeCanais
 from telezapp.interface.busca_global import DialogoBuscaGlobal
 from telezapp.nucleo import busca as busca_nucleo
+from telezapp.nucleo import filtros_personalizados as filtros_nucleo
 from telezapp.nucleo import busca_global as busca_global_nucleo
 from telezapp.interface import dispositivos as ui_dispositivos
 from telezapp.midia import armazem
@@ -476,6 +477,10 @@ class Janela(wx.Frame):
         self.filtro_tipo = self._filtro_tipo_salvo(cfg)
         self.filtro_conta = cfg.get("filtro_conta") or m.CONTA_TODAS
         self._opcoes_conta = []       # (valor, rotulo) da caixa de contas
+        # filtros personalizados (nucleo/filtros_personalizados.py)
+        self.filtros_pers = filtros_nucleo.normalizar(
+            cfg.get("filtros_personalizados"))
+        self.filtro_pers_id = cfg.get("filtro_personalizado") or ""
         self._chaves_conv = []        # chave de cada item da lista
         self._rotulos_conv = []       # texto de cada item da lista
         # rajadas (fila do WhatsApp ao abrir): a lista e refeita uma vez por
@@ -603,6 +608,7 @@ class Janela(wx.Frame):
         log.info("modo de exibição: %s", self.modo_exibicao)
         self._criar_controles()
         self._rotular_controles()
+        self._sincronizar_filtros_personalizados()
         self.CreateStatusBar()
         self._aplicar_letra()
         self.Bind(wx.EVT_CLOSE, self._ao_fechar)
@@ -940,8 +946,8 @@ class Janela(wx.Frame):
             "gerenciar_contas": lambda e: self._gerenciar_contas(),
             "editar_perfil": lambda e: self._editar_perfil(),
             "reconectar": lambda e: self._reconectar(),
-            "ir_filtro_conta": lambda e: self._ir_para(self.cx_conta, ""),
-            "ir_filtro_tipo": lambda e: self._ir_para(self.cx_tipo, ""),
+            "ir_filtro_conta": lambda e: self._ir_filtro_conta(),
+            "ir_filtro_tipo": lambda e: self._ir_filtro_tipo(),
             "buscar_conv": lambda e: self._ir_para(self.campo_busca, ""),
             "busca_criterios": lambda e: self._busca_por_criterios(),
             "busca_global": lambda e: self._busca_global(),
@@ -1412,6 +1418,9 @@ class Janela(wx.Frame):
             painel, choices=[r for _, r in self._tipos_atuais],
             name="Tipo de conversa")
         self.cx_tipo.SetSelection(self._indice_tipo())
+        rot_cx_filtro = wx.StaticText(painel, label="Filtro")
+        self.cx_filtro = wx.Choice(painel, name="Filtro")
+        self._rot_filtros = (rot_cx_conta, rot_cx_tipo, rot_cx_filtro)
         rot_busca = wx.StaticText(painel, label="Buscar conversa")
         self.campo_busca = wx.TextCtrl(painel, name="Buscar conversa",
                                        style=wx.TE_PROCESS_ENTER)
@@ -1429,6 +1438,7 @@ class Janela(wx.Frame):
         self.botao_sair.Bind(wx.EVT_BUTTON, seguro(lambda e: self._sair()))
         self.cx_conta.Bind(wx.EVT_CHOICE, seguro(self._ao_filtro_conta))
         self.cx_tipo.Bind(wx.EVT_CHOICE, seguro(self._ao_filtro_tipo))
+        self.cx_filtro.Bind(wx.EVT_CHOICE, seguro(self._ao_filtro_pers))
         rot_conv = wx.StaticText(painel, label="Conversas")
         self.lista_conv = ListaDeTextos(painel, name="Conversas")
         self.rot_msgs = wx.StaticText(painel, label="Mensagens")
@@ -1495,6 +1505,7 @@ class Janela(wx.Frame):
         self._controles_atalho = [
             (rot_cx_conta, "Serviço ou conta", "ir_filtro_conta", ""),
             (rot_cx_tipo, "Tipo de conversa", "ir_filtro_tipo", ""),
+            (rot_cx_filtro, "Filtro", "ir_filtro_conta", ""),
             (rot_busca, "Buscar conversa", "buscar_conv", ""),
             (self.botao_busca, "Busca por critérios", "busca_criterios", ""),
             (self.botao_sair, "Sair", "sair", ""),
@@ -1512,6 +1523,8 @@ class Janela(wx.Frame):
         esq.Add(self.cx_conta, 0, wx.EXPAND | wx.BOTTOM, 6)
         esq.Add(rot_cx_tipo, 0, wx.BOTTOM, 2)
         esq.Add(self.cx_tipo, 0, wx.EXPAND | wx.BOTTOM, 6)
+        esq.Add(rot_cx_filtro, 0, wx.BOTTOM, 2)
+        esq.Add(self.cx_filtro, 0, wx.EXPAND | wx.BOTTOM, 6)
         esq.Add(rot_busca, 0, wx.BOTTOM, 2)
         esq.Add(self.campo_busca, 0, wx.EXPAND | wx.BOTTOM, 6)
         esq.Add(self.botao_busca, 0, wx.BOTTOM, 6)
@@ -2473,14 +2486,14 @@ class Janela(wx.Frame):
                 if soma is not None and "#" not in c.id:
                     c.nao_lidas = soma
         favoritas = self.banco.conversas_com_favoritas() \
-            if self.filtro_tipo == "favoritas" and self.banco else ()
+            if self._precisa_das_favoritas() and self.banco else ()
         posicoes = self._posicoes_das_fixadas() \
             if self.cfg.get("manter_posicao_fixadas") else None
         self.conversas = sorted(
             (c for c in self.indice.values()
-             if "#" not in c.id and (c.chave == self.atual or m.passa_filtro(
-                 c, self.filtro_tipo, self.filtro_conta, self.busca,
-                 favoritas))),
+             if "#" not in c.id and (
+                 c.chave == self.atual
+                 or self._passa_nos_filtros(c, favoritas))),
             key=lambda c: (not c.fixada, posicoes.get(_chave_em_texto(c), 0)
                            if posicoes is not None and c.fixada else -c.data))
         self._atualizar_titulo()
@@ -3714,7 +3727,7 @@ class Janela(wx.Frame):
         m.atualizar_extras(x, favorita=favorita)
         self.banco.salvar_mensagens([x])
         self._preencher_mensagens()
-        if self.filtro_tipo == "favoritas":
+        if self._precisa_das_favoritas():
             self._aplicar_filtros(falar=False)
         prov = self.contas.provedor(x.conta_id) if self.contas else None
         if prov is not None and getattr(prov, "FAVORITA_NA_CONTA", False):
@@ -4131,8 +4144,97 @@ class Janela(wx.Frame):
         self.cx_conta.Set([r for _, r in opcoes])
         self.cx_conta.SetSelection(valores.index(self.filtro_conta))
 
+    # ------------------------------------------- filtros personalizados
+    def _filtros_em_uso(self):
+        """Caixa de ativar marcada e pelo menos um filtro criado."""
+        return filtros_nucleo.em_uso(self.filtros_pers)
+
+    def _filtro_pers_atual(self):
+        if not self._filtros_em_uso():
+            return None
+        return filtros_nucleo.achar(self.filtros_pers, self.filtro_pers_id)
+
+    def _filtro_pers_vale(self):
+        """O filtro personalizado manda na lista. Nas trancadas (codigo
+        digitado) valem o tipo e a conta de sempre."""
+        return (self._filtro_pers_atual() is not None
+                and self.filtro_tipo != "trancadas")
+
+    def _passa_nos_filtros(self, c, favoritas):
+        if self._filtro_pers_vale():
+            return filtros_nucleo.passa(c, self._filtro_pers_atual(),
+                                        self.busca, favoritas)
+        return m.passa_filtro(c, self.filtro_tipo, self.filtro_conta,
+                              self.busca, favoritas)
+
+    def _precisa_das_favoritas(self):
+        if self._filtro_pers_vale():
+            return filtros_nucleo.usa_favoritas(self._filtro_pers_atual())
+        return self.filtro_tipo == "favoritas"
+
+    def _sincronizar_filtros_personalizados(self):
+        """Com os filtros em uso, as caixas de servico, conta e tipo saem
+        da tela e entra a caixa Filtro (so quando ha mais de um filtro)."""
+        em_uso = self._filtros_em_uso()
+        lista = self.filtros_pers["lista"] if em_uso else []
+        if em_uso:
+            atual = filtros_nucleo.achar(self.filtros_pers,
+                                         self.filtro_pers_id)
+            self.filtro_pers_id = atual["id"]
+            nomes = [f["nome"] for f in lista]
+            if nomes != [self.cx_filtro.GetString(i)
+                         for i in range(self.cx_filtro.GetCount())]:
+                self.cx_filtro.Set(nomes)
+            self.cx_filtro.SetSelection(
+                [f["id"] for f in lista].index(self.filtro_pers_id))
+        rot_conta, rot_tipo, rot_filtro = self._rot_filtros
+        for parte in (rot_conta, self.cx_conta, rot_tipo, self.cx_tipo):
+            parte.Show(not em_uso)
+        for parte in (rot_filtro, self.cx_filtro):
+            parte.Show(em_uso and len(lista) > 1)
+        self.painel.Layout()
+
+    def _ao_filtro_pers(self, evento=None):
+        i = self.cx_filtro.GetSelection()
+        lista = self.filtros_pers["lista"]
+        if 0 <= i < len(lista):
+            self._limpar_busca()
+            self.filtro_pers_id = lista[i]["id"]
+            self.cfg.set("filtro_personalizado", self.filtro_pers_id)
+            self._aplicar_filtros(
+                falar=bool(self.cfg.get("falar_quantas_no_filtro")))
+
+    def _ir_filtro_conta(self):
+        """Alt+4: a caixa de servico ou conta; com filtros personalizados,
+        a caixa Filtro (ou, com um so, o nome dele)."""
+        if not self._filtros_em_uso():
+            self._ir_para(self.cx_conta, "")
+        elif len(self.filtros_pers["lista"]) > 1:
+            self._ir_para(self.cx_filtro, "")
+        else:
+            self.fala.falar("Filtro: %s." % self._filtro_pers_atual()["nome"],
+                            interromper=True)
+
+    def _ir_filtro_tipo(self):
+        if not self._filtros_em_uso():
+            self._ir_para(self.cx_tipo, "")
+        else:
+            self.fala.falar("Os filtros personalizados estão ativados.",
+                            interromper=True)
+
+    def _aplicar_filtros_personalizados(self, valor):
+        """Veio de Configuracoes, Interface, Filtros."""
+        self.filtros_pers = filtros_nucleo.normalizar(valor)
+        self.cfg.set("filtros_personalizados", self.filtros_pers)
+        self._sincronizar_filtros_personalizados()
+        self._ordenar()
+        self._preencher_conversas()
+
     def _resumo_filtro(self):
         n = len(self._chaves_conv)
+        if self._filtro_pers_vale():
+            return ("Nenhuma conversa" if n == 0 else
+                    "1 conversa" if n == 1 else "%d conversas" % n)
         return "%s. %s" % (
             dict(self._opcoes_conta).get(self.filtro_conta, ""),
             "Nenhuma conversa" if n == 0 else
@@ -4142,9 +4244,11 @@ class Janela(wx.Frame):
         self._ordenar()
         self._preencher_conversas()
         if falar:
-            self.fala.falar("%s, %s" % (
-                dict(m.FILTROS_TIPO)[self.filtro_tipo],
-                self._resumo_filtro()), interromper=True)
+            nome = (self._filtro_pers_atual()["nome"]
+                    if self._filtro_pers_vale()
+                    else dict(m.FILTROS_TIPO)[self.filtro_tipo])
+            self.fala.falar("%s, %s" % (nome, self._resumo_filtro()),
+                            interromper=True)
 
     def _limpar_busca(self):
         """Esvazia o campo de busca de conversas. False se ja estava vazio
@@ -4180,6 +4284,10 @@ class Janela(wx.Frame):
 
     def _ir_para_tipo(self, valor):
         """Escolhe o tipo direto e leva o foco para a lista de conversas."""
+        if self._filtros_em_uso():
+            self.fala.falar("Os filtros personalizados estão ativados. Use "
+                            "a caixa Filtro.", interromper=True)
+            return
         if valor not in dict(self._tipos_atuais):
             self.fala.falar("As conversas trancadas estão escondidas.",
                             interromper=True)
@@ -10916,6 +11024,8 @@ class Janela(wx.Frame):
             self._aplicar_privacidade_conta(valor)
         elif chave == "atalhos":
             self._aplicar_atalhos(valor)
+        elif chave == "filtros_personalizados":
+            self._aplicar_filtros_personalizados(valor)
         elif chave == "lista_conversas":
             self.cfg.set(chave, lista_conv_nucleo.normalizar(valor))
             self._sincronizar_menu_da_lista()
