@@ -54,7 +54,8 @@ def test_extensoes():
     assert armazem.com_extensao("x/a", ".pdf") == "x/a.pdf"
 
 
-def test_apagar_conta_remove_a_pasta(dados):
+def test_apagar_conta_remove_a_pasta(dados, monkeypatch):
+    monkeypatch.setattr(config, "contas_separadas", lambda: True)
     pasta = armazem.pasta_da_conversa("c1", "x")
     open(os.path.join(pasta, "a.jpg"), "wb").write(b"123")
     assert armazem.tamanho_da_pasta("c1") == 3

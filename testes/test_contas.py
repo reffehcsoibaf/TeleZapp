@@ -69,6 +69,7 @@ def test_contas_salvas_sao_iniciadas_e_reconectadas(tmp_path, monkeypatch):
 
 
 def test_parear_de_novo_e_remover_apagam_a_sessao(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "contas_separadas", lambda: True)
     from telezapp.armazenamento.banco import Banco
     from telezapp.nucleo import contas as cm
     from telezapp.nucleo.modelos import Conversa

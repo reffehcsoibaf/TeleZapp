@@ -22,6 +22,7 @@ from telezapp.nucleo import modelos as m
 def cfg(tmp_path, monkeypatch):
     monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path / "dados"))
     c = config.Config()
+    c.set("contas_em_pastas", True)     # o padrao e desmarcada; aqui, separadas
     monkeypatch.setattr(config, "_cfg_de_contas", c)
     return c
 
@@ -681,3 +682,13 @@ def test_voltar_ao_layout_antigo_mantem_o_que_ja_esta_la(cfg):
     # a copia que sobrou na conta saiu junto com a pasta dela
     assert not os.path.exists(config.pasta_da_conta("t1"))
     assert migracao.migrar(cfg) == 0
+
+
+def test_o_padrao_e_um_banco_so_sem_pastas_por_conta(tmp_path, monkeypatch):
+    """Sem mexer nas opcoes, ninguem e migrado: o banco unico de sempre."""
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path / "dados"))
+    c = config.Config()
+    monkeypatch.setattr(config, "_cfg_de_contas", c)
+    assert c.get("contas_em_pastas") is False
+    assert config.contas_separadas() is False
+    assert not c.get("contas_pasta_personalizada")

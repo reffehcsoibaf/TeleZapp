@@ -382,9 +382,10 @@ def test_backup_antigo_restaura_atalhos_e_sons_com_as_configuracoes(tmp_path):
     assert (destino / "sons" / "pacotes" / "Meu" / "nova.ogg").exists()
 
 
-def test_formato_novo_um_banco_por_conta(tmp_path):
+def test_formato_novo_um_banco_por_conta(tmp_path, monkeypatch):
     """No formato novo, cada conta leva o banco, as sessoes e as midias
     dela, e o restore distribui nas pastas das contas."""
+    monkeypatch.setattr(config, "contas_separadas", lambda: True)
     dados = tmp_path / "dados"
     pasta = dados / "contas" / "w1"
     os.makedirs(pasta / "sessoes")

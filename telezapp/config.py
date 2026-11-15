@@ -183,7 +183,7 @@ def contas_separadas():
     banco so, no lugar de sempre."""
     cfg = _cfg_de_contas
     if cfg is None:
-        return True
+        return False
     return bool(cfg.get("contas_em_pastas"))
 
 
@@ -636,7 +636,7 @@ OPCOES = (
           "Vale na próxima abertura.", reabrir=True),
     Opcao("contas_em_pastas",
           "Guardar os dados de cada conta em uma pasta separada",
-          "Sistema", True,
+          "Sistema", False,
           "Cada conta tem uma pasta própria, com o banco de conversas, as "
           "sessões e as mídias dentro dela. Desmarcada, todas as contas "
           "dividem os mesmos dados no lugar de sempre, como nas versões "

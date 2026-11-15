@@ -9,6 +9,8 @@ Antes de escrever aqui, confira a versão em vigor: `git fetch --tags` e
 
 ## Próxima versão (ainda sem número)
 
+Separação por conta DESMARCADA por padrão (`contas_em_pastas` = False): quem atualiza continua com o banco único de sempre, sem migração; quem quiser marca em Configurações, Sistema. Sem separação e sem pasta personalizada, o TeleZapp se comporta como antes do PR.
+
 Pasta das contas personalizada (Configuracoes, Sistema): o botao "Copiar as contas para a pasta escolhida..." saiu. A copia rodava com o aplicativo vivo e, pior, depois de o OK salvar a pasta nova a origem calculada ja era a pasta nova — para todas as contas dava "A pasta nova é a mesma de antes" e sobravam copias pela metade. Agora o OK pergunta "Reiniciar agora?" como sempre; no reinicio, as contas desconectam ao fechar e a migracao da abertura leva cada conta da pasta padrao para a pasta escolhida (com conferencia e retomavel), antes de elas conectarem de novo — as contas voltam no lugar certo, sem copia manual.
 
 Migrar entre os dois layout de dados (voltar ao antigo, ou ir para as pastas, em Configuracoes, Sistema): depois de copiar as linhas para o banco novo (unico ou da conta), o -wal dele e despejado para o arquivo (`PRAGMA wal_checkpoint(TRUNCATE)`, com falha ignorada e logada) e a troca dos caminhos das midias roda na conexao ja aberta, tentando de novo a cada meio segundo (e tambem quando abre o arquivo por conta propria): a primeira escrita no banco recem-criado de dezenas de MB podia falhar ("unable to open database file") e impedir o TeleZapp de abrir.
