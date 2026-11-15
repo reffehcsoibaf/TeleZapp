@@ -9463,6 +9463,7 @@ def test_dialogos_de_backup_tem_a_lista_de_contas():
     from telezapp.interface import backup as jb
     from telezapp.nucleo import backup as bk
     d = jb.DialogoBackup(None, [("t1", "Um, Telegram"), ("t2", "Dois")])
+    d.tipo.SetSelection(jb.SELETIVO)
     assert d.contas() is None                        # todas marcadas
     d.caixas_de_contas["t2"].SetValue(False)
     assert d.contas() == ["t1"]
@@ -9637,3 +9638,23 @@ def test_janela_de_filtros_cria_renomeia_e_exclui(monkeypatch):
         wx_falso.resposta_messagebox[0] = wx_falso.YES
     assert guardado[0]["lista"] == [] and guardado[0]["ativo"] is True
     assert d.lista.itens == []
+
+
+def test_backup_completo_leva_tudo_e_o_seletivo_mostra_as_partes():
+    from telezapp.interface import backup as jb
+    from telezapp.nucleo import backup as bk
+    d = jb.DialogoBackup(None, [("t1", "Um"), ("t2", "Dois")])
+    assert d.tipo.GetSelection() == jb.COMPLETO      # o primeiro item
+    assert d.tipo.itens == ["Backup completo", "Backup seletivo"]
+    assert d.partes() == [p for p, _ in bk.PARTES]
+    assert "filtros" in d.partes() and d.contas() is None
+    assert all(c.visivel is False for c in d._seletivos)   # escondidas
+    d.caixas_de_contas["t2"].SetValue(False)
+    assert d.contas() is None                        # no completo, todas
+    d.tipo.SetSelection(jb.SELETIVO)
+    d._mudou_o_tipo(None)
+    assert all(c.visivel is True for c in d._seletivos)
+    assert d.partes() == ["configuracoes", "atalhos", "sons", "filtros"]
+    assert d.contas() == ["t1"]
+    d.caixas["filtros"].SetValue(False)
+    assert "filtros" not in d.partes()

@@ -34,6 +34,7 @@ PARTES = (
     ("atalhos", "Atalhos personalizados (as teclas que você escolheu)"),
     ("sons", "Configurações de sons (o pacote escolhido, os sons ligados e "
              "desligados e os sons que você importou)"),
+    ("filtros", "Filtros personalizados da lista de conversas"),
     ("contas", "Contas e sessões, com o código secreto das conversas "
                "trancadas (dão acesso às suas contas)"),
     ("conversas", "Conversas, mensagens e contatos guardados"),
@@ -44,10 +45,11 @@ NOMES_PARTES = dict(PARTES)
 # As tres partes que moram no configuracoes.json; as demais opcoes, e as que
 # nao estao aqui, sao da parte "configuracoes". Nos backups antigos
 # (formato 1) tudo isso era uma parte so, "configuracoes"
-PARTES_DE_OPCOES = ("configuracoes", "atalhos", "sons")
+PARTES_DE_OPCOES = ("configuracoes", "atalhos", "sons", "filtros")
 OPCOES_DE_PARTE = {"atalhos": ("atalhos", "mostrar_atalhos"),
                    "sons": ("pacote_de_sons", "sons_desativados",
-                            "sons_de_conversa")}
+                            "sons_de_conversa"),
+                   "filtros": ("filtros_personalizados",)}
 FORMATO = 2
 
 

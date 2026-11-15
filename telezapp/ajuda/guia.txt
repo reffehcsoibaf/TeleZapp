@@ -768,10 +768,11 @@ Para encerrar de verdade, use Sair: Ctrl+Q, o botão Sair ou o menu do ícone. "
 "Abrir o TeleZapp ao entrar no Windows" abre o programa sozinho quando você entra na sua conta. Com o segundo plano ligado, ele abre minimizado, sem tirar o foco do que você faz.
 
 # Backup e restauração
-Ferramentas, Fazer backup abre uma janela para marcar o que incluir:
+Ferramentas, Fazer backup abre uma janela. O primeiro campo é o tipo de backup: Backup completo, que leva tudo, ou Backup seletivo, em que você marca o que incluir. No completo, o Tab vai direto para os campos de senha. No seletivo aparecem as partes:
 As configurações.
 Os atalhos personalizados.
 As configurações de sons: o pacote, os sons ligados e desligados e os sons que você importou.
+Os filtros personalizados da lista de conversas.
 As contas e sessões, que dão acesso às suas contas.
 As conversas, mensagens e contatos.
 As mídias baixadas.

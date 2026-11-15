@@ -583,3 +583,22 @@ def test_filtros_personalizados_vao_e_voltam_no_backup():
          "tipos": ["grupos"]}]}                       # sem trancadas
     assert "filtros_personalizados" not in bk.opcoes_validas(
         {"filtros_personalizados": "lixo"})
+
+
+def test_filtros_personalizados_sao_uma_parte_do_backup(tmp_path):
+    valor = {"ativo": True, "lista": [
+        {"id": "a", "nome": "Grupos", "contas": [], "tipos": ["grupos"]}]}
+    origem = tmp_path / "a"
+    os.makedirs(origem)
+    arquivo = str(tmp_path / "b.zip")
+    resumo = bk.criar(arquivo, str(origem), {"filtros_personalizados": valor,
+                                             "status_no_titulo": False},
+                      ["filtros"])
+    assert resumo == {"filtros": 1}
+    assert bk.ler_manifesto(arquivo).partes == ["filtros"]
+    with pyzipper.AESZipFile(arquivo) as z:
+        lido = json.loads(z.read("configuracoes.json").decode("utf-8"))
+    assert list(lido["opcoes"]) == ["filtros_personalizados"]   # so ela
+    opcoes, espera = bk.restaurar(arquivo, "", ["filtros"], str(origem))
+    assert opcoes == {"filtros_personalizados": valor} and espera == []
+    assert "filtros" in bk.NOMES_PARTES

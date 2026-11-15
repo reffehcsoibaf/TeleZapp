@@ -7,19 +7,24 @@ import wx
 from telezapp.nucleo import backup as bk
 
 
-def _caixas_de_contas(janela, lay, contas, titulo):
+def _caixas_de_contas(janela, lay, contas, titulo, acumular=None):
     """Uma caixa por conta (com um rotulo antes): so aparece quando ha mais
-    de uma conta. Devolve {conta_id: caixa}."""
+    de uma conta. Devolve {conta_id: caixa}; `acumular`, se dado, recebe
+    tambem o rotulo e as caixas (para mostrar e esconder juntos)."""
     caixas = {}
     if len(contas) < 2:
         return caixas
-    lay.Add(wx.StaticText(janela, label=titulo), 0,
-            wx.LEFT | wx.RIGHT | wx.TOP, 10)
+    rotulo_lista = wx.StaticText(janela, label=titulo)
+    lay.Add(rotulo_lista, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+    if acumular is not None:
+        acumular.append(rotulo_lista)
     for conta_id, rotulo in contas:
         c = wx.CheckBox(janela, label=rotulo)
         c.SetValue(True)
         lay.Add(c, 0, wx.LEFT | wx.RIGHT, 20)
         caixas[conta_id] = c
+        if acumular is not None:
+            acumular.append(c)
     return caixas
 
 
@@ -29,26 +34,45 @@ def _contas_marcadas(caixas):
     return None if len(marcadas) == len(caixas) else marcadas
 
 
+COMPLETO, SELETIVO = 0, 1
+TIPOS_DE_BACKUP = ("Backup completo", "Backup seletivo")
+
+
 class DialogoBackup(wx.Dialog):
-    """Escolhe as partes, as contas e a senha (opcional) do backup.
-    `contas`: [(conta_id, rotulo)] das contas que existem."""
+    """Escolhe o tipo do backup (completo ou seletivo) e, no seletivo, as
+    partes e as contas; depois, a senha (opcional). No completo vai tudo, e
+    o Tab pula direto para a senha. `contas`: [(conta_id, rotulo)] das
+    contas que existem."""
 
     def __init__(self, pai, contas=()):
         super().__init__(pai, title="Fazer backup",
                          style=wx.DEFAULT_DIALOG_STYLE)
         lay = wx.BoxSizer(wx.VERTICAL)
         lay.Add(wx.StaticText(
-            self, label="Escolha o que vai no backup. O arquivo é um zip "
-                        "que o 7-Zip também abre."), 0, wx.ALL, 10)
+            self, label="O arquivo do backup é um zip que o 7-Zip também "
+                        "abre. O backup completo leva tudo: configurações, "
+                        "atalhos, sons, filtros, contas, conversas e "
+                        "mídias. No seletivo, você escolhe o que vai."),
+            0, wx.ALL, 10)
+        lay.Add(wx.StaticText(self, label="&Tipo de backup"), 0,
+                wx.LEFT | wx.RIGHT, 10)
+        self.tipo = wx.Choice(self, choices=list(TIPOS_DE_BACKUP),
+                              name="Tipo de backup")
+        self.tipo.SetSelection(COMPLETO)
+        lay.Add(self.tipo, 0, wx.EXPAND | wx.ALL, 10)
+        self._seletivos = []     # so aparecem no backup seletivo
         self.caixas = {}
         for parte, rotulo in bk.PARTES:
             c = wx.CheckBox(self, label=rotulo)
-            c.SetValue(parte in ("configuracoes", "atalhos", "sons"))
+            c.SetValue(parte in ("configuracoes", "atalhos", "sons",
+                                 "filtros"))
             lay.Add(c, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
             self.caixas[parte] = c
+            self._seletivos.append(c)
         self.caixas_de_contas = _caixas_de_contas(
             self, lay, contas, "Contas que vão no backup (valem para as "
-                               "sessões, as conversas e as mídias):")
+                               "sessões, as conversas e as mídias):",
+            self._seletivos)
         lay.Add(wx.StaticText(
             self, label="Com senha, o arquivo é cifrado (AES-256) e as "
                         "chaves dos provedores de IA vão junto, se a parte "
@@ -70,14 +94,31 @@ class DialogoBackup(wx.Dialog):
                 wx.ALL | wx.ALIGN_RIGHT, 10)
         self.SetSizerAndFit(lay)
         self.Bind(wx.EVT_BUTTON, self._ok, id=wx.ID_OK)
+        self.tipo.Bind(wx.EVT_CHOICE, self._mudou_o_tipo)
+        self._mostrar_seletivos()
         self.CentreOnParent()
+        self.tipo.SetFocus()
+
+    def seletivo(self):
+        return self.tipo.GetSelection() == SELETIVO
+
+    def _mostrar_seletivos(self):
+        """Partes e contas so aparecem no backup seletivo."""
+        for parte in self._seletivos:
+            parte.Show(self.seletivo())
+        self.Layout()
+        self.Fit()
+
+    def _mudou_o_tipo(self, evt):
+        self._mostrar_seletivos()
 
     def _ok(self, evt):
         if not self.partes():
             wx.MessageBox("Marque pelo menos uma parte.", "Fazer backup",
                           wx.OK | wx.ICON_WARNING, self)
             return
-        if self.caixas_de_contas and self.contas() == []:
+        if self.seletivo() and self.caixas_de_contas and \
+                self.contas() == []:
             wx.MessageBox("Marque pelo menos uma conta.", "Fazer backup",
                           wx.OK | wx.ICON_WARNING, self)
             return
@@ -85,7 +126,7 @@ class DialogoBackup(wx.Dialog):
             wx.MessageBox("As duas senhas não são iguais.", "Fazer backup",
                           wx.OK | wx.ICON_WARNING, self)
             return
-        if self.caixas["contas"].GetValue() and not self.senha.GetValue():
+        if "contas" in self.partes() and not self.senha.GetValue():
             r = wx.MessageBox(
                 "O backup vai levar as sessões das suas contas, que dão "
                 "acesso a elas, e está sem senha. Quem tiver o arquivo "
@@ -94,8 +135,7 @@ class DialogoBackup(wx.Dialog):
                 self)
             if r != wx.YES:
                 return
-        if self.caixas["conversas"].GetValue() and (
-                not self.caixas["contas"].GetValue()):
+        if "conversas" in self.partes() and "contas" not in self.partes():
             r = wx.MessageBox(
                 bk.AVISO_CONVERSAS_SEM_CONTAS + " Marque também Contas e "
                 "sessões para levá-las a outra instalação. Fazer o backup "
@@ -106,10 +146,16 @@ class DialogoBackup(wx.Dialog):
         evt.Skip()
 
     def partes(self):
+        """Todas no backup completo; no seletivo, as marcadas."""
+        if not self.seletivo():
+            return [p for p, _ in bk.PARTES]
         return [p for p, c in self.caixas.items() if c.GetValue()]
 
     def contas(self):
-        """None: todas as contas; senao, os ids das marcadas."""
+        """None: todas as contas; senao, os ids das marcadas (so no
+        seletivo)."""
+        if not self.seletivo():
+            return None
         return _contas_marcadas(self.caixas_de_contas)
 
 
