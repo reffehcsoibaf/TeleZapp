@@ -4985,7 +4985,10 @@ class Janela(wx.Frame):
         prioridade.chamada_em_curso(c.ativa)
         a = ch.apresentar(c)
         self.SetStatusText(a.situacao)
-        self.fala.falar(a.fala, interromper=True)
+        if c.estado == ch.CONECTANDO:
+            self._anunciar_conexao(c, a.fala)
+        else:
+            self.fala.falar(a.fala, interromper=True)
         toque = a.som in ("toque", "chamando")
         if a.som:
             bipe(a.som, servico=self._servico_da_conta(c.conta_id))
@@ -4994,6 +4997,29 @@ class Janela(wx.Frame):
         self._atualizar_dialogo_chamada(c)
         if c.estado == ch.ENCERRADA:
             self.chamada = None
+
+    def _anunciar_conexao(self, c, texto):
+        """Atendida a chamada, o som leva alguns segundos para chegar. A fala
+        vem um instante depois de o foco ir para o Desligar (o leitor de tela
+        cala o que falava ao anunciar o foco) e se repete algumas vezes,
+        para o silencio nao parecer que travou."""
+        def ainda_conectando():
+            return self.chamada is c and c.estado == ch.CONECTANDO
+
+        def dizer():
+            if ainda_conectando():
+                self.fala.falar(texto, interromper=True)
+
+        def lembrar(n):
+            if not ainda_conectando():
+                return
+            self.fala.falar(ch.FALA_AINDA_CONECTANDO)
+            if n < ch.LEMBRETES_AO_CONECTAR:
+                wx.CallLater(ch.INTERVALO_DO_LEMBRETE_MS,
+                             lambda: lembrar(n + 1))
+        wx.CallLater(ch.ATRASO_DA_FALA_AO_ATENDER_MS, dizer)
+        wx.CallLater(ch.ATRASO_DA_FALA_AO_ATENDER_MS
+                     + ch.INTERVALO_DO_LEMBRETE_MS, lambda: lembrar(1))
 
     def _repetir_toque(self, c, estado, som):
         """Repete o som enquanto a chamada continua no mesmo estado."""

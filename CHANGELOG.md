@@ -9,6 +9,8 @@ Antes de escrever aqui, confira a versão em vigor: `git fetch --tags` e
 
 ## 2026.11.15.0
 
+Chamada atendida: a fala avisa que a comunicação está sendo estabelecida (`_anunciar_conexao`). Entre atender e o som chegar passam alguns segundos (7 s na medição), e o TeleZapp ficava calado (a fala "Conectando." saía junto do foco ir para o Desligar, que o leitor de tela anuncia e a cala). Agora ele diz "Atendida. Estabelecendo a comunicação com <nome>." 400 ms depois, e repete "Ainda estabelecendo a comunicação." duas vezes, de 4 em 4 s, enquanto a chamada seguir em CONECTANDO. **Sem teste ao vivo.**
+
 Botão "Iniciar chamada" escondido nos grupos e canais (`_mostrar_conversa`): não há chamada em grupo, e o botão ficava na ordem de Tab sem servir. Volta ao abrir uma conversa com uma pessoa. **Sem teste ao vivo.**
 
 Foco do leitor de tela nas janelas da chamada e dos detalhes da conversa: depois de apertar um botão, o foco ia para o início da janela. Nos detalhes (`DialogoTexto.definir`), os botões eram destruídos e refeitos a cada ação; agora o botão que tinha o foco é lembrado (pelo rótulo e pela posição, porque o rótulo pode mudar, como Trancar/Destrancar a conversa) e o foco volta a ele. Na janela da chamada (`DialogoChamada.mostrar`), todo redesenho mandava o foco para o botão principal (Desligar); agora ele só vai para lá quando o ESTADO da chamada muda, e nas outras atualizações (silenciar, câmera, tela, som) fica onde estava. **Sem teste ao vivo.**

@@ -269,7 +269,7 @@ def apresentar(c):
         return Apresentacao(
             "Conectando com %s" % quem,
             "Conectando o áudio com %s." % quem,
-            "Conectando.",
+            "Atendida. Estabelecendo a comunicação com %s." % quem,
             (DESLIGAR,), DESLIGAR)
     if c.estado == EM_CHAMADA:
         mudo = " Seu microfone está silenciado." if c.mudo else ""
@@ -293,6 +293,14 @@ def apresentar(c):
     texto = texto_encerramento(c)
     return Apresentacao(
         "Chamada encerrada", texto, texto, (FECHAR,), FECHAR, "desligada")
+
+
+# Depois de atender, a comunicacao leva alguns segundos: a fala lembra a
+# pessoa de que ainda esta conectando, algumas vezes, em vez de ficar calada
+ATRASO_DA_FALA_AO_ATENDER_MS = 400
+INTERVALO_DO_LEMBRETE_MS = 4000
+LEMBRETES_AO_CONECTAR = 2
+FALA_AINDA_CONECTANDO = "Ainda estabelecendo a comunicação."
 
 
 def rotulo_silenciar(mudo):

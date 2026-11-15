@@ -9832,3 +9832,32 @@ def test_botao_de_chamada_some_em_grupo_e_canal(j):
     assert j.botao_chamada.visivel is False
     j._abrir_conversa_de(privada)                 # volta a aparecer
     assert j.botao_chamada.visivel is not False
+
+
+def test_depois_de_atender_a_fala_avisa_que_esta_conectando(chamadas, monkeypatch):
+    j = chamadas.j
+    agendados = []
+    monkeypatch.setattr(jm.wx, "CallLater",
+                        lambda ms, f, *a, **k: agendados.append((ms, f)))
+    estado(j, "tocando", entrante=True)
+    chamadas.falas.clear()
+    agendados.clear()                        # (o toque tambem agenda)
+    estado(j, "conectando", entrante=True)
+    assert chamadas.falas == []              # a fala espera o foco assentar
+    (ms1, dizer), (ms2, lembrar) = agendados[:2]
+    assert ms1 == 400 and ms2 == 4400
+    dizer()
+    assert chamadas.falas == ["Atendida. Estabelecendo a comunicação com "
+                              "Ana."]
+    lembrar()
+    assert chamadas.falas[-1] == "Ainda estabelecendo a comunicação."
+    assert agendados[-1][0] == 4000          # e lembra de novo
+    agendados[-1][1]()
+    assert chamadas.falas.count("Ainda estabelecendo a comunicação.") == 2
+    assert len(agendados) == 3               # so duas vezes
+    # conectou: o que estava agendado nao fala mais
+    estado(j, "em chamada", entrante=True)
+    chamadas.falas.clear()
+    dizer()
+    lembrar()
+    assert chamadas.falas == []
