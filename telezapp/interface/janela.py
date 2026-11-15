@@ -11236,11 +11236,13 @@ class Janela(wx.Frame):
         """Salva num .zip (com senha, se a pessoa quiser) as partes que ela
         escolher: configuracoes, contas e sessoes, conversas e midias."""
         from telezapp.interface import backup as jb
-        dlg = jb.DialogoBackup(self)
+        dlg = jb.DialogoBackup(
+            self, [(i, r) for i, r, _ in self._itens_de_contas()])
         try:
             if dlg.ShowModal() != wx.ID_OK:
                 return
             partes, senha = dlg.partes(), dlg.senha.GetValue()
+            contas = dlg.contas()
         finally:
             dlg.Destroy()
         nome = time.strftime("TeleZapp-backup-%Y%m%d-%H%M%S.zip")
@@ -11267,7 +11269,8 @@ class Janela(wx.Frame):
                     caminho, config.pasta_dados(), dados, partes, senha,
                     copiar_banco=self.banco.copiar_para,
                     progresso=andamento,
-                    pasta_contas=config.pasta_do_layout_antigo())
+                    pasta_contas=config.pasta_do_layout_antigo(),
+                    contas=contas)
                 texto = "Backup salvo em %s%s." % (
                     caminho, " (com senha)" if senha else "")
                 grave = False
@@ -11347,11 +11350,16 @@ class Janela(wx.Frame):
         if not manifesto.partes:
             self.fala.falar("Este backup está vazio.")
             return
-        dlg = jb.DialogoRestaurar(self, manifesto)
+        try:
+            do_backup = backup.contas_do_backup(arquivo, senha)
+        except backup.ErroBackup:
+            do_backup = []
+        dlg = jb.DialogoRestaurar(self, manifesto, do_backup)
         try:
             if dlg.ShowModal() != wx.ID_OK:
                 return
             partes = dlg.partes()
+            contas = dlg.contas()
         finally:
             dlg.Destroy()
         if not partes:
@@ -11367,10 +11375,15 @@ class Janela(wx.Frame):
             if r != wx.YES:
                 return
         if set(partes) - set(backup.PARTES_DE_OPCOES):
+            de_algumas = contas is not None or manifesto.contas is not None
             r = wx.MessageBox(
-                "Restaurar vai trocar, na próxima abertura, o que o %s tem "
-                "hoje nessas partes pelo conteúdo do backup (o que havia fica "
-                "guardado). Continuar?" % NOME, "Restaurar backup",
+                ("Restaurar vai trocar, na próxima abertura, o que o %s tem "
+                 "hoje dessas partes, só nas contas escolhidas, pelo "
+                 "conteúdo do backup (o que havia fica guardado; as outras "
+                 "contas não mudam). Continuar?" if de_algumas else
+                 "Restaurar vai trocar, na próxima abertura, o que o %s tem "
+                 "hoje nessas partes pelo conteúdo do backup (o que havia "
+                 "fica guardado). Continuar?") % NOME, "Restaurar backup",
                 wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
             if r != wx.YES:
                 return
@@ -11382,7 +11395,7 @@ class Janela(wx.Frame):
                 extra = {}
                 opcoes, espera = backup.restaurar(
                     arquivo, senha, partes, config.pasta_dados(), extra,
-                    progresso=andamento)
+                    progresso=andamento, contas=contas)
                 erro = ""
             except backup.ErroBackup as e:
                 opcoes, espera, erro, extra = {}, [], str(e), {}

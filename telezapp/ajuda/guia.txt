@@ -765,9 +765,13 @@ As contas e sessões, que dão acesso às suas contas.
 As conversas, mensagens e contatos.
 As mídias baixadas.
 
+Com mais de uma conta, a janela também lista as contas, todas marcadas: desmarque as que ficam de fora. Isso vale para as sessões, as conversas e as mídias; assim dá para fazer o backup de só uma conta.
+
 Há campos de senha, opcionais, para proteger o arquivo. Depois, você escolhe onde salvar o zip. O TeleZapp avisa quando termina.
 
 Ferramentas, Restaurar backup pede o arquivo e a senha, se tiver, e mostra o que o backup contém, para você marcar o que volta.
+
+Se o backup tem mais de uma conta, a janela de restauração também lista as contas, para você escolher quais voltam. Num backup de algumas contas, ou escolhendo só algumas, só os dados dessas contas são trocados; as outras ficam como estão. As conversas do backup entram junto das que já existem, sem apagar as que só existem hoje.
 
 As configurações valem na hora. As contas, as conversas e as mídias trocam o que existe hoje na próxima vez que o TeleZapp abrir, e ele oferece reiniciar agora. O que havia antes fica guardado na pasta antes-da-restauracao, dentro da pasta de dados.
 

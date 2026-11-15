@@ -9457,3 +9457,20 @@ def test_dados_das_contas_em_gerenciar_contas(j, monkeypatch, tmp_path):
     assert j.cfg.get("contas_pasta") == pasta        # a anterior fica
     assert avisos and "Z:" in avisos[0]
 
+
+
+def test_dialogos_de_backup_tem_a_lista_de_contas():
+    from telezapp.interface import backup as jb
+    from telezapp.nucleo import backup as bk
+    d = jb.DialogoBackup(None, [("t1", "Um, Telegram"), ("t2", "Dois")])
+    assert d.contas() is None                        # todas marcadas
+    d.caixas_de_contas["t2"].SetValue(False)
+    assert d.contas() == ["t1"]
+    uma = jb.DialogoBackup(None, [("t1", "Um")])     # uma so: sem lista
+    assert uma.caixas_de_contas == {} and uma.contas() is None
+    man = bk.Manifesto("x", 0.0, ["contas", "conversas"], "", 2, False,
+                       ["t1"])
+    r = jb.DialogoRestaurar(None, man, [("t1", "Um"), ("t2", "Dois")])
+    assert r.contas() is None
+    r.caixas_de_contas["t1"].SetValue(False)
+    assert r.contas() == ["t2"]

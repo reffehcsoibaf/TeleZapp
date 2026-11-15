@@ -91,6 +91,7 @@ class Manifesto:
     pasta_midias: str = ""      # onde estavam as midias (os caminhos no banco)
     formato: int = 1            # 2: atalhos e sons sao partes proprias
     pasta_por_conta: bool = False   # uma pasta de dados por conta
+    contas: object = None       # ids das contas no backup (None: todas)
 
 
 # ------------------------------------------------------------- opcoes
@@ -270,6 +271,27 @@ def _contas_do_backup(pasta_dados):
                   if os.path.isdir(os.path.join(base, n)))
 
 
+def _arquivo_da_conta(nome, ids):
+    """O arquivo de sessao (so o nome) e de alguma das contas `ids`?"""
+    return any(nome == i or nome.startswith((i + ".", i + "-"))
+               for i in ids)
+
+
+def _filtrar_banco(caminho, ids):
+    """Deixa no banco `caminho` (uma copia) so as linhas das contas `ids`."""
+    from telezapp.armazenamento.banco import TABELAS
+    con = sqlite3.connect(caminho)
+    try:
+        marcas = ", ".join("?" * len(ids))
+        with con:
+            for tabela in TABELAS:
+                con.execute("DELETE FROM %s WHERE conta_id NOT IN (%s)" % (
+                    tabela, marcas), list(ids))
+        con.execute("VACUUM")
+    finally:
+        con.close()
+
+
 def _contar_arquivos(pasta, excluir=()):
     n = 0
     for _, _, arquivos in os.walk(pasta):
@@ -278,19 +300,24 @@ def _contar_arquivos(pasta, excluir=()):
 
 
 def criar(destino, pasta_dados, cfg_dados, partes, senha="",
-          copiar_banco=None, progresso=None, pasta_contas=None):
+          copiar_banco=None, progresso=None, pasta_contas=None,
+          contas=None):
     """Grava o backup em `destino`. `cfg_dados`: o dicionario do config.json;
     `copiar_banco(caminho, conta_id=None)`: grava uma copia consistente
     do banco da conta (se for None, copia o arquivo). `progresso(pct, texto)`: o avanco, de 0 a 100,
     por arquivo gravado. `pasta_contas`: onde ficam o banco unico, as
     sessoes e as midias do layout antigo, quando a pasta personalizada
     esta marcada (o padrao e a propria `pasta_dados`). Devolve {parte:
-    quantidade de arquivos}. Em erro apaga o arquivo parcial e deixa a
-    excecao subir."""
+    quantidade de arquivos}. `contas`: os ids das contas que vao (None:
+    todas); as outras ficam de fora das sessoes, das conversas e das
+    midias. Em erro apaga o arquivo parcial e deixa a excecao subir."""
     partes = [p for p, _ in PARTES if p in partes]
     if not partes:
         raise ErroBackup("Escolha pelo menos uma parte para o backup.")
     raiz_antiga = pasta_contas or pasta_dados
+    ids = None if contas is None else sorted(set(contas))
+    if ids is not None and not ids:
+        raise ErroBackup("Escolha pelo menos uma conta para o backup.")
     temporarios = os.path.join(pasta_dados, "temp", "backup-%d" %
                                int(time.time()))
     os.makedirs(temporarios, exist_ok=True)
@@ -302,6 +329,8 @@ def criar(destino, pasta_dados, cfg_dados, partes, senha="",
     if "sons" in partes:
         total += _contar_arquivos(os.path.join(pasta_dados, "sons"))
     contas_no_disco = _contas_do_backup(pasta_dados)
+    if ids is not None:
+        contas_no_disco = [c for c in contas_no_disco if c in ids]
     if "contas" in partes:
         total += 1
         for sessao in ([os.path.join(_pasta_da_conta_no_disco(
@@ -332,7 +361,7 @@ def criar(destino, pasta_dados, cfg_dados, partes, senha="",
             midias = os.path.join(raiz_antiga, "midias")
             manifesto = Manifesto(VERSAO, time.time(), partes,
                                   pasta_dados if contas_no_disco else midias,
-                                  FORMATO, bool(contas_no_disco))
+                                  FORMATO, bool(contas_no_disco), ids)
             z.writestr(MANIFESTO, json.dumps(manifesto.__dict__,
                                              ensure_ascii=False, indent=1))
             if grupos:
@@ -360,9 +389,13 @@ def criar(destino, pasta_dados, cfg_dados, partes, senha="",
                         resumo["sons"] += 1
                         andou("Copiando os sons")
             if "contas" in partes:
+                da_conta = {c: cfg_dados[c] for c in CHAVES_CONTAS
+                            if c in cfg_dados}
+                if ids is not None and "contas" in da_conta:
+                    da_conta["contas"] = [
+                        d for d in da_conta["contas"] if d.get("id") in ids]
                 z.writestr("contas.json", json.dumps(
-                    {c: cfg_dados[c] for c in CHAVES_CONTAS if c in cfg_dados},
-                    ensure_ascii=False, indent=1))
+                    da_conta, ensure_ascii=False, indent=1))
                 n = 0
                 sessoes = [os.path.join(_pasta_da_conta_no_disco(
                               pasta_dados, c), "sessoes")
@@ -372,6 +405,9 @@ def criar(destino, pasta_dados, cfg_dados, partes, senha="",
                     for atual, _, arquivos in os.walk(sessao):
                         for a in arquivos:
                             if a.endswith(("-wal", "-shm", ".tmp")):
+                                continue
+                            if (ids is not None
+                                    and not _arquivo_da_conta(a, ids)):
                                 continue
                             origem = os.path.join(atual, a)
                             copia = os.path.join(temporarios, "s%d" % n)
@@ -413,6 +449,8 @@ def criar(destino, pasta_dados, cfg_dados, partes, senha="",
                     else:
                         _copia_consistente(
                             os.path.join(raiz_antiga, "telezapp.db"), copia)
+                    if ids is not None:
+                        _filtrar_banco(copia, ids)
                     z.write(copia, "telezapp.db")
                     resumo["conversas"] = 1
                     andou("Copiando as conversas")
@@ -420,7 +458,14 @@ def criar(destino, pasta_dados, cfg_dados, partes, senha="",
                 n = 0
                 raizes = [(c, os.path.join(_pasta_da_conta_no_disco(
                                 pasta_dados, c), "midias"))
-                          for c in contas_no_disco] or [("", midias)]
+                          for c in contas_no_disco]
+                if not contas_no_disco:
+                    if ids is None:
+                        raizes = [("", midias)]
+                    else:       # banco unico: a pasta de cada conta
+                        from telezapp.midia import armazem
+                        raizes = [(i, os.path.join(
+                            midias, armazem._limpo(i, 80))) for i in ids]
                 for conta_id, raiz in raizes:
                     no_zip = "midias/" + (conta_id + "/" if conta_id else "")
                     for atual, _, arquivos in os.walk(raiz):
@@ -490,7 +535,9 @@ def ler_manifesto(arquivo, senha=""):
                      [p for p in dados["partes"] if p in NOMES_PARTES],
                      str(dados.get("pasta_midias", "")),
                      int(dados.get("formato") or 1),
-                     bool(dados.get("pasta_por_conta")))
+                     bool(dados.get("pasta_por_conta")),
+                     [str(c) for c in dados["contas"]]
+                     if isinstance(dados.get("contas"), list) else None)
 
 
 def _extrair(z, nome, destino):
@@ -525,16 +572,74 @@ def _restaurar_chaves(z, pasta_dados):
     return n
 
 
+def contas_do_backup(arquivo, senha=""):
+    """[(conta_id, nome)] das contas que o backup tem (vazio se nao ha como
+    saber: backup sem a parte das contas e sem banco por conta)."""
+    z = _abrir(arquivo, senha)
+    try:
+        achadas = {}
+        try:
+            lidas = json.loads(z.read("contas.json").decode("utf-8"))
+            for d in lidas.get("contas") or []:
+                if d.get("id"):
+                    achadas[d["id"]] = d.get("nome") or d["id"]
+        except (KeyError, ValueError):
+            pass
+        except RuntimeError:
+            raise ErroBackup("Senha errada." if senha else
+                             "Este backup tem senha.")
+        for nome in z.namelist():
+            partes = nome.split("/")
+            if len(partes) > 2 and partes[0] in ("contas", "midias")                     and partes[1]:
+                achadas.setdefault(partes[1], partes[1])
+    finally:
+        z.close()
+    return sorted(achadas.items(), key=lambda x: (x[1].lower(), x[0]))
+
+
+def _nome_da_conta(nome, ids):
+    """O item do zip e de alguma das contas `ids` (ou nao e de conta
+    nenhuma, como contas.json e o banco unico)?"""
+    partes = nome.split("/")
+    if partes[0] == "sessoes" and len(partes) > 1:
+        return _arquivo_da_conta(partes[-1], ids)
+    if partes[0] in ("contas", "midias") and len(partes) > 2:
+        return partes[1] in ids
+    return True
+
+
+def _layout_com_separacao(pasta_dados):
+    """A separacao por conta esta marcada nas opcoes (config.json)?"""
+    try:
+        with open(os.path.join(pasta_dados, "config.json"),
+                  encoding="utf-8") as f:
+            return bool(json.load(f).get("contas_em_pastas"))
+    except (OSError, ValueError):
+        return False
+
+
 def restaurar(arquivo, senha, partes, pasta_dados, resultado=None,
-              progresso=None):
+              progresso=None, contas=None):
     """Das `partes` escolhidas: devolve as opcoes validas (para aplicar na
     hora, ou {} se "configuracoes" nao foi escolhida) e deixa as demais na
     pasta de espera, para `aplicar_pendente` na proxima abertura. Devolve
     (opcoes, partes_em_espera). `resultado`, se dado, recebe
     {"ia_chaves": quantas chaves de IA voltaram}. `progresso(pct, texto)`:
-    o avanco da leitura do backup, de 0 a 100."""
+    o avanco da leitura do backup, de 0 a 100. `contas`: os ids das contas
+    a restaurar (None: todas do backup). Backup de so algumas contas, ou
+    so algumas delas escolhidas, troca apenas os dados dessas contas e nao
+    mexe nas outras."""
     manifesto = ler_manifesto(arquivo, senha)
     escolhidas = [p for p in partes if p in manifesto.partes]
+    ids = None if contas is None else sorted(set(contas))
+    parcial = manifesto.contas is not None
+    if ids is not None and not parcial:
+        todas = {i for i, _ in contas_do_backup(arquivo, senha)}
+        parcial = bool(todas) and set(ids) != todas
+    if parcial and ids is None:
+        ids = list(manifesto.contas)
+    if parcial and not ids:
+        raise ErroBackup("Escolha pelo menos uma conta para restaurar.")
     espera = os.path.join(pasta_dados, ESPERA)
     shutil.rmtree(espera, ignore_errors=True)
     opcoes, em_espera = {}, []
@@ -561,12 +666,21 @@ def restaurar(arquivo, senha, partes, pasta_dados, resultado=None,
             prefixos = {"contas": ("contas.json", "sessoes/"),
                         "conversas": ("telezapp.db", "contas/"),
                         "midias": ("midias/",)}
+            if parcial and "conversas" in escolhidas and                     "telezapp.db" in z.namelist() and                     _layout_com_separacao(pasta_dados):
+                raise ErroBackup(
+                    "Este backup é de só algumas contas e foi feito com os "
+                    "dados em um banco único, mas o TeleZapp está com os "
+                    "dados de cada conta em pasta separada. Desmarque a "
+                    "separação em Gerenciar contas, reabra o TeleZapp e "
+                    "restaure de novo.")
+
             def a_extrair(parte):
                 return [nome for nome in z.namelist()
                         if nome != MANIFESTO and not nome.endswith("/") and
                         any(nome == p or (p.endswith("/") and
                                           nome.startswith(p))
-                            for p in prefixos[parte])]
+                            for p in prefixos[parte]) and
+                        (not parcial or _nome_da_conta(nome, ids))]
             planos = [(parte, a_extrair(parte))
                       for parte in ("contas", "conversas", "midias")
                       if parte in escolhidas]
@@ -595,7 +709,9 @@ def restaurar(arquivo, senha, partes, pasta_dados, resultado=None,
                   encoding="utf-8") as f:
             json.dump({"partes": em_espera,
                        "pasta_midias": manifesto.pasta_midias,
-                       "pasta_por_conta": manifesto.pasta_por_conta}, f)
+                       "pasta_por_conta": manifesto.pasta_por_conta,
+                       "parcial": parcial,
+                       "contas": ids if parcial else None}, f)
     return opcoes, em_espera
 
 
@@ -646,8 +762,70 @@ def _mover(origem, destino):
 def _pasta_da_conta_no_backup(dados, pasta_dados, conta_id):
     """A pasta de dados da conta em um momento: a escolhida no registro
     dela, ou a padrao `<pasta_dados>\\contas\\<conta_id>`."""
-    escolhida = ((dados or {}).get("pasta") or "").strip()
-    return escolhida or os.path.join(pasta_dados, "contas", conta_id)
+    escolhida = config.pasta_escolhida_das_contas()
+    if escolhida:
+        return os.path.join(escolhida, conta_id)
+    return os.path.join(pasta_dados, "contas", conta_id)
+
+
+def _aplicar_parcial_no_banco_unico(pasta_dados, raiz, espera, info,
+                                    partes, antes):
+    """Backup de so algumas contas (ou so algumas escolhidas) com o banco
+    unico: troca os dados dessas contas e deixa as outras como estao. As
+    linhas do banco do backup entram por cima das da conta (as mensagens
+    que so existem aqui ficam); as sessoes e as midias da conta sao
+    trocadas, e o que havia vai para `antes`. Devolve as partes trocadas."""
+    from telezapp.armazenamento.banco import Banco
+    from telezapp.midia import armazem
+    ids = info.get("contas") or []
+    feitas = []
+    vivo = os.path.join(raiz, "telezapp.db")
+    if "conversas" in partes:
+        os.makedirs(antes, exist_ok=True)
+        if os.path.isfile(vivo):
+            _copia_consistente(vivo, os.path.join(antes, "telezapp.db"))
+        for conta_id in ids:
+            origem = os.path.join(espera, "telezapp.db")
+            if not os.path.isfile(origem):
+                origem = os.path.join(espera, "contas", conta_id,
+                                      "conversas.db")
+            if not os.path.isfile(origem):
+                continue
+            de, para = Banco(origem), Banco(vivo)
+            try:
+                para.copiar_conta_de(conta_id, de)
+            finally:
+                de.fechar()
+                para.fechar()
+        feitas.append("conversas")
+    if "contas" in partes:
+        novas = os.path.join(espera, "sessoes")
+        if os.path.isdir(novas):
+            atuais = os.path.join(raiz, "sessoes")
+            os.makedirs(atuais, exist_ok=True)
+            for nome in os.listdir(novas):
+                if not _arquivo_da_conta(nome, ids):
+                    continue
+                for sufixo in ("", "-wal", "-shm", "-journal"):
+                    _mover(os.path.join(atuais, nome + sufixo),
+                           os.path.join(antes, "sessoes", nome + sufixo))
+                _mover(os.path.join(novas, nome),
+                       os.path.join(atuais, nome))
+        feitas.append("contas")
+    if "midias" in partes:
+        for conta_id in ids:
+            nova = os.path.join(espera, "midias", conta_id)
+            if not os.path.isdir(nova):
+                continue
+            pasta = os.path.join(raiz, "midias",
+                                 armazem._limpo(conta_id, 80))
+            _mover(pasta, os.path.join(antes, "midias", conta_id))
+            _mover(nova, pasta)
+        feitas.append("midias")
+    if "conversas" in partes or "midias" in partes:
+        _acertar_caminhos_das_midias(vivo, info.get("pasta_midias", ""),
+                                     os.path.join(raiz, "midias"))
+    return feitas
 
 
 def aplicar_pendente(pasta_dados, pasta_contas=None):
@@ -685,14 +863,31 @@ def aplicar_pendente(pasta_dados, pasta_contas=None):
                 atual = json.load(f)
         with open(os.path.join(espera, "contas.json"),
                   encoding="utf-8") as f:
-            atual.update(json.load(f))
+            lido = json.load(f)
+        if info.get("parcial"):
+            # so algumas contas: cada uma troca a sua entrada (ou entra),
+            # e as outras contas, e as chaves comuns, ficam como estao
+            registros = [d for d in atual.get("contas") or []
+                         if d.get("id") not in
+                         {x.get("id") for x in lido.get("contas") or []}]
+            registros.extend(lido.get("contas") or [])
+            atual["contas"] = registros
+            for chave, valor in lido.items():
+                if chave != "contas" and chave not in atual:
+                    atual[chave] = valor
+        else:
+            atual.update(lido)
         with open(caminho + ".tmp", "w", encoding="utf-8") as f:
             json.dump(atual, f, ensure_ascii=False, indent=2)
         os.replace(caminho + ".tmp", caminho)
 
     novo = bool(info.get("pasta_por_conta")) or \
         os.path.isdir(os.path.join(espera, "contas"))
-    if not novo:
+    if info.get("parcial") and not _layout_com_separacao(pasta_dados):
+        for parte in _aplicar_parcial_no_banco_unico(
+                pasta_dados, raiz_antiga, espera, info, partes, antes):
+            anotar(parte)
+    elif not novo:
         if "contas" in partes:
             _mover(os.path.join(raiz_antiga, "sessoes"),
                    os.path.join(antes, "sessoes"))

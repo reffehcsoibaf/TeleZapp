@@ -329,6 +329,7 @@ def main():
         # a configuracao ainda nao foi registrada: le-la aqui para saber
         # onde ficam o banco unico, as sessoes e as midias do layout antigo
         cfg_restauracao = config.Config()
+        config.definir_cfg(cfg_restauracao)
         trocadas = backup.aplicar_pendente(
             config.pasta_dados(),
             config.pasta_do_layout_antigo(cfg_restauracao))
