@@ -7,7 +7,7 @@ Antes de escrever aqui, confira a versão em vigor: `git fetch --tags` e
 `gh release list -L 3` (a Latest é a publicada). O que veio depois dela vai em
 "Próxima versão (ainda sem número)".
 
-## Próxima versão (ainda sem número)
+## 2026.11.15.0
 
 Backup completo ou seletivo: a janela de Fazer backup começa com a caixa "Tipo de backup" (Backup completo, o padrão, ou Backup seletivo). No completo vai tudo, de todas as contas, e o Tab já pula para a senha; só no seletivo aparecem as partes e a lista de contas. Nova parte do backup, "Filtros personalizados" (`filtros`, as opções `filtros_personalizados`), que aparece também ao restaurar. **Sem teste ao vivo.**
 
