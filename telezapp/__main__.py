@@ -164,6 +164,23 @@ def _vigiar_aviso(sinal, janela, instancia):
             return
 
 
+def terminar_ja(codigo=0):
+    """Termina o processo agora. O os._exit comum ainda descarrega as DLLs
+    (DLL_PROCESS_DETACH), e a do WhatsApp, em Go, ja deixou o processo preso
+    depois de tudo gravado: a janela sumia, nada aparecia e uma nova abertura
+    achava que ja havia um TeleZapp. TerminateProcess nao passa por essa
+    etapa. Sem ele (fora do Windows), cai no os._exit."""
+    try:
+        import ctypes
+        k = ctypes.windll.kernel32
+        k.GetCurrentProcess.restype = ctypes.c_void_p
+        k.TerminateProcess.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+        k.TerminateProcess(k.GetCurrentProcess(), codigo)
+    except Exception:
+        pass
+    os._exit(codigo)
+
+
 def _vigiar_o_fim():
     """Janela fechada: se o programa nao terminar, a pessoa nao o ve mais, nao
     consegue abri-lo de novo e uma atualizacao nao troca a pasta."""
@@ -172,7 +189,7 @@ def _vigiar_o_fim():
         logging.getLogger("telezapp").warning(
             "a janela fechou e o programa não terminou; encerrando")
         logging.shutdown()
-        os._exit(0)
+        terminar_ja(0)
     threading.Thread(target=vigia, daemon=True, name="vigia-do-fim").start()
 
 
@@ -443,7 +460,7 @@ def main():
     # Garante o fim do processo mesmo se alguma biblioteca deixar uma
     # thread presa (tudo ja foi gravado e fechado acima).
     logging.shutdown()
-    os._exit(0)
+    terminar_ja(0)
 
 
 if __name__ == "__main__":

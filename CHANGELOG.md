@@ -9,6 +9,8 @@ Antes de escrever aqui, confira a versão em vigor: `git fetch --tags` e
 
 ## 2026.11.15.0
 
+Fim do programa: `terminar_ja` (`__main__.py`) troca o `os._exit` por `TerminateProcess` do próprio processo. Em 15/11 o TeleZapp fechou, registrou "encerrado normalmente" e o processo ficou vivo por vários minutos: nenhuma janela aparecia e as novas aberturas achavam que já havia um TeleZapp aberto. O `os._exit` ainda descarrega as DLLs (a do WhatsApp, em Go, é a suspeita); o `TerminateProcess` não passa por essa etapa. Tudo já está gravado antes. Fora do Windows cai no `os._exit`. **Causa do travamento não confirmada; sem teste ao vivo.**
+
 Chamada atendida: a fala avisa que a comunicação está sendo estabelecida (`_anunciar_conexao`). Entre atender e o som chegar passam alguns segundos (7 s na medição), e o TeleZapp ficava calado (a fala "Conectando." saía junto do foco ir para o Desligar, que o leitor de tela anuncia e a cala). Agora ele diz "Atendida. Estabelecendo a comunicação com <nome>." 400 ms depois, e repete "Ainda estabelecendo a comunicação." duas vezes, de 4 em 4 s, enquanto a chamada seguir em CONECTANDO. **Sem teste ao vivo.**
 
 Botão "Iniciar chamada" escondido nos grupos e canais (`_mostrar_conversa`): não há chamada em grupo, e o botão ficava na ordem de Tab sem servir. Volta ao abrir uma conversa com uma pessoa. **Sem teste ao vivo.**
