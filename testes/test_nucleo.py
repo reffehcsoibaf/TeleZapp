@@ -325,7 +325,8 @@ def test_privacidade_do_whatsapp_regras():
     lido = {"last": "contacts", "online": "all", "status": "none",
             "readreceipts": "all", "groupadd": "contact_blacklist"}
     assert not pw.ilegivel(lido) and pw.ilegivel(None) and pw.ilegivel({})
-    assert [c.nome for c in pw.desconhecidos(lido)] == ["groupadd"]
+    assert [c.nome for c in pw.desconhecidos(lido)] == [
+        "groupadd", "keeparchived"]
     last = pw.CAMPOS[0]
     assert pw.indice(last, "contacts") == 1 and pw.indice(last, "xyz") == -1
     # so entra o que mudou; posicao -1 ou ausente fica como esta
@@ -356,9 +357,14 @@ def test_privacidade_do_telegram_regras():
                              regra("PrivacyValueDisallowAll")]) is None
     assert valor_das_regras([]) is None and valor_das_regras(None) is None
     nomes = [c.nome for c in pw.campos_do("telegram")]
-    assert nomes == ["last", "status", "readreceipts", "groupadd"]   # sem online
+    assert nomes == ["last", "status", "readreceipts", "groupadd",
+                     "keeparchived"]                                # sem online
     assert pw.campos_do("telegram")[0].rotulo.endswith("visto por último e online")
-    assert len(pw.campos_do("whatsapp")) == 5
+    # o "manter arquivadas" so existe no Telegram: no WhatsApp fica no celular
+    assert [c.nome for c in pw.campos_do("whatsapp")] == [
+        "last", "online", "status", "readreceipts", "groupadd"]
+    assert pw.campos_do("telegram")[-1].rotulo.startswith(
+        "Manter arquivadas, mesmo com mensagem nova")
 
 
 def test_nova_mensagem_tipo_de_destino_e_candidatos():
@@ -715,19 +721,25 @@ def test_previa_de_link_na_linha_e_nos_detalhes():
         m.definir_modo_previa("completa")
 
 
-def test_mensagem_so_com_link_fala_a_previa_antes_do_link():
+def test_mensagem_com_link_fala_a_previa_antes_do_texto():
     x = m.Mensagem("c", "v", "1", autor="Ana", data=1760000000,
                    texto="https://a.com/x")
     m.guardar_extras(x, previa=m.previa_de_link(
         "https://a.com/x", "Título", "Descrição", "A.com"))
     linha = m.formatar(x, m.ESTILO_AUTOR_PRIMEIRO)
     assert linha.index("prévia do link: Título") < linha.index("https://a.com/x")
-    # com texto junto do link, a previa continua depois do texto
+    assert linha.count("prévia do link") == 1            # sem repetir no fim
+    # com texto junto do link, a previa tambem vem antes do texto
     y = m.Mensagem("c", "v", "2", autor="Ana", data=1760000000,
-                   texto="olha https://a.com/x")
+                   texto="olha https://a.com/x que legal")
     m.guardar_extras(y, previa=m.previa_de_link("https://a.com/x", "Título"))
     linha = m.formatar(y, m.ESTILO_AUTOR_PRIMEIRO)
-    assert linha.index("olha") < linha.index("prévia do link")
+    assert linha.index("prévia do link: Título") < linha.index("olha")
+    assert linha.count("prévia do link") == 1
+    # sem previa, a linha e a de sempre
+    z = m.Mensagem("c", "v", "3", autor="Ana", data=1760000000,
+                   texto="olha https://a.com/x")
+    assert "prévia" not in m.formatar(z, m.ESTILO_AUTOR_PRIMEIRO)
 
 
 def test_conferir_o_que_vai_ser_publicado_como_status(tmp_path):
@@ -1006,6 +1018,30 @@ def test_encaminhar_destinos_inclui_grupos_da_conta_e_filtra_por_modo():
     assert nomes("conversas") == ["Bia", "Time"]
     assert nomes("contatos") == ["Bia", "Dora"]
     assert nomes("grupos") == ["Família", "Time"]
+
+
+def test_encaminhar_meu_status_no_topo_sem_status_de_outros_e_regras():
+    from telezapp.nucleo import encaminhar as enc
+    conversas = [m.Conversa("a", "1", "Bia"),
+                 m.Conversa("a", "status@x", "Ana", tipo="status")]
+    d = enc.destinos(conversas, [], lambda c: c in ("a", "b"),
+                     contas_status=["a", "b", "c"])
+    assert [(x[0], x[2]) for x in d] == [("a", "Meu status"),
+                                         ("b", "Meu status"), ("a", "Bia")]
+    assert [enc.eh_status(x) for x in d] == [True, True, False]
+    cat = enc.categorias(conversas, [], ())
+    assert [x[2] for x in enc.do_modo(d, "conversas", cat)] == [
+        "Meu status", "Bia"]
+    texto, foto = enc.Item("texto", "oi"), enc.Item("arquivo", "", "x", m.FOTO)
+    assert enc.para_status(texto, "whatsapp") == ""
+    assert "Telegram" in enc.para_status(texto, "telegram")
+    assert "700" in enc.para_status(enc.Item("texto", "a" * 701), "whatsapp")
+    assert enc.para_status(foto, "telegram") == ""
+    voz = enc.Item("arquivo", "", "x", m.VOZ)
+    assert enc.para_status(voz, "whatsapp") == ""
+    assert enc.para_status(voz, "telegram") != ""
+    assert enc.para_status(enc.Item("arquivo", "", "x", m.DOCUMENTO),
+                           "whatsapp") != ""
 
 
 def test_nova_mensagem_grupos_candidatos_com_e_sem_conversa():

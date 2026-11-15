@@ -87,11 +87,6 @@ class DialogoContas(wx.Dialog):
         if evt.GetActive() and not self.IsDestroyed():
             self._preencher(self.lista.GetSelection())
 
-    def _clicou_mover(self, evt):
-        conta_id, n = self._atual()
-        if conta_id and self._ao_mover(conta_id):
-            self._preencher(n)
-
     def _clicou_excluir(self, evt):
         conta_id, n = self._atual()
         if conta_id and self._ao_excluir(conta_id):

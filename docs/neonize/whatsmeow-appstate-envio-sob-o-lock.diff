@@ -1,0 +1,60 @@
+diff --git a/appstate.go b/appstate.go
+index 3cb31ba..f78e0cc 100644
+--- a/appstate.go
++++ b/appstate.go
+@@ -541,6 +541,32 @@ func (cli *Client) sendAppState(ctx context.Context, patch appstate.PatchInfo, a
+ 	if cli == nil {
+ 		return ErrClientIsNil
+ 	}
++	// The read-encode-send-apply below works on the stored version and hash, so
++	// it holds the same lock fetchAppState does. Without it, two sends (or a
++	// send and a fetch started by a server notification) read the same version;
++	// the loser got 409 and applied the conflicting patches on top of a version
++	// the other had already moved past, leaving a mismatching LTHash.
++	cli.appStateSyncLock.Lock()
++	err := cli.sendAppStateLocked(ctx, patch, allowRetry)
++	cli.appStateSyncLock.Unlock()
++	if err != nil {
++		return err
++	}
++	eventsToDispatch, err := cli.fetchAppState(ctx, patch.Type, false, false)
++	if err != nil {
++		return fmt.Errorf("failed to fetch app state after sending update: %w", err)
++	}
++	go func() {
++		for _, evt := range eventsToDispatch {
++			cli.dispatchEvent(evt)
++		}
++	}()
++
++	return nil
++}
++
++// sendAppStateLocked sends the patch; the caller holds appStateSyncLock.
++func (cli *Client) sendAppStateLocked(ctx context.Context, patch appstate.PatchInfo, allowRetry bool) error {
+ 	version, hash, err := cli.Store.AppState.GetAppStateVersion(ctx, string(patch.Type))
+ 	if err != nil {
+ 		return err
+@@ -611,21 +637,11 @@ func (cli *Client) sendAppState(ctx context.Context, patch appstate.PatchInfo, a
+ 						cli.dispatchEvent(evt)
+ 					}
+ 				}()
+-				return cli.sendAppState(ctx, patch, false)
++				return cli.sendAppStateLocked(ctx, patch, false)
+ 			}
+ 		}
+ 		return mainErr
+ 	}
+-	eventsToDispatch, err := cli.fetchAppState(ctx, patch.Type, false, false)
+-	if err != nil {
+-		return fmt.Errorf("failed to fetch app state after sending update: %w", err)
+-	}
+-	go func() {
+-		for _, evt := range eventsToDispatch {
+-			cli.dispatchEvent(evt)
+-		}
+-	}()
+-
+ 	return nil
+ }
+ 

@@ -36,23 +36,34 @@ CAMPOS = (
           (("all", "Ativada"), ("none", "Desativada"))),
     Campo("groupadd", "Quem pode me adicionar a grupos",
           (TODOS, CONTATOS)),
+    Campo("keeparchived",
+          "Manter conversas arquivadas quando chegar mensagem nova",
+          (("keep", "Ativado"), ("unarchive", "Desativado"))),
 )
+
+# Campos que so um servico tem. O "manter arquivadas" do WhatsApp foi tirado
+# daqui duas vezes: o servidor aceita o ajuste, mas o iPhone do usuario nao o
+# aplica (11/11), e a caixa mostrava o que o TeleZapp mandou, nao o do celular.
+SO_DO_TELEGRAM = ("keeparchived",)
 
 # o que o WhatsApp devolve para "meus contatos, exceto alguns" e afins
 VALOR_COM_LISTA = "contact_blacklist"
 
 # Telegram: quais campos existem e como se chamam la
-CAMPOS_TELEGRAM = ("last", "status", "readreceipts", "groupadd")
+CAMPOS_TELEGRAM = ("last", "status", "readreceipts", "groupadd",
+                   "keeparchived")
 ROTULOS_TELEGRAM = {
     "last": "Quem pode ver meu visto por último e online",
     "readreceipts": "Confirmação de leitura (mostrar a hora em que li)",
+    "keeparchived": "Manter arquivadas, mesmo com mensagem nova, as "
+                    "conversas que não estão silenciadas",
 }
 
 
 def campos_do(servico):
     """Os campos que o servico tem, com o texto certo para ele."""
     if servico != "telegram":
-        return CAMPOS
+        return tuple(c for c in CAMPOS if c.nome not in SO_DO_TELEGRAM)
     return tuple(
         Campo(c.nome, ROTULOS_TELEGRAM.get(c.nome, c.rotulo), c.opcoes)
         for c in CAMPOS if c.nome in CAMPOS_TELEGRAM)

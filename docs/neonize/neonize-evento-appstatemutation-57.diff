@@ -1,0 +1,95 @@
+commit c0cc82b29a2cd6849eae4073218969eff90e136a
+Author: TeleZapp build <build@telezapp.invalid>
+Date:   Wed Nov 11 18:49:15 2026 -0300
+
+    evento AppStateMutation (57): toda mutacao do estado do aplicativo, com colecao e versao (do WinZapp)
+
+diff --git a/goneonize/Neonize.proto b/goneonize/Neonize.proto
+index 1800924..b8042b3 100644
+--- a/goneonize/Neonize.proto
++++ b/goneonize/Neonize.proto
+@@ -964,6 +964,17 @@ message ChatClear { //54
+     required bool FromFullSync = 4;
+     required bool DeleteMedia = 5;
+ }
++// Every app state mutation, set or remove (Remove), with its collection
++// (Name) and Version, also during a full sync. For the entries no other event
++// carries: "keep chats archived", labels and lists, status privacy...
++message AppStateMutation { //57
++    required string Name = 1;
++    repeated string Index = 2;
++    required int32 Version = 3;
++    required bool Remove = 4;
++    optional WAWebProtobufSyncAction.SyncActionValue Action = 5;
++    required bool FromFullSync = 6;
++}
+ message UpdateGroupParticipantsReturnFunction {
+     optional string Error = 1;
+     repeated GroupParticipant participants = 2;
+diff --git a/goneonize/main.go b/goneonize/main.go
+index 9405fee..15c65a3 100644
+--- a/goneonize/main.go
++++ b/goneonize/main.go
+@@ -1401,6 +1401,22 @@ func Neonize(db *C.char, id *C.char, JIDByte *C.uchar, JIDSize C.int, newDevice
+ 				}
+ 				eventChan <- &messageEvent
+ 			}
++		case *events.AppStateMutation:
++			if _, ok := subscribers[57]; ok {
++				mutation := defproto.AppStateMutation{
++					Name:         proto.String(string(v.Name)),
++					Index:        v.Index,
++					Version:      proto.Int32(v.Version),
++					Remove:       proto.Bool(v.Remove),
++					Action:       v.Action,
++					FromFullSync: proto.Bool(v.FromFullSync),
++				}
++				messageEvent := MessageEvent{
++					eventType: 57,
++					message:   &mutation,
++				}
++				eventChan <- &messageEvent
++			}
+ 		case *events.RotateADVSecret:
+ 			if _, ok := subscribers[45]; ok {
+ 				rot := defproto.RotateADVSecret{
+diff --git a/neonize/aioze/events.py b/neonize/aioze/events.py
+index 4213210..368fb04 100644
+--- a/neonize/aioze/events.py
++++ b/neonize/aioze/events.py
+@@ -22,6 +22,7 @@ from ..proto.Neonize_pb2 import CallTerminate as CallTerminateEv
+ from ..proto.Neonize_pb2 import CallTransport as CallTransportEv
+ from ..proto.Neonize_pb2 import ChatArchive as ChatArchiveEv
+ from ..proto.Neonize_pb2 import ChatClear as ChatClearEv
++from ..proto.Neonize_pb2 import AppStateMutation as AppStateMutationEv
+ from ..proto.Neonize_pb2 import ChatDelete as ChatDeleteEv
+ from ..proto.Neonize_pb2 import ChatLock as ChatLockEv
+ from ..proto.Neonize_pb2 import ChatMarkAsRead as ChatMarkAsReadEv
+@@ -85,6 +86,7 @@ __all__ = [
+     "CallRelayLatencyEv",
+     "ChatArchiveEv",
+     "ChatClearEv",
++    "AppStateMutationEv",
+     "ChatLockEv",
+     "ChatMarkAsReadEv",
+     "ChatMuteEv",
+diff --git a/neonize/events.py b/neonize/events.py
+index 08250d7..61515b6 100644
+--- a/neonize/events.py
++++ b/neonize/events.py
+@@ -24,6 +24,7 @@ from .proto.Neonize_pb2 import CallTerminate as CallTerminateEv
+ from .proto.Neonize_pb2 import CallTransport as CallTransportEv
+ from .proto.Neonize_pb2 import ChatArchive as ChatArchiveEv
+ from .proto.Neonize_pb2 import ChatClear as ChatClearEv
++from .proto.Neonize_pb2 import AppStateMutation as AppStateMutationEv
+ from .proto.Neonize_pb2 import ChatDelete as ChatDeleteEv
+ from .proto.Neonize_pb2 import ChatMarkAsRead as ChatMarkAsReadEv
+ from .proto.Neonize_pb2 import ChatLock as ChatLockEv
+@@ -120,6 +121,7 @@ EVENT_TO_INT: dict[type[Message], int] = {
+     MessageDeleteForMeEv: 52,
+     MessageStarEv: 53,
+     ChatClearEv: 54,
++    AppStateMutationEv: 57,
+ }
+ INT_TO_EVENT: dict[int, type[Message]] = {code: ev for ev, code in EVENT_TO_INT.items()}
+ 

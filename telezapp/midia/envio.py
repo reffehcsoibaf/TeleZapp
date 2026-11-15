@@ -9,7 +9,7 @@ AVI, HEIC...) seguem como documento, sem recodificar.
 """
 import mimetypes
 import os
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, fields, replace
 
 from telezapp.midia import mp4, opus
 from telezapp.nucleo import modelos as m
@@ -51,6 +51,18 @@ class Anexo:
     @property
     def voz(self):
         return self.tipo == m.VOZ
+
+
+def anexo_em_dicionario(anexo):
+    """Os campos do anexo, para guardar no banco (mensagem agendada)."""
+    return asdict(anexo)
+
+
+def anexo_de_dicionario(dados):
+    """O anexo guardado por `anexo_em_dicionario`; campos desconhecidos
+    (de outra versao) sao ignorados."""
+    campos = {f.name for f in fields(Anexo)}
+    return Anexo(**{k: v for k, v in dados.items() if k in campos})
 
 
 def _mime(caminho, padrao="application/octet-stream"):

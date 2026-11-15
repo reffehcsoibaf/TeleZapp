@@ -371,9 +371,9 @@ class Bancos:
 
     # ----------------------------------------------- mensagens agendadas
     def guardar_agendada(self, conta_id, conversa_id, texto, quando,
-                         resposta_a="", mencoes=""):
+                         resposta_a="", mencoes="", anexo=""):
         return self._de(conta_id).guardar_agendada(
-            conta_id, conversa_id, texto, quando, resposta_a, mencoes)
+            conta_id, conversa_id, texto, quando, resposta_a, mencoes, anexo)
 
     def agendadas(self, conta_id, conversa_id=None):
         return self._de(conta_id).agendadas(conta_id, conversa_id)
@@ -392,7 +392,10 @@ class Bancos:
     def agendadas_vencidas(self, conta_id, ate):
         return self._de(conta_id).agendadas_vencidas(conta_id, ate)
 
-    def marcar_agendadas_atrasadas(self, ids):
+    def marcar_agendadas_atrasadas(self, ids, conta_id=None):
+        if conta_id is not None:
+            self._de(conta_id).marcar_agendadas_atrasadas(ids)
+            return
         for _, b in self._todas():
             b.marcar_agendadas_atrasadas(ids)
 

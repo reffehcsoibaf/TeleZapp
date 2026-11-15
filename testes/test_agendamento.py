@@ -1,3 +1,5 @@
+import pytest
+
 from datetime import date, datetime
 
 from telezapp.nucleo import agendamento as ag
@@ -197,3 +199,109 @@ def test_janela_de_agendar_do_whatsapp_explica_o_limite(monkeypatch):
 def test_linha_de_agendada_atrasada_diz_que_nao_foi_enviada():
     t = ag.linha("oi", datetime(2026, 11, 11, 9, 0), AGORA, atrasada=True)
     assert "passou da hora, não enviada" in t
+
+
+# ------------------------------------------- so com numeros e setas
+HOJE = datetime(2026, 11, 11, 10, 20)
+
+
+@pytest.mark.parametrize("texto,esperado", [
+    ("25122026", date(2026, 12, 25)),
+    ("251226", date(2026, 12, 25)),
+    ("2512", date(2026, 12, 25)),
+    ("0512", date(2026, 12, 5)),
+    ("1011", date(2027, 11, 10)),          # ja passou neste ano
+    ("25", date(2026, 11, 25)),
+    ("11", date(2026, 11, 11)),            # hoje
+    ("5", date(2026, 12, 5)),              # dia 5 deste mes ja passou
+    ("30", date(2026, 11, 30)),
+    ("112", None),                         # ambiguo
+    ("32122026", None),
+    ("31112026", None),                    # novembro nao tem 31
+])
+def test_data_so_com_numeros(texto, esperado):
+    assert ag.interpretar_data(texto, HOJE.date()) == esperado
+
+
+def test_dia_sem_mes_pula_para_o_mes_em_que_o_dia_existe():
+    assert ag.interpretar_data("31", date(2026, 11, 11)) == date(2026, 12, 31)
+    assert ag.interpretar_data("30", date(2027, 1, 31)) == date(2027, 3, 30)
+
+
+def test_hora_so_com_numeros_e_montar():
+    assert ag.interpretar_hora("1430") == (14, 30)
+    assert ag.interpretar_hora("930") == (9, 30)
+    assert ag.interpretar_hora("9") == (9, 0)
+    quando, erro = ag.montar("25122026", "1430", HOJE)
+    assert quando == datetime(2026, 12, 25, 14, 30) and erro == ""
+    assert "números" in ag.montar("abc", "1430", HOJE)[1]
+
+
+def test_mudar_data_com_as_setas():
+    hoje = HOJE.date()
+    assert ag.mudar_data("11/11/2026", 1, False, hoje) == (
+        "12/11/2026", "amanhã, quinta-feira, 12/11/2026")
+    assert ag.mudar_data("12/11/2026", -1, False, hoje) == (
+        "11/11/2026", "hoje, quarta-feira, 11/11/2026")
+    assert ag.mudar_data("10/11/2026", 1, False, hoje)[1].startswith("hoje")
+    assert ag.mudar_data("11/11/2026", 1, False, hoje)[0] == "12/11/2026"
+    # amanha, em palavras
+    assert ag.mudar_data("hoje", 1, False, hoje)[1].startswith("amanhã")
+    # Page Up anda uma semana
+    assert ag.mudar_data("11/11/2026", 1, True, hoje)[0] == "18/11/2026"
+    # nunca antes de hoje nem alem de um ano
+    assert ag.mudar_data("11/11/2026", -1, False, hoje)[0] == "11/11/2026"
+    assert ag.mudar_data("11/11/2027", 1, True, hoje)[0] == "11/11/2027"
+    # sem data valida parte de hoje
+    assert ag.mudar_data("xx", 1, False, hoje)[0] == "12/11/2026"
+    # digitado so com numeros tambem
+    assert ag.mudar_data("2512", 1, False, hoje)[0] == "26/12/2026"
+
+
+def test_mudar_hora_com_as_setas():
+    agora = HOJE
+    assert ag.mudar_hora("14:30", 1, False, agora) == ("14:45", "14:45")
+    assert ag.mudar_hora("14:30", -1, False, agora)[0] == "14:15"
+    assert ag.mudar_hora("14:10", 1, False, agora)[0] == "14:15"   # ao quarto
+    assert ag.mudar_hora("14:10", -1, False, agora)[0] == "14:00"
+    assert ag.mudar_hora("14:00", -1, False, agora)[0] == "13:45"
+    assert ag.mudar_hora("23:50", 1, False, agora)[0] == "00:00"   # da a volta
+    assert ag.mudar_hora("00:00", -1, False, agora)[0] == "23:45"
+    assert ag.mudar_hora("14:30", 1, True, agora)[0] == "15:30"    # Page Up
+    assert ag.mudar_hora("23:30", 1, True, agora)[0] == "00:30"
+    assert ag.mudar_hora("", 1, False, agora)[0] == "10:30"        # da atual
+
+
+def test_setas_na_janela_de_agendar_mudam_o_campo_e_falam(monkeypatch):
+    ja, wx = _janelas()
+    falas = []
+    d = ja.DialogoAgendar(None, "Ana", "oi", agora=lambda: HOJE,
+                          falar=falas.append)
+
+    class Tecla:
+        def __init__(self, codigo, mod=False):
+            self.codigo, self.mod, self.pulou = codigo, mod, False
+
+        def GetKeyCode(self):
+            return self.codigo
+
+        def HasAnyModifiers(self):
+            return self.mod
+
+        def Skip(self):
+            self.pulou = True
+    d.data.SetValue("11/11/2026")
+    d._tecla_da_data(Tecla(ja.wx.WXK_UP))
+    assert d.data.GetValue() == "12/11/2026"
+    assert falas[-1] == "amanhã, quinta-feira, 12/11/2026"
+    d.hora.SetValue("14:30")
+    d._tecla_da_hora(Tecla(ja.wx.WXK_DOWN))
+    assert d.hora.GetValue() == "14:15" and falas[-1] == "14:15"
+    d._tecla_da_hora(Tecla(ja.wx.WXK_PAGEUP))
+    assert d.hora.GetValue() == "15:15"
+    outra = Tecla(65)                         # outra tecla segue normal
+    d._tecla_da_data(outra)
+    assert outra.pulou and d.data.GetValue() == "12/11/2026"
+    com_ctrl = Tecla(ja.wx.WXK_UP, mod=True)
+    d._tecla_da_hora(com_ctrl)
+    assert com_ctrl.pulou and d.hora.GetValue() == "15:15"

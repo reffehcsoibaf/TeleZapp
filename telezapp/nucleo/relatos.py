@@ -5,11 +5,13 @@ pagina, sem navegador; veja relatos/LEIAME.md. Sem wx."""
 import json
 import logging
 import os
+import re
 import urllib.error
 import urllib.request
 import uuid
 
 from telezapp import VERSAO, config
+from telezapp.nucleo import modelos
 from telezapp.nucleo.atualizacao import abrir_url
 
 log = logging.getLogger("telezapp.relatos")
@@ -26,6 +28,46 @@ SEM_DESCRICAO = "(sem descrição: só os logs)"
 
 class ErroRelato(Exception):
     """O texto e dito a pessoa."""
+
+
+VIAS = (("telegram", "Telegram"), ("whatsapp", "WhatsApp"),
+        ("email", "E-mail"))
+DICAS = {"telegram": "Contato: seu usuário do Telegram (como @fulano) ou o "
+                     "número do telefone com DDD",
+         "whatsapp": "Contato: seu número de WhatsApp com DDD",
+         "email": "Contato: seu endereço de e-mail"}
+
+
+def via_de(contato):
+    """A via que combina com um contato ja escrito (de antes da escolha)."""
+    t = (contato or "").strip()
+    if "@" in t[1:]:
+        return "email"
+    if sum(c.isdigit() for c in t) >= 8:
+        return "whatsapp"
+    return "telegram"
+
+
+def contato_de(via, valor):
+    """(texto para o relato, erro). O texto leva a via na frente, como
+    "WhatsApp: +5521977425383"; `erro` e a frase para a pessoa, ou vazio."""
+    t = (valor or "").strip()
+    nome = dict(VIAS).get(via, via)
+    if via == "email":
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", t):
+            return "", "Escreva o e-mail completo, como nome@exemplo.com."
+        return "%s: %s" % (nome, t), ""
+    if via == "whatsapp" or (via == "telegram" and not re.search(
+            r"[A-Za-z_]", t) and t):
+        fone = modelos.normalizar_telefone(t)
+        if fone is None:
+            return "", "Escreva o número com DDD, como 21 99999-8888."
+        return "%s: %s" % (nome, fone), ""
+    usuario = t[1:] if t.startswith("@") else t
+    if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", usuario):
+        return "", ("Escreva o usuário do Telegram, como @fulano (de 5 a 32 "
+                    "letras, números ou _), ou o número com DDD.")
+    return "%s: @%s" % (nome, usuario), ""
 
 
 def falta(contato, descricao, com_logs):

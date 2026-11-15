@@ -77,6 +77,29 @@ def test_agendadas_por_numero_e_por_conta(cfg):
     b.fechar()
 
 
+
+def test_agendada_com_conta_nao_mexe_na_de_outra_conta(cfg):
+    """Os numeros se repetem entre as contas: tirar ou marcar a agendada de
+    uma conta nao pode atingir a que tem o mesmo numero em outra."""
+    b = Bancos(cfg)
+    id1 = b.guardar_agendada("t1", "c", "a", 100)
+    id2 = b.guardar_agendada("t2", "c", "b", 200)
+    assert id1 == id2
+    b.marcar_agendadas_atrasadas([id1], "t1")
+    assert b.agendada(id1, "t1")["atrasada"]
+    assert not b.agendada(id2, "t2")["atrasada"]
+    b.tirar_agendadas([id1], "t1")
+    assert b.agendada(id1, "t1") is None
+    assert b.agendada(id2, "t2") is not None
+    b.fechar()
+
+
+def test_agendada_guarda_o_anexo(cfg):
+    b = Bancos(cfg)
+    i = b.guardar_agendada("t1", "c", "legenda", 100, anexo='{"a": 1}')
+    assert b.agendada(i, "t1")["anexo"] == '{"a": 1}'
+    b.fechar()
+
 def test_apagar_conta_fecha_e_apaga_o_banco(cfg):
     b = Bancos(cfg)
     b.salvar_mensagens([m.Mensagem("t1", "1", "1", texto="oi", data=1)])

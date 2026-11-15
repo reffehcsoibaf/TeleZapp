@@ -115,11 +115,13 @@ def descrever_marca(marca):
 def descrever_ambiente(log):
     try:
         import platform
+        import sysconfig
         from telezapp import config
         ligado = tempo_ligado()
-        log.info("ambiente: %s, Python %s, %s, dados em %s, argumentos %s, "
-                 "Windows ligado há %s", platform.platform(),
-                 platform.python_version(),
+        log.info("ambiente: %s, processador %s (Python %s), Python %s, %s, "
+                 "dados em %s, argumentos %s, Windows ligado há %s",
+                 platform.platform(), platform.machine() or "?",
+                 sysconfig.get_platform(), platform.python_version(),
                  "empacotado" if getattr(sys, "frozen", False) else "código",
                  config.pasta_dados(), _argumentos_para_o_log(sys.argv[1:]),
                  "%.0f min" % (ligado / 60) if ligado is not None

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Provedor do WhatsApp com mensagens protobuf de verdade do neonize e um
 cliente simulado (sem rede)."""
+import json
 import contextlib
 import time
 import logging
@@ -581,6 +582,20 @@ def test_historico_guarda_conversas_nomes_e_mensagens(amb):
     esperar(amb.fila, ev.MensagemNova)
     assert amb.c.lidas == [(["H3"], "5551988887777@s.whatsapp.net",
                             "5551988887777")]
+
+
+def test_historico_ignora_contato_sem_conversa_iniciada(amb):
+    h = H.HistorySync(syncType=3, conversations=[
+        H.Conversation(ID="5551900000001@s.whatsapp.net", name="So agenda"),
+        H.Conversation(ID="5551900000002@s.whatsapp.net", unreadCount=2),
+        H.Conversation(ID="5551900000003@s.whatsapp.net",
+                       conversationTimestamp=TS),
+        H.Conversation(ID="456@g.us", name="Grupo vazio")])
+    amb.p.guardar_historico(h)
+    ids = {c.id for c in amb.banco.conversas("w1")}
+    assert "5551900000001@s.whatsapp.net" not in ids
+    assert {"5551900000002@s.whatsapp.net", "5551900000003@s.whatsapp.net",
+            "456@g.us"} <= ids
 
 
 def test_recentes_guarda_tudo_que_vier(amb):
@@ -1189,6 +1204,27 @@ def test_pagamento_interativo_sem_texto_vira_solicitacao_de_pagamento():
         "w1", "c")
     assert msg.tipo == m.TEXTO
     assert msg.texto == "mensagem interativa: solicitação de pagamento"
+
+
+def test_pagamento_interativo_mostra_valor_itens_e_pix():
+    params = json.dumps({
+        "currency": "BRL", "reference_id": "A123",
+        "total_amount": {"value": 125990, "offset": 100},
+        "order": {"items": [
+            {"name": "Cadeira", "quantity": 2,
+             "amount": {"value": 62995, "offset": 100}}]},
+        "payment_settings": [{"type": "pix_static_code", "pix_static_code": {
+            "key": "12345678900", "merchant_name": "Loja"}}]})
+    nf = E.InteractiveMessage.NativeFlowMessage(buttons=[
+        E.InteractiveMessage.NativeFlowMessage.NativeFlowButton(
+            name="review_and_pay", buttonParamsJSON=params)])
+    msg, _ = wa.converter(evento("PG2", E.Message(
+        interactiveMessage=E.InteractiveMessage(nativeFlowMessage=nf))),
+        "w1", "c")
+    assert msg.texto == (
+        "mensagem interativa: solicitação de pagamento\n"
+        "2 x Cadeira, R$ 629,95\nTotal: R$ 1.259,90\nReferência: A123\n"
+        "Pix: 12345678900, Loja")
 
 
 def _modelo_com_botoes():
@@ -1833,6 +1869,9 @@ def test_tipos_novos_ganham_texto_e_o_de_edicao_nao_vira_mensagem():
     # edicao de evento ou enquete (cifrada): so controle, nao e mensagem
     assert wa.conteudo_de(E.Message(
         secretEncryptedMessage=E.SecretEncryptedMessage())) is None
+    # resposta cifrada a convite de evento (vou / nao vou): so controle
+    assert wa.conteudo_de(E.Message(
+        encEventResponseMessage=E.EncEventResponseMessage())) is None
 
 
 def test_contato_salvo_no_telezapp_vai_ao_whatsapp_sem_tocar_a_agenda(amb):
@@ -2522,17 +2561,51 @@ def test_oferta_velha_da_fila_nao_avisa_que_esta_tocando(amb):
     amb.f["CallOffer"](amb.c, _chamada("oferta", "V2", ts=int(time.time())))
     assert esperar(amb.fila, ev.ChamadaWhatsApp).chamada_id == "V2"
     assert not amb.p._oferta_velha("V2")
-    # acabada a fila, a data nao importa: o relogio do computador pode errar
+    # acabada a fila, uns minutos de diferenca do relogio nao calam a chamada
     amb.p._ao_fim_sincronia(None, None)
-    amb.f["CallOffer"](amb.c, _chamada("oferta", "V3"))
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "V3",
+                                       ts=int(time.time()) - 300))
     assert esperar(amb.fila, ev.ChamadaWhatsApp).chamada_id == "V3"
+    # mas oferta de horas atras (sincronizacao de mensagens antigas) nao toca
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "V4",
+                                       ts=int(time.time()) - 7200))
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.mensagem.id == "chamada-V4"
+    assert nova.mensagem.texto == "Chamada de voz encerrada"
+    assert amb.p._oferta_velha("V4")
+    assert not any(isinstance(x, ev.ChamadaWhatsApp) and
+                   x.chamada_id == "V4" for x in list(amb.fila.queue))
+
+
+def test_oferta_marcada_offline_nao_toca_nem_depois_do_fim_da_fila(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.p._ao_fim_sincronia(None, None)
+    # a DLL passa a marca "offline" nos atributos do no "offer"
+    marca = N.NodeAttrs(name="offline", text="3")
+    antiga = _chamada("oferta", "M1", ts=int(time.time()) - 300)
+    antiga.data.Attrs.append(marca)
+    amb.f["CallOffer"](amb.c, antiga)
+    nova = esperar(amb.fila, ev.MensagemNova)
+    assert nova.mensagem.texto == "Chamada de voz encerrada"
+    assert amb.p._oferta_velha("M1")
+    # a mesma idade, sem a marca (ao vivo, relogio atrasado), toca
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "M2",
+                                       ts=int(time.time()) - 300))
+    assert esperar(amb.fila, ev.ChamadaWhatsApp).chamada_id == "M2"
+    # marcada, mas de agora (tocando quando o app reconectou): toca
+    fresca = _chamada("oferta", "M3", ts=int(time.time()) - 5)
+    fresca.data.Attrs.append(marca)
+    amb.f["CallOffer"](amb.c, fresca)
+    assert esperar(amb.fila, ev.ChamadaWhatsApp).chamada_id == "M3"
 
 
 def test_chamada_recebida_vira_aviso_e_linha_na_conversa(amb):
     amb.f["Connected"](amb.c, N.Connected())
     esperar(amb.fila, ev.ContaPronta)
     amb.p._ao_fim_sincronia(None, None)
-    amb.f["CallOffer"](amb.c, _chamada("oferta", "C1", video=True))
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "C1", video=True,
+                                       ts=int(time.time())))
     nova = esperar(amb.fila, ev.MensagemNova)
     assert nova.silenciosa and nova.mensagem.id == "chamada-C1"
     assert nova.mensagem.texto == "Chamada de vídeo recebida, tocando"
@@ -2556,7 +2629,7 @@ def test_chamada_atendida_em_outro_aparelho_e_recusada(amb):
     amb.f["Connected"](amb.c, N.Connected())
     esperar(amb.fila, ev.ContaPronta)
     amb.p._ao_fim_sincronia(None, None)
-    amb.f["CallOffer"](amb.c, _chamada("oferta", "C2"))
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "C2", ts=int(time.time())))
     esperar(amb.fila, ev.ChamadaWhatsApp)
     amb.f["CallAccept"](amb.c, _chamada("atendida", "C2", ts=TS + 5))
     amb.f["CallTerminate"](amb.c, _chamada("fim", "C2", ts=TS + 70))
@@ -2564,7 +2637,7 @@ def test_chamada_atendida_em_outro_aparelho_e_recusada(amb):
         "Chamada de voz atendida em outro aparelho, durou 1 minuto e 5 segundos"
     fim = esperar(amb.fila, ev.ChamadaWhatsApp)
     assert (fim.fase, fim.segundos) == ("atendida", 65)
-    amb.f["CallOffer"](amb.c, _chamada("oferta", "C3"))
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "C3", ts=int(time.time())))
     esperar(amb.fila, ev.ChamadaWhatsApp)
     amb.f["CallTerminate"](amb.c, _chamada("fim", "C3", reason="rejected"))
     assert esperar(amb.fila, ev.ChamadaWhatsApp).fase == "recusada"
@@ -4638,7 +4711,7 @@ def test_chamada_recebida_some_por_completo_com_o_aviso_desligado(amb):
     esperar(amb.fila, ev.ContaPronta)
     amb.p._ao_fim_sincronia(None, None)
     wa.config.Config().set("avisar_chamadas_whatsapp", False)
-    amb.f["CallOffer"](amb.c, _chamada("oferta", "O1", video=True))
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "O1", video=True, ts=int(time.time())))
     amb.f["CallAccept"](amb.c, _chamada("atendida", "O1", ts=TS + 5))
     amb.f["CallTerminate"](amb.c, _chamada("fim", "O1", ts=TS + 30))
     # nem aviso, nem linha na conversa, nem nao lida, e o motor de voz ignora
@@ -4651,7 +4724,7 @@ def test_chamada_recebida_some_por_completo_com_o_aviso_desligado(amb):
     assert amb.p._chamadas_ocultas == set()      # o fim limpou
     # ligando o aviso de novo, a proxima chamada volta ao normal
     wa.config.Config().set("avisar_chamadas_whatsapp", True)
-    amb.f["CallOffer"](amb.c, _chamada("oferta", "O2"))
+    amb.f["CallOffer"](amb.c, _chamada("oferta", "O2", ts=int(time.time())))
     assert esperar(amb.fila, ev.MensagemNova).mensagem.id == "chamada-O2"
     assert esperar(amb.fila, ev.ChamadaWhatsApp).chamada_id == "O2"
 
@@ -4948,3 +5021,186 @@ def test_agenda_do_whatsapp_envia_o_que_chegou_na_hora_e_separa_as_atrasadas(
     assert p.agendadas("c2")[0]["atrasada"] is False
     p.descartar_agendadas([x["id"] for x in atrasadas])
     assert p.agendadas("c2") == []
+
+
+def test_agendar_arquivo_guarda_copia_e_envia_na_hora_pelo_caminho_de_arquivo(
+        tmp_path, monkeypatch):
+    from datetime import datetime
+    from telezapp import config
+    from telezapp.midia.envio import Anexo
+    monkeypatch.setattr(config, "pasta",
+                        lambda *a: str(tmp_path / "dados"))
+    (tmp_path / "dados").mkdir()
+    p, banco = _provedor_com_cliente(tmp_path, ClienteFalso())
+    original = tmp_path / "foto.jpg"
+    original.write_bytes(b"jpeg")
+    anexo = Anexo(str(original), m.FOTO, "foto.jpg", "image/jpeg", 4)
+    quando = datetime(2026, 11, 12, 9, 0)
+    assert p.agendar_arquivo("c1", anexo, "olha", quando, "R1",
+                             [{"nome": "Ana", "id": "x"}]) == (True, "")
+    original.unlink()                           # o original pode sumir
+    itens = p.agendadas("c1")
+    assert itens[0]["texto"] == "foto (foto.jpg): olha"
+    enviados = []
+    p.enviar_arquivo = lambda c, a, legenda="", resposta="", mencoes=None: \
+        enviados.append((c, a, legenda, resposta, mencoes))
+    assert p.enviar_agendada(itens[0]["id"]) is True
+    c, a, legenda, resposta, mencoes = enviados[0]
+    assert (c, legenda, resposta) == ("c1", "olha", "R1")
+    assert mencoes == [{"nome": "Ana", "id": "x"}]
+    assert a.tipo == m.FOTO and a.temporario and os.path.isfile(a.caminho)
+    assert open(a.caminho, "rb").read() == b"jpeg"
+    assert p.agendadas("c1") == []
+
+
+def test_cancelar_agendada_com_arquivo_apaga_a_copia(tmp_path, monkeypatch):
+    from datetime import datetime
+    from telezapp import config
+    from telezapp.midia.envio import Anexo
+    monkeypatch.setattr(config, "pasta",
+                        lambda *a: str(tmp_path / "dados"))
+    (tmp_path / "dados").mkdir()
+    p, banco = _provedor_com_cliente(tmp_path, ClienteFalso())
+    arq = tmp_path / "d.pdf"
+    arq.write_bytes(b"pdf")
+    anexo = Anexo(str(arq), m.DOCUMENTO, "d.pdf", "application/pdf", 3)
+    p.agendar_arquivo("c1", anexo, "", datetime(2026, 11, 12, 9, 0))
+    copia = banco.agendadas("w1")[0]["anexo"]
+    caminho = __import__("json").loads(copia)["caminho"]
+    assert os.path.isfile(caminho) and caminho != str(arq)
+    p.cancelar_agendadas("c1", [p.agendadas("c1")[0]["id"]])
+    assert not os.path.exists(caminho) and p.agendadas("c1") == []
+
+
+def test_agendada_com_arquivo_que_sumiu_avisa_a_falha(tmp_path, monkeypatch):
+    from datetime import datetime
+    from telezapp import config
+    from telezapp.midia.envio import Anexo
+    monkeypatch.setattr(config, "pasta",
+                        lambda *a: str(tmp_path / "dados"))
+    (tmp_path / "dados").mkdir()
+    p, banco = _provedor_com_cliente(tmp_path, ClienteFalso())
+    arq = tmp_path / "f.jpg"
+    arq.write_bytes(b"x")
+    p.agendar_arquivo("c1", Anexo(str(arq), m.FOTO, "f.jpg", "image/jpeg", 1),
+                      "", datetime(2026, 11, 12, 9, 0))
+    for f in (tmp_path / "dados").iterdir():
+        f.unlink()
+    falhas = []
+    p.barramento.ouvir(lambda e: falhas.append(e))
+    p.enviar_arquivo = lambda *a, **k: falhas.append("enviou")
+    assert p.enviar_agendada(p.agendadas("c1")[0]["id"]) is True
+    assert "enviou" not in falhas
+    assert any(isinstance(e, ev.EnvioFalhou) and e.nome_arquivo == "f.jpg"
+               for e in falhas)
+
+
+def _mutacao(nome="regular_low", indice=("setting_unarchiveChats",),
+             desarquiva=False, remove=False, completo=False):
+    from neonize.proto.waSyncAction.WAWebProtobufSyncAction_pb2 import (
+        SyncActionValue, UnarchiveChatsSetting)
+    return types.SimpleNamespace(
+        Name=nome, Index=list(indice), Version=4, Remove=remove,
+        FromFullSync=completo,
+        Action=SyncActionValue(unarchiveChatsSetting=UnarchiveChatsSetting(
+            unarchiveChats=desarquiva)))
+
+
+def test_manter_arquivadas_segue_o_que_o_celular_avisa(tmp_path):
+    p, banco = _provedor_com_cliente(tmp_path, ClienteFalso())
+    assert p._manter_arquivadas_visto() is None
+    p._ao_mutacao_de_estado(None, _mutacao(desarquiva=True))   # desativado
+    assert p._manter_arquivadas_visto() is False
+    p._ao_mutacao_de_estado(None, _mutacao(desarquiva=False))  # ativado
+    assert p._manter_arquivadas_visto() is True
+    p._ao_mutacao_de_estado(None, _mutacao(desarquiva=True))
+    p._ao_mutacao_de_estado(None, _mutacao(remove=True))       # volta ao padrao
+    assert p._manter_arquivadas_visto() is True
+    # outras mutacoes nao mexem
+    p._ao_mutacao_de_estado(None, _mutacao(desarquiva=True, nome="regular_high"))
+    p._ao_mutacao_de_estado(None, _mutacao(desarquiva=True, indice=("pin_v1",)))
+    assert p._manter_arquivadas_visto() is True
+
+
+def test_privacidade_baixa_a_colecao_uma_vez_quando_nunca_viu_o_ajuste(
+        tmp_path):
+    cliente = ClienteFalso()
+    baixadas = []
+
+    def baixar(nome, full_sync=False):
+        baixadas.append((nome, full_sync))
+        cliente_p._ao_mutacao_de_estado(None, _mutacao(desarquiva=True))
+    cliente.fetch_app_state = baixar
+    cliente_p, banco = _provedor_com_cliente(tmp_path, cliente)
+    assert cliente_p._manter_arquivadas() == "unarchive"
+    assert baixadas == [("regular_low", True)]
+    assert cliente_p._manter_arquivadas() == "unarchive"       # sem baixar de novo
+    assert len(baixadas) == 1
+
+
+def test_sem_o_ajuste_no_celular_vale_o_padrao_manter(tmp_path):
+    cliente = ClienteFalso()
+    cliente.fetch_app_state = lambda nome, full_sync=False: None   # nada chega
+    p, banco = _provedor_com_cliente(tmp_path, cliente)
+    import telezapp.provedores.whatsapp as w
+    w.time.sleep = lambda s: None
+    assert p._manter_arquivadas() == "keep"
+
+
+def test_se_nao_deu_para_baixar_a_colecao_fica_sem_escolha(tmp_path):
+    cliente = ClienteFalso()
+
+    def baixar(nome, full_sync=False):
+        raise RuntimeError("sem resposta")
+    cliente.fetch_app_state = baixar
+    p, banco = _provedor_com_cliente(tmp_path, cliente)
+    assert p._manter_arquivadas() is None
+    assert p._manter_arquivadas_visto() is None
+
+
+def test_definir_manter_arquivadas_manda_o_ajuste_e_lembra(tmp_path):
+    p, banco = _provedor_com_cliente(tmp_path, ClienteFalso())
+    enviados = []
+    p._mandar_estado = enviados.append
+    p.definir_privacidade("keeparchived", "keep")
+    patch = enviados[-1]
+    assert patch.Type == patch.REGULAR_LOW
+    mut = patch.Mutations[0]
+    assert list(mut.Index) == ["setting_unarchiveChats"] and mut.Version == 4
+    # no WhatsApp o ajuste diz se DESARQUIVA: manter arquivadas = falso
+    assert mut.Value.unarchiveChatsSetting.unarchiveChats is False
+    assert p._manter_arquivadas_visto() is True
+    p.definir_privacidade("keeparchived", "unarchive")
+    assert enviados[-1].Mutations[0].Value.unarchiveChatsSetting \
+        .unarchiveChats is True
+    assert p._manter_arquivadas_visto() is False
+
+
+def test_go_sem_preempcao_assincrona_acrescenta_ao_godebug():
+    amb = {}
+    assert wa.go_sem_preempcao_assincrona(amb) is True
+    assert amb["GODEBUG"] == "asyncpreemptoff=1"
+    assert wa.go_sem_preempcao_assincrona(amb) is False        # ja esta
+    assert amb["GODEBUG"] == "asyncpreemptoff=1"
+    amb = {"GODEBUG": "madvdontneed=1"}                        # preserva o resto
+    assert wa.go_sem_preempcao_assincrona(amb) is True
+    assert amb["GODEBUG"] == "madvdontneed=1,asyncpreemptoff=1"
+    amb = {"GODEBUG": "asyncpreemptoff=0"}                     # a pessoa decidiu
+    assert wa.go_sem_preempcao_assincrona(amb) is False
+    assert amb["GODEBUG"] == "asyncpreemptoff=0"
+
+
+def test_so_no_windows_arm_o_go_perde_a_preempcao_assincrona(monkeypatch):
+    import os
+    chamadas = []
+    monkeypatch.setattr(wa, "go_sem_preempcao_assincrona",
+                        lambda amb=None: chamadas.append(1))
+    monkeypatch.setattr(wa.sysconfig, "get_platform", lambda: "win-amd64")
+    monkeypatch.setattr(wa.platform, "machine", lambda: "AMD64")
+    with wa.arquitetura_do_processo():
+        pass
+    assert chamadas == []                                      # x64 de verdade
+    monkeypatch.setattr(wa.platform, "machine", lambda: "ARM64")
+    with wa.arquitetura_do_processo():
+        pass
+    assert chamadas == [1]                                     # ARM emulando x64
