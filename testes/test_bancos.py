@@ -692,3 +692,33 @@ def test_o_padrao_e_um_banco_so_sem_pastas_por_conta(tmp_path, monkeypatch):
     assert c.get("contas_em_pastas") is False
     assert config.contas_separadas() is False
     assert not c.get("contas_pasta_personalizada")
+
+
+def test_mover_pasta_no_mesmo_disco_renomeia_sem_copiar(tmp_path, monkeypatch):
+    """Mover as midias para a pasta da conta nao pode gastar espaco quando
+    e no mesmo disco: renomeia (copiar 16 GB num disco cheio falhava)."""
+    from telezapp.nucleo import migracao
+    origem = tmp_path / "a" / "midias"
+    os.makedirs(origem / "x")
+    (origem / "x" / "f.bin").write_bytes(b"123")
+
+    def nao_copiar(*a, **k):
+        raise AssertionError("copiou em vez de renomear")
+    monkeypatch.setattr(migracao, "_copiar_pasta", nao_copiar)
+    destino = tmp_path / "b" / "conta" / "midias"
+    migracao._mover_pasta(str(origem), str(destino))
+    assert (destino / "x" / "f.bin").read_bytes() == b"123"
+    assert not origem.exists()
+
+
+def test_mover_pasta_copia_quando_nao_da_para_renomear(tmp_path, monkeypatch):
+    from telezapp.nucleo import migracao
+    origem = tmp_path / "a" / "midias"
+    os.makedirs(origem)
+    (origem / "f.bin").write_bytes(b"123")
+    monkeypatch.setattr(os, "rename", lambda *a: (_ for _ in ()).throw(
+        OSError("outro disco")))
+    destino = tmp_path / "b" / "midias"
+    migracao._mover_pasta(str(origem), str(destino))
+    assert (destino / "f.bin").read_bytes() == b"123"
+    assert not origem.exists()

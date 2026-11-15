@@ -140,8 +140,16 @@ def _copiar_pasta(origem, destino):
 
 
 def _mover_pasta(origem, destino):
-    """Move uma pasta inteira, conferindo o resultado antes de apagar a
-    origem."""
+    """Move uma pasta inteira. No mesmo disco renomeia (instantaneo, sem
+    gastar espaco: copiar 16 GB num disco quase cheio falhava); entre
+    discos copia, confere o resultado e so entao apaga a origem."""
+    if not os.path.exists(destino):
+        try:
+            os.makedirs(os.path.dirname(destino), exist_ok=True)
+            os.rename(origem, destino)
+            return
+        except OSError:
+            pass            # outro disco (ou algo travado): copia
     _copiar_pasta(origem, destino)
     _rmtree_com_espera(origem)
 
