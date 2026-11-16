@@ -421,6 +421,21 @@ OPCOES = (
           "trancadas. Sem código definido elas ficam escondidas. Desmarcada, "
           "o tipo Trancadas no celular aparece sempre.",
           grupo="Conversas trancadas"),
+    Opcao("trancadas_esconder_ao_sair",
+          "Esconder as conversas trancadas quando eu sair da janela",
+          "Privacidade", True,
+          "Depois de digitar o código, as trancadas ficam à mostra. Marcada, "
+          "elas voltam a ficar escondidas assim que você troca para outro "
+          "programa (ou o TeleZapp deixa de estar na frente). Minimizar a "
+          "janela e apertar Esc na lista de conversas também as escondem.",
+          grupo="Conversas trancadas"),
+    Opcao("trancadas_esconder_minutos",
+          "Esconder as conversas trancadas depois de quantos minutos sem "
+          "usar o teclado (0 para nunca)", "Privacidade", 5,
+          "Com as trancadas à mostra, se você não apertar nenhuma tecla do "
+          "TeleZapp por este tempo, elas voltam a ficar escondidas e é "
+          "preciso digitar o código de novo. 0 desliga.",
+          numero=(0, 1440), grupo="Conversas trancadas"),
     Opcao("temporarias_apagar_aqui",
           "Apagar daqui as mensagens temporárias quando o prazo acabar",
           "Privacidade", True,

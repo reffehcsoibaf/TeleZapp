@@ -388,7 +388,7 @@ Buscar mostra até 500 resultados na lista de baixo, das mais novas para as mais
 
 Enter, ou Ver na conversa, fecha a janela e abre a conversa na mensagem. Limpar critérios desmarca tudo. A janela lembra a última busca ao abrir de novo.
 
-Conversas trancadas só entram na busca depois de você digitar o código secreto na busca de conversas.
+Conversas trancadas só entram na busca depois de você digitar o código secreto na busca de conversas. Para escondê-las de novo, aperte Esc na lista de conversas ou no campo de busca; com os filtros personalizados, trocar de filtro também as esconde. Minimizar a janela as esconde sempre. Em Configurações, Privacidade, Conversas trancadas, duas opções as escondem sozinhas: ao sair da janela (quando você troca para outro programa) e depois de alguns minutos sem apertar nenhuma tecla no TeleZapp (5 por padrão; 0 desliga).
 
 # Detalhes da conversa
 Ctrl+I abre os detalhes da conversa selecionada: pessoa, grupo ou canal. Esc volta de cada lista para a janela de detalhes.

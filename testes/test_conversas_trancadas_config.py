@@ -25,7 +25,8 @@ def test_privacidade_tem_o_botao_conversas_trancadas(tmp_path, monkeypatch):
     assert "trancadas_exigir_codigo" not in soltas      # saiu da tela solta
     dentro = {o.chave for o in mod.opcoes_do_grupo("Privacidade",
                                                    "Conversas trancadas")}
-    assert dentro == {"trancadas_exigir_codigo"}
+    assert dentro == {"trancadas_exigir_codigo", "trancadas_esconder_ao_sair",
+                      "trancadas_esconder_minutos"}
     # a busca continua achando a opcao
     assert "trancadas_exigir_codigo" in {
         o.chave for o in config.buscar_opcoes("trancadas")}

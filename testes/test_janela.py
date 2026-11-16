@@ -9861,3 +9861,90 @@ def test_depois_de_atender_a_fala_avisa_que_esta_conectando(chamadas, monkeypatc
     dizer()
     lembrar()
     assert chamadas.falas == []
+
+
+def test_esc_na_lista_sai_das_trancadas_com_filtros_personalizados(j):
+    """Com os filtros personalizados a caixa de tipos nao esta na tela: o Esc
+    na lista de conversas esconde as trancadas na hora, mesmo com busca."""
+    _com_trancada(j)
+    j._aplicar_filtros_personalizados({"ativo": True, "lista": [
+        {"id": "a", "nome": "Todas", "contas": [], "tipos": []}]})
+    _digitar(j, "2468")
+    assert j.trancadas_liberadas and _nomes(j) == ["Segredo"]
+    j.campo_busca.SetValue("Seg")
+    j._ao_busca()
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    wx_falso._foco[0] = j.lista_conv
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))
+    assert not j.trancadas_liberadas
+    assert j.campo_busca.GetValue() == "" and j.busca == ""
+    assert "Segredo" not in _nomes(j) and _nomes(j) == ["Ana", "Bruno"]
+    assert ditas[-1].startswith("Saiu das conversas trancadas.")
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))         # sem trancadas: nada
+    assert _nomes(j) == ["Ana", "Bruno"]
+
+
+def test_trocar_de_filtro_personalizado_esconde_as_trancadas(j):
+    _com_trancada(j)
+    j._aplicar_filtros_personalizados({"ativo": True, "lista": [
+        {"id": "a", "nome": "Um", "contas": [], "tipos": []},
+        {"id": "b", "nome": "Dois", "contas": [], "tipos": []}]})
+    _digitar(j, "2468")
+    assert j.trancadas_liberadas and _nomes(j) == ["Segredo"]
+    j.cx_filtro.SetSelection(1)
+    j._ao_filtro_pers()
+    assert not j.trancadas_liberadas
+    assert "Segredo" not in _nomes(j)
+
+
+def test_trancadas_se_escondem_ao_sair_da_janela(j):
+    _com_trancada(j)
+    _digitar(j, "2468")
+    assert j.trancadas_liberadas and j._vigia_trancadas
+    j._app_ativo = lambda: True
+    j._vigiar_trancadas()                       # na frente: fica
+    assert j.trancadas_liberadas and j._vigia_trancadas
+    j._app_ativo = lambda: False                # foi para outro programa
+    j._vigiar_trancadas()
+    assert not j.trancadas_liberadas and not j._vigia_trancadas
+    assert _nomes(j) == ["Ana", "Bruno"]
+
+
+def test_trancadas_sair_da_janela_pode_ser_desligado(j):
+    _com_trancada(j)
+    j.cfg.set("trancadas_esconder_ao_sair", False)
+    _digitar(j, "2468")
+    j._app_ativo = lambda: False
+    j._vigiar_trancadas()
+    assert j.trancadas_liberadas
+
+
+def test_trancadas_se_escondem_depois_de_minutos_sem_teclado(j):
+    import time
+    _com_trancada(j)
+    j.cfg.set("trancadas_esconder_minutos", 3)
+    _digitar(j, "2468")
+    j._app_ativo = lambda: True
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._atividade = time.monotonic() - 100       # 1 min 40 s parado
+    j._vigiar_trancadas()
+    assert j.trancadas_liberadas
+    j._atividade = time.monotonic() - 181       # passou de 3 min
+    j._vigiar_trancadas()
+    assert not j.trancadas_liberadas
+    assert ditas[-1] == "Conversas trancadas escondidas."
+    j.cfg.set("trancadas_esconder_minutos", 0)  # 0: nunca
+    _digitar(j, "2468")
+    j._atividade = time.monotonic() - 99999
+    j._vigiar_trancadas()
+    assert j.trancadas_liberadas
+
+
+def test_tecla_apertada_zera_o_tempo_parado_das_trancadas(j):
+    import time
+    j._atividade = time.monotonic() - 500
+    wx_falso._foco[0] = j.lista_conv
+    j._char_hook(Tecla(wx_falso.WXK_DOWN))
+    assert time.monotonic() - j._atividade < 5

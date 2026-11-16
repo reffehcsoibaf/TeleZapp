@@ -99,6 +99,8 @@ from telezapp.nucleo.midias import TEXTO_LIMPA
 
 log = logging.getLogger("telezapp.janela")
 
+INTERVALO_VIGIA_TRANCADAS_MS = 1000
+
 MARCADOR = "marcador"
 ATALHOS_GLOBAIS = ("mostrar_janela", "atender_global", "recusar_global")
 ROTULO_GLOBAL = {"mostrar_janela": "chamar o TeleZapp",
@@ -472,6 +474,8 @@ class Janela(wx.Frame):
         self.busca = ""               # texto do campo de busca de conversas
         self._sem_whatsapp = ""       # motivo do ultimo telefone nao achado
         self.trancadas_liberadas = False   # codigo secreto digitado agora
+        self._atividade = time.monotonic()   # ultima tecla apertada
+        self._vigia_trancadas = False       # o relogio das trancadas roda
         self._tipos_atuais = m.tipos_visiveis(False)
         self._buscando = False        # evita tratar a limpeza do campo
         self.filtro_tipo = self._filtro_tipo_salvo(cfg)
@@ -4212,6 +4216,10 @@ class Janela(wx.Frame):
             self._limpar_busca()
             self.filtro_pers_id = lista[i]["id"]
             self.cfg.set("filtro_personalizado", self.filtro_pers_id)
+            # trocar de filtro tira das trancadas: com os filtros
+            # personalizados a caixa de tipos nao esta na tela, e esse era o
+            # unico jeito de sair delas
+            self._esconder_trancadas(falar=False)
             self._aplicar_filtros(
                 falar=bool(self.cfg.get("falar_quantas_no_filtro")))
 
@@ -4311,6 +4319,15 @@ class Janela(wx.Frame):
         self.lista_conv.SetFocus()
         self._aplicar_filtros()
 
+    def _sair_das_trancadas(self):
+        """Esc na lista de conversas, com as trancadas na tela: elas somem
+        na hora, sem depender da caixa de tipos (que nao existe com os
+        filtros personalizados) e sem outro Esc para a busca."""
+        self._limpar_busca()
+        self._esconder_trancadas(falar=False)
+        self.fala.falar("Saiu das conversas trancadas. %s" %
+                        self._resumo_filtro(), interromper=True)
+
     def _esconder_se_saiu_das_trancadas(self):
         """Saiu do tipo Trancadas: elas somem de novo e so voltam quando o
         codigo for digitado outra vez na busca."""
@@ -4337,6 +4354,40 @@ class Janela(wx.Frame):
             return
         self.busca = texto
         self._aplicar_filtros(falar=False)
+
+    def _app_ativo(self):
+        """Alguma janela do TeleZapp esta na frente (a principal ou uma
+        caixa de dialogo dele). Falso quando a pessoa foi para outro
+        programa."""
+        try:
+            return wx.GetActiveWindow() is not None
+        except Exception:
+            return True
+
+    def _vigiar_trancadas(self):
+        """Com as trancadas a mostra, olha a cada segundo se a pessoa saiu
+        da janela ou ficou parada tempo demais e, se sim, as esconde."""
+        self._vigia_trancadas = False
+        if not self.trancadas_liberadas:
+            return
+        saiu = bool(self.cfg.get("trancadas_esconder_ao_sair")) and             not self._app_ativo()
+        minutos = int(self.cfg.get("trancadas_esconder_minutos") or 0)
+        parada = minutos > 0 and             time.monotonic() - self._atividade >= minutos * 60
+        if saiu or parada:
+            log.info("trancadas escondidas sozinhas (%s)",
+                     "saiu da janela" if saiu else "%d min parado" % minutos)
+            self._esconder_trancadas(falar=False)
+            if not saiu:
+                self.fala.falar("Conversas trancadas escondidas.",
+                                interromper=True)
+            return
+        self._iniciar_vigia_trancadas()
+
+    def _iniciar_vigia_trancadas(self):
+        if self._vigia_trancadas or not self.trancadas_liberadas:
+            return
+        self._vigia_trancadas = True
+        wx.CallLater(INTERVALO_VIGIA_TRANCADAS_MS, self._vigiar_trancadas)
 
     def _ao_ativar(self, evento):
         """A janela voltou ao foco: o que chegou na conversa aberta enquanto
@@ -4377,6 +4428,8 @@ class Janela(wx.Frame):
             self._buscando = False
         self.busca = ""
         self.trancadas_liberadas = True
+        self._atividade = time.monotonic()
+        self._iniciar_vigia_trancadas()
         self._montar_tipos()
         self.filtro_tipo = "trancadas"
         self.cx_tipo.SetSelection(self._indice_tipo())
@@ -5404,6 +5457,7 @@ class Janela(wx.Frame):
     # ============================================================ teclado
     def _char_hook(self, evt):
         """Enter e Esc tratados na janela: o ListBox nao entrega o Enter."""
+        self._atividade = time.monotonic()
         try:
             k = evt.GetKeyCode()
             foco = self.FindFocus()
@@ -5443,6 +5497,9 @@ class Janela(wx.Frame):
                             not self._parar_audio() and \
                             not self._voltar_da_respondida():
                         self._esc_da_conversa()
+                    return
+                if foco in (self.lista_conv, self.campo_busca) and                         self.trancadas_liberadas and                         self.filtro_tipo == "trancadas":
+                    self._sair_das_trancadas()
                     return
                 # nada mais a cancelar: Esc limpa a busca de conversas
                 if foco in (self.lista_conv, self.campo_busca) and \
