@@ -9045,6 +9045,45 @@ def test_dialogo_do_som_da_conversa_escolhe_evento_e_depois_o_pacote(
             pk.remover_som_da_conversa(j.cfg, conv.chave, e)
 
 
+def test_dialogo_do_som_da_conversa_mostra_os_sons_do_pacote(
+        j, monkeypatch, tmp_path):
+    """A terceira lista traz os sons do pacote marcado na segunda, em
+    ordem; escolher um define o som do evento, sem falar por cima do
+    NVDA (que ja anuncia cada item)."""
+    pk, jd = _pacotes_falsos(monkeypatch, tmp_path, j)
+    conv = j.indice[("t1", "20")]
+    conv.tipo = "privada"
+    ditas = []
+    monkeypatch.setattr(j.fala, "falar", lambda t, **k: ditas.append(t))
+    try:
+        d = jd.DialogoSomDaConversa(None, j, conv)
+        # sem som proprio, a segunda nao marca nada: a terceira traz o
+        # pacote ativo (Marimba)
+        assert d.cx_escolha.itens == ["Marimba", "Cristal"]
+        assert d.cx_escolha.GetSelection() == -1
+        assert d._pacote_da_lista == "marimba"
+        assert d.cx_pacote.itens == ["nova.wav", "reacao_recebida.wav"]
+        d.cx_pacote.SetSelection(0)
+        d._escolher_pacote()                 # nova: o nova.wav do pacote
+        assert pk.arquivo_da_conversa(j.cfg, conv.chave) != ""
+        assert open(pk.arquivo_da_conversa(j.cfg, conv.chave),
+                    "rb").read() == b"nova-M"
+        assert ditas == []                   # so o NVDA anuncia os itens
+        # marcando Cristal na segunda, a terceira passa a mostrar Cristal
+        d.cx_escolha.SetSelection(1)
+        d._escolher()
+        assert d._pacote_da_lista == "cristal"
+        assert d._sons_do_pacote[0][1] == str(
+            tmp_path / "cristal" / "nova.wav")
+        d2 = jd.DialogoSomDaConversa(None, j, conv)  # reabre: o pacote dela
+        assert d2.cx_escolha.GetSelection() == 1     # nova: Cristal
+        assert d2._pacote_da_lista == "cristal"
+        assert d2.cx_pacote.itens == ["nova.wav", "reacao_recebida.wav"]
+    finally:
+        for e in pk.EVENTOS_DA_CONVERSA:
+            pk.remover_som_da_conversa(j.cfg, conv.chave, e)
+
+
 def test_grupo_tem_o_evento_de_mencao_na_lista(j, monkeypatch, tmp_path):
     pk, jd = _pacotes_falsos(monkeypatch, tmp_path, j)
     conv = j.indice[("t1", "20")]
@@ -9394,3 +9433,518 @@ def test_limpar_varias_conversas_marcadas_com_uma_pergunta_so(j, monkeypatch):
     assert not j.banco.mensagens("t1", "21", 1)
     assert c1.chave in j.indice and c2.chave in j.indice   # seguem na lista
     assert "2 conversas limpadas" in falas[-1] and "celular" in falas[-1]
+
+
+def test_dados_das_contas_em_gerenciar_contas(j, monkeypatch, tmp_path):
+    """A caixa de separar por conta e a pasta moram em Gerenciar contas e
+    so valem ao reabrir; uma pasta que nao da para criar nao e guardada."""
+    assert j._salvar_dados_das_contas(None) is False
+    assert j._salvar_dados_das_contas((False, "")) is False   # nada mudou
+    pasta = str(tmp_path / "contas")
+    assert j._salvar_dados_das_contas((True, pasta)) is True
+    assert j.cfg.get("contas_em_pastas") is True
+    assert j.cfg.get("contas_pasta") == pasta
+    assert os.path.isdir(pasta)
+    assert j._salvar_dados_das_contas((True, pasta)) is False
+    avisos = []
+    monkeypatch.setattr(jm.wx, "MessageBox",
+                        lambda *a, **k: avisos.append(a[0]))
+
+    def recusa(p, exist_ok=False):
+        raise OSError("sem permissao")
+    monkeypatch.setattr(jm.os, "makedirs", recusa)
+    assert j._salvar_dados_das_contas((True, "Z:/nao/existe")) is False
+    assert j.cfg.get("contas_pasta") == pasta        # a anterior fica
+    assert avisos and "Z:" in avisos[0]
+
+
+
+def test_dialogos_de_backup_tem_a_lista_de_contas():
+    from telezapp.interface import backup as jb
+    from telezapp.nucleo import backup as bk
+    d = jb.DialogoBackup(None, [("t1", "Um, Telegram"), ("t2", "Dois")])
+    d.tipo.SetSelection(jb.SELETIVO)
+    assert d.contas() is None                        # todas marcadas
+    d.caixas_de_contas["t2"].SetValue(False)
+    assert d.contas() == ["t1"]
+    uma = jb.DialogoBackup(None, [("t1", "Um")])     # uma so: sem lista
+    assert uma.caixas_de_contas == {} and uma.contas() is None
+    man = bk.Manifesto("x", 0.0, ["contas", "conversas"], "", 2, False,
+                       ["t1"])
+    r = jb.DialogoRestaurar(None, man, [("t1", "Um"), ("t2", "Dois")])
+    assert r.contas() is None
+    r.caixas_de_contas["t1"].SetValue(False)
+    assert r.contas() == ["t2"]
+
+
+def test_filtros_personalizados_tomam_o_lugar_das_caixas(j):
+    """Ativados, os filtros esconderem serviço, conta e tipo; com um filtro
+    so, nao ha caixa Filtro; com mais de um, ela aparece."""
+    assert _nomes(j) == ["Ana", "Bruno"]
+    assert j.cx_conta.visivel is not False
+    j._aplicar_filtros_personalizados({"ativo": True, "lista": [
+        {"id": "a", "nome": "Não lidas", "contas": [], "tipos": ["nao_lidas"]}]})
+    assert _nomes(j) == ["Ana"]                       # so a nao lida
+    assert j.cx_conta.visivel is False and j.cx_tipo.visivel is False
+    assert j.cx_filtro.visivel is False               # um filtro so
+    assert j.cfg.get("filtros_personalizados")["ativo"] is True
+    j._aplicar_filtros_personalizados({"ativo": True, "lista": [
+        {"id": "a", "nome": "Não lidas", "contas": [], "tipos": ["nao_lidas"]},
+        {"id": "b", "nome": "Telegram", "contas": ["telegram"],
+         "tipos": []}]})
+    assert j.cx_filtro.visivel is True
+    assert j.cx_filtro.itens == ["Não lidas", "Telegram"]
+    j.cx_filtro.SetSelection(1)
+    j._ao_filtro_pers()
+    assert _nomes(j) == ["Ana", "Bruno"]
+    assert j.cfg.get("filtro_personalizado") == "b"
+    # desativados (ou sem filtro nenhum), as caixas de sempre voltam
+    j._aplicar_filtros_personalizados({"ativo": False, "lista": [
+        {"id": "a", "nome": "X", "contas": [], "tipos": ["nao_lidas"]}]})
+    assert j.cx_conta.visivel is True and j.cx_tipo.visivel is True
+    assert j.cx_filtro.visivel is False
+    assert _nomes(j) == ["Ana", "Bruno"]
+    j._aplicar_filtros_personalizados({"ativo": True, "lista": []})
+    assert j.cx_conta.visivel is True
+
+
+def test_alt4_e_alt5_com_filtros_personalizados(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._aplicar_filtros_personalizados({"ativo": True, "lista": [
+        {"id": "a", "nome": "Grupos", "contas": [], "tipos": ["grupos"]}]})
+    j._ir_filtro_conta()
+    assert ditas[-1] == "Filtro: Grupos."
+    j._ir_filtro_tipo()
+    assert "personalizados" in ditas[-1]
+    j._ir_para_tipo("nao_lidas")                      # menu Tipo de conversa
+    assert "Filtro" in ditas[-1] and j.filtro_tipo == "todas"
+    j._aplicar_filtros_personalizados({"ativo": True, "lista": [
+        {"id": "a", "nome": "Grupos", "contas": [], "tipos": ["grupos"]},
+        {"id": "b", "nome": "Outro", "contas": [], "tipos": []}]})
+    j._ir_filtro_conta()
+    assert j.FindFocus() is j.cx_filtro
+
+
+def test_filtro_personalizado_vem_de_configuracoes(j):
+    from telezapp.nucleo.configuracoes import ModeloConfiguracoes
+    mod = ModeloConfiguracoes(j.cfg)
+    assert mod.filtros_em_uso() == {"ativo": False, "lista": []}
+    mod.filtros_definir({"ativo": True, "lista": [
+        {"id": "a", "nome": "Grupos", "contas": [], "tipos": ["grupos"]}]})
+    assert mod.filtros_pendentes is not None
+    chamadas = []
+    mod.aplicar(lambda chave, valor: chamadas.append((chave, valor)))
+    assert ("filtros_personalizados", {"ativo": True, "lista": [
+        {"id": "a", "nome": "Grupos", "contas": [], "tipos": ["grupos"]}]}) \
+        in chamadas
+    j._aplicar_opcao("filtros_personalizados", chamadas[-1][1])
+    assert j.cfg.get("filtros_personalizados")["ativo"] is True
+
+
+def _contas_para_filtros():
+    return jm.m.opcoes_de_conta([("w1", "whatsapp", "Fábio"),
+                                 ("t1", "telegram", "Tel")])
+
+
+def test_formulario_do_filtro_sugere_o_nome_e_respeita_o_que_a_pessoa_escreve():
+    from telezapp.interface import filtros as jf
+    d = jf.DialogoNovoFiltro(None, _contas_para_filtros(), [])
+    assert d.nome.GetValue() == "Todas as conversas"       # nada marcado
+    d.lista_contas.Check(2)                               # WhatsApp
+    for i, (valor, _) in enumerate(d._tipos):
+        if valor in ("nao_lidas", "grupos", "arquivadas"):
+            d.lista_tipos.Check(i)
+    d._marcou(None)
+    assert d.nome.GetValue() == "WhatsApp, Não lidas, Grupos, Arquivadas"
+    d.nome.SetValue("Meu zap")
+    d._digitou(None)                                      # a pessoa escreveu
+    d.lista_tipos.Check(0)
+    d._marcou(None)
+    assert d.nome.GetValue() == "Meu zap"                 # nao muda mais
+    filtro = d.resultado()
+    assert filtro["nome"] == "Meu zap"
+    assert filtro["contas"] == ["whatsapp"]
+    assert "trancadas" not in dict(d._tipos)              # nao ha trancadas
+    assert set(filtro["tipos"]) == {"todas", "nao_lidas", "grupos",
+                                    "arquivadas"}
+
+
+def test_formulario_do_filtro_nao_salva_vazio_e_nao_repete_nome():
+    from telezapp.interface import filtros as jf
+    wx_falso.mensagens.clear()
+    d = jf.DialogoNovoFiltro(None, _contas_para_filtros(), [
+        {"id": "f1", "nome": "Grupos", "contas": [], "tipos": ["grupos"]}])
+
+    class Evt:
+        pulou = False
+
+        def Skip(self):
+            self.pulou = True
+    e = Evt()
+    d._salvar(e)                                          # nada marcado
+    assert not e.pulou and "pelo menos um item" in wx_falso.mensagens[-1]
+    d.lista_tipos.Check(4)                                # Grupos
+    d._marcou(None)
+    e = Evt()
+    d._salvar(e)
+    assert e.pulou
+    assert d.resultado()["nome"] == "Grupos (2)"          # nome ja usado
+
+
+def test_janela_de_filtros_cria_renomeia_e_exclui(monkeypatch):
+    from telezapp.interface import filtros as jf
+    guardado = [{"ativo": False, "lista": []}]
+    dita = []
+    fala = types.SimpleNamespace(falar=lambda t, interromper=False:
+                                 dita.append(t))
+    d = jf.DialogoFiltros(None, lambda: guardado[0],
+                          lambda v: guardado.__setitem__(0, v),
+                          _contas_para_filtros, fala)
+    assert d.lista.visivel is False                        # caixa desmarcada
+    d.ativar.SetValue(True)
+    d._ativou(None)
+    assert guardado[0]["ativo"] is True and d.lista.visivel is True
+    assert "Crie o primeiro filtro" in dita[-1]
+
+    class FormularioFalso:
+        def __init__(self, *a, **k):
+            pass
+
+        def ShowModal(self):
+            return wx_falso.ID_OK
+
+        def resultado(self):
+            return {"id": "f1", "nome": "Grupos", "contas": [],
+                    "tipos": ["grupos"]}
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(jf, "DialogoNovoFiltro", FormularioFalso)
+    assert d.novo_filtro() is True
+    assert [f["nome"] for f in guardado[0]["lista"]] == ["Grupos"]
+    assert d.lista.itens == ["Grupos"]
+    wx_falso.texto_digitado[0] = "Só grupos"
+    try:
+        assert d.renomear_filtro() is True
+    finally:
+        wx_falso.texto_digitado[0] = None
+    assert guardado[0]["lista"][0]["nome"] == "Só grupos"
+    assert d.lista.itens == ["Só grupos"]
+    wx_falso.resposta_messagebox[0] = wx_falso.YES
+    try:
+        assert d.excluir_filtro() is True
+    finally:
+        wx_falso.resposta_messagebox[0] = wx_falso.YES
+    assert guardado[0]["lista"] == [] and guardado[0]["ativo"] is True
+    assert d.lista.itens == []
+
+
+def test_backup_completo_leva_tudo_e_o_seletivo_mostra_as_partes():
+    from telezapp.interface import backup as jb
+    from telezapp.nucleo import backup as bk
+    d = jb.DialogoBackup(None, [("t1", "Um"), ("t2", "Dois")])
+    assert d.tipo.GetSelection() == jb.COMPLETO      # o primeiro item
+    assert d.tipo.itens == ["Backup completo", "Backup seletivo"]
+    assert d.partes() == [p for p, _ in bk.PARTES]
+    assert "filtros" in d.partes() and d.contas() is None
+    assert all(c.visivel is False for c in d._seletivos)   # escondidas
+    d.caixas_de_contas["t2"].SetValue(False)
+    assert d.contas() is None                        # no completo, todas
+    d.tipo.SetSelection(jb.SELETIVO)
+    d._mudou_o_tipo(None)
+    assert all(c.visivel is True for c in d._seletivos)
+    assert d.partes() == ["configuracoes", "atalhos", "sons", "filtros"]
+    assert d.contas() == ["t1"]
+    d.caixas["filtros"].SetValue(False)
+    assert "filtros" not in d.partes()
+
+
+# ------------------------------------------- tela e som do computador
+def com_compartilhar(chamadas):
+    p = com_video(chamadas)
+    p.suporta_som_pc = True
+    p.telas = lambda: [("Tela 1", (0, 0, 10, 10)), ("Tela 2", (10, 0, 5, 5))]
+    p.saidas_do_computador = lambda: ["Alto-falantes", "Fones"]
+    for nome in ("compartilhar_tela", "parar_tela", "trocar_tela",
+                 "compartilhar_som", "parar_som"):
+        setattr(p, nome, lambda *a, _n=nome: p.comandos.append((_n,) + a))
+    return p
+
+
+def em_chamada_com(j, **extra):
+    j.b.publicar(ev.EstadoChamada(
+        "t1", "10", "em chamada", "Ana", False, video=True,
+        suporta_video=True, suporta_tela=True, suporta_som_pc=True, **extra))
+
+
+def test_botoes_de_tela_e_som_aparecem_so_se_a_conta_sabe(chamadas):
+    ch = chamadas.ch
+    j = chamadas.j
+    com_compartilhar(chamadas)
+    em_chamada_com(j)
+    botoes = ch.apresentar(j.chamada).botoes
+    assert ch.TELA in botoes and ch.SOM_PC in botoes
+    j2 = ch.Chamada("t1", "10", "Ana", estado=ch.EM_CHAMADA,
+                    suporta_video=True)
+    assert ch.TELA not in ch.apresentar(j2).botoes
+    assert ch.SOM_PC not in ch.apresentar(j2).botoes
+
+
+def test_alternar_a_tela_usa_a_tela_e_o_som_escolhidos(chamadas):
+    j = chamadas.j
+    p = com_compartilhar(chamadas)
+    em_chamada_com(j)
+    j.cfg.set("chamada_tela", "Tela 2")
+    j._alternar_tela()
+    assert p.comandos == [("compartilhar_tela", "10", "Tela 2", True)]
+    em_chamada_com(j, camera=True, tela=True, som_pc=True)
+    j._alternar_tela()
+    assert p.comandos[-1] == ("parar_tela", "10")
+    j.cfg.set("chamada_tela_com_som", False)
+    em_chamada_com(j)
+    j._alternar_tela()
+    assert p.comandos[-1] == ("compartilhar_tela", "10", "Tela 2", False)
+
+
+def test_alternar_o_som_do_computador(chamadas):
+    j = chamadas.j
+    p = com_compartilhar(chamadas)
+    em_chamada_com(j)
+    j.cfg.set("chamada_saida_pc", "Fones")
+    j._alternar_som_pc()
+    assert p.comandos == [("compartilhar_som", "10", "Fones")]
+    em_chamada_com(j, som_pc=True)
+    j._alternar_som_pc()
+    assert p.comandos[-1] == ("parar_som", "10")
+    j._trocar_som_pc("Alto-falantes")        # trocando com o som ligado
+    assert p.comandos[-1] == ("compartilhar_som", "10", "Alto-falantes")
+    assert j.cfg.get("chamada_saida_pc") == "Alto-falantes"
+
+
+def test_compartilhamento_e_falado_sem_dizer_camera(chamadas):
+    j = chamadas.j
+    com_compartilhar(chamadas)
+    em_chamada_com(j)
+    chamadas.falas.clear()
+    em_chamada_com(j, camera=True, tela=True, som_pc=True)
+    assert chamadas.falas == ["Compartilhando a tela e o som do computador."]
+    chamadas.falas.clear()
+    em_chamada_com(j, som_pc=True)           # parou so a tela
+    assert chamadas.falas == ["Você parou de compartilhar a tela."]
+    chamadas.falas.clear()
+    em_chamada_com(j)
+    assert chamadas.falas == [
+        "Você parou de compartilhar o som do computador."]
+
+
+def test_sem_suporte_diz_que_a_conta_nao_compartilha(chamadas):
+    j = chamadas.j
+    com_video(chamadas)
+    j.b.publicar(ev.EstadoChamada("t1", "10", "em chamada", "Ana", False,
+                                  video=True, suporta_video=True))
+    chamadas.falas.clear()
+    j._alternar_tela()
+    j._alternar_som_pc()
+    assert "não compartilha a tela" in chamadas.falas[0]
+    assert "não compartilha o som" in chamadas.falas[1]
+
+
+def test_caixa_do_som_junto_com_a_tela_age_na_hora(chamadas):
+    j = chamadas.j
+    p = com_compartilhar(chamadas)
+    em_chamada_com(j, camera=True, tela=True, som_pc=True)
+    j._tela_com_som(False)
+    assert p.comandos == [("parar_som", "10")]
+    assert j.cfg.get("chamada_tela_com_som") is False
+    em_chamada_com(j, camera=True, tela=True)
+    j._tela_com_som(True)
+    assert p.comandos[-1] == ("compartilhar_som", "10", "")
+    p.comandos.clear()
+    em_chamada_com(j)                      # sem tela: so vale para a proxima
+    j._tela_com_som(False)
+    assert p.comandos == []
+
+
+# --------------------------------------- o foco nao volta ao inicio
+def test_detalhes_devolvem_o_foco_ao_botao_depois_de_refazer_os_botoes():
+    from telezapp.interface.detalhes import DialogoTexto
+    d = DialogoTexto(None, "Detalhes")
+    d.definir(["a"], [("Mensagens fi&xadas", lambda: None),
+                      ("Tra&ncar a conversa", lambda: None),
+                      ("&Limpar a conversa...", lambda: None)])
+    d.botoes[1].SetFocus()                          # a pessoa esta em Trancar
+    d.definir(["a", "b"], [("Mensagens fi&xadas", lambda: None),
+                            ("Des&trancar a conversa", lambda: None),
+                            ("&Limpar a conversa...", lambda: None)])
+    assert d.FindFocus() is d.botoes[1]             # o rotulo mudou: mesma vez
+    d.botoes[2].SetFocus()
+    d.definir(["c"], [("Mensagens fi&xadas", lambda: None),
+                      ("Des&trancar a conversa", lambda: None),
+                      ("&Limpar a conversa...", lambda: None)])
+    assert d.FindFocus() is d.botoes[2]             # mesmo rotulo
+    d.botoes[-1].SetFocus()                         # Fechar
+    d.definir(["d"], [("Outro", lambda: None)])
+    assert d.FindFocus() is d.botoes[-1]
+    # com o foco no texto (ou em nenhum botao), nada e movido
+    d.texto.SetFocus()
+    d.definir(["e"], [("Outro", lambda: None)])
+    assert d.FindFocus() is d.texto
+
+
+def test_janela_da_chamada_so_move_o_foco_quando_o_estado_muda():
+    from telezapp.interface.chamada import DialogoChamada
+    from telezapp.nucleo import chamadas as ch
+    c = ch.Chamada("t1", "10", "Ana", estado=ch.EM_CHAMADA,
+                   suporta_video=True, suporta_tela=True, suporta_som_pc=True)
+    d = DialogoChamada(None, c, {k: (lambda *a: None) for k in (
+        "atender", "recusar", "desligar", "silenciar", "tempo", "trocar",
+        "camera", "trocar_camera", "tela", "som_pc")},
+        lambda t: None, ["Mic"], ["Saida"], "Mic", "Saida", cameras=["Cam"],
+        camera="Cam", telas=["Tela 1"], saidas_pc=["Saida"])
+    assert d.FindFocus() is d.b_desligar            # abriu: foco no principal
+    d.b_silenciar.SetFocus()                        # a pessoa esta em Silenciar
+    c.mudo = True                                   # o botao muda de nome
+    d.mostrar()
+    assert d.FindFocus() is d.b_silenciar           # e o foco ficou nele
+    d.b_som_pc.SetFocus()
+    c.som_pc = True
+    d.mostrar()
+    assert d.FindFocus() is d.b_som_pc
+    c.estado = ch.ENCERRADA                         # o estado mudou: Fechar
+    d.mostrar()
+    assert d.FindFocus() is d.b_fechar
+
+
+def test_botao_de_chamada_some_em_grupo_e_canal(j):
+    privada = j.indice[("t1", "10")]
+    privada.tipo = "privada"
+    j._abrir_conversa_de(privada)
+    assert j.botao_chamada.visivel is not False
+    grupo = j.indice[("t1", "20")]
+    grupo.tipo = "grupo"
+    j._abrir_conversa_de(grupo)
+    assert j.botao_chamada.visivel is False       # grupo: sem botao
+    assert j.botao_enviar.visivel is not False    # o resto continua
+    canal = j.indice[("t1", "20")]
+    canal.tipo = "canal"
+    j._abrir_conversa_de(canal)
+    assert j.botao_chamada.visivel is False
+    j._abrir_conversa_de(privada)                 # volta a aparecer
+    assert j.botao_chamada.visivel is not False
+
+
+def test_depois_de_atender_a_fala_avisa_que_esta_conectando(chamadas, monkeypatch):
+    j = chamadas.j
+    agendados = []
+    monkeypatch.setattr(jm.wx, "CallLater",
+                        lambda ms, f, *a, **k: agendados.append((ms, f)))
+    estado(j, "tocando", entrante=True)
+    chamadas.falas.clear()
+    agendados.clear()                        # (o toque tambem agenda)
+    estado(j, "conectando", entrante=True)
+    assert chamadas.falas == []              # a fala espera o foco assentar
+    (ms1, dizer), (ms2, lembrar) = agendados[:2]
+    assert ms1 == 400 and ms2 == 4400
+    dizer()
+    assert chamadas.falas == ["Atendida. Estabelecendo a comunicação com "
+                              "Ana."]
+    lembrar()
+    assert chamadas.falas[-1] == "Ainda estabelecendo a comunicação."
+    assert agendados[-1][0] == 4000          # e lembra de novo
+    agendados[-1][1]()
+    assert chamadas.falas.count("Ainda estabelecendo a comunicação.") == 2
+    assert len(agendados) == 3               # so duas vezes
+    # conectou: o que estava agendado nao fala mais
+    estado(j, "em chamada", entrante=True)
+    chamadas.falas.clear()
+    dizer()
+    lembrar()
+    assert chamadas.falas == []
+
+
+def test_esc_na_lista_sai_das_trancadas_com_filtros_personalizados(j):
+    """Com os filtros personalizados a caixa de tipos nao esta na tela: o Esc
+    na lista de conversas esconde as trancadas na hora, mesmo com busca."""
+    _com_trancada(j)
+    j._aplicar_filtros_personalizados({"ativo": True, "lista": [
+        {"id": "a", "nome": "Todas", "contas": [], "tipos": []}]})
+    _digitar(j, "2468")
+    assert j.trancadas_liberadas and _nomes(j) == ["Segredo"]
+    j.campo_busca.SetValue("Seg")
+    j._ao_busca()
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    wx_falso._foco[0] = j.lista_conv
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))
+    assert not j.trancadas_liberadas
+    assert j.campo_busca.GetValue() == "" and j.busca == ""
+    assert "Segredo" not in _nomes(j) and _nomes(j) == ["Ana", "Bruno"]
+    assert ditas[-1].startswith("Saiu das conversas trancadas.")
+    j._char_hook(Tecla(wx_falso.WXK_ESCAPE))         # sem trancadas: nada
+    assert _nomes(j) == ["Ana", "Bruno"]
+
+
+def test_trocar_de_filtro_personalizado_esconde_as_trancadas(j):
+    _com_trancada(j)
+    j._aplicar_filtros_personalizados({"ativo": True, "lista": [
+        {"id": "a", "nome": "Um", "contas": [], "tipos": []},
+        {"id": "b", "nome": "Dois", "contas": [], "tipos": []}]})
+    _digitar(j, "2468")
+    assert j.trancadas_liberadas and _nomes(j) == ["Segredo"]
+    j.cx_filtro.SetSelection(1)
+    j._ao_filtro_pers()
+    assert not j.trancadas_liberadas
+    assert "Segredo" not in _nomes(j)
+
+
+def test_trancadas_se_escondem_ao_sair_da_janela(j):
+    _com_trancada(j)
+    _digitar(j, "2468")
+    assert j.trancadas_liberadas and j._vigia_trancadas
+    j._app_ativo = lambda: True
+    j._vigiar_trancadas()                       # na frente: fica
+    assert j.trancadas_liberadas and j._vigia_trancadas
+    j._app_ativo = lambda: False                # foi para outro programa
+    j._vigiar_trancadas()
+    assert not j.trancadas_liberadas and not j._vigia_trancadas
+    assert _nomes(j) == ["Ana", "Bruno"]
+
+
+def test_trancadas_sair_da_janela_pode_ser_desligado(j):
+    _com_trancada(j)
+    j.cfg.set("trancadas_esconder_ao_sair", False)
+    _digitar(j, "2468")
+    j._app_ativo = lambda: False
+    j._vigiar_trancadas()
+    assert j.trancadas_liberadas
+
+
+def test_trancadas_se_escondem_depois_de_minutos_sem_teclado(j):
+    import time
+    _com_trancada(j)
+    j.cfg.set("trancadas_esconder_minutos", 3)
+    _digitar(j, "2468")
+    j._app_ativo = lambda: True
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._atividade = time.monotonic() - 100       # 1 min 40 s parado
+    j._vigiar_trancadas()
+    assert j.trancadas_liberadas
+    j._atividade = time.monotonic() - 181       # passou de 3 min
+    j._vigiar_trancadas()
+    assert not j.trancadas_liberadas
+    assert ditas[-1] == "Conversas trancadas escondidas."
+    j.cfg.set("trancadas_esconder_minutos", 0)  # 0: nunca
+    _digitar(j, "2468")
+    j._atividade = time.monotonic() - 99999
+    j._vigiar_trancadas()
+    assert j.trancadas_liberadas
+
+
+def test_tecla_apertada_zera_o_tempo_parado_das_trancadas(j):
+    import time
+    j._atividade = time.monotonic() - 500
+    wx_falso._foco[0] = j.lista_conv
+    j._char_hook(Tecla(wx_falso.WXK_DOWN))
+    assert time.monotonic() - j._atividade < 5

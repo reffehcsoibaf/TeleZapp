@@ -159,6 +159,68 @@ class Camera:
                     pass
 
 
+# ------------------------------------------------------------------ tela
+def listar_telas():
+    """[(nome, (x, y, largura, altura))] das telas do Windows: cada uma e,
+    havendo mais de uma, tambem todas juntas. Vazio se nao deu para listar."""
+    import ctypes
+    from ctypes import wintypes
+    telas = []
+
+    class Info(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                    ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD),
+                    ("szDevice", wintypes.WCHAR * 32)]
+    try:
+        usuario = ctypes.windll.user32
+        retorno = ctypes.WINFUNCTYPE(
+            wintypes.BOOL, wintypes.HANDLE, wintypes.HDC,
+            ctypes.POINTER(wintypes.RECT), wintypes.LPARAM)
+
+        def ver(monitor, _dc, _ret, _dados):
+            info = Info()
+            info.cbSize = ctypes.sizeof(Info)
+            if usuario.GetMonitorInfoW(monitor, ctypes.byref(info)):
+                r = info.rcMonitor
+                telas.append((bool(info.dwFlags & 1), r.left, r.top,
+                              r.right - r.left, r.bottom - r.top))
+            return True
+        usuario.EnumDisplayMonitors(None, None, retorno(ver), 0)
+        if len(telas) > 1:
+            v = [usuario.GetSystemMetrics(i) for i in (76, 77, 78, 79)]
+    except Exception:
+        log.exception("erro ao listar as telas")
+        return []
+    telas.sort(key=lambda t: (not t[0], t[1], t[2]))     # a principal antes
+    saida = []
+    for n, (principal, x, y, l, a) in enumerate(telas, 1):
+        nome = "Tela %d%s, %d por %d" % (
+            n, " (principal)" if principal else "", l, a)
+        saida.append((nome, (x, y, l, a)))
+    if len(telas) > 1:
+        saida.append(("Todas as telas, %d por %d" % (v[2], v[3]),
+                      (v[0], v[1], v[2], v[3])))
+    return saida
+
+
+class Tela(Camera):
+    """Captura uma tela (GDI do Windows) como se fosse uma camera: chama
+    `ao_quadro(av.VideoFrame)` ate 10 vezes por segundo. `retangulo` e
+    (x, y, largura, altura)."""
+
+    def __init__(self, retangulo, ao_quadro, nome="Tela"):
+        super().__init__(nome, ao_quadro)
+        self.retangulo = tuple(retangulo)
+
+    def _abrir(self):
+        import av
+        x, y, largura, altura = self.retangulo
+        return av.open("desktop", format="gdigrab", options={
+            "framerate": str(FPS), "draw_mouse": "1",
+            "offset_x": str(x), "offset_y": str(y),
+            "video_size": "%dx%d" % (largura, altura)})
+
+
 # ------------------------------------------------------------ codificador
 class Codificador:
     """Quadros da camera -> unidades de acesso H.264. O tamanho vem do

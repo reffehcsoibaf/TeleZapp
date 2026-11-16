@@ -576,3 +576,236 @@ def test_esc_na_chamada_em_andamento_esconde_a_janela_sem_encerrar():
     d.chamada = SimpleNamespace(estado=ch.CHAMANDO, ativa=True)
     d._escape()
     assert desligou == [2, 1] and escondida == [d]
+
+
+# ------------------------------ tela e som do computador no Telegram
+class MotorFalsoExterno(MotorFalsoComVideo):
+    enviados = []
+
+    def __init__(self):
+        super().__init__()
+        MotorFalsoExterno.enviados = []
+
+    def fluxo_externo(self, audio, video, microfone=None, camera=None):
+        return ("externo", audio, video,
+                getattr(microfone, "title", None),
+                getattr(camera, "title", None))
+
+    async def enviar_quadro(self, app, chat_id, tipo, dados, largura=0,
+                            altura=0):
+        MotorFalsoExterno.enviados.append((tipo, dados, largura, altura))
+
+
+class FluxoMic:
+    def read(self, n):
+        import time
+        time.sleep(0.002)
+        return b"\x01\x00" * n, False
+
+    def stop(self):
+        pass
+
+    def close(self):
+        pass
+
+
+class CapturaFalsa:
+    def __init__(self, saida="", taxa=0, amostras=0):
+        self.saida, self.taxa, self.amostras = saida, taxa, amostras
+        self.parada = False
+        self.erro = ""
+
+    def iniciar(self):
+        pass
+
+    def ler(self):
+        return b"\x02\x00" * self.amostras
+
+    def parar(self):
+        self.parada = True
+
+
+class SomFalsoTg:
+    capturas = []
+
+    def disponivel(self):
+        return True
+
+    def saidas_do_computador(self):
+        return ["Alto-falantes"]
+
+    def CapturaDoSom(self, saida="", taxa=0, amostras=0):
+        c = CapturaFalsa(saida, taxa, amostras)
+        SomFalsoTg.capturas.append(c)
+        return c
+
+    def misturar(self, a, b):
+        from telezapp.midia import som_pc
+        return som_pc.misturar(a, b)
+
+
+class QuadroFalso:
+    width, height = 1366, 768
+
+    def reformat(self, width, height, format):
+        import numpy as np
+        return types.SimpleNamespace(
+            to_ndarray=lambda: np.zeros(height * 3 // 2 * width,
+                                        dtype="uint8").reshape(-1, width))
+
+
+class VideoFalsoTg:
+    def __init__(self):
+        self.fontes = []
+        self.parada = False
+
+    def listar_telas(self):
+        return [("Tela 1", (0, 0, 1366, 768)),
+                ("Tela 2", (1366, 0, 800, 600))]
+
+    def tamanho_cabivel(self, largura, altura):
+        from telezapp.midia import video
+        return video.tamanho_cabivel(largura, altura)
+
+    def Tela(self, retangulo, ao_quadro, nome="Tela"):
+        video = self
+
+        class T:
+            def iniciar(self):
+                video.fontes.append((nome, retangulo))
+                ao_quadro(QuadroFalso())
+
+            def parar(self):
+                video.parada = True
+        return T()
+
+
+def sala_externa():
+    s = Sala()
+    s.chamadas._motor_fabrica = MotorFalsoExterno
+    SomFalsoTg.capturas = []
+    s.chamadas.video = VideoFalsoTg()
+    s.chamadas.som_pc = SomFalsoTg()
+    s.chamadas.abrir_microfone = lambda nome, taxa, amostras: FluxoMic()
+    return s
+
+
+def test_compartilhar_a_tela_no_telegram_leva_o_som_por_padrao():
+    s = sala_externa()
+
+    async def cena():
+        await s.chamadas.iniciar()
+        await s.chamadas.ligar(10, "", "", video=True, camera="")
+        assert await s.chamadas.compartilhar_tela(10, "Tela 2") is True
+        await asyncio.sleep(0.3)
+        e = ultimo(s)
+        assert e.tela and e.camera and e.som_pc and e.video
+        assert e.suporta_tela and e.suporta_som_pc
+        await s.chamadas.parar_tela(10)
+        assert not ultimo(s).tela and not ultimo(s).camera
+        await s.chamadas.parar_som(10)
+        assert not ultimo(s).som_pc
+    rodar(cena())
+    plays = [x[2] for x in MotorFalso.app.chamadas if x[0] == "play"]
+    assert ("externo", False, "externo", "Padrão", None) in plays  # so a tela
+    assert ("externo", True, "externo", "Padrão", None) in plays   # + o som
+    assert ("externo", True, None, "Padrão", None) in plays        # tela fora
+    assert plays[-1] == ("mic", "Padrão")                          # tudo fora
+    tipos = {x[0] for x in MotorFalsoExterno.enviados}
+    assert tipos == {"video", "audio"}
+    video = [x for x in MotorFalsoExterno.enviados if x[0] == "video"][0]
+    assert video[2:] == (640, 358) and len(video[1]) == 640 * 358 * 3 // 2
+    assert s.chamadas.video.fontes[0] == ("Tela 2", (1366, 0, 800, 600))
+    assert SomFalsoTg.capturas[0].taxa == 48000
+    assert SomFalsoTg.capturas[0].amostras == 480
+
+
+def test_som_do_computador_no_telegram_soma_ao_microfone_e_respeita_o_mudo():
+    import numpy as np
+    s = sala_externa()
+    marcas = {}
+
+    async def cena():
+        await s.chamadas.iniciar()
+        await s.chamadas.ligar(10, "", "")
+        assert await s.chamadas.compartilhar_som(10) is True
+        await asyncio.sleep(0.2)
+        await s.chamadas.silenciar(10, True)
+        marcas["mudo"] = len(MotorFalsoExterno.enviados)
+        await asyncio.sleep(0.2)
+        await s.chamadas.parar_som(10)
+    rodar(cena())
+    audio = [x for x in MotorFalsoExterno.enviados if x[0] == "audio"]
+    assert audio and len(audio[0][1]) == 960
+    primeiro = np.frombuffer(audio[0][1], dtype="<i2")
+    assert (primeiro == 1 + 2).all()               # mic (1) + som (2)
+    depois = [np.frombuffer(x[1], dtype="<i2")
+              for x in MotorFalsoExterno.enviados[marcas["mudo"]:]
+              if x[0] == "audio"]
+    assert any((q == 2).all() for q in depois)     # mudo: so o som do PC
+    acoes = [x[0] for x in MotorFalso.app.chamadas]
+    assert "mute" in acoes                         # voltou ao mic do motor
+    plays = [x[2] for x in MotorFalso.app.chamadas if x[0] == "play"]
+    assert ("externo", True, None, "Padrão", None) in plays
+    assert SomFalsoTg.capturas[0].parada
+
+
+def test_silenciar_com_o_som_do_computador_nao_usa_o_mute_do_motor():
+    s = sala_externa()
+
+    async def cena():
+        await s.chamadas.iniciar()
+        await s.chamadas.ligar(10, "", "")
+        await s.chamadas.compartilhar_som(10)
+        await s.chamadas.silenciar(10, True)
+        assert s.chamadas.chamadas[10].mudo
+        await s.chamadas.silenciar(10, False)
+        assert not s.chamadas.chamadas[10].mudo
+        await s.chamadas.parar_som(10)
+    rodar(cena())
+    acoes = [x[0] for x in MotorFalso.app.chamadas]
+    assert "mute" not in acoes and "unmute" not in acoes
+
+
+def test_camera_toma_o_lugar_da_tela_no_telegram():
+    s = sala_externa()
+
+    async def cena():
+        await s.chamadas.iniciar()
+        await s.chamadas.ligar(10, "", "", video=True, camera="")
+        await s.chamadas.compartilhar_tela(10, "", com_som=False)
+        assert ultimo(s).tela
+        await s.chamadas.ligar_camera(10, "Câmera A")
+        assert ultimo(s).camera and not ultimo(s).tela
+        assert 10 not in s.chamadas._tela
+    rodar(cena())
+    assert s.chamadas.video.parada
+    plays = [x[2] for x in MotorFalso.app.chamadas if x[0] == "play"]
+    assert plays[-1][0] == "camera+mic"
+
+
+def test_compartilhamento_para_quando_a_chamada_acaba_no_telegram():
+    s = sala_externa()
+
+    async def cena():
+        await s.chamadas.iniciar()
+        await s.chamadas.ligar(10, "", "", video=True, camera="")
+        await s.chamadas.compartilhar_tela(10)
+        await s.chamadas.encerrar(10)
+    rodar(cena())
+    assert SomFalsoTg.capturas[0].parada
+    assert s.chamadas.video.parada
+    assert s.chamadas._tela == {} and s.chamadas._som == {}
+
+
+def test_telegram_sem_quadros_externos_nao_oferece_tela_nem_som():
+    s = sala_com_video()                 # o motor sem fluxo_externo
+
+    async def cena():
+        await s.chamadas.iniciar()
+        await s.chamadas.ligar(10, "", "")
+        assert not s.chamadas.suporta_tela
+        assert not s.chamadas.suporta_som_pc
+        assert await s.chamadas.compartilhar_tela(10) is False
+        assert await s.chamadas.compartilhar_som(10) is False
+    rodar(cena())

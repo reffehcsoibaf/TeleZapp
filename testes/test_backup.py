@@ -94,6 +94,33 @@ def test_backup_com_senha_restaura_configuracoes_e_deixa_o_resto_em_espera(
     assert caminho == str(destino / "midias" / "w1" / "a.jpg")
 
 
+def test_backup_do_layout_antigo_na_pasta_personalizada(tmp_path):
+    """Com a pasta personalizada e o layout antigo, o backup pega o banco
+    unico, as sessoes e as midias dela, e a restauracao os devolve para a
+    pasta escolhida, com os caminhos das midias acertados."""
+    origem = tmp_path / "a"
+    cfg = preparar(origem)
+    arquivo = str(tmp_path / "b.zip")
+    resumo = bk.criar(arquivo, str(tmp_path / "dados"), cfg,
+                      ["contas", "conversas", "midias"],
+                      pasta_contas=str(origem))
+    assert resumo == {"contas": 1, "conversas": 1, "midias": 1}
+    destino = tmp_path / "b"
+    os.makedirs(destino)
+    opcoes, espera = bk.restaurar(arquivo, "", ["contas", "conversas",
+                                                "midias"], str(destino))
+    assert espera == ["contas", "conversas", "midias"]
+    contas = tmp_path / "contas-novas"
+    trocadas = bk.aplicar_pendente(str(destino), str(contas))
+    assert trocadas == ["contas", "conversas", "midias"]
+    assert (contas / "sessoes" / "whatsapp-1.db").exists()
+    assert (contas / "midias" / "w1" / "a.jpg").read_bytes() == b"JPG"
+    con = sqlite3.connect(str(contas / "telezapp.db"))
+    caminho = con.execute("SELECT caminho FROM midias").fetchone()[0]
+    con.close()
+    assert caminho == str(contas / "midias" / "w1" / "a.jpg")
+
+
 def test_backup_sem_senha_e_so_configuracoes(tmp_path):
     origem = tmp_path / "a"
     cfg = preparar(origem)
@@ -353,3 +380,225 @@ def test_backup_antigo_restaura_atalhos_e_sons_com_as_configuracoes(tmp_path):
     opcoes, _ = bk.restaurar(antigo, "", ["configuracoes"], str(destino))
     assert {"atalhos", "pacote_de_sons", "previa_links"} <= set(opcoes)
     assert (destino / "sons" / "pacotes" / "Meu" / "nova.ogg").exists()
+
+
+def test_formato_novo_um_banco_por_conta(tmp_path, monkeypatch):
+    """No formato novo, cada conta leva o banco, as sessoes e as midias
+    dela, e o restore distribui nas pastas das contas."""
+    monkeypatch.setattr(config, "contas_separadas", lambda: True)
+    dados = tmp_path / "dados"
+    pasta = dados / "contas" / "w1"
+    os.makedirs(pasta / "sessoes")
+    os.makedirs(pasta / "midias" / "abc")
+    (pasta / "sessoes" / "w1.db").write_bytes(b"sessao")
+    (pasta / "midias" / "abc" / "a.jpg").write_bytes(b"JPG")
+    con = sqlite3.connect(str(pasta / "conversas.db"))
+    con.execute("CREATE TABLE conversas (conta_id TEXT, id TEXT, nome TEXT)")
+    con.execute("INSERT INTO conversas VALUES ('w1', 'c1', 'A')")
+    con.execute("CREATE TABLE midias (caminho TEXT)")
+    con.execute("INSERT INTO midias VALUES (?)",
+                (str(pasta / "midias" / "abc" / "a.jpg"),))
+    con.commit()
+    con.close()
+    cfg = {"contas": [{"id": "w1"}]}
+    arquivo = str(tmp_path / "b.zip")
+    resumo = bk.criar(arquivo, str(dados), cfg,
+                      ["contas", "conversas", "midias"])
+    assert resumo["conversas"] == 1
+    assert resumo["contas"] == 1 and resumo["midias"] == 1
+    assert bk.ler_manifesto(arquivo).pasta_por_conta
+    with pyzipper.AESZipFile(arquivo) as z:
+        nomes = z.namelist()
+    assert "contas/w1/conversas.db" in nomes
+    assert "sessoes/w1.db" in nomes
+    assert "midias/w1/abc/a.jpg" in nomes
+    # restaurar numa pasta de dados nova
+    dados2 = tmp_path / "outros"
+    os.makedirs(dados2)
+    _, espera = bk.restaurar(arquivo, "",
+                             ["contas", "conversas", "midias"], str(dados2))
+    assert espera == ["contas", "conversas", "midias"]
+    # as conversas em espera sao da conta do backup
+    assert bk.conversas_sem_conta(str(dados2), ["w1"]) is False
+    assert bk.conversas_sem_conta(str(dados2), ["w2"]) is True
+    trocadas = bk.aplicar_pendente(str(dados2))
+    assert sorted(trocadas) == ["contas", "conversas", "midias"]
+    nova = dados2 / "contas" / "w1"
+    assert (nova / "conversas.db").is_file()
+    assert (nova / "sessoes" / "w1.db").is_file()
+    assert (nova / "midias" / "abc" / "a.jpg").is_file()
+    con = sqlite3.connect(str(nova / "conversas.db"))
+    caminho = con.execute("SELECT caminho FROM midias").fetchone()[0]
+    con.close()
+    assert caminho.startswith(str(nova))
+    assert not os.path.isdir(dados2 / "restauracao")
+
+
+def test_formato_antigo_sem_separacao(tmp_path, monkeypatch):
+    """Com a separacao de pastas desmarcada, o backup sai no formato
+    antigo (tudo na raiz), mesmo havendo pastas de conta sobrando."""
+    from telezapp import config
+    dados = tmp_path / "dados"
+    pasta = dados / "contas" / "w1"
+    os.makedirs(pasta)
+    (pasta / "conversas.db").write_bytes(b"banco")
+    os.makedirs(dados / "sessoes")
+    (dados / "sessoes" / "w1.session").write_bytes(b"s")
+    # a parte conversas copia o banco unico de verdade
+    from telezapp.armazenamento.banco import Banco
+    Banco(str(dados / "telezapp.db")).fechar()
+
+    class CfgFalso:
+        def get(self, chave):
+            return {"contas_em_pastas": False}.get(chave)
+
+        def contas(self):
+            return [{"id": "w1"}]
+
+    monkeypatch.setattr(config, "_cfg_de_contas", CfgFalso())
+    arquivo = str(tmp_path / "b.zip")
+    bk.criar(arquivo, str(dados), {"contas": [{"id": "w1"}]},
+             ["contas", "conversas", "midias"])
+    assert not bk.ler_manifesto(arquivo).pasta_por_conta
+    with pyzipper.AESZipFile(arquivo) as z:
+        nomes = z.namelist()
+    assert not any(n.startswith("contas/") for n in nomes)
+    assert "sessoes/w1.session" in nomes
+
+
+def _dados_de_duas_contas(pasta):
+    from telezapp.armazenamento.banco import Banco
+    from telezapp.nucleo import modelos as m
+    os.makedirs(pasta / "sessoes")
+    for conta in ("t1", "t2"):
+        (pasta / "sessoes" / (conta + ".session")).write_bytes(
+            conta.encode())
+        os.makedirs(pasta / "midias" / conta / "x")
+        (pasta / "midias" / conta / "x" / "a.jpg").write_bytes(
+            ("JPG" + conta).encode())
+    b = Banco(str(pasta / "telezapp.db"))
+    b.salvar_mensagens([m.Mensagem("t1", "1", "1", texto="de t1", data=1),
+                        m.Mensagem("t2", "1", "1", texto="de t2", data=1)])
+    b.fechar()
+    cfg = {"contas": [{"id": "t1", "servico": "telegram", "nome": "Um"},
+                      {"id": "t2", "servico": "telegram", "nome": "Dois"}]}
+    (pasta / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+    return cfg
+
+
+def test_backup_de_so_uma_conta_leva_so_os_dados_dela(tmp_path):
+    origem = tmp_path / "a"
+    cfg = _dados_de_duas_contas(origem)
+    arquivo = str(tmp_path / "b.zip")
+    bk.criar(arquivo, str(origem), cfg, ["contas", "conversas", "midias"],
+             contas=["t1"])
+    with pyzipper.AESZipFile(arquivo) as z:
+        nomes = set(z.namelist())
+        lido = json.loads(z.read("contas.json").decode("utf-8"))
+        z.extract("telezapp.db", str(tmp_path / "x"))
+    assert "sessoes/t1.session" in nomes and "sessoes/t2.session" not in nomes
+    assert "midias/t1/x/a.jpg" in nomes
+    assert not any(n.startswith("midias/t2/") for n in nomes)
+    assert [d["id"] for d in lido["contas"]] == ["t1"]
+    con = sqlite3.connect(str(tmp_path / "x" / "telezapp.db"))
+    assert {c for c, in con.execute(
+        "SELECT DISTINCT conta_id FROM mensagens")} == {"t1"}
+    con.close()
+    manifesto = bk.ler_manifesto(arquivo)
+    assert manifesto.contas == ["t1"]
+    assert bk.contas_do_backup(arquivo) == [("t1", "Um")]
+    with pytest.raises(bk.ErroBackup):
+        bk.criar(str(tmp_path / "vazio.zip"), str(origem), cfg,
+                 ["conversas"], contas=[])
+
+
+def test_restaurar_uma_conta_nao_mexe_nas_outras(tmp_path):
+    from telezapp.armazenamento.banco import Banco
+    origem = tmp_path / "a"
+    cfg = _dados_de_duas_contas(origem)
+    arquivo = str(tmp_path / "b.zip")
+    bk.criar(arquivo, str(origem), cfg, ["contas", "conversas", "midias"],
+             contas=["t1"])
+    # depois do backup: t1 perde tudo e t2 muda
+    os.remove(origem / "sessoes" / "t1.session")
+    (origem / "midias" / "t1" / "x" / "a.jpg").write_bytes(b"estragada")
+    b = Banco(str(origem / "telezapp.db"))
+    b.apagar_conta("t1")
+    b.fechar()
+    (origem / "sessoes" / "t2.session").write_bytes(b"t2 novo")
+    opcoes, espera = bk.restaurar(arquivo, "", ["contas", "conversas",
+                                                "midias"], str(origem))
+    assert sorted(espera) == ["contas", "conversas", "midias"]
+    assert bk.aplicar_pendente(str(origem))
+    assert (origem / "sessoes" / "t1.session").read_bytes() == b"t1"
+    assert (origem / "sessoes" / "t2.session").read_bytes() == b"t2 novo"
+    assert (origem / "midias" / "t1" / "x" / "a.jpg").read_bytes() == \
+        b"JPGt1"
+    assert (origem / "midias" / "t2" / "x" / "a.jpg").read_bytes() == \
+        b"JPGt2"
+    b = Banco(str(origem / "telezapp.db"))
+    assert [x.texto for x in b.mensagens("t1", "1")] == ["de t1"]
+    assert [x.texto for x in b.mensagens("t2", "1")] == ["de t2"]
+    b.fechar()
+    config_json = json.loads((origem / "config.json").read_text(
+        encoding="utf-8"))
+    assert sorted(d["id"] for d in config_json["contas"]) == ["t1", "t2"]
+
+
+def test_restaurar_so_algumas_contas_de_um_backup_completo(tmp_path):
+    origem = tmp_path / "a"
+    cfg = _dados_de_duas_contas(origem)
+    arquivo = str(tmp_path / "b.zip")
+    bk.criar(arquivo, str(origem), cfg, ["contas", "midias"])   # todas
+    assert bk.ler_manifesto(arquivo).contas is None
+    assert sorted(i for i, _ in bk.contas_do_backup(arquivo)) == ["t1", "t2"]
+    os.remove(origem / "sessoes" / "t1.session")
+    (origem / "sessoes" / "t2.session").write_bytes(b"t2 novo")
+    bk.restaurar(arquivo, "", ["contas"], str(origem), contas=["t1"])
+    assert bk.aplicar_pendente(str(origem)) == ["contas"]
+    assert (origem / "sessoes" / "t1.session").read_bytes() == b"t1"
+    assert (origem / "sessoes" / "t2.session").read_bytes() == b"t2 novo"
+
+
+def test_backup_parcial_recusa_banco_unico_com_a_separacao_ligada(tmp_path):
+    origem = tmp_path / "a"
+    cfg = _dados_de_duas_contas(origem)
+    arquivo = str(tmp_path / "b.zip")
+    bk.criar(arquivo, str(origem), cfg, ["conversas"], contas=["t1"])
+    (origem / "config.json").write_text(
+        json.dumps({"contas_em_pastas": True}), encoding="utf-8")
+    with pytest.raises(bk.ErroBackup):
+        bk.restaurar(arquivo, "", ["conversas"], str(origem))
+
+
+def test_filtros_personalizados_vao_e_voltam_no_backup():
+    valor = {"ativo": True, "lista": [
+        {"id": "a", "nome": "Grupos", "contas": ["whatsapp"],
+         "tipos": ["grupos", "trancadas"]}]}
+    levadas = bk.opcoes_do_backup({"filtros_personalizados": valor})
+    assert levadas["filtros_personalizados"] == valor
+    voltou = bk.opcoes_validas({"filtros_personalizados": valor})
+    assert voltou["filtros_personalizados"] == {"ativo": True, "lista": [
+        {"id": "a", "nome": "Grupos", "contas": ["whatsapp"],
+         "tipos": ["grupos"]}]}                       # sem trancadas
+    assert "filtros_personalizados" not in bk.opcoes_validas(
+        {"filtros_personalizados": "lixo"})
+
+
+def test_filtros_personalizados_sao_uma_parte_do_backup(tmp_path):
+    valor = {"ativo": True, "lista": [
+        {"id": "a", "nome": "Grupos", "contas": [], "tipos": ["grupos"]}]}
+    origem = tmp_path / "a"
+    os.makedirs(origem)
+    arquivo = str(tmp_path / "b.zip")
+    resumo = bk.criar(arquivo, str(origem), {"filtros_personalizados": valor,
+                                             "status_no_titulo": False},
+                      ["filtros"])
+    assert resumo == {"filtros": 1}
+    assert bk.ler_manifesto(arquivo).partes == ["filtros"]
+    with pyzipper.AESZipFile(arquivo) as z:
+        lido = json.loads(z.read("configuracoes.json").decode("utf-8"))
+    assert list(lido["opcoes"]) == ["filtros_personalizados"]   # so ela
+    opcoes, espera = bk.restaurar(arquivo, "", ["filtros"], str(origem))
+    assert opcoes == {"filtros_personalizados": valor} and espera == []
+    assert "filtros" in bk.NOMES_PARTES

@@ -45,6 +45,7 @@ from telezapp.interface.busca import DialogoBusca
 from telezapp.interface.busca_canais import DialogoBuscaDeCanais
 from telezapp.interface.busca_global import DialogoBuscaGlobal
 from telezapp.nucleo import busca as busca_nucleo
+from telezapp.nucleo import filtros_personalizados as filtros_nucleo
 from telezapp.nucleo import busca_global as busca_global_nucleo
 from telezapp.interface import dispositivos as ui_dispositivos
 from telezapp.midia import armazem
@@ -97,6 +98,8 @@ from telezapp.nucleo import paginas
 from telezapp.nucleo.midias import TEXTO_LIMPA
 
 log = logging.getLogger("telezapp.janela")
+
+INTERVALO_VIGIA_TRANCADAS_MS = 1000
 
 MARCADOR = "marcador"
 ATALHOS_GLOBAIS = ("mostrar_janela", "atender_global", "recusar_global")
@@ -471,11 +474,17 @@ class Janela(wx.Frame):
         self.busca = ""               # texto do campo de busca de conversas
         self._sem_whatsapp = ""       # motivo do ultimo telefone nao achado
         self.trancadas_liberadas = False   # codigo secreto digitado agora
+        self._atividade = time.monotonic()   # ultima tecla apertada
+        self._vigia_trancadas = False       # o relogio das trancadas roda
         self._tipos_atuais = m.tipos_visiveis(False)
         self._buscando = False        # evita tratar a limpeza do campo
         self.filtro_tipo = self._filtro_tipo_salvo(cfg)
         self.filtro_conta = cfg.get("filtro_conta") or m.CONTA_TODAS
         self._opcoes_conta = []       # (valor, rotulo) da caixa de contas
+        # filtros personalizados (nucleo/filtros_personalizados.py)
+        self.filtros_pers = filtros_nucleo.normalizar(
+            cfg.get("filtros_personalizados"))
+        self.filtro_pers_id = cfg.get("filtro_personalizado") or ""
         self._chaves_conv = []        # chave de cada item da lista
         self._rotulos_conv = []       # texto de cada item da lista
         # rajadas (fila do WhatsApp ao abrir): a lista e refeita uma vez por
@@ -603,6 +612,7 @@ class Janela(wx.Frame):
         log.info("modo de exibição: %s", self.modo_exibicao)
         self._criar_controles()
         self._rotular_controles()
+        self._sincronizar_filtros_personalizados()
         self.CreateStatusBar()
         self._aplicar_letra()
         self.Bind(wx.EVT_CLOSE, self._ao_fechar)
@@ -768,6 +778,10 @@ class Janela(wx.Frame):
         item(m_cham, "ligar", "&Ligar para esta conversa\tCtrl+Shift+L")
         item(m_cham, "ligar_video", "Ligar com &vídeo")
         item(m_cham, "chamada_camera", "Ligar ou desligar a &câmera")
+        item(m_cham, "chamada_tela",
+             "Compartilhar ou parar de compartilhar a &tela")
+        item(m_cham, "chamada_som_pc",
+             "Compartilhar ou parar de compartilhar o so&m do computador")
         item(m_cham, "chamada_janela",
              "Mostrar a &janela da chamada\tCtrl+Shift+J")
         item(m_cham, "chamada_mudo",
@@ -940,8 +954,8 @@ class Janela(wx.Frame):
             "gerenciar_contas": lambda e: self._gerenciar_contas(),
             "editar_perfil": lambda e: self._editar_perfil(),
             "reconectar": lambda e: self._reconectar(),
-            "ir_filtro_conta": lambda e: self._ir_para(self.cx_conta, ""),
-            "ir_filtro_tipo": lambda e: self._ir_para(self.cx_tipo, ""),
+            "ir_filtro_conta": lambda e: self._ir_filtro_conta(),
+            "ir_filtro_tipo": lambda e: self._ir_filtro_tipo(),
             "buscar_conv": lambda e: self._ir_para(self.campo_busca, ""),
             "busca_criterios": lambda e: self._busca_por_criterios(),
             "busca_global": lambda e: self._busca_global(),
@@ -1056,6 +1070,8 @@ class Janela(wx.Frame):
             "ligar": lambda e: self._ligar(),
             "ligar_video": lambda e: self._ligar(video=True),
             "chamada_camera": lambda e: self._alternar_camera(),
+            "chamada_tela": lambda e: self._alternar_tela(),
+            "chamada_som_pc": lambda e: self._alternar_som_pc(),
             "chamada_janela": lambda e: self._mostrar_chamada(),
             "mostrar_oculta": lambda e: self._mostrar_oculta(),
             "chamada_mudo": lambda e: self._alternar_mudo(),
@@ -1412,6 +1428,9 @@ class Janela(wx.Frame):
             painel, choices=[r for _, r in self._tipos_atuais],
             name="Tipo de conversa")
         self.cx_tipo.SetSelection(self._indice_tipo())
+        rot_cx_filtro = wx.StaticText(painel, label="Filtro")
+        self.cx_filtro = wx.Choice(painel, name="Filtro")
+        self._rot_filtros = (rot_cx_conta, rot_cx_tipo, rot_cx_filtro)
         rot_busca = wx.StaticText(painel, label="Buscar conversa")
         self.campo_busca = wx.TextCtrl(painel, name="Buscar conversa",
                                        style=wx.TE_PROCESS_ENTER)
@@ -1429,6 +1448,7 @@ class Janela(wx.Frame):
         self.botao_sair.Bind(wx.EVT_BUTTON, seguro(lambda e: self._sair()))
         self.cx_conta.Bind(wx.EVT_CHOICE, seguro(self._ao_filtro_conta))
         self.cx_tipo.Bind(wx.EVT_CHOICE, seguro(self._ao_filtro_tipo))
+        self.cx_filtro.Bind(wx.EVT_CHOICE, seguro(self._ao_filtro_pers))
         rot_conv = wx.StaticText(painel, label="Conversas")
         self.lista_conv = ListaDeTextos(painel, name="Conversas")
         self.rot_msgs = wx.StaticText(painel, label="Mensagens")
@@ -1495,6 +1515,7 @@ class Janela(wx.Frame):
         self._controles_atalho = [
             (rot_cx_conta, "Serviço ou conta", "ir_filtro_conta", ""),
             (rot_cx_tipo, "Tipo de conversa", "ir_filtro_tipo", ""),
+            (rot_cx_filtro, "Filtro", "ir_filtro_conta", ""),
             (rot_busca, "Buscar conversa", "buscar_conv", ""),
             (self.botao_busca, "Busca por critérios", "busca_criterios", ""),
             (self.botao_sair, "Sair", "sair", ""),
@@ -1512,6 +1533,8 @@ class Janela(wx.Frame):
         esq.Add(self.cx_conta, 0, wx.EXPAND | wx.BOTTOM, 6)
         esq.Add(rot_cx_tipo, 0, wx.BOTTOM, 2)
         esq.Add(self.cx_tipo, 0, wx.EXPAND | wx.BOTTOM, 6)
+        esq.Add(rot_cx_filtro, 0, wx.BOTTOM, 2)
+        esq.Add(self.cx_filtro, 0, wx.EXPAND | wx.BOTTOM, 6)
         esq.Add(rot_busca, 0, wx.BOTTOM, 2)
         esq.Add(self.campo_busca, 0, wx.EXPAND | wx.BOTTOM, 6)
         esq.Add(self.botao_busca, 0, wx.BOTTOM, 6)
@@ -1582,6 +1605,11 @@ class Janela(wx.Frame):
             w.Show(mensagens)
         for w in (self.rot_caixa, self.caixa) + self.botoes_envio:
             w.Show(escrever)
+        # chamadas so com uma pessoa (nao ha chamada em grupo nem em canal):
+        # nesses o botao some, e a ordem de Tab nao para num botao inutil
+        conv = self.indice.get(self.atual) if self.atual is not None             else None
+        if conv is not None and conv.tipo != "privada":
+            self.botao_chamada.Show(False)
         if not mensagens:
             self._botoes_chave = None
             for b in self._botoes_de_contexto():
@@ -1892,9 +1920,10 @@ class Janela(wx.Frame):
                 return
         antes = set(self.contas.provedores)
         if not self.contas.adicionar(servico, sugestao, historico):
-            wx.MessageBox("Não foi possível adicionar a conta. Sem as "
-                          "credenciais do aplicativo, o Telegram não deixa "
-                          "conectar.", NOME, wx.OK | wx.ICON_WARNING, self)
+            wx.MessageBox("Não foi possível adicionar a conta: faltam "
+                          "as credenciais do aplicativo para o Telegram, "
+                          "ou a pasta de dados da conta não pôde ser "
+                          "criada.", NOME, wx.OK | wx.ICON_WARNING, self)
             return
         self._ajustar_menu_por_contas()
         self.SetStatusText("Conectando ao %s..." % m.SERVICOS[servico])
@@ -1936,20 +1965,55 @@ class Janela(wx.Frame):
 
     @seguro
     def _gerenciar_contas(self):
-        """Lista de contas com caixa de marcar (ativada ou desativada) e,
-        com a conta em foco, os botoes Excluir e Renomear."""
+        """Lista de contas com caixa de marcar (ativada ou desativada)
+        e, com a conta em foco, os botoes Nova conta, Excluir e
+        Renomear."""
         if not self.cfg.contas():
             self.fala.falar("Não há contas. Use Novo, Nova conta.")
             return
         from telezapp.interface.gerenciar_contas import DialogoContas
         dlg = DialogoContas(self, self._itens_de_contas, self._marcar_conta,
-                            self._excluir_conta_id, self._renomear_conta_id)
+                            self._excluir_conta_id, self._renomear_conta_id,
+                            self._adicionar_conta_pelo_menu,
+                            dados=(self.cfg.get("contas_em_pastas"),
+                                   self.cfg.get("contas_pasta") or ""))
         try:
             dlg.ShowModal()
+            mudou = self._salvar_dados_das_contas(dlg.valores())
         finally:
             dlg.Destroy()
+        if mudou:
+            self._oferecer_reinicio(
+                "Onde ficam os dados das contas só muda quando o %s abre "
+                "de novo." % NOME)
         # A conta em foco pode ter sido excluída: devolve o foco à janela.
         self.lista_conv.SetFocus()
+
+    def _salvar_dados_das_contas(self, valores):
+        """Guarda a caixa de separar os dados por conta e a pasta escolhida
+        (Gerenciar contas). True se algo mudou (so vale ao reabrir). Uma
+        pasta que nao da para criar nao e guardada."""
+        if valores is None:
+            return False
+        separar, pasta = bool(valores[0]), valores[1]
+        if separar and pasta:
+            try:
+                os.makedirs(pasta, exist_ok=True)
+            except OSError as erro:
+                log.warning("pasta das contas recusada (%r): %s", pasta, erro)
+                wx.MessageBox("Não consegui usar a pasta %s: %s. A pasta "
+                              "dos dados das contas não foi mudada." % (
+                                  pasta, erro), NOME, wx.OK | wx.ICON_WARNING,
+                              self)
+                pasta = self.cfg.get("contas_pasta") or ""
+        mudou = False
+        for chave, valor in (("contas_em_pastas", separar),
+                             ("contas_pasta", pasta)):
+            if self.cfg.get(chave) != valor:
+                self.cfg.set(chave, valor)
+                log.info("configuração mudada: %s = %r", chave, valor)
+                mudou = True
+        return mudou
 
     def _marcar_conta(self, conta_id, ativa):
         """Liga ou desliga uma conta e diz o que aconteceu."""
@@ -2437,14 +2501,14 @@ class Janela(wx.Frame):
                 if soma is not None and "#" not in c.id:
                     c.nao_lidas = soma
         favoritas = self.banco.conversas_com_favoritas() \
-            if self.filtro_tipo == "favoritas" and self.banco else ()
+            if self._precisa_das_favoritas() and self.banco else ()
         posicoes = self._posicoes_das_fixadas() \
             if self.cfg.get("manter_posicao_fixadas") else None
         self.conversas = sorted(
             (c for c in self.indice.values()
-             if "#" not in c.id and (c.chave == self.atual or m.passa_filtro(
-                 c, self.filtro_tipo, self.filtro_conta, self.busca,
-                 favoritas))),
+             if "#" not in c.id and (
+                 c.chave == self.atual
+                 or self._passa_nos_filtros(c, favoritas))),
             key=lambda c: (not c.fixada, posicoes.get(_chave_em_texto(c), 0)
                            if posicoes is not None and c.fixada else -c.data))
         self._atualizar_titulo()
@@ -3678,7 +3742,7 @@ class Janela(wx.Frame):
         m.atualizar_extras(x, favorita=favorita)
         self.banco.salvar_mensagens([x])
         self._preencher_mensagens()
-        if self.filtro_tipo == "favoritas":
+        if self._precisa_das_favoritas():
             self._aplicar_filtros(falar=False)
         prov = self.contas.provedor(x.conta_id) if self.contas else None
         if prov is not None and getattr(prov, "FAVORITA_NA_CONTA", False):
@@ -4095,8 +4159,101 @@ class Janela(wx.Frame):
         self.cx_conta.Set([r for _, r in opcoes])
         self.cx_conta.SetSelection(valores.index(self.filtro_conta))
 
+    # ------------------------------------------- filtros personalizados
+    def _filtros_em_uso(self):
+        """Caixa de ativar marcada e pelo menos um filtro criado."""
+        return filtros_nucleo.em_uso(self.filtros_pers)
+
+    def _filtro_pers_atual(self):
+        if not self._filtros_em_uso():
+            return None
+        return filtros_nucleo.achar(self.filtros_pers, self.filtro_pers_id)
+
+    def _filtro_pers_vale(self):
+        """O filtro personalizado manda na lista. Nas trancadas (codigo
+        digitado) valem o tipo e a conta de sempre."""
+        return (self._filtro_pers_atual() is not None
+                and self.filtro_tipo != "trancadas")
+
+    def _passa_nos_filtros(self, c, favoritas):
+        if self._filtro_pers_vale():
+            return filtros_nucleo.passa(c, self._filtro_pers_atual(),
+                                        self.busca, favoritas)
+        return m.passa_filtro(c, self.filtro_tipo, self.filtro_conta,
+                              self.busca, favoritas)
+
+    def _precisa_das_favoritas(self):
+        if self._filtro_pers_vale():
+            return filtros_nucleo.usa_favoritas(self._filtro_pers_atual())
+        return self.filtro_tipo == "favoritas"
+
+    def _sincronizar_filtros_personalizados(self):
+        """Com os filtros em uso, as caixas de servico, conta e tipo saem
+        da tela e entra a caixa Filtro (so quando ha mais de um filtro)."""
+        em_uso = self._filtros_em_uso()
+        lista = self.filtros_pers["lista"] if em_uso else []
+        if em_uso:
+            atual = filtros_nucleo.achar(self.filtros_pers,
+                                         self.filtro_pers_id)
+            self.filtro_pers_id = atual["id"]
+            nomes = [f["nome"] for f in lista]
+            if nomes != [self.cx_filtro.GetString(i)
+                         for i in range(self.cx_filtro.GetCount())]:
+                self.cx_filtro.Set(nomes)
+            self.cx_filtro.SetSelection(
+                [f["id"] for f in lista].index(self.filtro_pers_id))
+        rot_conta, rot_tipo, rot_filtro = self._rot_filtros
+        for parte in (rot_conta, self.cx_conta, rot_tipo, self.cx_tipo):
+            parte.Show(not em_uso)
+        for parte in (rot_filtro, self.cx_filtro):
+            parte.Show(em_uso and len(lista) > 1)
+        self.painel.Layout()
+
+    def _ao_filtro_pers(self, evento=None):
+        i = self.cx_filtro.GetSelection()
+        lista = self.filtros_pers["lista"]
+        if 0 <= i < len(lista):
+            self._limpar_busca()
+            self.filtro_pers_id = lista[i]["id"]
+            self.cfg.set("filtro_personalizado", self.filtro_pers_id)
+            # trocar de filtro tira das trancadas: com os filtros
+            # personalizados a caixa de tipos nao esta na tela, e esse era o
+            # unico jeito de sair delas
+            self._esconder_trancadas(falar=False)
+            self._aplicar_filtros(
+                falar=bool(self.cfg.get("falar_quantas_no_filtro")))
+
+    def _ir_filtro_conta(self):
+        """Alt+4: a caixa de servico ou conta; com filtros personalizados,
+        a caixa Filtro (ou, com um so, o nome dele)."""
+        if not self._filtros_em_uso():
+            self._ir_para(self.cx_conta, "")
+        elif len(self.filtros_pers["lista"]) > 1:
+            self._ir_para(self.cx_filtro, "")
+        else:
+            self.fala.falar("Filtro: %s." % self._filtro_pers_atual()["nome"],
+                            interromper=True)
+
+    def _ir_filtro_tipo(self):
+        if not self._filtros_em_uso():
+            self._ir_para(self.cx_tipo, "")
+        else:
+            self.fala.falar("Os filtros personalizados estão ativados.",
+                            interromper=True)
+
+    def _aplicar_filtros_personalizados(self, valor):
+        """Veio de Configuracoes, Interface, Filtros."""
+        self.filtros_pers = filtros_nucleo.normalizar(valor)
+        self.cfg.set("filtros_personalizados", self.filtros_pers)
+        self._sincronizar_filtros_personalizados()
+        self._ordenar()
+        self._preencher_conversas()
+
     def _resumo_filtro(self):
         n = len(self._chaves_conv)
+        if self._filtro_pers_vale():
+            return ("Nenhuma conversa" if n == 0 else
+                    "1 conversa" if n == 1 else "%d conversas" % n)
         return "%s. %s" % (
             dict(self._opcoes_conta).get(self.filtro_conta, ""),
             "Nenhuma conversa" if n == 0 else
@@ -4106,9 +4263,11 @@ class Janela(wx.Frame):
         self._ordenar()
         self._preencher_conversas()
         if falar:
-            self.fala.falar("%s, %s" % (
-                dict(m.FILTROS_TIPO)[self.filtro_tipo],
-                self._resumo_filtro()), interromper=True)
+            nome = (self._filtro_pers_atual()["nome"]
+                    if self._filtro_pers_vale()
+                    else dict(m.FILTROS_TIPO)[self.filtro_tipo])
+            self.fala.falar("%s, %s" % (nome, self._resumo_filtro()),
+                            interromper=True)
 
     def _limpar_busca(self):
         """Esvazia o campo de busca de conversas. False se ja estava vazio
@@ -4144,6 +4303,10 @@ class Janela(wx.Frame):
 
     def _ir_para_tipo(self, valor):
         """Escolhe o tipo direto e leva o foco para a lista de conversas."""
+        if self._filtros_em_uso():
+            self.fala.falar("Os filtros personalizados estão ativados. Use "
+                            "a caixa Filtro.", interromper=True)
+            return
         if valor not in dict(self._tipos_atuais):
             self.fala.falar("As conversas trancadas estão escondidas.",
                             interromper=True)
@@ -4155,6 +4318,15 @@ class Janela(wx.Frame):
         self._esconder_se_saiu_das_trancadas()
         self.lista_conv.SetFocus()
         self._aplicar_filtros()
+
+    def _sair_das_trancadas(self):
+        """Esc na lista de conversas, com as trancadas na tela: elas somem
+        na hora, sem depender da caixa de tipos (que nao existe com os
+        filtros personalizados) e sem outro Esc para a busca."""
+        self._limpar_busca()
+        self._esconder_trancadas(falar=False)
+        self.fala.falar("Saiu das conversas trancadas. %s" %
+                        self._resumo_filtro(), interromper=True)
 
     def _esconder_se_saiu_das_trancadas(self):
         """Saiu do tipo Trancadas: elas somem de novo e so voltam quando o
@@ -4182,6 +4354,40 @@ class Janela(wx.Frame):
             return
         self.busca = texto
         self._aplicar_filtros(falar=False)
+
+    def _app_ativo(self):
+        """Alguma janela do TeleZapp esta na frente (a principal ou uma
+        caixa de dialogo dele). Falso quando a pessoa foi para outro
+        programa."""
+        try:
+            return wx.GetActiveWindow() is not None
+        except Exception:
+            return True
+
+    def _vigiar_trancadas(self):
+        """Com as trancadas a mostra, olha a cada segundo se a pessoa saiu
+        da janela ou ficou parada tempo demais e, se sim, as esconde."""
+        self._vigia_trancadas = False
+        if not self.trancadas_liberadas:
+            return
+        saiu = bool(self.cfg.get("trancadas_esconder_ao_sair")) and             not self._app_ativo()
+        minutos = int(self.cfg.get("trancadas_esconder_minutos") or 0)
+        parada = minutos > 0 and             time.monotonic() - self._atividade >= minutos * 60
+        if saiu or parada:
+            log.info("trancadas escondidas sozinhas (%s)",
+                     "saiu da janela" if saiu else "%d min parado" % minutos)
+            self._esconder_trancadas(falar=False)
+            if not saiu:
+                self.fala.falar("Conversas trancadas escondidas.",
+                                interromper=True)
+            return
+        self._iniciar_vigia_trancadas()
+
+    def _iniciar_vigia_trancadas(self):
+        if self._vigia_trancadas or not self.trancadas_liberadas:
+            return
+        self._vigia_trancadas = True
+        wx.CallLater(INTERVALO_VIGIA_TRANCADAS_MS, self._vigiar_trancadas)
 
     def _ao_ativar(self, evento):
         """A janela voltou ao foco: o que chegou na conversa aberta enquanto
@@ -4222,6 +4428,8 @@ class Janela(wx.Frame):
             self._buscando = False
         self.busca = ""
         self.trancadas_liberadas = True
+        self._atividade = time.monotonic()
+        self._iniciar_vigia_trancadas()
         self._montar_tipos()
         self.filtro_tipo = "trancadas"
         self.cx_tipo.SetSelection(self._indice_tipo())
@@ -4795,19 +5003,32 @@ class Janela(wx.Frame):
             c = self.chamada = ch.Chamada(
                 e.conta_id, e.conversa_id, e.nome, e.entrante, e.estado,
                 video=e.video, camera=e.camera,
-                video_remoto=e.video_remoto, suporta_video=e.suporta_video)
+                video_remoto=e.video_remoto, suporta_video=e.suporta_video,
+                tela=e.tela, som_pc=e.som_pc, suporta_tela=e.suporta_tela,
+                suporta_som_pc=e.suporta_som_pc)
             mudou = True
         else:
             if e.nome and not c.nome:
                 c.nome = e.nome
             mudou = c.aplicar(e.estado, e.motivo, e.erro)
             antes = (c.video, c.camera, c.video_remoto)
-            if c.aplicar_video(e.video, e.camera, e.video_remoto,
-                               e.suporta_video) and not mudou:
-                # so o video mudou: diz o que foi, sem repetir o estado
-                self.fala.falar(ch.fala_do_video(
-                    antes, (c.video, c.camera, c.video_remoto), c.nome),
-                    interromper=True)
+            antes_pc = (c.tela, c.som_pc)
+            mudou_video = c.aplicar_video(e.video, e.camera, e.video_remoto,
+                                          e.suporta_video)
+            mudou_pc = c.aplicar_compartilhamento(
+                e.tela, e.som_pc, e.suporta_tela, e.suporta_som_pc)
+            if (mudou_video or mudou_pc) and not mudou:
+                # so o video ou o compartilhamento mudou: diz o que foi, sem
+                # repetir o estado
+                fala = " ".join(t for t in (
+                    ch.fala_do_video(
+                        antes, (c.video, c.camera, c.video_remoto), c.nome)
+                    if mudou_video and not (
+                        mudou_pc and c.tela != antes_pc[0]) else "",
+                    ch.fala_compartilhamento(antes_pc, (c.tela, c.som_pc))
+                    if mudou_pc else "") if t)
+                if fala:
+                    self.fala.falar(fala, interromper=True)
                 self._atualizar_dialogo_chamada(c)
                 return
         if not mudou:
@@ -4817,7 +5038,10 @@ class Janela(wx.Frame):
         prioridade.chamada_em_curso(c.ativa)
         a = ch.apresentar(c)
         self.SetStatusText(a.situacao)
-        self.fala.falar(a.fala, interromper=True)
+        if c.estado == ch.CONECTANDO:
+            self._anunciar_conexao(c, a.fala)
+        else:
+            self.fala.falar(a.fala, interromper=True)
         toque = a.som in ("toque", "chamando")
         if a.som:
             bipe(a.som, servico=self._servico_da_conta(c.conta_id))
@@ -4826,6 +5050,29 @@ class Janela(wx.Frame):
         self._atualizar_dialogo_chamada(c)
         if c.estado == ch.ENCERRADA:
             self.chamada = None
+
+    def _anunciar_conexao(self, c, texto):
+        """Atendida a chamada, o som leva alguns segundos para chegar. A fala
+        vem um instante depois de o foco ir para o Desligar (o leitor de tela
+        cala o que falava ao anunciar o foco) e se repete algumas vezes,
+        para o silencio nao parecer que travou."""
+        def ainda_conectando():
+            return self.chamada is c and c.estado == ch.CONECTANDO
+
+        def dizer():
+            if ainda_conectando():
+                self.fala.falar(texto, interromper=True)
+
+        def lembrar(n):
+            if not ainda_conectando():
+                return
+            self.fala.falar(ch.FALA_AINDA_CONECTANDO)
+            if n < ch.LEMBRETES_AO_CONECTAR:
+                wx.CallLater(ch.INTERVALO_DO_LEMBRETE_MS,
+                             lambda: lembrar(n + 1))
+        wx.CallLater(ch.ATRASO_DA_FALA_AO_ATENDER_MS, dizer)
+        wx.CallLater(ch.ATRASO_DA_FALA_AO_ATENDER_MS
+                     + ch.INTERVALO_DO_LEMBRETE_MS, lambda: lembrar(1))
 
     def _repetir_toque(self, c, estado, som):
         """Repete o som enquanto a chamada continua no mesmo estado."""
@@ -4849,9 +5096,18 @@ class Janela(wx.Frame):
         com_video = bool(p is not None and getattr(p, "suporta_video", False))
         if com_video:
             self._registrar_destino_de_video(p)
+        com_tela = bool(p is not None and getattr(p, "suporta_video", False)
+                        and hasattr(p, "telas"))
+        com_som_pc = bool(p is not None
+                          and getattr(p, "suporta_som_pc", False))
         acoes = {
             "camera": self._alternar_camera,
             "trocar_camera": self._trocar_camera,
+            "tela": self._alternar_tela,
+            "trocar_tela": self._trocar_tela,
+            "tela_com_som": self._tela_com_som,
+            "som_pc": self._alternar_som_pc,
+            "trocar_som_pc": self._trocar_som_pc,
             "atender": self._atender_chamada,
             "recusar": self._desligar_chamada,
             "desligar": self._desligar_chamada,
@@ -4864,7 +5120,12 @@ class Janela(wx.Frame):
             mics, saidas, mic, saida, ao_fechar=self._chamada_fechada,
             ao_ocultar=lambda d: self._ocultar_janela(d, "Janela da chamada"),
             cameras=p.cameras() if com_video else (),
-            camera=self.cfg.get("chamada_camera") or "")
+            camera=self.cfg.get("chamada_camera") or "",
+            telas=[n for n, _ in p.telas()] if com_tela else (),
+            tela=self.cfg.get("chamada_tela") or "",
+            saidas_pc=p.saidas_do_computador() if com_som_pc else (),
+            saida_pc=self.cfg.get("chamada_saida_pc") or "",
+            tela_com_som=bool(self.cfg.get("chamada_tela_com_som")))
         self.dlg_chamada.Show()
         if hasattr(self.dlg_chamada, "Raise"):
             self.dlg_chamada.Raise()
@@ -4916,6 +5177,80 @@ class Janela(wx.Frame):
         if c is not None and p is not None and c.camera:
             p.desligar_camera(c.conversa_id)
             p.ligar_camera(c.conversa_id, nome)
+
+    @seguro
+    def _alternar_tela(self):
+        c = self._chamada_em_curso()
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if c is None:
+            return
+        if p is None or not c.suporta_tela:
+            self.fala.falar("Esta conta ainda não compartilha a tela.",
+                            interromper=True)
+            return
+        if c.estado != ch.EM_CHAMADA:
+            self.fala.falar("A tela só pode ser compartilhada durante a "
+                            "conversa.", interromper=True)
+            return
+        if c.tela:
+            p.parar_tela(c.conversa_id)
+        else:
+            p.compartilhar_tela(
+                c.conversa_id, self.cfg.get("chamada_tela") or "",
+                bool(self.cfg.get("chamada_tela_com_som")) and
+                bool(c.suporta_som_pc))
+
+    @seguro
+    def _trocar_tela(self, nome):
+        self.cfg.set("chamada_tela", nome)
+        c = self.chamada
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if c is not None and p is not None and c.tela:
+            p.trocar_tela(c.conversa_id, nome)
+
+    @seguro
+    def _tela_com_som(self, marcada):
+        """A caixa "compartilhar tambem o som" vale para as proximas telas
+        e, com a tela sendo compartilhada agora, liga ou desliga o som na
+        hora."""
+        self.cfg.set("chamada_tela_com_som", bool(marcada))
+        c = self.chamada
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if c is None or p is None or not c.ativa or not c.tela                 or c.estado != ch.EM_CHAMADA or not c.suporta_som_pc:
+            return
+        if marcada and not c.som_pc:
+            p.compartilhar_som(c.conversa_id,
+                               self.cfg.get("chamada_saida_pc") or "")
+        elif not marcada and c.som_pc:
+            p.parar_som(c.conversa_id)
+
+    @seguro
+    def _alternar_som_pc(self):
+        c = self._chamada_em_curso()
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if c is None:
+            return
+        if p is None or not c.suporta_som_pc:
+            self.fala.falar("Esta conta ainda não compartilha o som do "
+                            "computador.", interromper=True)
+            return
+        if c.estado != ch.EM_CHAMADA:
+            self.fala.falar("O som do computador só pode ser compartilhado "
+                            "durante a conversa.", interromper=True)
+            return
+        if c.som_pc:
+            p.parar_som(c.conversa_id)
+        else:
+            p.compartilhar_som(c.conversa_id,
+                               self.cfg.get("chamada_saida_pc") or "")
+
+    @seguro
+    def _trocar_som_pc(self, nome):
+        self.cfg.set("chamada_saida_pc", nome)
+        c = self.chamada
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if c is not None and p is not None and c.som_pc:
+            p.compartilhar_som(c.conversa_id, nome)
 
     def _chamada_em_curso(self):
         if self.chamada is None or not self.chamada.ativa:
@@ -5122,6 +5457,7 @@ class Janela(wx.Frame):
     # ============================================================ teclado
     def _char_hook(self, evt):
         """Enter e Esc tratados na janela: o ListBox nao entrega o Enter."""
+        self._atividade = time.monotonic()
         try:
             k = evt.GetKeyCode()
             foco = self.FindFocus()
@@ -5161,6 +5497,9 @@ class Janela(wx.Frame):
                             not self._parar_audio() and \
                             not self._voltar_da_respondida():
                         self._esc_da_conversa()
+                    return
+                if foco in (self.lista_conv, self.campo_busca) and                         self.trancadas_liberadas and                         self.filtro_tipo == "trancadas":
+                    self._sair_das_trancadas()
                     return
                 # nada mais a cancelar: Esc limpa a busca de conversas
                 if foco in (self.lista_conv, self.campo_busca) and \
@@ -10880,6 +11219,8 @@ class Janela(wx.Frame):
             self._aplicar_privacidade_conta(valor)
         elif chave == "atalhos":
             self._aplicar_atalhos(valor)
+        elif chave == "filtros_personalizados":
+            self._aplicar_filtros_personalizados(valor)
         elif chave == "lista_conversas":
             self.cfg.set(chave, lista_conv_nucleo.normalizar(valor))
             self._sincronizar_menu_da_lista()
@@ -11200,11 +11541,13 @@ class Janela(wx.Frame):
         """Salva num .zip (com senha, se a pessoa quiser) as partes que ela
         escolher: configuracoes, contas e sessoes, conversas e midias."""
         from telezapp.interface import backup as jb
-        dlg = jb.DialogoBackup(self)
+        dlg = jb.DialogoBackup(
+            self, [(i, r) for i, r, _ in self._itens_de_contas()])
         try:
             if dlg.ShowModal() != wx.ID_OK:
                 return
             partes, senha = dlg.partes(), dlg.senha.GetValue()
+            contas = dlg.contas()
         finally:
             dlg.Destroy()
         nome = time.strftime("TeleZapp-backup-%Y%m%d-%H%M%S.zip")
@@ -11230,7 +11573,9 @@ class Janela(wx.Frame):
                 resumo = backup.criar(
                     caminho, config.pasta_dados(), dados, partes, senha,
                     copiar_banco=self.banco.copiar_para,
-                    progresso=andamento)
+                    progresso=andamento,
+                    pasta_contas=config.pasta_do_layout_antigo(),
+                    contas=contas)
                 texto = "Backup salvo em %s%s." % (
                     caminho, " (com senha)" if senha else "")
                 grave = False
@@ -11310,11 +11655,16 @@ class Janela(wx.Frame):
         if not manifesto.partes:
             self.fala.falar("Este backup está vazio.")
             return
-        dlg = jb.DialogoRestaurar(self, manifesto)
+        try:
+            do_backup = backup.contas_do_backup(arquivo, senha)
+        except backup.ErroBackup:
+            do_backup = []
+        dlg = jb.DialogoRestaurar(self, manifesto, do_backup)
         try:
             if dlg.ShowModal() != wx.ID_OK:
                 return
             partes = dlg.partes()
+            contas = dlg.contas()
         finally:
             dlg.Destroy()
         if not partes:
@@ -11330,10 +11680,15 @@ class Janela(wx.Frame):
             if r != wx.YES:
                 return
         if set(partes) - set(backup.PARTES_DE_OPCOES):
+            de_algumas = contas is not None or manifesto.contas is not None
             r = wx.MessageBox(
-                "Restaurar vai trocar, na próxima abertura, o que o %s tem "
-                "hoje nessas partes pelo conteúdo do backup (o que havia fica "
-                "guardado). Continuar?" % NOME, "Restaurar backup",
+                ("Restaurar vai trocar, na próxima abertura, o que o %s tem "
+                 "hoje dessas partes, só nas contas escolhidas, pelo "
+                 "conteúdo do backup (o que havia fica guardado; as outras "
+                 "contas não mudam). Continuar?" if de_algumas else
+                 "Restaurar vai trocar, na próxima abertura, o que o %s tem "
+                 "hoje nessas partes pelo conteúdo do backup (o que havia "
+                 "fica guardado). Continuar?") % NOME, "Restaurar backup",
                 wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
             if r != wx.YES:
                 return
@@ -11345,7 +11700,7 @@ class Janela(wx.Frame):
                 extra = {}
                 opcoes, espera = backup.restaurar(
                     arquivo, senha, partes, config.pasta_dados(), extra,
-                    progresso=andamento)
+                    progresso=andamento, contas=contas)
                 erro = ""
             except backup.ErroBackup as e:
                 opcoes, espera, erro, extra = {}, [], str(e), {}

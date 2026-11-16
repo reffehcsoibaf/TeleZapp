@@ -33,6 +33,9 @@ ATENDER, RECUSAR, DESLIGAR, SILENCIAR, TEMPO, FECHAR, CAMERA = (
     "atender", "recusar", "desligar", "silenciar", "tempo", "fechar",
     "camera")
 
+# Compartilhar a tela e o som do computador
+TELA, SOM_PC = "tela", "som_pc"
+
 
 def formatar_duracao(segundos):
     """0:07, 12:03 ou 1:02:45 (para mostrar)."""
@@ -73,6 +76,10 @@ class Chamada:
     camera: bool = False            # a nossa camera esta ligada
     video_remoto: bool = False      # o outro lado esta mandando video
     suporta_video: bool = False     # a conta sabe fazer video
+    tela: bool = False              # estamos compartilhando a tela
+    som_pc: bool = False            # estamos compartilhando o som do computador
+    suporta_tela: bool = False      # a conta sabe compartilhar a tela
+    suporta_som_pc: bool = False    # a conta sabe mandar o som do computador
     _agora: object = field(default=time.monotonic, repr=False)
 
     @property
@@ -95,6 +102,18 @@ class Chamada:
             self.suporta_video = bool(suporta)
         antigo = (self.video, self.camera, self.video_remoto)
         self.video, self.camera, self.video_remoto = novo
+        return novo != antigo
+
+    def aplicar_compartilhamento(self, tela, som_pc, suporta_tela=None,
+                                 suporta_som_pc=None):
+        """Atualiza o que estamos compartilhando; True se algo mudou."""
+        if suporta_tela is not None:
+            self.suporta_tela = bool(suporta_tela)
+        if suporta_som_pc is not None:
+            self.suporta_som_pc = bool(suporta_som_pc)
+        novo = (bool(tela), bool(som_pc))
+        antigo = (self.tela, self.som_pc)
+        self.tela, self.som_pc = novo
         return novo != antigo
 
     def aplicar(self, estado, motivo="", erro=""):
@@ -129,6 +148,47 @@ def rotulo_camera(c):
     if c.camera:
         return "Desligar a &câmera"
     return "Ligar a &câmera" if c.video else         "Passar para &vídeo (ligar a câmera)"
+
+
+def rotulo_tela(c):
+    return "Parar de compartilhar a &tela" if c.tela \
+        else "Compartilhar a &tela"
+
+
+def rotulo_som_pc(c):
+    return "Parar de compartilhar o so&m do computador" if c.som_pc \
+        else "Compartilhar o so&m do computador"
+
+
+def fala_compartilhamento(antes, depois):
+    """O que falar quando o compartilhamento mudou. `antes` e `depois` sao
+    (tela, som_pc); "" se nada a dizer."""
+    tela0, som0 = antes
+    tela1, som1 = depois
+    if (tela0, som0) == (tela1, som1):
+        return ""
+    if tela1 and som1 and not tela0 and not som0:
+        return "Compartilhando a tela e o som do computador."
+    partes = []
+    if tela1 != tela0:
+        partes.append("Compartilhando a tela." if tela1
+                      else "Você parou de compartilhar a tela.")
+    if som1 != som0:
+        partes.append("Compartilhando o som do computador." if som1
+                      else "Você parou de compartilhar o som do "
+                           "computador.")
+    return " ".join(partes)
+
+
+def texto_do_compartilhamento(c):
+    """O que a chamada esta compartilhando, para a janela e o leitor."""
+    if c.tela and c.som_pc:
+        return "Você está compartilhando a tela e o som do computador."
+    if c.tela:
+        return "Você está compartilhando a tela."
+    if c.som_pc:
+        return "Você está compartilhando o som do computador."
+    return ""
 
 
 def fala_camera(camera, video):
@@ -209,12 +269,22 @@ def apresentar(c):
         return Apresentacao(
             "Conectando com %s" % quem,
             "Conectando o áudio com %s." % quem,
-            "Conectando.",
+            "Atendida. Estabelecendo a comunicação com %s." % quem,
             (DESLIGAR,), DESLIGAR)
     if c.estado == EM_CHAMADA:
         mudo = " Seu microfone está silenciado." if c.mudo else ""
         video = (" " + texto_do_video(c)) if c.video else ""
-        botoes = (SILENCIAR, CAMERA, TEMPO, DESLIGAR) if c.suporta_video             else (SILENCIAR, TEMPO, DESLIGAR)
+        partilha = texto_do_compartilhamento(c)
+        if partilha:
+            video += " " + partilha
+        botoes = [SILENCIAR]
+        if c.suporta_som_pc:
+            botoes.append(SOM_PC)
+        if c.suporta_tela and c.suporta_video:
+            botoes.append(TELA)
+        if c.suporta_video:
+            botoes.append(CAMERA)
+        botoes = tuple(botoes + [TEMPO, DESLIGAR])
         return Apresentacao(
             "Em chamada com %s" % quem,
             "Em chamada com %s.%s%s" % (quem, mudo, video),
@@ -223,6 +293,14 @@ def apresentar(c):
     texto = texto_encerramento(c)
     return Apresentacao(
         "Chamada encerrada", texto, texto, (FECHAR,), FECHAR, "desligada")
+
+
+# Depois de atender, a comunicacao leva alguns segundos: a fala lembra a
+# pessoa de que ainda esta conectando, algumas vezes, em vez de ficar calada
+ATRASO_DA_FALA_AO_ATENDER_MS = 400
+INTERVALO_DO_LEMBRETE_MS = 4000
+LEMBRETES_AO_CONECTAR = 2
+FALA_AINDA_CONECTANDO = "Ainda estabelecendo a comunicação."
 
 
 def rotulo_silenciar(mudo):

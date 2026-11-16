@@ -48,9 +48,12 @@ class VistaVideo(wx.Panel):
 class DialogoChamada(wx.Dialog):
     def __init__(self, pai, chamada, acoes, falar, microfones=(), saidas=(),
                  microfone="", saida="", ao_fechar=None, cameras=(),
-                 camera="", ao_ocultar=None):
+                 camera="", ao_ocultar=None, telas=(), tela="",
+                 saidas_pc=(), saida_pc="", tela_com_som=True):
         """acoes: dict com atender(), recusar(), desligar(), silenciar(bool),
-        tempo(), trocar(microfone, saida), camera() e trocar_camera(nome).
+        tempo(), trocar(microfone, saida), camera() e trocar_camera(nome);
+        tela(), trocar_tela(nome), tela_com_som(bool), som_pc() e
+        trocar_som_pc(nome) quando ha telas e saidas de som para mostrar.
         `falar(texto)` fala sem interromper o que ja esta sendo dito."""
         super().__init__(pai, title="Chamada", style=wx.DEFAULT_DIALOG_STYLE)
         self.chamada = chamada
@@ -66,11 +69,15 @@ class DialogoChamada(wx.Dialog):
         self.b_desligar = wx.Button(self, wx.ID_ANY, "&Desligar")
         self.b_fechar = wx.Button(self, wx.ID_ANY, "&Fechar")
         self.b_camera = wx.Button(self, wx.ID_ANY, "Ligar a &câmera")
+        self.b_tela = wx.Button(self, wx.ID_ANY, "Compartilhar a &tela")
+        self.b_som_pc = wx.Button(self, wx.ID_ANY,
+                                  "Compartilhar o so&m do computador")
         # esconde a janela sem encerrar a chamada (Ctrl+Shift+O traz de volta)
         self.b_ocultar = wx.Button(self, wx.ID_ANY, "&Ocultar a janela")
         self.botoes = {
             ch.ATENDER: self.b_atender, ch.SILENCIAR: self.b_silenciar,
-            ch.CAMERA: self.b_camera,
+            ch.CAMERA: self.b_camera, ch.TELA: self.b_tela,
+            ch.SOM_PC: self.b_som_pc,
             ch.TEMPO: self.b_tempo, ch.RECUSAR: self.b_recusar,
             ch.DESLIGAR: self.b_desligar, ch.FECHAR: self.b_fechar}
         self.vista = None               # VistaVideo, criada com o 1o quadro
@@ -81,6 +88,28 @@ class DialogoChamada(wx.Dialog):
         if self.cameras:
             self.escolha_camera.SetSelection(next(
                 (n for n, d in enumerate(self.cameras) if d == camera), 0))
+
+        self.telas = list(telas)
+        self.rot_tela = wx.StaticText(self, label="Tela a compartilhar:")
+        self.escolha_tela = wx.Choice(self, choices=self.telas,
+                                      name="Tela a compartilhar")
+        if self.telas:
+            self.escolha_tela.SetSelection(next(
+                (n for n, d in enumerate(self.telas) if d == tela), 0))
+        self.cx_tela_som = wx.CheckBox(
+            self, label="Ao compartilhar a tela, compartilhar também o som "
+                        "do computador")
+        self.cx_tela_som.SetValue(bool(tela_com_som))
+        self.saidas_pc = list(saidas_pc)
+        self.rot_saida_pc = wx.StaticText(
+            self, label="Saída de som do computador a compartilhar:")
+        self.escolha_saida_pc = wx.Choice(
+            self, choices=self.saidas_pc,
+            name="Saída de som do computador a compartilhar")
+        if self.saidas_pc:
+            self.escolha_saida_pc.SetSelection(next(
+                (n for n, d in enumerate(self.saidas_pc)
+                 if parecem_o_mesmo(saida_pc, d)), 0))
 
         self.microfones, self.saidas = list(microfones), list(saidas)
         self.rot_mic = wx.StaticText(self, label="Mi&crofone:")
@@ -111,9 +140,23 @@ class DialogoChamada(wx.Dialog):
             lay.Add(escolha, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
         lay.Add(self.rot_camera, 0, wx.LEFT | wx.RIGHT | wx.TOP, 12)
         lay.Add(self.escolha_camera, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
+        lay.Add(self.rot_tela, 0, wx.LEFT | wx.RIGHT | wx.TOP, 12)
+        lay.Add(self.escolha_tela, 0, wx.LEFT | wx.RIGHT, 12)
+        lay.Add(self.cx_tela_som, 0, wx.ALL, 12)
+        lay.Add(self.rot_saida_pc, 0, wx.LEFT | wx.RIGHT | wx.TOP, 12)
+        lay.Add(self.escolha_saida_pc, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
         self.SetSizer(lay)
 
         self.b_camera.Bind(wx.EVT_BUTTON, lambda e: acoes["camera"]())
+        self.b_tela.Bind(wx.EVT_BUTTON,
+                         lambda e: acoes["tela"]() if "tela" in acoes
+                         else None)
+        self.b_som_pc.Bind(wx.EVT_BUTTON,
+                           lambda e: acoes["som_pc"]() if "som_pc" in acoes
+                           else None)
+        self.escolha_tela.Bind(wx.EVT_CHOICE, self._tela_escolhida)
+        self.cx_tela_som.Bind(wx.EVT_CHECKBOX, self._tela_som_marcada)
+        self.escolha_saida_pc.Bind(wx.EVT_CHOICE, self._saida_pc_escolhida)
         self.escolha_camera.Bind(wx.EVT_CHOICE, self._camera_escolhida)
         self.b_atender.Bind(wx.EVT_BUTTON, lambda e: acoes["atender"]())
         self.b_recusar.Bind(wx.EVT_BUTTON, lambda e: acoes["recusar"]())
@@ -126,12 +169,25 @@ class DialogoChamada(wx.Dialog):
         self.escolha_saida.Bind(wx.EVT_CHOICE, self._dispositivo)
         self.Bind(wx.EVT_CHAR_HOOK, self._tecla)
         self.Bind(wx.EVT_CLOSE, self._ao_fechar)
+        self._estado_mostrado = None
         self.mostrar()
 
     # ------------------------------------------------------- desenho
+    def _controles_com_foco(self):
+        """Tudo o que pode ter o foco dentro desta janela."""
+        return (list(self.botoes.values())
+                + [self.b_ocultar, self.escolha_mic, self.escolha_saida,
+                   self.escolha_camera, self.escolha_tela, self.cx_tela_som,
+                   self.escolha_saida_pc])
+
     def mostrar(self):
-        """Redesenha para o estado atual de `self.chamada`."""
+        """Redesenha para o estado atual de `self.chamada`. O foco so vai
+        para o botao principal quando o ESTADO da chamada muda (tocando,
+        conversando, encerrada); ao redesenhar por outro motivo (silenciar,
+        ligar a camera, compartilhar a tela...), o foco fica onde a pessoa
+        estava, para o leitor de tela nao voltar ao inicio da janela."""
         c = self.chamada
+        foco_antes = self.FindFocus()
         a = ch.apresentar(c)
         self.SetTitle(a.titulo)
         self.situacao.SetLabel(a.situacao)
@@ -141,6 +197,17 @@ class DialogoChamada(wx.Dialog):
         self.b_ocultar.Show(bool(c.ativa))
         self.b_silenciar.SetLabel(ch.rotulo_silenciar(c.mudo))
         self.b_camera.SetLabel(ch.rotulo_camera(c))
+        self.b_tela.SetLabel(ch.rotulo_tela(c))
+        self.b_som_pc.SetLabel(ch.rotulo_som_pc(c))
+        em_chamada = c.estado in (ch.CONECTANDO, ch.EM_CHAMADA)
+        com_tela = c.suporta_tela and c.suporta_video and bool(self.telas) \
+            and em_chamada
+        self.rot_tela.Show(com_tela)
+        self.escolha_tela.Show(com_tela)
+        self.cx_tela_som.Show(com_tela and c.suporta_som_pc)
+        com_som = c.suporta_som_pc and bool(self.saidas_pc) and em_chamada
+        self.rot_saida_pc.Show(com_som)
+        self.escolha_saida_pc.Show(com_som)
         mostrar_camera = c.suporta_video and bool(self.cameras) and \
             c.estado in (ch.CONECTANDO, ch.EM_CHAMADA)
         self.rot_camera.Show(mostrar_camera)
@@ -152,6 +219,12 @@ class DialogoChamada(wx.Dialog):
             w.Show(mostrar_disp)
         self.Layout()
         self.Fit()
+        mudou_o_estado = c.estado != self._estado_mostrado
+        self._estado_mostrado = c.estado
+        nosso = any(foco_antes is x for x in self._controles_com_foco())
+        if not mudou_o_estado and nosso and foco_antes.IsShown()                 and foco_antes.IsEnabled():
+            foco_antes.SetFocus()
+            return a
         foco = self.botoes.get(a.foco)
         if foco is not None:
             foco.SetFocus()
@@ -168,6 +241,25 @@ class DialogoChamada(wx.Dialog):
 
     def _camera_escolhida(self, _e=None):
         self.acoes["trocar_camera"](self.camera_escolhida())
+
+    def tela_escolhida(self):
+        return self.escolha_tela.GetStringSelection() if self.telas else ""
+
+    def _tela_escolhida(self, _e=None):
+        if "trocar_tela" in self.acoes:
+            self.acoes["trocar_tela"](self.tela_escolhida())
+
+    def _tela_som_marcada(self, _e=None):
+        if "tela_com_som" in self.acoes:
+            self.acoes["tela_com_som"](self.cx_tela_som.GetValue())
+
+    def saida_pc_escolhida(self):
+        return self.escolha_saida_pc.GetStringSelection() \
+            if self.saidas_pc else ""
+
+    def _saida_pc_escolhida(self, _e=None):
+        if "trocar_som_pc" in self.acoes:
+            self.acoes["trocar_som_pc"](self.saida_pc_escolhida())
 
     def mostrar_quadro(self, largura, altura, rgb):
         """Um quadro do video do outro lado."""

@@ -249,6 +249,11 @@ class EstadoChamada:
     camera: bool = False
     video_remoto: bool = False
     suporta_video: bool = False
+    # compartilhar a tela e o som do computador, e se o provedor sabe
+    tela: bool = False
+    som_pc: bool = False
+    suporta_tela: bool = False
+    suporta_som_pc: bool = False
 
 
 @dataclass

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Fábio Scheffer Moraes
-"""Onde as midias baixadas ficam: so dentro da pasta de dados do TeleZapp
-(%APPDATA%\\TeleZapp\\midias\\<conta>\\<conversa>), nunca espalhadas pelo
-sistema."""
+"""Onde as midias baixadas ficam: dentro da pasta da conta
+(<pasta da conta>\\midias\\<conversa>; ver config.pasta_da_conta), nunca
+espalhadas pelo sistema."""
 import hashlib
 import mimetypes
 import os
@@ -25,12 +25,17 @@ def _limpo(texto, limite=60):
     return t[:limite].rstrip(" .")
 
 
-def pasta_midias():
-    return config.pasta("midias")
+def pasta_midias(conta_id):
+    """A pasta de midias da conta: na pasta dela (com separacao) ou na
+    pasta de midias do layout antigo (a personalizada, se escolhida;
+    senao, <dados>\\midias; a pasta da conta fica dentro)."""
+    if not config.contas_separadas():
+        return os.path.join(config.pasta_do_layout_antigo(), "midias")
+    return os.path.join(config.pasta_da_conta(conta_id), "midias")
 
 
 def pasta_da_conversa(conta_id, conversa_id):
-    base = os.path.join(pasta_midias(), _limpo(conta_id, 80))
+    base = pasta_midias(conta_id)
     # o id da conversa pode ser longo ou ter caracteres proibidos
     sub = hashlib.sha1(conversa_id.encode("utf-8")).hexdigest()[:12]
     pasta = os.path.join(base, sub)
@@ -41,7 +46,7 @@ def pasta_da_conversa(conta_id, conversa_id):
 def apagar_conversa(conta_id, conversa_id):
     """Apaga a pasta de midias da conversa (sem cria-la)."""
     sub = hashlib.sha1(conversa_id.encode("utf-8")).hexdigest()[:12]
-    shutil.rmtree(os.path.join(pasta_midias(), _limpo(conta_id, 80), sub),
+    shutil.rmtree(os.path.join(pasta_midias(conta_id), sub),
                   ignore_errors=True)
 
 
@@ -86,18 +91,29 @@ def guardar_enviada(msg, origem, mover=False):
 
 
 def tamanho_da_pasta(conta_id=None):
+    """Quantos bytes de midias a conta tem (ou todas as contas juntas)."""
     total = 0
-    raiz = pasta_midias() if conta_id is None else os.path.join(
-        pasta_midias(), _limpo(conta_id, 80))
-    for pasta, _, arquivos in os.walk(raiz):
-        for a in arquivos:
-            try:
-                total += os.path.getsize(os.path.join(pasta, a))
-            except OSError:
-                pass
+    if conta_id:
+        raizes = [pasta_midias(conta_id)]
+    elif not config.contas_separadas():
+        raizes = [pasta_midias("")]    # a pasta comum, uma vez so
+    else:
+        raizes = [os.path.join(p, "midias")
+                  for p in config.pastas_das_contas()]
+    for raiz in raizes:
+        for pasta, _, arquivos in os.walk(raiz):
+            for a in arquivos:
+                try:
+                    total += os.path.getsize(os.path.join(pasta, a))
+                except OSError:
+                    pass
     return total
 
 
 def apagar_conta(conta_id):
-    shutil.rmtree(os.path.join(pasta_midias(), _limpo(conta_id, 80)),
-                  ignore_errors=True)
+    """Apaga as midias da conta (sem tocar nas das outras)."""
+    if not config.contas_separadas():
+        shutil.rmtree(os.path.join(pasta_midias(conta_id),
+                                   _limpo(conta_id, 80)), ignore_errors=True)
+        return
+    shutil.rmtree(pasta_midias(conta_id), ignore_errors=True)

@@ -27,6 +27,7 @@ import traceback
 
 from telezapp.nucleo import chamadas as ch
 from telezapp.midia import eco as midia_eco
+from telezapp.midia import som_pc as midia_som_pc
 from telezapp.midia import video as midia_video
 from telezapp.midia import prioridade
 from telezapp.nucleo import eventos as ev
@@ -327,7 +328,11 @@ class _Ligacao:
         self.trocar_saida = threading.Event()
         self.threads = []
         self.camera_nome = None         # None = camera desligada; "" = a 1a
-        self.camera = None              # midia.video.Camera
+        self.camera = None              # midia.video.Camera (ou Tela)
+        self.tela_ativa = False         # o "camera" acima e uma Tela
+        self.som_pc = None              # midia.som_pc.CapturaDoSom
+        self.som_pc_saida = ""          # a saida de som que esta sendo captada
+        self.eco_pc = None              # tira a voz do outro do som captado
         self.codificador = None         # midia.video.Codificador
         self.recebendo_video = False
 
@@ -350,6 +355,7 @@ class ChamadasWhatsApp:
         self.destino_video = None       # f(cid, largura, altura, rgb), da janela
         self.oferta_velha = None        # f(call_id): ja nao esta tocando
         self.video = midia_video        # trocavel nos testes
+        self.som_pc = midia_som_pc      # trocavel nos testes
         self.ligacoes = {}              # id da conversa -> _Ligacao
         self._trava = threading.RLock()
         self._parar = threading.Event()
@@ -389,6 +395,26 @@ class ChamadasWhatsApp:
         except Exception:
             return []
 
+    @property
+    def suporta_som_pc(self):
+        try:
+            return self.som_pc.disponivel()
+        except Exception:
+            return False
+
+    def telas(self):
+        """[(nome, (x, y, largura, altura))] das telas que da para mostrar."""
+        try:
+            return self.video.listar_telas()
+        except Exception:
+            return []
+
+    def saidas_do_computador(self):
+        try:
+            return self.som_pc.saidas_do_computador()
+        except Exception:
+            return []
+
     def atualizar_dispositivos(self):
         try:
             self._nomes = self.audio.listar()
@@ -402,10 +428,13 @@ class ChamadasWhatsApp:
     # --------------------------------------------------------- estados
     def _publicar(self, c):
         c.suporta_video = self.suporta_video
+        c.suporta_tela = self.suporta_video
+        c.suporta_som_pc = self.suporta_som_pc
         self.barramento.publicar(ev.EstadoChamada(
             self.conta_id, str(c.conversa_id), c.estado, c.nome, c.entrante,
             c.motivo, c.erro, c.video, c.camera, c.video_remoto,
-            c.suporta_video))
+            c.suporta_video, c.tela, c.som_pc, c.suporta_tela,
+            c.suporta_som_pc))
 
     def _mudar(self, cid, estado, motivo="", erro=""):
         with self._trava:
@@ -416,6 +445,7 @@ class ChamadasWhatsApp:
             if estado == ch.ENCERRADA:
                 lig.parar.set()
                 self._parar_camera(lig)
+                self._parar_som_pc(lig)
                 self.ligacoes.pop(cid, None)
         self._publicar(c)
 
@@ -786,6 +816,7 @@ class ChamadasWhatsApp:
         return True
 
     def _parar_camera(self, lig):
+        lig.tela_ativa = False
         camera, lig.camera = lig.camera, None
         if camera is not None:
             camera.parar()
@@ -801,6 +832,10 @@ class ChamadasWhatsApp:
         if lig is None or lig.chamada.estado != ch.EM_CHAMADA or \
                 not self.suporta_video:
             return
+        if lig.tela_ativa:          # a camera toma o lugar da tela
+            self._parar_camera(lig)
+            self._marcar_video(cid, lig, camera=False)
+            self._marcar_compartilhamento(cid, lig, tela=False)
         lig.camera_nome = nome
         if not lig.chamada.video:
             if not self.ponte.video(lig.call_id, VIDEO_PEDIR):
@@ -825,6 +860,148 @@ class ChamadasWhatsApp:
         lig.camera_nome = None
         self.ponte.video(lig.call_id, VIDEO_DESLIGAR)
         self._marcar_video(cid, lig, camera=False)
+        self._marcar_compartilhamento(cid, lig, tela=False)
+
+    # ---------------------------------------------- compartilhar a tela
+    def compartilhar_tela(self, cid, nome="", com_som=True):
+        """Manda a tela (a `nome`; vazio = a principal) no lugar da camera.
+        Por padrao leva junto o som do computador."""
+        with self._trava:
+            lig = self.ligacoes.get(cid)
+        if lig is None or lig.chamada.estado != ch.EM_CHAMADA or \
+                not self.suporta_video:
+            return False
+        telas = self.telas()
+        escolhida = next((t for t in telas if t[0] == nome), None) \
+            or (telas[0] if telas else None)
+        if escolhida is None:
+            self.barramento.publicar(ev.Aviso(
+                self.conta_id, "Não encontrei nenhuma tela para "
+                "compartilhar.", False))
+            return False
+        if lig.camera is not None:      # a tela toma o lugar da camera
+            self._parar_camera(lig)
+            self.ponte.video(lig.call_id, VIDEO_DESLIGAR)
+        if not lig.chamada.video:
+            if not self.ponte.video(lig.call_id, VIDEO_PEDIR):
+                self.barramento.publicar(ev.Aviso(
+                    self.conta_id, "Não consegui passar a chamada para "
+                    "vídeo.", False))
+                return False
+            self._marcar_video(cid, lig, video=True)
+            self._receber_video_em_segundo_plano(cid, lig)
+        else:
+            self.ponte.video(lig.call_id, VIDEO_LIGAR)
+        lig.codificador = self.video.Codificador()
+
+        def ao_quadro(quadro):
+            for unidade in lig.codificador.codificar(quadro):
+                self.ponte.escrever_video(lig.call_id, unidade,
+                                          self.video.QUADRO_MS)
+        lig.camera = self.video.Tela(escolhida[1], ao_quadro, escolhida[0])
+        lig.tela_ativa = True
+        lig.camera.iniciar()
+        log.info("tela compartilhada (%s)", escolhida[0])
+        self._marcar_video(cid, lig, camera=True)
+        self._marcar_compartilhamento(cid, lig, tela=True)
+        if com_som and lig.som_pc is None:
+            self.compartilhar_som(cid)
+        return True
+
+    def parar_tela(self, cid):
+        with self._trava:
+            lig = self.ligacoes.get(cid)
+        if lig is None or not lig.tela_ativa:
+            return
+        self.desligar_camera(cid)
+
+    def trocar_tela(self, cid, nome):
+        """Troca a tela que esta sendo compartilhada."""
+        with self._trava:
+            lig = self.ligacoes.get(cid)
+        if lig is None or not lig.tela_ativa:
+            return
+        com_som = lig.som_pc is not None
+        self._parar_camera(lig)
+        self.compartilhar_tela(cid, nome, com_som=False)
+        if com_som and lig.som_pc is None:
+            self.compartilhar_som(cid)
+
+    # --------------------------------------- som do computador na chamada
+    def compartilhar_som(self, cid, saida=""):
+        """Manda, junto com o microfone, o som que toca em `saida` (vazio: a
+        saida padrao do Windows). O microfone segue valendo (e continua
+        podendo ser silenciado). A voz do outro lado e retirada do que sai:
+        se o computador toca a chamada na mesma saida que e captada, o
+        TeleZapp subtrai o que ele mesmo esta tocando."""
+        with self._trava:
+            lig = self.ligacoes.get(cid)
+        if lig is None or lig.chamada.estado != ch.EM_CHAMADA or \
+                not self.suporta_som_pc:
+            return False
+        if lig.som_pc is not None:
+            self._parar_som_pc(lig)
+        lig.som_pc_saida = saida
+        captura = self.som_pc.CapturaDoSom(saida)
+        lig.som_pc = captura
+        captura.iniciar()
+        if getattr(captura, "erro", ""):
+            self._parar_som_pc(lig)
+            self.barramento.publicar(ev.Aviso(
+                self.conta_id, "Não consegui capturar o som do "
+                "computador.", False))
+            return False
+        self._preparar_eco_do_som_pc(lig)
+        self._marcar_compartilhamento(cid, lig, som_pc=True)
+        return True
+
+    def _preparar_eco_do_som_pc(self, lig):
+        """Liga o tira-voz quando a saida captada e a mesma em que a chamada
+        toca (ela e o que volta para o outro lado)."""
+        lig.eco_pc = None
+        if getattr(lig.som_pc, "exato", False):
+            log.info("som do computador: captura por processo, sem o som "
+                     "do TeleZapp (a voz do outro lado não entra)")
+            return
+        capturada = lig.som_pc_saida or self.som_pc.saida_padrao()
+        tocando = lig.saida or self.som_pc.saida_padrao()
+        from telezapp.midia.dispositivos import parecem_o_mesmo
+        if capturada and tocando and not parecem_o_mesmo(capturada, tocando):
+            log.info("som do computador: a chamada toca em outra saida "
+                     "(%s); a voz do outro lado não entra", tocando)
+            return
+        lig.eco_pc = midia_eco.CancelaEco(eco=True, ruido=False)
+        log.info("som do computador: tirando a voz do outro lado do que "
+                 "sai (saida %s)", capturada or "padrão")
+
+    def parar_som(self, cid):
+        with self._trava:
+            lig = self.ligacoes.get(cid)
+        if lig is None or lig.som_pc is None:
+            return
+        self._parar_som_pc(lig)
+        self._marcar_compartilhamento(cid, lig, som_pc=False)
+
+    def _parar_som_pc(self, lig):
+        captura, lig.som_pc = lig.som_pc, None
+        lig.eco_pc = None
+        if captura is not None:
+            captura.parar()
+            log.info("som do computador parado (%d quadros captados)",
+                     getattr(captura, "quadros", 0))
+
+    def _marcar_compartilhamento(self, cid, lig, tela=None, som_pc=None):
+        with self._trava:
+            c = lig.chamada
+            antes = (c.tela, c.som_pc)
+            mudou = c.aplicar_compartilhamento(
+                c.tela if tela is None else tela,
+                c.som_pc if som_pc is None else som_pc)
+        if mudou:
+            log.info("compartilhamento: tela %s -> %s, som do computador "
+                     "%s -> %s", antes[0], c.tela, antes[1], c.som_pc)
+            self._publicar(c)
+        return mudou
 
     # ----------------------------------------------------------- audio
     def _iniciar_audio(self, cid, lig):
@@ -893,6 +1070,7 @@ class ChamadasWhatsApp:
                         dados = silencio
                     elif lig.eco is not None:
                         dados = self._sem_eco(lig, bytes(dados))
+                    dados = self._com_som_do_computador(lig, bytes(dados))
                     self._avisar_retorno(lig, bytes(dados))
                     if not self.ponte.escrever_quadro(lig.call_id,
                                                       bytes(dados)):
@@ -915,6 +1093,26 @@ class ChamadasWhatsApp:
             prioridade.soltar_thread(ident)
             log.info("microfone da chamada encerrado (%d quadros enviados)",
                      enviados)
+
+    def _com_som_do_computador(self, lig, dados):
+        """O quadro do microfone (ou o silencio, se silenciado) somado ao som
+        do computador, sem a voz do outro lado. Qualquer problema: o quadro
+        segue como estava, so com o microfone."""
+        captura = lig.som_pc
+        if captura is None:
+            return dados
+        try:
+            som = captura.ler()
+            eco = lig.eco_pc
+            if eco is not None:
+                limpo = eco.processar(som)
+                if len(limpo) == len(som):
+                    som = limpo
+            return self.som_pc.misturar(dados, som)
+        except Exception:
+            log.exception("erro no som do computador da chamada; desligado")
+            self._parar_som_pc(lig)
+            return dados
 
     def _avisar_retorno(self, lig, dados):
         """Diz ao tira-retorno o que estamos mandando (a referencia dele)."""
@@ -990,6 +1188,8 @@ class ChamadasWhatsApp:
                         diag.tocou(t2 - t1, t3 - t2)
                         if lig.eco is not None:
                             lig.eco.referencia(quadro)
+                        if lig.eco_pc is not None:
+                            lig.eco_pc.referencia(quadro)
                         diag.referencia += time.perf_counter() - t3
                     falhas = 0
                 except Exception:

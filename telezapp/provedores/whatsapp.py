@@ -5195,11 +5195,11 @@ class ProvedorWhatsApp(Provedor):
 
     def cancelar_agendadas(self, conversa_id, ids):
         self._apagar_copias(ids)
-        self.banco.tirar_agendadas(ids)
+        self.banco.tirar_agendadas(ids, self.conta.id)
         return True, ""
 
     def mudar_horario_agendada(self, conversa_id, id_, quando):
-        self.banco.mudar_agendada(id_, quando.timestamp())
+        self.banco.mudar_agendada(id_, quando.timestamp(), self.conta.id)
         return True, ""
 
     def vencidas_da_agenda(self, agora, tolerancia):
@@ -5211,20 +5211,21 @@ class ProvedorWhatsApp(Provedor):
             (prontas if agora - x["quando"] <= tolerancia
              else atrasadas).append(x)
         if atrasadas:
-            self.banco.marcar_agendadas_atrasadas([x["id"] for x in atrasadas])
+            self.banco.marcar_agendadas_atrasadas(
+                [x["id"] for x in atrasadas], self.conta.id)
         return prontas, atrasadas
 
     def enviar_agendada(self, id_):
         """Envia a agendada agora, pelo caminho de um texto comum, e a tira
         da agenda. False se ela ja nao existe."""
-        x = self.banco.agendada(id_)
+        x = self.banco.agendada(id_, self.conta.id)
         if x is None:
             return False
         try:
             mencoes = json.loads(x["mencoes"]) if x["mencoes"] else None
         except ValueError:
             mencoes = None
-        self.banco.tirar_agendadas([id_])
+        self.banco.tirar_agendadas([id_], self.conta.id)
         anexo = self._anexo_da_agendada(x)
         if anexo is not None:
             if not os.path.isfile(anexo.caminho):
@@ -5247,7 +5248,7 @@ class ProvedorWhatsApp(Provedor):
 
     def descartar_agendadas(self, ids):
         self._apagar_copias(ids)
-        self.banco.tirar_agendadas(ids)
+        self.banco.tirar_agendadas(ids, self.conta.id)
 
     def enviar_contatos(self, conversa_id, contatos):
         contatos = list(contatos)
@@ -6530,6 +6531,33 @@ class ProvedorWhatsApp(Provedor):
 
     def desligar_camera(self, conversa_id):
         self._comando_de_chamada("desligar_camera", conversa_id)
+
+    @property
+    def suporta_som_pc(self):
+        return self._voz is not None and self._voz.suporta_som_pc
+
+    def telas(self):
+        return self._voz.telas() if self._voz is not None else []
+
+    def saidas_do_computador(self):
+        return (self._voz.saidas_do_computador()
+                if self._voz is not None else [])
+
+    def compartilhar_tela(self, conversa_id, nome="", com_som=True):
+        self._comando_de_chamada("compartilhar_tela", conversa_id, nome,
+                                 com_som)
+
+    def parar_tela(self, conversa_id):
+        self._comando_de_chamada("parar_tela", conversa_id)
+
+    def trocar_tela(self, conversa_id, nome):
+        self._comando_de_chamada("trocar_tela", conversa_id, nome)
+
+    def compartilhar_som(self, conversa_id, saida=""):
+        self._comando_de_chamada("compartilhar_som", conversa_id, saida)
+
+    def parar_som(self, conversa_id):
+        self._comando_de_chamada("parar_som", conversa_id)
 
     def definir_destino_video(self, destino):
         self._destino_video = destino

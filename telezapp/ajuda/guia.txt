@@ -130,6 +130,17 @@ O download e o envio só abrem a janela se passarem de um segundo. O download po
 
 O TeleZapp não fala a porcentagem. Se a barra fala, bipa, faz os dois ou fica quieta é a configuração de barras de progresso do leitor de tela. A janela só diz a etapa, e a etapa é falada quando muda.
 
+# Filtros personalizados
+Em Configurações, Interface, o botão Filtros abre uma janela para criar os seus próprios filtros da lista de conversas. Cada filtro junta, de uma vez, o serviço ou a conta e o tipo de conversa.
+
+Marque "Ativar filtros personalizados". Aparece então a lista dos filtros, com os botões Novo filtro, Renomear filtro e Excluir filtro, e o botão Fechar.
+
+Em Novo filtro há duas listas de caixas. A primeira traz as contas e os serviços: Todas as contas, Telegram, WhatsApp e, onde um serviço tem mais de uma conta, cada conta, como na tela principal (Alt+4). A segunda traz os tipos de conversa, os mesmos de Alt+5, menos as trancadas. Marque o que o filtro mostra: dentro de cada lista basta uma das opções marcadas, e entre as duas listas as duas valem. Por exemplo, WhatsApp com Não lidas, Grupos e Arquivadas mostra, só no WhatsApp, as conversas não lidas, os grupos e as arquivadas.
+
+O TeleZapp sugere um nome com o que você marcou, e você pode escrever outro. Salvar filtro guarda.
+
+Com os filtros ativados e pelo menos um criado, as caixas de serviço, conta e tipo de conversa saem da tela principal. Com mais de um filtro, aparece a caixa Filtro (Alt+4) para trocar entre eles. As conversas trancadas não entram nos filtros: continuam aparecendo só com o código secreto.
+
 # Selecionar várias conversas ou mensagens
 Ctrl+Espaço, na lista de conversas ou na de mensagens, liga o modo de seleção e já marca o item em foco.
 
@@ -377,7 +388,7 @@ Buscar mostra até 500 resultados na lista de baixo, das mais novas para as mais
 
 Enter, ou Ver na conversa, fecha a janela e abre a conversa na mensagem. Limpar critérios desmarca tudo. A janela lembra a última busca ao abrir de novo.
 
-Conversas trancadas só entram na busca depois de você digitar o código secreto na busca de conversas.
+Conversas trancadas só entram na busca depois de você digitar o código secreto na busca de conversas. Para escondê-las de novo, aperte Esc na lista de conversas ou no campo de busca; com os filtros personalizados, trocar de filtro também as esconde. Minimizar a janela as esconde sempre. Em Configurações, Privacidade, Conversas trancadas, duas opções as escondem sozinhas: ao sair da janela (quando você troca para outro programa) e depois de alguns minutos sem apertar nenhuma tecla no TeleZapp (5 por padrão; 0 desliga).
 
 # Detalhes da conversa
 Ctrl+I abre os detalhes da conversa selecionada: pessoa, grupo ou canal. Esc volta de cada lista para a janela de detalhes.
@@ -510,11 +521,11 @@ Na janela do som do computador, a caixa "Gravar também o microfone" já vem mar
 Se a gravação sair quase em silêncio, o TeleZapp avisa antes de você enviar. Ela vai como mensagem de voz, em Ogg/Opus.
 
 # Chamadas de voz
-As chamadas são feitas em conversas com uma pessoa, não em grupos nem canais. Use fones de ouvido, para a voz da outra pessoa não voltar pelo microfone.
+As chamadas são feitas em conversas com uma pessoa, não em grupos nem canais; nesses, o botão Iniciar chamada fica escondido. Use fones de ouvido, para a voz da outra pessoa não voltar pelo microfone.
 
 Ligar: abra ou selecione uma conversa e use Chamadas, Ligar para esta conversa (Ctrl+Shift+L). O TeleZapp fala "Chamando" e o nome, toca um som grave de espera e abre a janela da chamada, com o foco em Desligar. Quando a pessoa atende, ouve-se um som de conectado e a fala diz "Conectado com" o nome. Se ela não atender, recusar ou estiver ocupada, o TeleZapp diz o que aconteceu e a janela fica com o botão Fechar.
 
-Receber: o TeleZapp fala "Chamada de" e o nome, toca um som repetido e abre uma janela com o foco no botão Atender. Enter atende e Esc recusa; Tab vai para Recusar. Se você estiver em outra chamada, a nova é recusada sozinha.
+Receber: o TeleZapp fala "Chamada de" e o nome, toca um som repetido e abre uma janela com o foco no botão Atender. Enter atende e Esc recusa; Tab vai para Recusar. Se você estiver em outra chamada, a nova é recusada sozinha. Ao atender, o som leva alguns segundos para chegar: o TeleZapp fala "Atendida. Estabelecendo a comunicação" e, enquanto não conecta, lembra com "Ainda estabelecendo a comunicação" duas vezes; ao conectar, fala "Conectado com" e o nome.
 
 Durante a chamada, a janela tem os botões Silenciar o microfone, que vira Ativar o microfone, Tempo de chamada, que fala há quanto tempo vocês falam, e Desligar, além das listas Microfone e Saída de som, que valem na hora.
 
@@ -540,6 +551,13 @@ Durante a chamada, a janela tem o botão da câmera (Ligar a câmera, Desligar a
 O leitor de tela diz quando a chamada passa para vídeo e quando a outra pessoa liga ou desliga a câmera. Se ela pedir para passar a chamada para vídeo, o TeleZapp aceita, com a sua câmera como estava.
 
 O vídeo usa até 640 por 360 pontos e de 10 a 15 quadros por segundo. No Telegram, se o outro lado ficar alguns segundos sem mandar imagem, o TeleZapp entende que ele desligou a câmera. Chamadas de vídeo em grupo ainda não existem.
+
+# Compartilhar a tela e o som do computador na chamada
+No WhatsApp e no Telegram, durante uma chamada, a janela da chamada ganha os botões "Compartilhar o som do computador" e "Compartilhar a tela" (o segundo, nas contas que fazem vídeo). Os mesmos comandos estão no menu Chamadas e podem ter tecla própria em Configurações, Atalhos.
+
+Compartilhar o som do computador manda para a outra pessoa o que toca no computador, junto com o seu microfone. O microfone continua valendo: o botão Silenciar o microfone o cala sem parar o som do computador. No Windows 10 (versão 2004 em diante) e no Windows 11, o TeleZapp capta o som de todos os programas menos o dele mesmo. Assim a voz da outra pessoa e os avisos do próprio TeleZapp nunca vão para a chamada, e ela não ouve a própria voz de volta. Em um Windows mais antigo, ele capta a saída escolhida na lista "Saída de som do computador a compartilhar" e tira do que sai a voz da outra pessoa por processamento de áudio, que é menos exato; usar uma saída diferente da que toca a chamada evita o problema. Atenção: todos os outros programas entram, inclusive a fala do leitor de tela.
+
+Compartilhar a tela manda a tela escolhida na lista "Tela a compartilhar" no lugar da câmera. Por padrão o som do computador vai junto; a caixa "Ao compartilhar a tela, compartilhar também o som do computador" muda isso. A outra pessoa vê a tela como um vídeo comum, de até 640 por 360 pontos, então textos pequenos podem ficar difíceis de ler. Compartilhar a tela desliga a câmera, e ligar a câmera para a tela.
 
 # Enquetes
 Uma enquete aparece na lista de mensagens assim: "enquete: pergunta, 3 opções, 5 votos, seu voto: Sexta (Enter para ver e votar)".
@@ -757,17 +775,22 @@ Para encerrar de verdade, use Sair: Ctrl+Q, o botão Sair ou o menu do ícone. "
 "Abrir o TeleZapp ao entrar no Windows" abre o programa sozinho quando você entra na sua conta. Com o segundo plano ligado, ele abre minimizado, sem tirar o foco do que você faz.
 
 # Backup e restauração
-Ferramentas, Fazer backup abre uma janela para marcar o que incluir:
+Ferramentas, Fazer backup abre uma janela. O primeiro campo é o tipo de backup: Backup completo, que leva tudo, ou Backup seletivo, em que você marca o que incluir. No completo, o Tab vai direto para os campos de senha. No seletivo aparecem as partes:
 As configurações.
 Os atalhos personalizados.
 As configurações de sons: o pacote, os sons ligados e desligados e os sons que você importou.
+Os filtros personalizados da lista de conversas.
 As contas e sessões, que dão acesso às suas contas.
 As conversas, mensagens e contatos.
 As mídias baixadas.
 
+Com mais de uma conta, a janela também lista as contas, todas marcadas: desmarque as que ficam de fora. Isso vale para as sessões, as conversas e as mídias; assim dá para fazer o backup de só uma conta.
+
 Há campos de senha, opcionais, para proteger o arquivo. Depois, você escolhe onde salvar o zip. O TeleZapp avisa quando termina.
 
 Ferramentas, Restaurar backup pede o arquivo e a senha, se tiver, e mostra o que o backup contém, para você marcar o que volta.
+
+Se o backup tem mais de uma conta, a janela de restauração também lista as contas, para você escolher quais voltam. Num backup de algumas contas, ou escolhendo só algumas, só os dados dessas contas são trocados; as outras ficam como estão. As conversas do backup entram junto das que já existem, sem apagar as que só existem hoje.
 
 As configurações valem na hora. As contas, as conversas e as mídias trocam o que existe hoje na próxima vez que o TeleZapp abrir, e ele oferece reiniciar agora. O que havia antes fica guardado na pasta antes-da-restauracao, dentro da pasta de dados.
 

@@ -199,6 +199,32 @@ class Provedor(ABC):
     def desligar_camera(self, conversa_id):
         raise NotImplementedError
 
+    # Compartilhar a tela e o som do computador na chamada.
+    suporta_som_pc = False
+
+    def telas(self):
+        """[(nome, (x, y, largura, altura))] das telas que da para mostrar."""
+        return []
+
+    def saidas_do_computador(self):
+        """Nomes das saidas de som cujo som da para mandar na chamada."""
+        return []
+
+    def compartilhar_tela(self, conversa_id, nome="", com_som=True):
+        raise NotImplementedError
+
+    def parar_tela(self, conversa_id):
+        raise NotImplementedError
+
+    def trocar_tela(self, conversa_id, nome):
+        raise NotImplementedError
+
+    def compartilhar_som(self, conversa_id, saida=""):
+        raise NotImplementedError
+
+    def parar_som(self, conversa_id):
+        raise NotImplementedError
+
     def definir_destino_video(self, destino):
         """`destino(conversa_id, largura, altura, rgb)` recebe os quadros do
         video do outro lado."""

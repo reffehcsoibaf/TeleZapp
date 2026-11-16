@@ -689,3 +689,246 @@ def test_diagnostico_do_alto_falante_sem_pilhas_quando_toca_normal(caplog):
     with caplog.at_level(logging.INFO):
         d.periodo()
     assert not any("threads:" in r.getMessage() for r in caplog.records)
+
+
+# ------------------------------------- tela e som do computador na chamada
+class SomFalso:
+    """No lugar de midia.som_pc: sem soundcard."""
+    SILENCIO = bytes(cw.BYTES_POR_QUADRO)
+
+    def __init__(self, quadro=b"\x02\x00" * cw.AMOSTRAS):
+        self.quadro = quadro
+        self.capturas = []
+        self.padrao = "Alto-falantes"
+
+    def disponivel(self):
+        return True
+
+    def saidas_do_computador(self):
+        return ["Alto-falantes", "Fones"]
+
+    def saida_padrao(self):
+        return self.padrao
+
+    def misturar(self, a, b):
+        from telezapp.midia import som_pc
+        return som_pc.misturar(a, b)
+
+    def CapturaDoSom(self, saida=""):
+        som = self
+
+        class C:
+            def __init__(self):
+                self.parada = False
+                som.capturas.append((saida, self))
+
+            def iniciar(self):
+                pass
+
+            def ler(self):
+                return som.quadro
+
+            def parar(self):
+                self.parada = True
+        return C()
+
+
+class VideoComTela(VideoFalso):
+    def __init__(self):
+        super().__init__()
+        self.telas_abertas = []
+
+    def listar_telas(self):
+        return [("Tela 1 (principal), 1366 por 768", (0, 0, 1366, 768)),
+                ("Tela 2, 1920 por 1080", (1366, 0, 1920, 1080))]
+
+    def Tela(self, retangulo, ao_quadro, nome="Tela"):
+        video = self
+
+        class T:
+            def iniciar(self):
+                video.telas_abertas.append((nome, retangulo))
+                ao_quadro(b"quadro")
+
+            def parar(self):
+                video.tela_parada = True
+        return T()
+
+
+@pytest.fixture
+def mundo_tela(mundo):
+    v, ponte, bus, audio = mundo
+    v.video = VideoComTela()
+    v.som_pc = SomFalso()
+    return v, ponte, bus
+
+
+def em_chamada(v, ponte, bus):
+    v.ligar(CID)
+    assert esperar(lambda: ponte.ligadas)
+    ponte.fila.put({"ev": "ready", "call": "C1"})
+    assert esperar(lambda: (ch.EM_CHAMADA, "") in bus.estados())
+
+
+def test_compartilhar_a_tela_leva_o_som_do_computador_por_padrao(mundo_tela):
+    v, ponte, bus = mundo_tela
+    em_chamada(v, ponte, bus)
+    assert v.compartilhar_tela(CID, "Tela 2, 1920 por 1080") is True
+    assert ("C1", cw.VIDEO_PEDIR) in ponte.acoes_de_video
+    assert v.video.telas_abertas == [
+        ("Tela 2, 1920 por 1080", (1366, 0, 1920, 1080))]
+    assert ponte.unidades_enviadas
+    e = ultimo_estado(bus)
+    assert e.tela and e.camera and e.som_pc and e.video
+    assert e.suporta_tela and e.suporta_som_pc
+    v.parar_tela(CID)
+    assert ("C1", cw.VIDEO_DESLIGAR) in ponte.acoes_de_video
+    e = ultimo_estado(bus)
+    assert not e.tela and not e.camera
+    assert e.som_pc                          # o som continua ate ser parado
+    v.parar_som(CID)
+    assert not ultimo_estado(bus).som_pc
+
+
+def test_compartilhar_a_tela_sem_som_e_a_tela_principal_por_padrao(
+        mundo_tela):
+    v, ponte, bus = mundo_tela
+    em_chamada(v, ponte, bus)
+    assert v.compartilhar_tela(CID, "", com_som=False)
+    assert v.video.telas_abertas[0][0].startswith("Tela 1")
+    e = ultimo_estado(bus)
+    assert e.tela and not e.som_pc and v.som_pc.capturas == []
+
+
+def test_camera_toma_o_lugar_da_tela_e_a_tela_o_da_camera(mundo_tela):
+    v, ponte, bus = mundo_tela
+    em_chamada(v, ponte, bus)
+    v.ligar_camera(CID, "Câmera A")
+    assert ultimo_estado(bus).camera and not ultimo_estado(bus).tela
+    v.compartilhar_tela(CID, "", com_som=False)
+    assert ultimo_estado(bus).tela
+    assert getattr(v.video, "camera_parada", False)       # a camera saiu
+    v.ligar_camera(CID, "Câmera A")
+    e = ultimo_estado(bus)
+    assert e.camera and not e.tela
+    assert getattr(v.video, "tela_parada", False)
+
+
+def test_som_do_computador_soma_ao_microfone_e_respeita_o_silenciar(
+        mundo_tela):
+    v, ponte, bus = mundo_tela
+    enviados = []
+    ponte.escrever_quadro = lambda c, d: enviados.append(d) or True
+    em_chamada(v, ponte, bus)
+    assert esperar(lambda: enviados)
+    assert v.compartilhar_som(CID, "Fones") is True   # outra saida: sem eco
+    mic = b"\x01" * cw.BYTES_POR_QUADRO     # o que o Fluxo falso entrega
+    esperado = None
+
+    def com_som():
+        nonlocal esperado
+        for d in enviados[-5:]:
+            if d != mic:
+                esperado = d
+                return True
+        return False
+    assert esperar(com_som)
+    import numpy as np
+    amostras = np.frombuffer(esperado, dtype="<i2")
+    assert (amostras == 0x0101 + 2).all()    # mic (0x0101) + som (2)
+    v.silenciar(CID, True)
+    enviados.clear()
+    assert esperar(lambda: len(enviados) > 3)
+    quadro = np.frombuffer(enviados[-1], dtype="<i2")
+    assert (quadro == 2).all()               # microfone mudo, som segue
+    v.parar_som(CID)
+    assert v.som_pc.capturas[0][1].parada
+    enviados.clear()
+    assert esperar(lambda: len(enviados) > 3)
+    assert bytes(enviados[-1]) == bytes(cw.BYTES_POR_QUADRO)   # so silencio
+
+
+def test_voz_do_outro_lado_sai_do_som_captado_quando_a_saida_e_a_mesma(
+        mundo_tela, monkeypatch):
+    v, ponte, bus = mundo_tela
+    visto = {"ref": [], "proc": 0}
+
+    class EcoFalso:
+        def __init__(self, eco, ruido):
+            visto["args"] = (eco, ruido)
+
+        def referencia(self, pcm):
+            visto["ref"].append(pcm)
+
+        def processar(self, pcm):
+            visto["proc"] += 1
+            return bytes(len(pcm))           # tira tudo
+
+        def diagnostico(self):
+            return {}
+
+        def reiniciar(self):
+            pass
+    monkeypatch.setattr(cw.midia_eco, "CancelaEco", EcoFalso)
+    em_chamada(v, ponte, bus)
+    v.compartilhar_som(CID)                  # capta a saida padrao
+    assert visto["args"] == (True, False)    # eco sim, ruido nao (musica)
+    ponte.recebidos.put(QUADRO)
+    assert esperar(lambda: visto["ref"])     # o que toca vira referencia
+    assert esperar(lambda: visto["proc"] > 0)
+
+
+def test_saida_diferente_da_chamada_nao_precisa_tirar_a_voz(mundo_tela):
+    v, ponte, bus = mundo_tela
+    em_chamada(v, ponte, bus)
+    v.trocar_dispositivos(CID, "", "Fones")
+    v.compartilhar_som(CID, "Alto-falantes")
+    assert v.ligacoes[CID].eco_pc is None    # a voz do outro nem passa por la
+    v.compartilhar_som(CID, "Fones")         # agora e a mesma saida
+    assert v.ligacoes[CID].eco_pc is not None
+
+
+def test_som_e_tela_param_quando_a_chamada_acaba(mundo_tela):
+    v, ponte, bus = mundo_tela
+    em_chamada(v, ponte, bus)
+    v.compartilhar_tela(CID)
+    captura = v.som_pc.capturas[0][1]
+    ponte.fila.put({"ev": "end", "call": "C1", "reason": ""})
+    assert esperar(lambda: captura.parada)
+    assert getattr(v.video, "tela_parada", False)
+
+
+def test_captura_exata_dispensa_o_tira_voz(mundo_tela, monkeypatch):
+    v, ponte, bus = mundo_tela
+    chamadas_eco = []
+
+    class EcoFalso:
+        def __init__(self, *a, **k):
+            chamadas_eco.append(a)
+    monkeypatch.setattr(cw.midia_eco, "CancelaEco", EcoFalso)
+    original = v.som_pc.CapturaDoSom
+
+    def exata(saida=""):
+        c = original(saida)
+        c.exato = True
+        return c
+    v.som_pc.CapturaDoSom = exata
+    em_chamada(v, ponte, bus)
+    assert v.compartilhar_som(CID) is True
+    assert v.ligacoes[CID].eco_pc is None and chamadas_eco == []
+
+
+def test_som_que_nao_abre_avisa_e_nao_marca_como_compartilhado(mundo_tela):
+    v, ponte, bus = mundo_tela
+    original = v.som_pc.CapturaDoSom
+
+    def quebrada(saida=""):
+        c = original(saida)
+        c.erro = "OSError: sem saida"
+        return c
+    v.som_pc.CapturaDoSom = quebrada
+    em_chamada(v, ponte, bus)
+    assert v.compartilhar_som(CID) is False
+    assert not ultimo_estado(bus).som_pc
+    assert any("capturar o som" in getattr(e, "texto", "")
+               for e in bus.eventos)

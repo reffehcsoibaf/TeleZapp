@@ -165,6 +165,136 @@ def limpar_temporarios():
         shutil.rmtree(caminho, ignore_errors=True)
 
 
+# ------------------------------------------- pastas de dados por conta
+_cfg_de_contas = None
+
+
+def definir_cfg(cfg):
+    """Lembra a configuracao ativa: as funcoes abaixo consultam o registro
+    de cada conta para achar a pasta de dados dela."""
+    global _cfg_de_contas
+    _cfg_de_contas = cfg
+
+
+def contas_separadas():
+    """True quando cada conta guarda os dados em uma pasta propria (o
+    banco de conversas, as sessoes e as midias). False (opcao
+    "contas_em_pastas" desmarcada): todas dividem o layout antigo, um
+    banco so, no lugar de sempre."""
+    cfg = _cfg_de_contas
+    if cfg is None:
+        return False
+    return bool(cfg.get("contas_em_pastas"))
+
+
+def ids_das_contas():
+    """Os ids das contas conhecidas (na configuracao ativa), ou None se
+    nao ha configuracao carregada."""
+    cfg = _cfg_de_contas
+    if cfg is None:
+        return None
+    return [c["id"] for c in cfg.contas() if c.get("id")]
+
+
+def _mesmo_caminho(a, b):
+    """Os dois caminhos apontam para a mesma pasta?"""
+    return os.path.normcase(os.path.abspath(a)) == \
+        os.path.normcase(os.path.abspath(b))
+
+
+def pasta_escolhida_do_layout_antigo(cfg=None):
+    """Onde ficam o banco unico, as sessoes e as midias do layout antigo
+    (sem separacao por conta): sempre a pasta de dados. A pasta que a
+    pessoa escolhe so vale com a separacao por conta marcada."""
+    return pasta_dados()
+
+
+def pasta_do_layout_antigo(cfg=None):
+    """Onde os dados do layout antigo estao: a pasta de dados. As opcoes,
+    os logs, os sons e os backups tambem ficam sempre nela."""
+    return pasta_dados()
+
+
+def pasta_escolhida_das_contas(cfg=None):
+    """A pasta que a pessoa escolheu para as pastas das contas ("" se nao
+    escolheu ou se a separacao por conta esta desmarcada)."""
+    if cfg is None:
+        cfg = _cfg_de_contas
+    if cfg is None or not cfg.get("contas_em_pastas"):
+        return ""
+    return (cfg.get("contas_pasta") or "").strip()
+
+
+def pasta_das_contas():
+    """A pasta que abriga a pasta de cada conta: a que a pessoa escolheu
+    (opcao "contas_pasta", em Gerenciar contas) ou a padrao,
+    a pasta contas dentro da de dados. Nao cria nada."""
+    escolhida = pasta_escolhida_das_contas()
+    if escolhida:
+        return escolhida
+    return os.path.join(pasta_dados(), "contas")
+
+
+def pasta_da_conta(conta_id):
+    """A pasta de dados de uma conta: <pasta das contas>\\<conta_id>.
+    Nao cria nada; para criar, ver preparar_pasta_da_conta. Sem separacao
+    (contas_em_pastas desmarcada) a conta nao tem pasta propria: as
+    sessoes ficam em pasta_sessoes e as midias na pasta comum."""
+    return os.path.join(pasta_das_contas(), conta_id)
+
+
+def pasta_sessoes(conta_id):
+    """Onde ficam os arquivos de sessao da conta: na pasta dela (com
+    separacao) ou na pasta de sessoes do layout antigo (a personalizada,
+    se escolhida; senao, <dados>\\sessoes)."""
+    if not contas_separadas():
+        return os.path.join(pasta_do_layout_antigo(), "sessoes")
+    return os.path.join(pasta_da_conta(conta_id), "sessoes")
+
+
+def pastas_das_contas():
+    """As pastas de dados de cada conta conhecida, sem repetir (para somar
+    tamanhos, por exemplo)."""
+    vistas, saida = set(), []
+    cfg = _cfg_de_contas
+    if cfg is not None:
+        for dados in cfg.contas():
+            pasta = pasta_da_conta(dados["id"])
+            if pasta not in vistas:
+                vistas.add(pasta)
+                saida.append(pasta)
+    return saida
+
+
+def preparar_pasta_da_conta(conta_id):
+    """Cria as pastas que a conta precisa: a dela e a de sessoes (com
+    separacao), ou so a pasta de sessoes comum. False se nao conseguir
+    (ex.: a unidade da pasta escolhida esta desligada): a conta fica sem
+    ligar ate a pasta voltar."""
+    try:
+        os.makedirs(pasta_sessoes(conta_id), exist_ok=True)
+        return True
+    except OSError as erro:
+        log.warning("não consegui preparar a pasta da conta %s: %r",
+                    conta_id, erro)
+        return False
+
+
+def limpar_pasta_da_conta(conta_id):
+    """Depois de remover a conta: apaga a pasta dela, se tiver ficado
+    vazia (a escolhida pela pessoa tambem — mas so se nao tiver mais nada
+    dentro)."""
+    pasta = pasta_da_conta(conta_id)
+    try:
+        os.rmdir(os.path.join(pasta, "sessoes"))
+    except OSError:
+        pass
+    try:
+        os.rmdir(pasta)
+    except OSError:
+        pass
+
+
 # ------------------------------------------------- opcoes de configuracao
 @dataclass(frozen=True)
 class Opcao:
@@ -291,6 +421,21 @@ OPCOES = (
           "trancadas. Sem código definido elas ficam escondidas. Desmarcada, "
           "o tipo Trancadas no celular aparece sempre.",
           grupo="Conversas trancadas"),
+    Opcao("trancadas_esconder_ao_sair",
+          "Esconder as conversas trancadas quando eu sair da janela",
+          "Privacidade", True,
+          "Depois de digitar o código, as trancadas ficam à mostra. Marcada, "
+          "elas voltam a ficar escondidas assim que você troca para outro "
+          "programa (ou o TeleZapp deixa de estar na frente). Minimizar a "
+          "janela e apertar Esc na lista de conversas também as escondem.",
+          grupo="Conversas trancadas"),
+    Opcao("trancadas_esconder_minutos",
+          "Esconder as conversas trancadas depois de quantos minutos sem "
+          "usar o teclado (0 para nunca)", "Privacidade", 5,
+          "Com as trancadas à mostra, se você não apertar nenhuma tecla do "
+          "TeleZapp por este tempo, elas voltam a ficar escondidas e é "
+          "preciso digitar o código de novo. 0 desliga.",
+          numero=(0, 1440), grupo="Conversas trancadas"),
     Opcao("temporarias_apagar_aqui",
           "Apagar daqui as mensagens temporárias quando o prazo acabar",
           "Privacidade", True,
@@ -490,6 +635,26 @@ OPCOES = (
           "como ao ligar o computador. Se o TeleZapp demora a responder "
           "quando é aberto depois de outros aplicativos, deixe marcada. "
           "Vale na próxima abertura.", reabrir=True),
+    # As duas opcoes abaixo aparecem em Gerenciar contas (nao em
+    # Configuracoes): ver Janela._gerenciar_contas
+    Opcao("contas_em_pastas",
+          "Guardar os dados de cada conta em uma pasta separada",
+          "Sistema", False,
+          "Cada conta tem uma pasta própria, com o banco de conversas, as "
+          "sessões e as mídias dentro dela. Desmarcada, todas as contas "
+          "dividem os mesmos dados na pasta de dados do TeleZapp, como nas "
+          "versões antigas: um banco só. Ao marcar, na próxima abertura o "
+          "TeleZapp separa os dados de cada conta; ao desmarcar, ele os "
+          "junta de novo. Vale na próxima abertura.",
+          reabrir=True),
+    Opcao("contas_pasta", "Pasta dos dados das contas", "Sistema", "",
+          "A pasta em que ficam as pastas das contas, uma subpasta para "
+          "cada conta. Vazia, usa a pasta padrão do TeleZapp. Só vale com "
+          "a separação por conta marcada. Na próxima abertura, o que "
+          "estiver na pasta padrão vai para a escolhida (no mesmo disco "
+          "é instantâneo; em outro disco é preciso ter espaço livre para "
+          "tudo).",
+          texto=True, pasta=True, reabrir=True),
     Opcao("barra_abre_comandos",
           "Barra na caixa de digitar abre os comandos do robô",
           "Mensagens", True,
@@ -1182,11 +1347,18 @@ def buscar_opcoes(texto):
     return achadas
 
 
+# Opcoes que ficam na janela Gerenciar contas, nao em Configuracoes
+OPCOES_DE_GERENCIAR_CONTAS = ("contas_em_pastas", "contas_pasta")
+
+
 PADROES = {o.chave: o.padrao for o in OPCOES}
 PADROES.update({
     "estilo": 1,             # antigo "Como cada mensagem e lida"; so migra
     "atalhos": {},           # funcao -> combinacao escolhida ("" = sem atalho)
     "participantes_silenciados": {},  # ver nucleo/silenciados.py
+    "filtros_personalizados": {"ativo": False, "lista": []},  # ver
+    #                                nucleo/filtros_personalizados.py
+    "filtro_personalizado": "",       # o filtro escolhido na tela principal
     "sons_de_conversa": {},  # "conta|conversa" -> arquivo em sons/conversas
     "ordem_das_fixadas": [],  # "conta|conversa" na ordem em que as fixadas ficam
     "ia_ordem": {},          # tarefa -> provedores ligados, na ordem de tentativa
@@ -1211,6 +1383,9 @@ PADROES.update({
     "chamada_microfone": "",     # nome do microfone usado nas chamadas
     "chamada_saida": "",         # nome da saida de som das chamadas
     "chamada_camera": "",        # nome da camera das chamadas de video
+    "chamada_tela": "",          # nome da tela compartilhada nas chamadas
+    "chamada_saida_pc": "",      # saida de som do computador compartilhada
+    "chamada_tela_com_som": True,  # compartilhar a tela leva o som junto
     "notificacao_saida": "",     # nome da saida dos sons de aviso do app
     "telegram_api_id": 0,
     "telegram_api_hash": "",

@@ -36,7 +36,7 @@ def test_caminhos_ficam_dentro_da_pasta_do_app(dados):
     x = msg(nome='re:la*t?"ório.pdf', conversa="a/b\\c@g.us")
     base_ = armazem.caminho_base(x)
     assert base_.startswith(str(dados))
-    assert os.path.dirname(base_).startswith(armazem.pasta_midias())
+    assert os.path.dirname(base_).startswith(armazem.pasta_midias("c1"))
     nome = os.path.basename(base_)
     assert not set('\\/:*?"<>|') & set(nome)
     assert armazem.caminho_base(x) == base_            # estavel
@@ -54,12 +54,13 @@ def test_extensoes():
     assert armazem.com_extensao("x/a", ".pdf") == "x/a.pdf"
 
 
-def test_apagar_conta_remove_a_pasta(dados):
+def test_apagar_conta_remove_a_pasta(dados, monkeypatch):
+    monkeypatch.setattr(config, "contas_separadas", lambda: True)
     pasta = armazem.pasta_da_conversa("c1", "x")
     open(os.path.join(pasta, "a.jpg"), "wb").write(b"123")
     assert armazem.tamanho_da_pasta("c1") == 3
     armazem.apagar_conta("c1")
-    assert not os.path.exists(os.path.join(armazem.pasta_midias(), "c1"))
+    assert not os.path.exists(armazem.pasta_midias("c1"))
 
 
 # -------------------------------------------------------------- gerente

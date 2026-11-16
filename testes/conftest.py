@@ -37,3 +37,11 @@ def _lista_sem_espera(monkeypatch):
     jm = sys.modules.get("telezapp.interface.janela")
     if jm is not None:
         monkeypatch.setattr(jm.Janela, "INTERVALO_DA_LISTA", 0)
+
+
+@pytest.fixture(autouse=True)
+def _dados_fora_do_computador(tmp_path, monkeypatch):
+    """Nenhum teste toca nos dados reais do TeleZapp: a pasta de dados
+    fica em um diretorio temporario. Quem quiser uma pasta propria seta
+    TELEZAPP_DADOS de novo (monkeypatch sobrepoe na ordem certa)."""
+    monkeypatch.setenv("TELEZAPP_DADOS", str(tmp_path / "dados"))

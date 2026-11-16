@@ -24,6 +24,11 @@ log = logging.getLogger("telezapp.detalhes")
 
 
 # ------------------------------------------------------------ janelas
+def _sem_atalho(rotulo):
+    """O rotulo sem o & da tecla de acesso."""
+    return (rotulo or "").replace("&", "")
+
+
 class DialogoTexto(wx.Dialog):
     """Texto somente leitura (setas leem) e uma fila de botoes. Esc fecha."""
 
@@ -44,6 +49,16 @@ class DialogoTexto(wx.Dialog):
     def definir(self, linhas, botoes):
         """linhas: [texto]; botoes: [(rotulo, funcao)] (o ultimo costuma ser
         Fechar, que e o proprio Esc)."""
+        # os botoes sao refeitos: sem isto o foco (e o leitor de tela) cairia
+        # no inicio da janela depois de qualquer botao. Guarda qual botao o
+        # tinha (o rotulo e a posicao; o rotulo pode mudar, como em Trancar a
+        # conversa / Destrancar a conversa) para devolver o foco a ele.
+        foco = self.FindFocus()
+        quem = None
+        for i, b in enumerate(self.botoes):
+            if b is foco:
+                quem = (i, _sem_atalho(b.GetLabel()))
+                break
         self.texto.SetValue("\n".join(linhas))
         self.texto.SetInsertionPoint(0)
         for b in self.botoes:
@@ -59,6 +74,21 @@ class DialogoTexto(wx.Dialog):
         self.linha.Add(fechar, 0, wx.RIGHT | wx.TOP, 6)
         self.botoes.append(fechar)
         self.Layout()
+        if quem is not None:
+            self._devolver_o_foco(*quem)
+
+    def _devolver_o_foco(self, indice, rotulo):
+        """O foco volta ao botao de mesmo rotulo; se o rotulo mudou, ao que
+        esta na mesma posicao (o Fechar, que e o ultimo, continua ultimo)."""
+        iguais = [b for b in self.botoes
+                  if _sem_atalho(b.GetLabel()) == rotulo]
+        if iguais:
+            alvo = iguais[0]
+        elif indice >= len(self.botoes) - 1:
+            alvo = self.botoes[-1]
+        else:
+            alvo = self.botoes[min(indice, len(self.botoes) - 1)]
+        alvo.SetFocus()
 
 
 def _chave_do_item(dado):
@@ -430,7 +460,9 @@ def _quando(ts):
 class DialogoSomDaConversa(wx.Dialog):
     """Os sons proprios de uma conversa: valem na hora, sem passar pelas
     configuracoes. Primeiro se escolhe o evento (mensagem recebida, menção,
-    reação...); a lista de sons traz o som desse evento em cada pacote."""
+    reação...); a lista de sons traz o som desse evento em cada pacote, e a
+    ultima lista traz todos os sons do pacote escolhido nela, para escolher
+    qualquer um deles."""
 
     def __init__(self, pai, jan, conv):
         super().__init__(pai, title="Sons de %s" % conv.nome,
@@ -450,8 +482,17 @@ class DialogoSomDaConversa(wx.Dialog):
         lay.Add(wx.StaticText(self, label="&Som deste evento em cada "
                                           "pacote:"), 0, wx.LEFT, 10)
         self.cx_escolha = wx.Choice(self, name="Som deste evento")
-        self.cx_escolha.Bind(wx.EVT_CHOICE, lambda e: self._escolher())
+        # a reacao sai do manipulador do evento: acertar a selecao de
+        # dentro dele (em _mostrar) travava a navegacao pelas setas
+        self.cx_escolha.Bind(wx.EVT_CHOICE,
+                             lambda e: wx.CallAfter(self._escolher))
         lay.Add(self.cx_escolha, 0, wx.EXPAND | wx.ALL, 10)
+        lay.Add(wx.StaticText(self, label="&Todos os sons do pacote "
+                                          "escolhido:"), 0, wx.LEFT, 10)
+        self.cx_pacote = wx.Choice(self, name="Todos os sons do pacote")
+        self.cx_pacote.Bind(wx.EVT_CHOICE,
+                            lambda e: wx.CallAfter(self._escolher_pacote))
+        lay.Add(self.cx_pacote, 0, wx.EXPAND | wx.ALL, 10)
         linha = wx.WrapSizer(wx.HORIZONTAL)
         self.botoes = {}
         for chave, rotulo, funcao in (
@@ -470,6 +511,8 @@ class DialogoSomDaConversa(wx.Dialog):
         self.SetSizerAndFit(lay)
         self.CentreOnParent()
         self._arquivos_escolha = []
+        self._sons_do_pacote = []
+        self._pacote_da_lista = None    # o pacote da terceira lista
         self._mostrar()
         self.cx_evento.SetFocus()
 
@@ -489,6 +532,7 @@ class DialogoSomDaConversa(wx.Dialog):
             self.situacao.SetLabel("%s: o som padrão do pacote." % rotulo)
         self.botoes["remover"].Enable(bool(self._arquivo()))
         self._preencher_escolha()
+        self._preencher_pacote()
         self.Layout()
 
     def ouvir(self):
@@ -520,14 +564,14 @@ class DialogoSomDaConversa(wx.Dialog):
         ativo = pacotes_de_som.EstadoDeSons(self.jan.cfg).ativo
         self._arquivos_escolha = pacotes_de_som.sons_do_evento(
             no_pacote, ativo, segue)
-        nomes = [nome for nome, _ in self._arquivos_escolha]
+        nomes = [nome for _, nome, _ in self._arquivos_escolha]
         if nomes != [self.cx_escolha.GetString(i)
                      for i in range(self.cx_escolha.GetCount())]:
             self.cx_escolha.Set(nomes)       # so refaz se mudou (NVDA)
         alvo = self._arquivo()
         indice = -1
         if alvo:
-            for i, (_, arquivo) in enumerate(self._arquivos_escolha):
+            for i, (_, _, arquivo) in enumerate(self._arquivos_escolha):
                 if _mesmo_arquivo(arquivo, alvo):
                     indice = i
                     break
@@ -539,7 +583,39 @@ class DialogoSomDaConversa(wx.Dialog):
         if not 0 <= i < len(self._arquivos_escolha):
             return
         self._escolher_pelo_caminho(
-            self._arquivos_escolha[i][1], anunciar=False, focar=False)
+            self._arquivos_escolha[i][2], anunciar=False, focar=False)
+
+    def _pacote_da_terceira(self):
+        """O pacote cujos sons a terceira lista mostra: o marcado na
+        segunda lista; sem marca, o pacote que ela ja mostrava (para a
+        lista nao pular sozinha ao escolher um som) e, na primeira vez, o
+        pacote ativo."""
+        i = self.cx_escolha.GetSelection()
+        if 0 <= i < len(self._arquivos_escolha):
+            return self._arquivos_escolha[i][0]
+        if self._pacote_da_lista:
+            return self._pacote_da_lista
+        return pacotes_de_som.EstadoDeSons(self.jan.cfg).ativo
+
+    def _preencher_pacote(self):
+        """Preenche a terceira lista com todos os sons do pacote marcado
+        na segunda, em ordem. So refaz a lista quando o pacote muda: mexer
+        nela durante o evento de escolha travava a navegacao pelas
+        setas."""
+        pacote_id = self._pacote_da_terceira()
+        if pacote_id == self._pacote_da_lista:
+            return
+        self._pacote_da_lista = pacote_id
+        self._sons_do_pacote = pacotes_de_som.arquivos_do_pacote(pacote_id)
+        self.cx_pacote.Set([nome for nome, _ in self._sons_do_pacote])
+
+    def _escolher_pacote(self):
+        """Escolhe o som do evento pela lista de sons do pacote."""
+        i = self.cx_pacote.GetSelection()
+        if not 0 <= i < len(self._sons_do_pacote):
+            return
+        self._escolher_pelo_caminho(
+            self._sons_do_pacote[i][1], anunciar=False, focar=False)
 
     def _escolher_pelo_caminho(self, origem, anunciar=True, focar=True):
         try:
