@@ -273,7 +273,7 @@ func instalarChamadas(id string) {
 	if !chamadasQuer {
 		return
 	}
-	cli := clients[id]
+	cli := clientFor(id)
 	if cli == nil {
 		return
 	}
@@ -289,6 +289,13 @@ func instalarChamadas(id string) {
 		switch v := evt.(type) {
 		case *events.CallOffer:
 			registrar(id, "sinal: oferta %s de %s", v.CallID, v.CallCreator)
+			if !v.GroupJID.IsEmpty() {
+				// convite para chamada em grupo: guarda para poder entrar depois
+				video := v.Data != nil && v.Data.GetChildByTag("video").Tag != ""
+				emitirEvento(id, map[string]any{"ev": "offer", "call": v.CallID,
+					"group": v.GroupJID.String(), "creator": v.CallCreator.String(),
+					"video": video})
+			}
 		case *events.CallPreAccept:
 			registrar(id, "sinal: pre-aceite %s de %s (%s)", v.CallID, v.From, v.RemotePlatform)
 		case *events.CallAccept:
@@ -415,7 +422,7 @@ func discar(cliente, numero string, video bool, buf *C.char, cap C.int) C.int {
 	if mc == nil {
 		return erro(fmt.Errorf("chamadas desligadas neste cliente"))
 	}
-	cli := clients[cliente]
+	cli := clientFor(cliente)
 	if cli == nil {
 		return erro(fmt.Errorf("cliente nao encontrado"))
 	}

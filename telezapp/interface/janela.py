@@ -32,6 +32,8 @@ from telezapp.nucleo import copia_oficial, localizacao, silenciados
 from telezapp.nucleo import links_externos, links_recebidos, resumo_midias
 from telezapp.nucleo.links_externos import motivo_de_nao_achar
 from telezapp.interface import emojis as ui_emojis
+from telezapp.interface.chat_de_voz import DialogoChatDeVoz
+from telezapp.interface.convidar import DialogoConvidar
 from telezapp.interface import enquete as ui_enquete
 from telezapp.interface import nova_enquete as ui_nova_enquete
 from telezapp.interface import ortografia as ui_ortografia
@@ -63,6 +65,7 @@ from telezapp.provedores.base import APAGAR_PENDENTE
 from telezapp.midia.reprodutor import (FormatoNaoSuportado, Reprodutor,
                                        formatar_tempo)
 from telezapp.nucleo import chamadas as ch
+from telezapp.nucleo import chat_de_voz as cv
 from telezapp.provedores.base import ErroPerfil, ErroPrivacidade
 from telezapp.nucleo import atualizacao
 from telezapp.nucleo import atualizador
@@ -580,6 +583,12 @@ class Janela(wx.Frame):
         self._seq_tocados = 0         # audios da sequencia atual, apos o 1o
         self.chamada = None           # nucleo.chamadas.Chamada em curso
         self.dlg_chamada = None       # DialogoChamada aberto
+        self.em_andamento = {}        # (conta, grupo) -> id da chamada em
+        #                               grupo do WhatsApp que ainda dura
+        self.chat_voz = None          # nucleo.chat_de_voz.ChatDeVoz em curso
+        self.dlg_chat_voz = None      # DialogoChatDeVoz aberto
+        self.vozes = {}               # (conta, conversa) -> ao_vivo: tem chat
+        #                               de voz ou live em andamento
         self._gravacao_rapida = None  # {"gravador", "origem"} gravando por atalho
         self._busca_global_volta = None   # {"estado", "chave"}: Esc volta a ela
         self._bandeja = None          # icone da area de notificacao
@@ -788,6 +797,16 @@ class Janela(wx.Frame):
              "&Silenciar ou ativar o microfone\tCtrl+Shift+K")
         item(m_cham, "chamada_tempo", "&Falar há quanto tempo a chamada dura")
         item(m_cham, "chamada_desligar", "&Desligar\tCtrl+Shift+H")
+        m_cham.AppendSeparator()
+        item(m_cham, "chat_de_voz",
+             "&Entrar no chat de voz ou live desta conversa (experimental)")
+        item(m_cham, "chamada_adicionar",
+             "&Adicionar participantes à chamada (experimental)")
+        item(m_cham, "chat_de_voz_iniciar",
+             "&Iniciar um chat de voz nesta conversa (experimental)")
+        item(m_cham, "chat_de_voz_quem",
+             "Dizer &quem está falando no chat de voz")
+        item(m_cham, "chat_de_voz_sair", "Sair do &chat de voz")
         item(m_cham, "ver_chamadas", "Ver o &histórico de chamadas...")
 
         m_mid = wx.Menu()
@@ -1077,6 +1096,11 @@ class Janela(wx.Frame):
             "chamada_mudo": lambda e: self._alternar_mudo(),
             "chamada_tempo": lambda e: self._falar_tempo_da_chamada(),
             "chamada_desligar": lambda e: self._desligar_chamada(),
+            "chat_de_voz": lambda e: self._entrar_chat_de_voz(),
+            "chamada_adicionar": lambda e: self._adicionar_participantes(),
+            "chat_de_voz_iniciar": lambda e: self._iniciar_chat_de_voz(),
+            "chat_de_voz_quem": lambda e: self._quem_fala_no_chat_de_voz(),
+            "chat_de_voz_sair": lambda e: self._sair_chat_de_voz(),
             "abrir_midia": lambda e: self._abrir_midia(),
             "baixar_midia": lambda e: self._abrir_midia(abrir=False),
             "salvar_midia": lambda e: self._salvar_midia(),
@@ -1605,11 +1629,17 @@ class Janela(wx.Frame):
             w.Show(mensagens)
         for w in (self.rot_caixa, self.caixa) + self.botoes_envio:
             w.Show(escrever)
-        # chamadas so com uma pessoa (nao ha chamada em grupo nem em canal):
-        # nesses o botao some, e a ordem de Tab nao para num botao inutil
+        # chamada de voz so com uma pessoa: em grupo e canal o botao vira
+        # "Entrar no chat de voz" (recurso experimental, ligado nas
+        # configuracoes) ou some, para o Tab nao parar num botao inutil
         conv = self.indice.get(self.atual) if self.atual is not None             else None
         if conv is not None and conv.tipo != "privada":
-            self.botao_chamada.Show(False)
+            rotulo = self._rotulo_do_botao_de_grupo(conv)
+            if rotulo:
+                self.botao_chamada.SetLabel(rotulo)
+            self.botao_chamada.Show(bool(mensagens and rotulo))
+        else:
+            self.botao_chamada.SetLabel("Iniciar chamada")
         if not mensagens:
             self._botoes_chave = None
             for b in self._botoes_de_contexto():
@@ -2235,6 +2265,10 @@ class Janela(wx.Frame):
             ev.ProgressoEnvio: self._ev_progresso_envio,
             ev.MidiaBaixada: self._ev_midia_baixada,
             ev.EstadoChamada: self._ev_chamada,
+            ev.EstadoChatDeVoz: self._ev_chat_de_voz,
+            ev.ChamadaEmAndamento: self._ev_chamada_em_andamento,
+            ev.ResultadoDeConvites: self._ev_resultado_de_convites,
+            ev.ChatDeVozAtivo: self._ev_chat_de_voz_ativo,
             ev.MensagemAtualizada: self._ev_atualizada,
         }.get(type(e))
         if tratador is not None and self:
@@ -2544,10 +2578,14 @@ class Janela(wx.Frame):
             em_uso = self._lista_em_uso()
         _, trecho, autor, estado = self.previas.get(
             c.chave, (0, "", "", ""))
+        voz = ""
+        if c.chave in self.vozes and \
+                self.cfg.get("chat_de_voz_avisar_inicio"):
+            voz = cv.marca_na_lista(self.vozes[c.chave])
         return lista_conv_nucleo.rotulo(
             c, em_uso, trecho,
             self.reacoes_novas.get(c.chave, 0),
-            self.quem_reagiu.get(c.chave, ()), autor, estado)
+            self.quem_reagiu.get(c.chave, ()), autor, estado, voz)
 
     def _atualizar_previa_se_for_a_ultima(self, chave, msg):
         """A mensagem mudou (editada, apagada...): se era a ultima da
@@ -4359,8 +4397,25 @@ class Janela(wx.Frame):
         """Alguma janela do TeleZapp esta na frente (a principal ou uma
         caixa de dialogo dele). Falso quando a pessoa foi para outro
         programa."""
+        # wx.GetActiveWindow() so enxerga janelas do wx: caixas nativas do
+        # Windows (TaskDialog da pergunta de ortografia, seletores de
+        # arquivo) davam None e pareciam "saiu do programa". Vale o
+        # processo dono da janela em primeiro plano.
         try:
-            return wx.GetActiveWindow() is not None
+            if wx.GetActiveWindow() is not None:
+                return True
+        except Exception:
+            return True
+        try:
+            import ctypes
+            from ctypes import wintypes
+            u32 = ctypes.windll.user32
+            hwnd = u32.GetForegroundWindow()
+            if not hwnd:
+                return False
+            pid = wintypes.DWORD(0)
+            u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            return pid.value == os.getpid()
         except Exception:
             return True
 
@@ -4924,6 +4979,12 @@ class Janela(wx.Frame):
     def _ligar_para(self, conv, video=False):
         """Liga para a conversa com uma pessoa, se a conta puder."""
         if conv.tipo != "privada":
+            if self._chat_de_voz_disponivel(conv):
+                self._entrar_chat_de_voz(conv)
+                return
+            if self._chamada_em_grupo_disponivel(conv):
+                self._ligar_para_grupo(conv)
+                return
             bipe("erro")
             self.fala.falar("Só dá para ligar para uma conversa com uma "
                             "pessoa, não para grupos nem canais.",
@@ -5005,7 +5066,9 @@ class Janela(wx.Frame):
                 video=e.video, camera=e.camera,
                 video_remoto=e.video_remoto, suporta_video=e.suporta_video,
                 tela=e.tela, som_pc=e.som_pc, suporta_tela=e.suporta_tela,
-                suporta_som_pc=e.suporta_som_pc)
+                suporta_som_pc=e.suporta_som_pc, grupo=e.grupo,
+                participantes=list(e.participantes),
+                suporta_adicionar=e.suporta_adicionar)
             mudou = True
         else:
             if e.nome and not c.nome:
@@ -5017,6 +5080,17 @@ class Janela(wx.Frame):
                                           e.suporta_video)
             mudou_pc = c.aplicar_compartilhamento(
                 e.tela, e.som_pc, e.suporta_tela, e.suporta_som_pc)
+            antes_gente = list(c.participantes)
+            c.grupo, c.suporta_adicionar = e.grupo, e.suporta_adicionar
+            c.participantes = list(e.participantes)
+            if c.participantes != antes_gente and not mudou:
+                fala = ch.fala_da_lista(antes_gente, c.participantes)
+                if fala and ch.conectados(c) <= ch.AVISOS_ATE and \
+                        not (mudou_video or mudou_pc):
+                    self.fala.falar(fala)
+                if not (mudou_video or mudou_pc):
+                    self._atualizar_dialogo_chamada(c)
+                    return
             if (mudou_video or mudou_pc) and not mudou:
                 # so o video ou o compartilhamento mudou: diz o que foi, sem
                 # repetir o estado
@@ -5114,6 +5188,7 @@ class Janela(wx.Frame):
             "silenciar": self._silenciar_chamada,
             "tempo": self._falar_tempo_da_chamada,
             "trocar": self._trocar_dispositivos,
+            "adicionar": self._adicionar_participantes,
         }
         self.dlg_chamada = DialogoChamada(
             self, c, acoes, lambda t: self.fala.falar(t, interromper=True),
@@ -5133,6 +5208,499 @@ class Janela(wx.Frame):
     def _chamada_fechada(self):
         self.dlg_chamada = None
 
+    # ---------------------- chamadas em grupo do WhatsApp (experimental)
+    def _chamada_em_grupo_disponivel(self, conv):
+        """Grupo do WhatsApp, com a caixa das chamadas em grupo marcada e a
+        DLL sabendo ligar para grupos."""
+        if conv is None or conv.tipo != "grupo":
+            return False
+        if not self.cfg.get("chamada_grupo_whatsapp"):
+            return False
+        p = self.contas.provedor(conv.conta_id) if self.contas else None
+        return bool(p is not None
+                    and getattr(p, "suporta_chamada_em_grupo", False))
+
+    def _chamada_em_andamento_de(self, conv):
+        """O id da chamada em grupo que ainda dura nesta conversa, ou ''."""
+        if conv is None or not self.cfg.get("chamada_em_andamento_whatsapp"):
+            return ""
+        return self.em_andamento.get(conv.chave, "")
+
+    def _rotulo_do_botao_de_grupo(self, conv):
+        """O texto do botao de chamada numa conversa de grupo ou canal, ou ''
+        se nao ha o que fazer (o botao some)."""
+        if self._chat_de_voz_disponivel(conv):
+            return "Entrar no chat de voz"
+        if self._chamada_em_grupo_disponivel(conv):
+            if self._chamada_em_andamento_de(conv):
+                return "Entrar na chamada em andamento"
+            return "Iniciar chamada em grupo"
+        return ""
+
+    def _atualizar_botao_de_chamada(self):
+        conv = self.indice.get(self.atual) if self.atual is not None else None
+        if conv is None or conv.tipo == "privada":
+            return
+        rotulo = self._rotulo_do_botao_de_grupo(conv)
+        if rotulo and self.botao_chamada.GetLabel() != rotulo:
+            self.botao_chamada.SetLabel(rotulo)
+        mostrar = bool(rotulo) and self.lista_msgs.IsShown()
+        if self.botao_chamada.IsShown() != mostrar:
+            self.botao_chamada.Show(mostrar)
+        self.painel.Layout()
+
+    @seguro
+    def _ligar_para_grupo(self, conv):
+        """Liga para o grupo ou, se ha chamada em andamento, entra nela."""
+        if self.estados.get(conv.conta_id) != ev.CONECTADA:
+            bipe("erro")
+            self.fala.falar("A conta não está conectada. Nada foi ligado.",
+                            interromper=True)
+            return
+        p = self._provedor_de_chamada(conv.conta_id)
+        mic, saida = self._dispositivos_da_chamada()
+        em_andamento = self._chamada_em_andamento_de(conv)
+        if em_andamento:
+            log.info("entrando na chamada em grupo em andamento (%s)",
+                     conv.conta_id)
+            self.fala.falar("Entrando na chamada em grupo de %s. %s" % (
+                conv.nome, "Recurso experimental."), interromper=True)
+            p.entrar_chamada_em_andamento(conv.id, em_andamento, mic, saida)
+            return
+        log.info("ligando para um grupo (%s)", conv.conta_id)
+        p.ligar(conv.id, mic, saida)
+
+    def _ev_chamada_em_andamento(self, e):
+        """Um convite de chamada em grupo chegou ou a chamada acabou: o botao
+        da conversa do grupo passa a oferecer Entrar (ou volta a Iniciar)."""
+        chave = (e.conta_id, e.conversa_id)
+        if e.ativa:
+            self.em_andamento[chave] = e.call_id
+        else:
+            self.em_andamento.pop(chave, None)
+        self._atualizar_botao_de_chamada()
+
+    @seguro
+    def _adicionar_participantes(self):
+        """Escolher quem convidar para a chamada em andamento."""
+        c = self.chamada
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if c is None or not c.ativa or c.estado != ch.EM_CHAMADA:
+            self.fala.falar("Só dá para adicionar participantes com a "
+                            "chamada em andamento.", interromper=True)
+            return
+        if p is None or not c.suporta_adicionar:
+            self.fala.falar("Adicionar participantes não está disponível. "
+                            "Marque a caixa em Configurações, Recursos "
+                            "experimentais.", interromper=True)
+            return
+        self.fala.falar("Procurando quem convidar.", interromper=True)
+
+        def trabalho():
+            try:
+                candidatos = p.candidatos_da_chamada(c.conversa_id)
+            except Exception:
+                log.exception("erro ao listar quem convidar")
+                candidatos = []
+            wx.CallAfter(self._mostrar_convites, c, p, candidatos)
+        threading.Thread(target=trabalho, name="chamada-candidatos",
+                         daemon=True).start()
+
+    def _mostrar_convites(self, c, p, candidatos):
+        if self.chamada is not c or not c.ativa:
+            return
+        if not candidatos:
+            self.fala.falar("Não há ninguém para convidar.",
+                            interromper=True)
+            return
+        dono = self.dlg_chamada if self.dlg_chamada is not None and \
+            self.dlg_chamada.IsShown() else self
+        dlg = DialogoConvidar(dono, candidatos, c.nome or "a chamada")
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            escolhidos = dlg.escolhidos()
+        finally:
+            dlg.Destroy()
+        if not escolhidos:
+            self.fala.falar("Ninguém foi marcado.", interromper=True)
+            return
+        self.fala.falar("Convidando %d %s." % (
+            len(escolhidos), "pessoa" if len(escolhidos) == 1 else "pessoas"),
+            interromper=True)
+        p.adicionar_participantes_chamada(c.conversa_id, escolhidos)
+
+    def _ev_resultado_de_convites(self, e):
+        self.fala.falar(ch.fala_dos_convites(list(e.resultados)),
+                        interromper=True)
+
+    # ----------------------------------- chat de voz e lives (experimental)
+    def _chat_de_voz_disponivel(self, conv):
+        """O botao e o menu valem em grupo ou canal do Telegram, com a caixa
+        de Configuracoes, Recursos experimentais, marcada."""
+        if conv is None or conv.tipo not in ("grupo", "canal"):
+            return False
+        if not self.cfg.get("chat_de_voz_telegram"):
+            return False
+        p = self.contas.provedor(conv.conta_id) if self.contas else None
+        return bool(p is not None
+                    and getattr(p, "suporta_chat_de_voz", False))
+
+    def _provedor_de_chat_de_voz(self, conta_id):
+        p = self.contas.provedor(conta_id) if self.contas else None
+        if p is not None and getattr(p, "suporta_chat_de_voz", False):
+            return p
+        return None
+
+    @seguro
+    def _entrar_chat_de_voz(self, conv=None):
+        if conv is None:
+            conv = self.indice.get(self.atual) if self.atual is not None \
+                else self._conversa_selecionada()
+        if conv is None:
+            self.fala.falar("Abra ou selecione uma conversa de grupo ou "
+                            "canal do Telegram.", interromper=True)
+            return
+        if not self.cfg.get("chat_de_voz_telegram"):
+            bipe("erro")
+            self.fala.falar("O chat de voz é um recurso experimental. Para "
+                            "usar, marque a caixa em Configurações, Recursos "
+                            "experimentais.", interromper=True)
+            return
+        if not self._chat_de_voz_disponivel(conv):
+            bipe("erro")
+            self.fala.falar("O chat de voz só existe em grupos e canais do "
+                            "Telegram.", interromper=True)
+            return
+        if self.estados.get(conv.conta_id) != ev.CONECTADA:
+            bipe("erro")
+            self.fala.falar("A conta não está conectada.", interromper=True)
+            return
+        if (self.chamada is not None and self.chamada.ativa) or \
+                (self.chat_voz is not None and self.chat_voz.ativo):
+            self.fala.falar("Já há uma chamada ou um chat de voz em "
+                            "andamento.", interromper=True)
+            if self.chat_voz is not None and self.chat_voz.ativo:
+                self._reexibir(self.dlg_chat_voz)
+            return
+        p = self._provedor_de_chat_de_voz(conv.conta_id)
+        mic, saida = self._dispositivos_da_chamada()
+        log.info("chat de voz: pedindo para entrar (%s)", conv.conta_id)
+        self.fala.falar("Procurando o chat de voz de %s. %s" % (
+            conv.nome, cv.AVISO_EXPERIMENTAL), interromper=True)
+        p.entrar_chat_de_voz(conv.id, mic, saida)
+
+    @seguro
+    def _sair_chat_de_voz(self):
+        c = self.chat_voz
+        p = self._provedor_de_chat_de_voz(c.conta_id) if c else None
+        if c is None or not c.ativo or p is None:
+            self.fala.falar("Nenhum chat de voz em andamento.",
+                            interromper=True)
+            return
+        p.sair_chat_de_voz()
+
+    @seguro
+    def _mudo_do_chat_de_voz(self, mudo):
+        c = self.chat_voz
+        p = self._provedor_de_chat_de_voz(c.conta_id) if c else None
+        if c is not None and p is not None and c.estado == cv.DENTRO:
+            p.silenciar_chat_de_voz(mudo)
+
+    @seguro
+    def _mao_do_chat_de_voz(self, sim):
+        c = self.chat_voz
+        p = self._provedor_de_chat_de_voz(c.conta_id) if c else None
+        if c is not None and p is not None and c.estado == cv.DENTRO:
+            p.levantar_mao_chat_de_voz(sim)
+
+    @seguro
+    def _iniciar_chat_de_voz(self):
+        """Cria um chat de voz onde nao ha nenhum. Avisa os membros, entao
+        pergunta antes; so administradores podem."""
+        conv = self.indice.get(self.atual) if self.atual is not None \
+            else self._conversa_selecionada()
+        if conv is None:
+            self.fala.falar("Abra ou selecione uma conversa de grupo ou "
+                            "canal do Telegram.", interromper=True)
+            return
+        if not self.cfg.get("chat_de_voz_iniciar"):
+            bipe("erro")
+            self.fala.falar("Para iniciar um chat de voz, marque a caixa em "
+                            "Configurações, Recursos experimentais.",
+                            interromper=True)
+            return
+        if not self._chat_de_voz_disponivel(conv):
+            bipe("erro")
+            self.fala.falar("Marque também a caixa do chat de voz em "
+                            "Configurações, Recursos experimentais, e use um "
+                            "grupo ou canal do Telegram.", interromper=True)
+            return
+        if self.estados.get(conv.conta_id) != ev.CONECTADA:
+            bipe("erro")
+            self.fala.falar("A conta não está conectada.", interromper=True)
+            return
+        if (self.chamada is not None and self.chamada.ativa) or \
+                (self.chat_voz is not None and self.chat_voz.ativo):
+            self.fala.falar("Já há uma chamada ou um chat de voz em "
+                            "andamento.", interromper=True)
+            return
+        r = wx.MessageBox(
+            "Iniciar um chat de voz em %s? Se ainda não houver um, ele será "
+            "criado e os membros serão avisados. Só administradores podem "
+            "iniciar. Recurso experimental." % conv.nome,
+            "Iniciar chat de voz", wx.YES_NO | wx.NO_DEFAULT |
+            wx.ICON_QUESTION, self)
+        if r != wx.YES:
+            self.fala.falar("Nada foi iniciado.", interromper=True)
+            return
+        p = self._provedor_de_chat_de_voz(conv.conta_id)
+        mic, saida = self._dispositivos_da_chamada()
+        log.info("chat de voz: pedindo para iniciar (%s)", conv.conta_id)
+        self.fala.falar("Iniciando o chat de voz de %s." % conv.nome,
+                        interromper=True)
+        p.entrar_chat_de_voz(conv.id, mic, saida, True)
+
+    def _chat_de_voz_que_fala(self):
+        """O chat de voz em que da para mandar camera, tela e som, ou None
+        (e diz por que)."""
+        c = self.chat_voz
+        if c is None or not c.ativo:
+            self.fala.falar("Nenhum chat de voz em andamento.",
+                            interromper=True)
+            return None
+        if c.estado != cv.DENTRO:
+            self.fala.falar("Ainda não entrou.", interromper=True)
+            return None
+        if c.ouvinte:
+            self.fala.falar("Em uma live você só ouve.", interromper=True)
+            return None
+        return c
+
+    @seguro
+    def _camera_do_chat_de_voz(self):
+        c = self._chat_de_voz_que_fala()
+        p = self._provedor_de_chat_de_voz(c.conta_id) if c else None
+        if c is not None and p is not None:
+            p.camera_chat_de_voz(not c.camera,
+                                 self.cfg.get("chamada_camera") or "")
+
+    @seguro
+    def _trocar_camera_do_chat_de_voz(self, nome):
+        self.cfg.set("chamada_camera", nome)
+        c = self.chat_voz
+        p = self._provedor_de_chat_de_voz(c.conta_id) if c else None
+        if c is not None and p is not None and c.camera:
+            p.camera_chat_de_voz(False)
+            p.camera_chat_de_voz(True, nome)
+
+    @seguro
+    def _tela_do_chat_de_voz(self):
+        c = self._chat_de_voz_que_fala()
+        p = self._provedor_de_chat_de_voz(c.conta_id) if c else None
+        if c is None or p is None:
+            return
+        if not c.suporta_tela:
+            self.fala.falar("Esta conta ainda não compartilha a tela.",
+                            interromper=True)
+            return
+        if c.tela:
+            p.tela_chat_de_voz("parar")
+        else:
+            p.tela_chat_de_voz(
+                "ligar", self.cfg.get("chamada_tela") or "",
+                bool(self.cfg.get("chamada_tela_com_som")) and
+                bool(c.suporta_som_pc))
+
+    @seguro
+    def _trocar_tela_do_chat_de_voz(self, nome):
+        self.cfg.set("chamada_tela", nome)
+        c = self.chat_voz
+        p = self._provedor_de_chat_de_voz(c.conta_id) if c else None
+        if c is not None and p is not None and c.tela:
+            p.tela_chat_de_voz("trocar", nome)
+
+    @seguro
+    def _tela_com_som_do_chat_de_voz(self, marcada):
+        self.cfg.set("chamada_tela_com_som", bool(marcada))
+        c = self.chat_voz
+        p = self._provedor_de_chat_de_voz(c.conta_id) if c else None
+        if c is None or p is None or not c.ativo or not c.tela or \
+                c.estado != cv.DENTRO or not c.suporta_som_pc:
+            return
+        if marcada and not c.som_pc:
+            p.som_pc_chat_de_voz(True, self.cfg.get("chamada_saida_pc") or "")
+        elif not marcada and c.som_pc:
+            p.som_pc_chat_de_voz(False)
+
+    @seguro
+    def _som_pc_do_chat_de_voz(self):
+        c = self._chat_de_voz_que_fala()
+        p = self._provedor_de_chat_de_voz(c.conta_id) if c else None
+        if c is None or p is None:
+            return
+        if not c.suporta_som_pc:
+            self.fala.falar("Esta conta ainda não compartilha o som do "
+                            "computador.", interromper=True)
+            return
+        p.som_pc_chat_de_voz(not c.som_pc,
+                             self.cfg.get("chamada_saida_pc") or "")
+
+    @seguro
+    def _trocar_som_pc_do_chat_de_voz(self, nome):
+        self.cfg.set("chamada_saida_pc", nome)
+        c = self.chat_voz
+        p = self._provedor_de_chat_de_voz(c.conta_id) if c else None
+        if c is not None and p is not None and c.som_pc:
+            p.som_pc_chat_de_voz(True, nome)
+
+    @seguro
+    def _quem_fala_no_chat_de_voz(self):
+        c = self.chat_voz
+        if c is None or not c.ativo or c.estado != cv.DENTRO:
+            self.fala.falar("Nenhum chat de voz em andamento.",
+                            interromper=True)
+            return
+        self.fala.falar(cv.quem_fala(c.participantes), interromper=True)
+
+    def _ev_chat_de_voz_ativo(self, e):
+        """Um chat de voz ou uma live comecou, acabou ou ja estava em
+        andamento: a linha da conversa muda e, se comecou agora, fala."""
+        if not self.cfg.get("chat_de_voz_avisar_inicio"):
+            return
+        chave = (e.conta_id, e.conversa_id)
+        tinha = chave in self.vozes
+        if e.ativo:
+            self.vozes[chave] = bool(e.ao_vivo)
+        else:
+            self.vozes.pop(chave, None)
+        conv = self.indice.get(chave)
+        if conv is None:
+            return
+        if e.ativo and e.iniciou:
+            log.info("chat de voz iniciado (%s)", e.conta_id)
+            self.fala.falar(cv.texto_de_inicio(conv.nome, e.ao_vivo))
+        if e.ativo != tinha or e.iniciou:
+            self._preencher_conversas()
+
+    @seguro
+    def _tempo_no_chat_de_voz(self):
+        c = self.chat_voz
+        if c is None or not c.ativo:
+            self.fala.falar("Nenhum chat de voz em andamento.",
+                            interromper=True)
+        elif c.estado != cv.DENTRO:
+            self.fala.falar("Ainda não entrou.", interromper=True)
+        else:
+            self.fala.falar("Dentro há %s." % cv.falar_duracao(c.segundos()),
+                            interromper=True)
+
+    @seguro
+    def _trocar_dispositivos_do_chat_de_voz(self, microfone, saida):
+        if microfone:
+            self.cfg.set("chamada_microfone", microfone)
+        if saida:
+            self.cfg.set("chamada_saida", saida)
+        c = self.chat_voz
+        p = self._provedor_de_chat_de_voz(c.conta_id) if c else None
+        if c is not None and p is not None:
+            p.trocar_dispositivos_chat_de_voz(microfone, saida)
+
+    def _ev_chat_de_voz(self, e):
+        c = self.chat_voz
+        mesmo = c is not None and c.ativo and \
+            (c.conta_id, c.conversa_id) == (e.conta_id, e.conversa_id)
+        if not mesmo:
+            if e.estado == cv.ENCERRADO:
+                return
+            if self.dlg_chat_voz is not None:
+                self.dlg_chat_voz.fechar()
+            c = self.chat_voz = cv.ChatDeVoz(e.conta_id, e.conversa_id,
+                                             e.nome)
+            antes = (c.mudo, c.mao)
+            antes_m = (False, False, False)
+            c.aplicar(e)
+            mudou = True
+        else:
+            antes = (c.mudo, c.mao)
+            antes_m = (c.camera, c.tela, c.som_pc)
+            mudou = c.aplicar(e)
+        if mudou:
+            log.info("chat de voz: %s %s", c.estado, c.motivo)
+            prioridade.chamada_em_curso(c.ativo)
+            a = cv.apresentar(c)
+            self.SetStatusText(a.titulo)
+            self.fala.falar(a.fala, interromper=True)
+            if a.som:
+                bipe(a.som, servico=self._servico_da_conta(c.conta_id))
+            self._atualizar_dialogo_chat_voz(c)
+            if c.estado == cv.ENCERRADO:
+                self.chat_voz = None
+            return
+        fala_m = cv.fala_do_que_mandamos(
+            antes_m, (c.camera, c.tela, c.som_pc))
+        if e.aviso:
+            self.fala.falar(e.aviso)
+        elif fala_m:
+            self.fala.falar(fala_m, interromper=True)
+        elif (c.mudo, c.mao) != antes:
+            if c.mao != antes[1]:
+                self.fala.falar(cv.fala_mao(c.mao), interromper=True)
+            else:
+                self.fala.falar(cv.fala_falar(c.mudo), interromper=True)
+        self._atualizar_dialogo_chat_voz(c)
+
+    def _atualizar_dialogo_chat_voz(self, c):
+        if self.dlg_chat_voz is not None and self.dlg_chat_voz.chat is c:
+            self.dlg_chat_voz.mostrar()
+            if not c.ativo:
+                self._reexibir(self.dlg_chat_voz)
+            return
+        p = self._provedor_de_chat_de_voz(c.conta_id)
+        mics, saidas = p.dispositivos_de_audio() if p is not None \
+            else ([], [])
+        mic, saida = self._dispositivos_da_chamada()
+        if p is not None and getattr(p, "suporta_video", False) and \
+                self.cfg.get("chat_de_voz_video"):
+            self._registrar_destino_de_video(p)
+        acoes = {
+            "sair": self._sair_chat_de_voz,
+            "falar": self._mudo_do_chat_de_voz,
+            "mao": self._mao_do_chat_de_voz,
+            "quem": self._quem_fala_no_chat_de_voz,
+            "camera": self._camera_do_chat_de_voz,
+            "trocar_camera": self._trocar_camera_do_chat_de_voz,
+            "tela": self._tela_do_chat_de_voz,
+            "trocar_tela": self._trocar_tela_do_chat_de_voz,
+            "tela_com_som": self._tela_com_som_do_chat_de_voz,
+            "som_pc": self._som_pc_do_chat_de_voz,
+            "trocar_som_pc": self._trocar_som_pc_do_chat_de_voz,
+            "tempo": self._tempo_no_chat_de_voz,
+            "trocar": self._trocar_dispositivos_do_chat_de_voz,
+        }
+        self.dlg_chat_voz = DialogoChatDeVoz(
+            self, c, acoes, lambda t: self.fala.falar(t, interromper=True),
+            mics, saidas, mic, saida,
+            ao_fechar=self._chat_de_voz_fechado,
+            ao_ocultar=lambda d: self._ocultar_janela(
+                d, "Janela do chat de voz"),
+            cameras=p.cameras() if p is not None and getattr(
+                p, "suporta_video", False) else (),
+            camera=self.cfg.get("chamada_camera") or "",
+            telas=[n for n, _ in p.telas()] if p is not None and getattr(
+                p, "suporta_video", False) and hasattr(p, "telas") else (),
+            tela=self.cfg.get("chamada_tela") or "",
+            saidas_pc=p.saidas_do_computador() if p is not None and getattr(
+                p, "suporta_som_pc", False) else (),
+            saida_pc=self.cfg.get("chamada_saida_pc") or "",
+            tela_com_som=bool(self.cfg.get("chamada_tela_com_som")))
+        self.dlg_chat_voz.Show()
+        if hasattr(self.dlg_chat_voz, "Raise"):
+            self.dlg_chat_voz.Raise()
+
+    def _chat_de_voz_fechado(self):
+        self.dlg_chat_voz = None
+
     # ------------------------------------------------------------- video
     def _registrar_destino_de_video(self, p):
         p.definir_destino_video(self._ao_quadro_de_video)
@@ -5149,6 +5717,8 @@ class Janela(wx.Frame):
         self._quadro_de_video_pendente = False
         if self.dlg_chamada is not None:
             self.dlg_chamada.mostrar_quadro(largura, altura, rgb)
+        elif self.dlg_chat_voz is not None:
+            self.dlg_chat_voz.mostrar_quadro(largura, altura, rgb)
 
     @seguro
     def _alternar_camera(self):

@@ -1433,6 +1433,7 @@ class ProvedorTelegram(Provedor):
                     citacoes.get(cid, 0),
                     int(getattr(d.dialog, "unread_mentions_count", 0) or 0))
                 self._conversas[cid] = c
+                self._notar_chat_de_voz(cid, getattr(d, "entity", None))
                 self._pendencias[cid] = (
                     int(getattr(d.dialog, "unread_mentions_count", 0) or 0),
                     int(getattr(d.dialog, "unread_reactions_count", 0) or 0),
@@ -1452,6 +1453,7 @@ class ProvedorTelegram(Provedor):
                  time.perf_counter() - inicio)
         lista += [c for c in self._conversas.values() if c.tipo == "status"]
         self.barramento.publicar(ev.ConversasAtualizadas(self.conta.id, lista))
+        self._publicar_chats_de_voz()
         await self._atualizar_historias()
 
     PODE_TEMPORARIAS = True
@@ -3768,6 +3770,82 @@ class ProvedorTelegram(Provedor):
         chamadas.destino_video = self._destino_video
         if await chamadas.iniciar():
             self._chamadas = chamadas
+
+    # ------------------------------ chat de voz e lives (experimental)
+    def _notar_chat_de_voz(self, cid, entidade):
+        """O Telegram marca `call_active` nos grupos e canais com chat de
+        voz ou live em andamento (recurso experimental: so a lista usa)."""
+        if getattr(entidade, "call_active", False):
+            self._vozes_novas = getattr(self, "_vozes_novas", {})
+            self._vozes_novas[cid] = bool(getattr(entidade, "broadcast",
+                                                  False))
+
+    def _publicar_chats_de_voz(self):
+        for cid, ao_vivo in getattr(self, "_vozes_novas", {}).items():
+            self.barramento.publicar(ev.ChatDeVozAtivo(
+                self.conta.id, cid, True, ao_vivo))
+        self._vozes_novas = {}
+
+    @property
+    def suporta_chat_de_voz(self):
+        g = self._chamadas.grupo if self._chamadas is not None else None
+        return g is not None and g.disponivel
+
+    def _comando_de_chat_de_voz(self, nome_metodo, conversa_id, *args):
+        chat = self._chat(conversa_id)
+        if not self.suporta_chat_de_voz or chat is None or chat >= 0:
+            self._avisar("O chat de voz não está disponível nesta conversa.")
+            return
+        self._agendar(getattr(self._chamadas.grupo, nome_metodo)(
+            chat, *args))
+
+    def entrar_chat_de_voz(self, conversa_id, microfone="", saida="",
+                           criar=False):
+        """`criar`: se ainda nao ha chat de voz, INICIA um (avisa os
+        membros; a janela sempre pergunta antes)."""
+        self._comando_de_chat_de_voz("entrar", conversa_id, microfone, saida,
+                                     bool(criar))
+
+    def camera_chat_de_voz(self, ligar, nome=""):
+        if self.suporta_chat_de_voz:
+            g = self._chamadas.grupo
+            self._agendar(g.ligar_camera(nome) if ligar
+                          else g.desligar_camera())
+
+    def tela_chat_de_voz(self, acao, nome="", com_som=True):
+        """acao: "ligar", "trocar" ou "parar"."""
+        if not self.suporta_chat_de_voz:
+            return
+        g = self._chamadas.grupo
+        if acao == "parar":
+            self._agendar(g.parar_tela())
+        elif acao == "trocar":
+            self._agendar(g.trocar_tela(nome))
+        else:
+            self._agendar(g.compartilhar_tela(nome, bool(com_som)))
+
+    def som_pc_chat_de_voz(self, ligar, saida=""):
+        if self.suporta_chat_de_voz:
+            g = self._chamadas.grupo
+            self._agendar(g.compartilhar_som(saida) if ligar
+                          else g.parar_som())
+
+    def sair_chat_de_voz(self):
+        if self.suporta_chat_de_voz:
+            self._agendar(self._chamadas.grupo.sair())
+
+    def silenciar_chat_de_voz(self, mudo):
+        if self.suporta_chat_de_voz:
+            self._agendar(self._chamadas.grupo.silenciar(bool(mudo)))
+
+    def levantar_mao_chat_de_voz(self, sim):
+        if self.suporta_chat_de_voz:
+            self._agendar(self._chamadas.grupo.levantar_mao(bool(sim)))
+
+    def trocar_dispositivos_chat_de_voz(self, microfone="", saida=""):
+        if self.suporta_chat_de_voz:
+            self._agendar(self._chamadas.grupo.trocar_dispositivos(
+                microfone, saida))
 
     async def _nome_da_conversa(self, chat_id):
         conv = self._conversas.get(str(chat_id))

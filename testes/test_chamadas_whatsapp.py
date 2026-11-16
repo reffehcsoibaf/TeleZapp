@@ -932,3 +932,334 @@ def test_som_que_nao_abre_avisa_e_nao_marca_como_compartilhado(mundo_tela):
     assert not ultimo_estado(bus).som_pc
     assert any("capturar o som" in getattr(e, "texto", "")
                for e in bus.eventos)
+
+
+# ================================================= chamadas em grupo do
+# WhatsApp (experimental): iniciar, receber, entrar, participantes, convidar
+GRUPO_CID = "120363000000000001@g.us"
+
+
+class PonteDeGrupo(PonteFalsa):
+    def __init__(self):
+        super().__init__()
+        self.grupos = []
+        self.erro_grupo = ""
+        self.lobby_resposta = {"call": "G9", "groupJid": GRUPO_CID,
+                               "video": False, "participants": []}
+        self.entradas = []
+        self.erro_entrar = ""
+        self.lista = []
+        self.convidados = []
+        self.resposta_convite = {}
+
+    def suporta_grupo(self):
+        return True
+
+    def suporta_em_andamento(self):
+        return True
+
+    def suporta_adicionar(self):
+        return True
+
+    def ligar_grupo(self, grupo, video=False):
+        self.grupos.append((grupo, video))
+        if self.erro_grupo:
+            return "", self.erro_grupo
+        return "G1", ""
+
+    def lobby(self, chamada, criador):
+        return self.lobby_resposta
+
+    def entrar(self, chamada, criador, video=False):
+        self.entradas.append((chamada, criador, video))
+        if self.erro_entrar:
+            return "", self.erro_entrar
+        return chamada, ""
+
+    def roster(self, chamada):
+        return self.lista
+
+    def adicionar(self, chamada, alvo):
+        self.convidados.append((chamada, alvo))
+        return self.resposta_convite.get(alvo, "invited")
+
+
+@pytest.fixture
+def mundo_grupo():
+    ponte, barramento, audio = PonteDeGrupo(), Barramento(), AudioFalso()
+    v = cw.ChamadasWhatsApp(
+        ponte, "w1", barramento,
+        conversa_do_peer=lambda peer: GRUPO_CID if "@g.us" in peer else CID,
+        nome_de=lambda cid: "Amigos" if cid == GRUPO_CID else "Ana",
+        destino_de=lambda cid: "5551", audio=audio, espera_s=0.3)
+    v.grupo_ligado = lambda: True
+    v.andamento_ligado = lambda: True
+    v.adicionar_ligado = lambda: True
+    v.nome_de_jid = lambda jid, pn="": {"1@lid": "Bia", "2@lid": "Caio",
+                                        "9@lid": "Eu"}.get(jid, "")
+    v.membros_de = lambda cid: ["x"] * 5
+    v.iniciar()
+    yield v, ponte, barramento, audio
+    v.parar()
+    ponte.fim = True
+
+
+def test_ligar_para_um_grupo_usa_a_funcao_de_grupo_e_so_voz(mundo_grupo):
+    v, ponte, bus, _ = mundo_grupo
+    v.ligar(GRUPO_CID, "Mic A", "Saida A", video=True)
+    assert esperar(lambda: ponte.grupos)
+    assert ponte.grupos == [(GRUPO_CID, False)]        # grupo nao leva video
+    assert ponte.ligadas == []
+    e = [x for x in bus.eventos if isinstance(x, ev.EstadoChamada)][0]
+    assert e.grupo is True and e.estado == ch.CHAMANDO and e.video is False
+    assert e.nome == "Amigos" and e.suporta_video is False
+
+
+def test_grupo_com_mais_de_32_nao_liga_e_diz_o_motivo(mundo_grupo):
+    v, ponte, bus, _ = mundo_grupo
+    v.membros_de = lambda cid: ["x"] * 33
+    v.ligar(GRUPO_CID)
+    avisos = [x.texto for x in bus.eventos if isinstance(x, ev.Aviso)]
+    assert any("32 participantes" in a for a in avisos)
+    assert ponte.grupos == [] and v.ligacoes == {}
+
+
+def test_sem_a_caixa_das_chamadas_em_grupo_nao_liga(mundo_grupo):
+    v, ponte, bus, _ = mundo_grupo
+    v.grupo_ligado = lambda: False
+    v.ligar(GRUPO_CID)
+    assert ponte.grupos == [] and v.ligacoes == {}
+    assert [x for x in bus.eventos if isinstance(x, ev.Aviso)]
+
+
+def test_erro_ao_ligar_para_o_grupo_encerra_com_falha(mundo_grupo):
+    v, ponte, bus, _ = mundo_grupo
+    ponte.erro_grupo = "sem relay"
+    v.ligar(GRUPO_CID)
+    assert esperar(lambda: (ch.ENCERRADA, ch.FALHA) in bus.estados())
+
+
+def test_chamada_em_grupo_que_chega_toca_com_o_nome_do_grupo(mundo_grupo):
+    v, ponte, bus, _ = mundo_grupo
+    ponte.fila.put({"ev": "offer", "call": "R7", "group": GRUPO_CID,
+                    "creator": "1@lid", "video": False})
+    ponte.fila.put({"ev": "incoming", "call": "R7", "peer": "1@lid",
+                    "group": True})
+    assert esperar(lambda: bus.estados())
+    e = [x for x in bus.eventos if isinstance(x, ev.EstadoChamada)][0]
+    assert (e.estado, e.grupo, e.nome, e.entrante) == (
+        ch.TOCANDO, True, "Amigos", True)
+
+
+def test_chamada_em_grupo_que_chega_sem_a_caixa_toca_como_antes(mundo_grupo):
+    v, ponte, bus, _ = mundo_grupo
+    v.grupo_ligado = lambda: False
+    ponte.fila.put({"ev": "incoming", "call": "R7", "peer": "1@lid",
+                    "group": True})
+    assert esperar(lambda: bus.estados())
+    e = [x for x in bus.eventos if isinstance(x, ev.EstadoChamada)][0]
+    assert e.grupo is False and e.nome == "Ana"
+
+
+def test_convite_de_grupo_guarda_e_avisa_que_da_para_entrar(mundo_grupo):
+    v, ponte, bus, _ = mundo_grupo
+    ponte.fila.put({"ev": "offer", "call": "R7", "group": GRUPO_CID,
+                    "creator": "1@lid", "video": True})
+    assert esperar(lambda: [x for x in bus.eventos
+                            if isinstance(x, ev.ChamadaEmAndamento)])
+    e = [x for x in bus.eventos if isinstance(x, ev.ChamadaEmAndamento)][0]
+    assert (e.conversa_id, e.call_id, e.ativa, e.video) == (
+        GRUPO_CID, "R7", True, True)
+    ponte.fila.put({"ev": "end", "call": "R7", "reason": "x"})
+    assert esperar(lambda: [x for x in bus.eventos
+                            if isinstance(x, ev.ChamadaEmAndamento)
+                            and not x.ativa])
+
+
+def test_entrar_na_chamada_em_andamento_liga_o_som(mundo_grupo):
+    v, ponte, bus, audio = mundo_grupo
+    ponte.fila.put({"ev": "offer", "call": "G9", "group": GRUPO_CID,
+                    "creator": "1@lid", "video": False})
+    assert esperar(lambda: "G9" in v._ofertas)
+    v.entrar_em_andamento(GRUPO_CID, "G9", "Mic B", "Saida A")
+    assert esperar(lambda: ponte.entradas)
+    assert ponte.entradas == [("G9", "1@lid", False)]
+    assert esperar(lambda: (ch.CONECTANDO, "") in bus.estados())
+    ponte.fila.put({"ev": "ready", "call": "G9"})
+    assert esperar(lambda: (ch.EM_CHAMADA, "") in bus.estados())
+    assert esperar(lambda: audio.microfones_abertos == ["Mic B"])
+
+
+def test_chamada_em_andamento_que_acabou_nao_entra(mundo_grupo):
+    v, ponte, bus, _ = mundo_grupo
+    ponte.lobby_resposta = {"over": True}
+    ponte.fila.put({"ev": "offer", "call": "G9", "group": GRUPO_CID,
+                    "creator": "1@lid", "video": False})
+    assert esperar(lambda: "G9" in v._ofertas)
+    v.entrar_em_andamento(GRUPO_CID, "G9")
+    assert esperar(lambda: [x for x in bus.eventos
+                            if isinstance(x, ev.Aviso)])
+    assert ponte.entradas == [] and v.ligacoes == {}
+    assert "G9" not in v._ofertas
+
+
+def test_sem_convite_guardado_nao_entra(mundo_grupo):
+    v, ponte, bus, _ = mundo_grupo
+    v.entrar_em_andamento(GRUPO_CID, "G9")
+    assert [x.texto for x in bus.eventos if isinstance(x, ev.Aviso)] == [
+        "Não achei essa chamada em andamento."]
+
+
+def test_lista_de_participantes_vem_dos_eventos_de_grupo(mundo_grupo):
+    v, ponte, bus, _ = mundo_grupo
+    v.ligar(GRUPO_CID)
+    assert esperar(lambda: ponte.grupos)
+    ponte.fila.put({"ev": "ready", "call": "G1"})
+    assert esperar(lambda: (ch.EM_CHAMADA, "") in bus.estados())
+    ponte.lista = [{"jid": "2@lid", "state": "invited"},
+                   {"jid": "1@lid", "pn": "5511@s.whatsapp.net",
+                    "state": "connected"}]
+    ponte.fila.put({"ev": "group", "call": "G1", "participants": 2})
+    assert esperar(lambda: [x for x in bus.eventos
+                            if isinstance(x, ev.EstadoChamada)
+                            and x.participantes])
+    e = [x for x in bus.eventos if isinstance(x, ev.EstadoChamada)][-1]
+    # quem esta na chamada primeiro; o nome vem do endereco original
+    assert e.participantes[0] == ("5511@s.whatsapp.net", "Bia",
+                                  "connected")
+    assert e.participantes[1] == ("2@lid", "Caio", "invited")
+    assert e.grupo is True and e.suporta_adicionar is True
+
+
+def test_convidar_pede_a_dll_e_diz_o_resultado(mundo_grupo):
+    v, ponte, bus, _ = mundo_grupo
+    v.ligar(GRUPO_CID)
+    assert esperar(lambda: ponte.grupos)
+    ponte.fila.put({"ev": "ready", "call": "G1"})
+    assert esperar(lambda: (ch.EM_CHAMADA, "") in bus.estados())
+    ponte.resposta_convite = {"3@lid": "failed", "4@lid": "rang"}
+    v.adicionar(GRUPO_CID, [("2@lid", "Caio"), ("3@lid", "Duda"),
+                            ("4@lid", "Edu")])
+    assert esperar(lambda: [x for x in bus.eventos
+                            if isinstance(x, ev.ResultadoDeConvites)])
+    r = [x for x in bus.eventos if isinstance(x, ev.ResultadoDeConvites)][0]
+    assert r.resultados == (("Caio", "invited"), ("Duda", "failed"),
+                            ("Edu", "rang"))
+    assert [c[1] for c in ponte.convidados] == ["2@lid", "3@lid", "4@lid"]
+
+
+def test_convidar_so_com_a_chamada_em_andamento_e_a_caixa(mundo_grupo):
+    v, ponte, bus, _ = mundo_grupo
+    v.adicionar(GRUPO_CID, [("2@lid", "Caio")])
+    assert "em andamento" in [x.texto for x in bus.eventos
+                              if isinstance(x, ev.Aviso)][-1]
+    assert ponte.convidados == []
+
+
+def test_botao_de_convidar_so_em_chamada_com_a_caixa(mundo_grupo):
+    v, ponte, bus, _ = mundo_grupo
+    c = ch.Chamada("w1", GRUPO_CID, "Amigos", False, ch.EM_CHAMADA,
+                   grupo=True)
+    assert v._pode_convidar(c) is True
+    v.adicionar_ligado = lambda: False
+    assert v._pode_convidar(c) is False
+    c.estado = ch.CHAMANDO
+    v.adicionar_ligado = lambda: True
+    assert v._pode_convidar(c) is False
+
+
+# ---------------------------------------------------------- nucleo
+def test_modelo_da_chamada_em_grupo():
+    c = ch.Chamada("w1", GRUPO_CID, "Amigos", True, ch.TOCANDO, grupo=True)
+    a = ch.apresentar(c)
+    assert "Chamada em grupo" in a.titulo and "Amigos" in a.titulo
+    c.aplicar(ch.EM_CHAMADA)
+    c.participantes = [("1@lid", "Bia", "connected"),
+                       ("2@lid", "Caio", "invited")]
+    c.suporta_adicionar = True
+    a = ch.apresentar(c)
+    assert ch.ADICIONAR in a.botoes and "1 pessoa na chamada" in a.situacao
+    assert a.botoes.index(ch.SILENCIAR) < a.botoes.index(ch.ADICIONAR)
+    c.suporta_adicionar = False
+    assert ch.ADICIONAR not in ch.apresentar(c).botoes
+
+
+def test_linhas_e_falas_da_lista_de_participantes():
+    assert ch.rotulo_participante("Bia", ch.CONECTADO) == "Bia, na chamada"
+    assert "ainda não entrou" in ch.rotulo_participante("Caio", ch.CONVIDADO)
+    antes = [("1", "Bia", "connected")]
+    depois = [("1", "Bia", "connected"), ("2", "Caio", "connected")]
+    assert ch.fala_da_lista(antes, depois) == "Caio entrou na chamada."
+    assert ch.fala_da_lista(depois, antes) == "Caio saiu da chamada."
+    assert ch.fala_da_lista(antes, [("1", "Bia", "connected"),
+                                    ("2", "Caio", "invited")]) == ""
+    assert ch.fala_dos_convites([("Ana", "invited"), ("Bia", "failed")]) == \
+        "Convidei Ana. Não consegui convidar Bia."
+    assert ch.fala_dos_convites([]) == "Não consegui convidar ninguém."
+
+
+def test_opcoes_das_chamadas_em_grupo_ficam_em_recursos_experimentais():
+    from telezapp import config
+    for chave in ("chamada_grupo_whatsapp", "chamada_em_andamento_whatsapp",
+                  "chamada_adicionar_whatsapp"):
+        o = next(x for x in config.OPCOES if x.chave == chave)
+        assert o.categoria == config.CATEGORIA_EXPERIMENTAL
+        assert o.padrao is False and o.servico == "whatsapp"
+        assert "experimental" in o.descricao.lower()
+
+
+# ------------------------------------------------------- a ponte da DLL
+class GoFalso:
+    def __init__(self, respostas):
+        self.respostas = respostas
+        self.chamadas = []
+
+    def __getattr__(self, nome):
+        if nome not in self.respostas:
+            raise AttributeError(nome)
+
+        def f(*args):
+            self.chamadas.append((nome, args))
+            texto = self.respostas[nome]
+            buf, cap = args[-2], args[-1]
+            dados = texto.encode()
+            buf.value = dados
+            return len(dados)
+        f.argtypes = f.restype = None
+        return f
+
+
+def ponte_com(respostas):
+    p = cw.Ponte.__new__(cw.Ponte)
+    p.uuid = b"u"
+    p.go = GoFalso(respostas)
+    return p
+
+
+def test_ponte_liga_para_grupo_e_le_o_resultado():
+    p = ponte_com({"CallGroupDial": '{"call": "G1"}'})
+    assert p.suporta_grupo() and not p.suporta_em_andamento()
+    assert p.ligar_grupo("123@g.us", True) == ("G1", "")
+    assert p.go.chamadas[0][1][1:3] == (b"123@g.us", 1)
+    p = ponte_com({"CallGroupDial": '{"error": "sem relay"}'})
+    assert p.ligar_grupo("123@g.us") == ("", "sem relay")
+
+
+def test_ponte_sem_as_funcoes_novas_diz_que_nao_suporta():
+    p = ponte_com({})
+    assert not (p.suporta_grupo() or p.suporta_em_andamento()
+                or p.suporta_adicionar())
+
+
+def test_ponte_lobby_roster_entrar_e_adicionar():
+    p = ponte_com({
+        "CallLobby": '{"over": true}',
+        "CallJoinOngoing": '{"call": "G9"}',
+        "CallRoster": '{"group": true, "participants": [{"jid": "1@lid", '
+                      '"state": "connected"}]}',
+        "CallAddParticipant": '{"rang": true}'})
+    assert p.suporta_em_andamento() and p.suporta_adicionar()
+    assert p.lobby("G9", "1@lid") == {"over": True}
+    assert p.entrar("G9", "1@lid") == ("G9", "")
+    assert p.roster("G9") == [{"jid": "1@lid", "state": "connected"}]
+    assert p.adicionar("G9", "2@lid") == "rang"

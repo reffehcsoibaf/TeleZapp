@@ -55,6 +55,43 @@ def test_listas_globais_juntam_todas_as_contas(cfg):
     b.fechar()
 
 
+def test_contatos_de_todas_as_contas_com_banco_unico(cfg, monkeypatch):
+    """Relato 16/11 (Mencionar pessoas no Status): sem contas em pastas, o
+    banco unico fica sob a chave None; juntar isso aos ids das contas
+    quebrava o sorted com 'str' e 'None'."""
+    cfg.set("contas_em_pastas", False)
+    monkeypatch.setattr(cfg, "contas", lambda: [{"id": "w1"}])
+    b = Bancos(cfg)
+    b.salvar_contato("w1", "1@lid", "Bia", "551")
+    b.salvar_contato("w1", "2@lid", "Ana", "552")
+    assert [c[2] for c in b.contatos()] == ["Ana", "Bia"]
+    assert [c[2] for c in b.contatos()] == ["Ana", "Bia"]   # banco ja aberto
+    b.fechar()
+
+
+def test_banco_unico_com_contas_configuradas_nao_repete_nem_quebra(
+        cfg, monkeypatch):
+    """Mesma regressao do relato de 16/11: com contas na configuracao e o
+    banco unico aberto, as passadas por conta misturavam None e texto."""
+    cfg.set("contas_em_pastas", False)
+    monkeypatch.setattr(cfg, "contas", lambda: [{"id": "t1"}, {"id": "t2"}])
+    b = Bancos(cfg)
+    b.salvar_conversas([m.Conversa("t1", "1", "A", "telegram"),
+                        m.Conversa("t2", "1", "B", "telegram")])
+    b.salvar_mensagens([m.Mensagem("t1", "1", "1", texto="a", data=1),
+                        m.Mensagem("t2", "1", "1", texto="b", data=2)])
+    assert sorted(x.conta_id for x, _ in b.buscar_mensagens()) == ["t1", "t2"]
+    assert [x.conta_id for x, _ in b.buscar_mensagens(contas=("t2",))] == [
+        "t2"]
+    assert len(b.mensagens_para_limpar()) == 2
+    assert len(b.mensagens_para_limpar(conversa_id="1")) == 2
+    assert b.agendada(99) is None
+    b.salvar_contato("t1", "1@lid", "Bia", "551")
+    b.salvar_contato("t2", "2@lid", "Ana", "552")
+    assert [c[2] for c in b.contatos()] == ["Ana", "Bia"]
+    b.fechar()
+
+
 def test_grupos_por_conta_sao_despachados(cfg):
     b = Bancos(cfg)
     b.salvar_fichas([("t1", "c", "1", b"f1"), ("t2", "c", "1", b"f2")])

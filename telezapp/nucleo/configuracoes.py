@@ -109,6 +109,19 @@ def _destinos_do_codigo():
             for r in ("Código atual", "Novo código", "Repita o novo código")]
 
 
+def aviso_experimental(opcao):
+    """O texto da janela que aparece ao marcar uma caixa dos recursos
+    experimentais (so None se a opcao nao e experimental)."""
+    if opcao.categoria != config.CATEGORIA_EXPERIMENTAL:
+        return None
+    return ("%s é um recurso experimental.\n\nAinda não sabemos se ele vai "
+            "funcionar bem em todos os computadores e contas. Ele pode "
+            "mudar ou sair do TeleZapp nas próximas versões se o "
+            "desempenho não for satisfatório.\n\nSe tiver problemas, "
+            "desmarque esta caixa e conte pelo Feedback."
+            % opcao.rotulo)
+
+
 def categorias():
     """Categorias na ordem em que as opcoes aparecem em config.OPCOES."""
     vistas = []
@@ -121,8 +134,8 @@ def categorias():
         vistas.append("Atalhos")    # tela propria: funcoes e teclas
     # no fim da lista, nesta ordem: "Privacidade" (que consulta a conta),
     # "Avancado" (quase ninguem precisa) e "Atualizacoes"
-    fim = {"Sistema": 1, "Privacidade": 2, "Avançado": 3,
-           "Atualizações": 4}
+    fim = {config.CATEGORIA_EXPERIMENTAL: 1, "Sistema": 2,
+           "Privacidade": 3, "Avançado": 4, "Atualizações": 5}
     return sorted(vistas, key=lambda c: fim.get(c, 0))
 
 

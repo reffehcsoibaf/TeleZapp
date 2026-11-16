@@ -58,6 +58,8 @@ class Provedor(ABC):
     servico = ""
     # True quando o servico e a biblioteca de chamadas estao disponiveis
     suporta_chamadas = False
+    # chat de voz de grupo e live de canal (experimental): so o Telegram
+    suporta_chat_de_voz = False
 
     def __init__(self, conta, barramento, banco, pedir):
         self.conta = conta

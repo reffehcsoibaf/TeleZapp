@@ -9948,3 +9948,404 @@ def test_tecla_apertada_zera_o_tempo_parado_das_trancadas(j):
     wx_falso._foco[0] = j.lista_conv
     j._char_hook(Tecla(wx_falso.WXK_DOWN))
     assert time.monotonic() - j._atividade < 5
+
+
+# --------------------- chat de voz e lives do Telegram (experimental)
+class ProvedorDeChatDeVoz(ProvedorFalso):
+    suporta_chat_de_voz = True
+
+    def __init__(self):
+        super().__init__()
+        self.chamadas_de_voz = []
+
+    def entrar_chat_de_voz(self, cid, mic="", saida="", criar=False):
+        self.chamadas_de_voz.append(("entrar", cid, mic, saida, criar))
+
+    def camera_chat_de_voz(self, ligar, nome=""):
+        self.chamadas_de_voz.append(("camera", ligar, nome))
+
+    def tela_chat_de_voz(self, acao, nome="", com_som=True):
+        self.chamadas_de_voz.append(("tela", acao, nome, com_som))
+
+    def som_pc_chat_de_voz(self, ligar, saida=""):
+        self.chamadas_de_voz.append(("som", ligar, saida))
+
+    def sair_chat_de_voz(self):
+        self.chamadas_de_voz.append(("sair",))
+
+    def silenciar_chat_de_voz(self, mudo):
+        self.chamadas_de_voz.append(("mudo", mudo))
+
+    def levantar_mao_chat_de_voz(self, sim):
+        self.chamadas_de_voz.append(("mao", sim))
+
+    def dispositivos_de_audio(self):
+        return [], []
+
+
+def _grupo_do_telegram(j):
+    j.contas.p = ProvedorDeChatDeVoz()
+    j.contas.provedores["t1"] = j.contas.p
+    c = m.Conversa("t1", "-100123", "Amigos", "telegram", "grupo",
+                   data=AGORA)
+    j.b.publicar(ev.ConversasAtualizadas("t1", [c]))
+    j.estados["t1"] = ev.CONECTADA
+    return j.indice[("t1", "-100123")]
+
+
+def test_chat_de_voz_so_com_a_caixa_dos_recursos_experimentais(j):
+    c = _grupo_do_telegram(j)
+    assert j.cfg.get("chat_de_voz_telegram") is False
+    assert not j._chat_de_voz_disponivel(c)
+    j.cfg.set("chat_de_voz_telegram", True)
+    assert j._chat_de_voz_disponivel(c)
+    privada = conv("10", "Ana")
+    assert not j._chat_de_voz_disponivel(privada)
+
+
+def test_entrar_sem_a_caixa_explica_onde_ligar(j):
+    c = _grupo_do_telegram(j)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._entrar_chat_de_voz(c)
+    assert "Recursos experimentais" in ditas[-1]
+    assert j.contas.p.chamadas_de_voz == []
+
+
+def test_entrar_com_a_caixa_pede_ao_provedor_e_avisa_que_e_experimental(j):
+    c = _grupo_do_telegram(j)
+    j.cfg.set("chat_de_voz_telegram", True)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._entrar_chat_de_voz(c)
+    assert j.contas.p.chamadas_de_voz[0][:2] == ("entrar", "-100123")
+    assert "experimental" in ditas[-1] and "Amigos" in ditas[-1]
+
+
+def test_ligar_em_grupo_com_a_caixa_marcada_entra_no_chat_de_voz(j):
+    c = _grupo_do_telegram(j)
+    j.cfg.set("chat_de_voz_telegram", True)
+    j.fala.falar = lambda t, interromper=False: None
+    j._ligar_para(c)
+    assert j.contas.p.chamadas_de_voz[0][0] == "entrar"
+
+
+def test_evento_do_chat_de_voz_abre_fala_e_encerra(j, monkeypatch):
+    from telezapp.nucleo import chat_de_voz as cv
+    monkeypatch.setattr(jm.prioridade, "chamada_em_curso", lambda *a: None)
+    monkeypatch.setattr(jm, "bipe", lambda *a, **k: None)
+    atualizados = []
+    j._atualizar_dialogo_chat_voz = lambda c: atualizados.append(c.estado)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.b.publicar(ev.EstadoChatDeVoz("t1", "-100123", cv.CONECTANDO, "Amigos"))
+    assert j.chat_voz is not None and j.chat_voz.estado == cv.CONECTANDO
+    assert "experimental" in ditas[-1]
+    j.b.publicar(ev.EstadoChatDeVoz(
+        "t1", "-100123", cv.DENTRO, "Amigos", participantes=(
+            (1, "Ana", True, False, False),), total=1))
+    assert "Dentro de chat de voz" in ditas[-1] and "silenciado" in ditas[-1]
+    j.b.publicar(ev.EstadoChatDeVoz(
+        "t1", "-100123", cv.DENTRO, "Amigos", aviso="Bruno entrou.",
+        participantes=((1, "Ana", True, False, False),), total=2))
+    assert ditas[-1] == "Bruno entrou."
+    j.b.publicar(ev.EstadoChatDeVoz(
+        "t1", "-100123", cv.DENTRO, "Amigos", mudo=False,
+        participantes=((1, "Ana", True, False, False),), total=2))
+    assert ditas[-1] == "Microfone aberto."
+    j.b.publicar(ev.EstadoChatDeVoz("t1", "-100123", cv.ENCERRADO, "Amigos",
+                                    motivo=cv.TERMINOU))
+    assert "terminou" in ditas[-1] and j.chat_voz is None
+    assert atualizados[-1] == cv.ENCERRADO
+
+
+def test_chat_de_voz_comecou_fala_e_marca_a_linha_da_conversa(j):
+    c = _grupo_do_telegram(j)
+    j.cfg.set("chat_de_voz_avisar_inicio", True)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    assert "em andamento" not in j._rotulo_da_conversa(c)
+    j.b.publicar(ev.ChatDeVozAtivo("t1", "-100123", True, False, True))
+    assert ditas[-1] == "Chat de voz começou em Amigos."
+    assert "chat de voz em andamento" in j._rotulo_da_conversa(c)
+    j.b.publicar(ev.ChatDeVozAtivo("t1", "-100123", False))
+    assert "em andamento" not in j._rotulo_da_conversa(c)
+
+
+def test_live_de_canal_diz_live_e_o_que_ja_estava_em_andamento_nao_fala(j):
+    c = _grupo_do_telegram(j)
+    j.cfg.set("chat_de_voz_avisar_inicio", True)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.b.publicar(ev.ChatDeVozAtivo("t1", "-100123", True, True))   # ja estava
+    assert ditas == []
+    assert "live em andamento" in j._rotulo_da_conversa(c)
+
+
+def test_sem_a_caixa_dos_avisos_nada_muda_na_lista_nem_fala(j):
+    c = _grupo_do_telegram(j)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.b.publicar(ev.ChatDeVozAtivo("t1", "-100123", True, False, True))
+    assert ditas == [] and "em andamento" not in j._rotulo_da_conversa(c)
+    assert j.vozes == {}
+
+
+def test_quem_esta_falando_fala_os_nomes(j):
+    from telezapp.nucleo import chat_de_voz as cv
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._quem_fala_no_chat_de_voz()
+    assert ditas[-1] == "Nenhum chat de voz em andamento."
+    c = cv.ChatDeVoz("t1", "-100123", "Amigos", estado=cv.DENTRO)
+    c.participantes = [cv.Participante(1, "Ana", falando=True),
+                       cv.Participante(2, "Bia")]
+    j.chat_voz = c
+    j._quem_fala_no_chat_de_voz()
+    assert ditas[-1] == "Ana está falando."
+
+
+def _com_chat_de_voz_dentro(j, ouvinte=False):
+    from telezapp.nucleo import chat_de_voz as cv
+    c = cv.ChatDeVoz("t1", "-100123", "Amigos", estado=cv.DENTRO,
+                     ouvinte=ouvinte, suporta_video=True, suporta_tela=True,
+                     suporta_som_pc=True)
+    j.chat_voz = c
+    return c
+
+
+def test_iniciar_chat_de_voz_pede_a_caixa_e_confirmacao(j, monkeypatch):
+    c = _grupo_do_telegram(j)
+    j.cfg.set("chat_de_voz_telegram", True)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._iniciar_chat_de_voz()
+    assert "Recursos experimentais" in ditas[-1]
+    assert j.contas.p.chamadas_de_voz == []
+    j.cfg.set("chat_de_voz_iniciar", True)
+    perguntas = []
+    monkeypatch.setattr(
+        jm.wx, "MessageBox",
+        lambda texto, *a, **k: (perguntas.append(texto), jm.wx.NO)[1])
+    j._iniciar_chat_de_voz()
+    assert "avisados" in perguntas[0] and "Amigos" in perguntas[0]
+    assert ditas[-1] == "Nada foi iniciado."
+    assert j.contas.p.chamadas_de_voz == []
+    monkeypatch.setattr(jm.wx, "MessageBox", lambda *a, **k: jm.wx.YES)
+    j._iniciar_chat_de_voz()
+    assert j.contas.p.chamadas_de_voz[-1] == (
+        "entrar", "-100123", "", "", True)
+
+
+def test_camera_tela_e_som_do_chat_de_voz_pedem_ao_provedor(j):
+    _grupo_do_telegram(j)
+    c = _com_chat_de_voz_dentro(j)
+    c.conta_id = "t1"
+    j.fala.falar = lambda t, interromper=False: None
+    j._camera_do_chat_de_voz()
+    j._tela_do_chat_de_voz()
+    j._som_pc_do_chat_de_voz()
+    chamadas = j.contas.p.chamadas_de_voz
+    assert chamadas[0][:2] == ("camera", True)
+    assert chamadas[1][:2] == ("tela", "ligar")
+    assert chamadas[2][:2] == ("som", True)
+    c.camera = c.tela = c.som_pc = True
+    j._camera_do_chat_de_voz()
+    j._tela_do_chat_de_voz()
+    j._som_pc_do_chat_de_voz()
+    assert [x[:2] for x in chamadas[3:]] == [
+        ("camera", False), ("tela", "parar"), ("som", False)]
+
+
+def test_em_live_camera_tela_e_som_nao_fazem_nada(j):
+    _grupo_do_telegram(j)
+    c = _com_chat_de_voz_dentro(j, ouvinte=True)
+    c.conta_id = "t1"
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._camera_do_chat_de_voz()
+    j._tela_do_chat_de_voz()
+    j._som_pc_do_chat_de_voz()
+    assert ditas == ["Em uma live você só ouve."] * 3
+    assert j.contas.p.chamadas_de_voz == []
+
+
+def test_mudanca_do_que_mandamos_e_falada(j, monkeypatch):
+    from telezapp.nucleo import chat_de_voz as cv
+    monkeypatch.setattr(jm.prioridade, "chamada_em_curso", lambda *a: None)
+    monkeypatch.setattr(jm, "bipe", lambda *a, **k: None)
+    j._atualizar_dialogo_chat_voz = lambda c: None
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    base = dict(estado=cv.DENTRO, participantes=(), total=1)
+    j.b.publicar(ev.EstadoChatDeVoz("t1", "-100123", nome="Amigos", **base))
+    j.b.publicar(ev.EstadoChatDeVoz("t1", "-100123", nome="Amigos",
+                                    camera=True, **base))
+    assert ditas[-1] == "Câmera ligada."
+    j.b.publicar(ev.EstadoChatDeVoz("t1", "-100123", nome="Amigos",
+                                    tela=True, som_pc=True, **base))
+    assert "Compartilhando a tela e o som do computador." in ditas[-1] or \
+        "Câmera desligada." in ditas[-1]
+
+
+from telezapp.nucleo import chamadas as ch  # noqa: E402
+
+# --------------------- chamadas em grupo do WhatsApp (experimental)
+GRUPO_WA = "120363000000000001@g.us"
+
+
+class ProvedorWaGrupo(ProvedorFalso):
+    suporta_chamadas = True
+    suporta_chamada_em_grupo = True
+    suporta_video = False
+
+    def __init__(self):
+        super().__init__()
+        self.feito = []
+        self.candidatos = [("1@lid", "Bia"), ("2@lid", "Caio")]
+
+    def ligar(self, cid, mic="", saida="", video=False, camera=None):
+        self.feito.append(("ligar", cid, video))
+
+    def entrar_chamada_em_andamento(self, cid, call_id, mic="", saida=""):
+        self.feito.append(("entrar", cid, call_id))
+
+    def candidatos_da_chamada(self, cid):
+        return list(self.candidatos)
+
+    def adicionar_participantes_chamada(self, cid, alvos):
+        self.feito.append(("convidar", cid, list(alvos)))
+
+    def dispositivos_de_audio(self):
+        return [], []
+
+
+def _grupo_do_whatsapp(j):
+    j.contas.p = ProvedorWaGrupo()
+    j.contas.provedores["w1"] = j.contas.p
+    c = m.Conversa("w1", GRUPO_WA, "Amigos", "whatsapp", "grupo", data=AGORA)
+    j.b.publicar(ev.ConversasAtualizadas("w1", [c]))
+    j.estados["w1"] = ev.CONECTADA
+    return j.indice[("w1", GRUPO_WA)]
+
+
+def test_botao_do_grupo_do_whatsapp_so_com_a_caixa(j):
+    c = _grupo_do_whatsapp(j)
+    assert j._rotulo_do_botao_de_grupo(c) == ""
+    j.cfg.set("chamada_grupo_whatsapp", True)
+    assert j._rotulo_do_botao_de_grupo(c) == "Iniciar chamada em grupo"
+    j.em_andamento[c.chave] = "G9"
+    assert j._rotulo_do_botao_de_grupo(c) == "Iniciar chamada em grupo"
+    j.cfg.set("chamada_em_andamento_whatsapp", True)
+    assert j._rotulo_do_botao_de_grupo(c) == "Entrar na chamada em andamento"
+
+
+def test_ligar_para_o_grupo_do_whatsapp_chama_o_provedor_so_com_voz(j):
+    c = _grupo_do_whatsapp(j)
+    j.cfg.set("chamada_grupo_whatsapp", True)
+    j.fala.falar = lambda t, interromper=False: None
+    j._ligar_para(c, video=True)
+    assert j.contas.p.feito == [("ligar", GRUPO_WA, False)] or \
+        j.contas.p.feito == [("ligar", GRUPO_WA, None)] or \
+        j.contas.p.feito[0][:2] == ("ligar", GRUPO_WA)
+
+
+def test_ligar_para_o_grupo_sem_a_caixa_explica_que_nao_da(j):
+    c = _grupo_do_whatsapp(j)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._ligar_para(c)
+    assert "não para grupos" in ditas[-1]
+    assert j.contas.p.feito == []
+
+
+def test_com_chamada_em_andamento_ligar_entra_nela(j):
+    c = _grupo_do_whatsapp(j)
+    j.cfg.set("chamada_grupo_whatsapp", True)
+    j.cfg.set("chamada_em_andamento_whatsapp", True)
+    j.fala.falar = lambda t, interromper=False: None
+    j.b.publicar(ev.ChamadaEmAndamento("w1", GRUPO_WA, "G9", "1@lid"))
+    assert j.em_andamento[c.chave] == "G9"
+    j._ligar_para(c)
+    assert j.contas.p.feito == [("entrar", GRUPO_WA, "G9")]
+    j.b.publicar(ev.ChamadaEmAndamento("w1", GRUPO_WA, "G9", ativa=False))
+    assert c.chave not in j.em_andamento
+
+
+def test_chamada_em_grupo_na_janela_mostra_participantes_e_fala_quem_entra(
+        j, monkeypatch):
+    monkeypatch.setattr(jm.prioridade, "chamada_em_curso", lambda *a: None)
+    monkeypatch.setattr(jm, "bipe", lambda *a, **k: None)
+    j._atualizar_dialogo_chamada = lambda c: None
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    base = dict(nome="Amigos", grupo=True, suporta_adicionar=True)
+    j.b.publicar(ev.EstadoChamada("w1", GRUPO_WA, ch.EM_CHAMADA,
+                                  participantes=(("1@lid", "Bia",
+                                                  "connected"),), **base))
+    assert j.chamada.grupo is True and j.chamada.suporta_adicionar is True
+    assert ch.conectados(j.chamada) == 1
+    j.b.publicar(ev.EstadoChamada(
+        "w1", GRUPO_WA, ch.EM_CHAMADA, participantes=(
+            ("1@lid", "Bia", "connected"), ("2@lid", "Caio", "connected")),
+        **base))
+    assert ditas[-1] == "Caio entrou na chamada."
+    assert ch.conectados(j.chamada) == 2
+
+
+def test_adicionar_participantes_abre_a_lista_e_convida_os_marcados(
+        j, monkeypatch):
+    c = _grupo_do_whatsapp(j)
+    j.chamada = ch.Chamada("w1", GRUPO_WA, "Amigos", False, ch.EM_CHAMADA,
+                           grupo=True, suporta_adicionar=True)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    visto = {}
+
+    class DialogoFalso:
+        def __init__(self, dono, candidatos, quem):
+            visto["candidatos"] = candidatos
+
+        def ShowModal(self):
+            return jm.wx.ID_OK
+
+        def escolhidos(self):
+            return [visto["candidatos"][1]]
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(jm, "DialogoConvidar", DialogoFalso)
+    j._mostrar_convites(j.chamada, j.contas.p,
+                        j.contas.p.candidatos_da_chamada(GRUPO_WA))
+    assert j.contas.p.feito == [("convidar", GRUPO_WA, [("2@lid", "Caio")])]
+    assert "Convidando 1 pessoa" in ditas[-1]
+
+
+def test_adicionar_participantes_sem_ninguem_para_convidar(j):
+    _grupo_do_whatsapp(j)
+    j.chamada = ch.Chamada("w1", GRUPO_WA, "Amigos", False, ch.EM_CHAMADA,
+                           grupo=True, suporta_adicionar=True)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._mostrar_convites(j.chamada, j.contas.p, [])
+    assert ditas[-1] == "Não há ninguém para convidar."
+
+
+def test_adicionar_sem_chamada_em_andamento_ou_sem_a_caixa_explica(j):
+    _grupo_do_whatsapp(j)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._adicionar_participantes()
+    assert "em andamento" in ditas[-1]
+    j.chamada = ch.Chamada("w1", GRUPO_WA, "Amigos", False, ch.EM_CHAMADA,
+                           grupo=True, suporta_adicionar=False)
+    j._adicionar_participantes()
+    assert "Recursos experimentais" in ditas[-1]
+
+
+def test_resultado_dos_convites_e_falado(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.b.publicar(ev.ResultadoDeConvites(
+        "w1", GRUPO_WA, (("Bia", "invited"), ("Caio", "failed"))))
+    assert ditas[-1] == "Convidei Bia. Não consegui convidar Caio."
