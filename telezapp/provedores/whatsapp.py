@@ -6458,12 +6458,116 @@ class ProvedorWhatsApp(Provedor):
                 self._destino_da_chamada)
             self._voz.destino_video = self._destino_video
             self._voz.oferta_velha = self._oferta_velha
+            self._ligar_chamadas_em_grupo()
             self._voz.iniciar()
             log.info("chamadas de voz do WhatsApp ligadas (video: %s)",
                      "sim" if self._voz.suporta_video else "não")
         except Exception:
             log.exception("erro ao preparar as chamadas do WhatsApp")
             self._voz = None
+
+    def _ligar_chamadas_em_grupo(self):
+        """Chamadas em grupo, convidar e entrar em chamada em andamento: tres
+        caixas de Configuracoes, Recursos experimentais (experimental)."""
+        def caixa(chave):
+            return lambda: bool(config.Config().get(chave))
+        self._voz.grupo_ligado = caixa("chamada_grupo_whatsapp")
+        self._voz.andamento_ligado = caixa("chamada_em_andamento_whatsapp")
+        self._voz.adicionar_ligado = caixa("chamada_adicionar_whatsapp")
+        self._voz.nome_de_jid = self._nome_na_chamada
+        self._voz.membros_de = self._membros_do_grupo
+
+    def _nome_na_chamada(self, jid, pn=""):
+        """O nome de quem esta numa chamada em grupo, so com o que ja se
+        sabe (sem rede); o telefone se nao ha nome."""
+        for candidato in (pn, jid):
+            if candidato:
+                nome = self.nome_de_participante(candidato)
+                if nome:
+                    return nome
+        usuario = jid_de_texto(pn or jid)[0] if (pn or jid) else ""
+        return "+" + usuario if usuario.isdigit() else ""
+
+    def _membros_do_grupo(self, cid):
+        """Os participantes do grupo (para o limite da chamada)."""
+        if self.cliente is None or not cid.endswith("@g.us"):
+            return None
+        usuario, servidor = jid_de_texto(cid)
+        info = self.cliente.get_group_info(_jid_obj(usuario, servidor))
+        return list(info.Participants)
+
+    @property
+    def suporta_chamada_em_grupo(self):
+        return bool(self.suporta_chamadas
+                    and self._voz.ponte.suporta_grupo())
+
+    @property
+    def suporta_chamada_em_andamento(self):
+        return bool(self.suporta_chamadas
+                    and self._voz.ponte.suporta_em_andamento())
+
+    @property
+    def suporta_adicionar_na_chamada(self):
+        return bool(self.suporta_chamadas
+                    and self._voz.ponte.suporta_adicionar())
+
+    def candidatos_da_chamada(self, conversa_id):
+        """[(endereco, nome)] de quem da para convidar para a chamada em
+        andamento nesta conversa: os membros do grupo que ainda nao entraram
+        ou, numa chamada individual, os contatos salvos. Leitura local."""
+        ligacao = self._voz.ligacoes.get(conversa_id) if self._voz else None
+        ja = set()
+        if ligacao is not None:
+            for jid, _nome, estado in ligacao.chamada.participantes:
+                if estado == "connected":
+                    ja.add(jid_de_texto(jid)[0])
+        achados = []
+        if conversa_id.endswith("@g.us"):
+            detalhes = self.detalhes_do_grupo(conversa_id) or {}
+            for p in detalhes.get("participantes", []):
+                if p.get("eu"):
+                    continue
+                alvo = self._alvo_de_convite(p.get("id", ""),
+                                             p.get("telefone", ""))
+                usuario = jid_de_texto(alvo)[0] if alvo else ""
+                if alvo and usuario not in ja and \
+                        p.get("telefone", "").lstrip("+") not in ja:
+                    achados.append((alvo, p.get("nome") or
+                                    p.get("telefone", "")))
+        else:
+            dono = jid_de_texto(conversa_id)[0]
+            for id_, nome, telefone in self.contatos_da_conta():
+                alvo = self._alvo_de_convite(id_, telefone)
+                if alvo and jid_de_texto(alvo)[0] not in ja | {dono}:
+                    achados.append((alvo, nome))
+        achados.sort(key=lambda x: x[1].casefold())
+        return achados
+
+    @staticmethod
+    def _alvo_de_convite(id_, telefone=""):
+        """O endereco que o meowcaller aceita: numero@lid ou
+        numero@s.whatsapp.net."""
+        import re
+        texto = (id_ or "").replace("@c.us", "@s.whatsapp.net")
+        if re.fullmatch(r"\d{5,20}@(lid|s\.whatsapp\.net)", texto):
+            return texto
+        numero = (telefone or "").lstrip("+")
+        return numero + "@s.whatsapp.net" if numero.isdigit() else ""
+
+    def adicionar_participantes_chamada(self, conversa_id, alvos):
+        """Convida `alvos` ([(endereco, nome)]) para a chamada em andamento."""
+        if not self.suporta_chamadas:
+            return
+        threading.Thread(target=self._voz.adicionar,
+                         args=(conversa_id, list(alvos)), daemon=True,
+                         name="chamada-convidar").start()
+
+    def entrar_chamada_em_andamento(self, conversa_id, call_id,
+                                    microfone="", saida=""):
+        if not self.suporta_chamadas:
+            self._avisar("Chamadas de voz não estão disponíveis.")
+            return
+        self._voz.entrar_em_andamento(conversa_id, call_id, microfone, saida)
 
     @staticmethod
     def _ocultar_chamadas():
@@ -6501,7 +6605,12 @@ class ProvedorWhatsApp(Provedor):
         return usuario if servidor == "s.whatsapp.net" else             "%s@%s" % (usuario, servidor)
 
     def _comando_de_chamada(self, metodo, conversa_id, *args):
-        if not self.suporta_chamadas or "@g.us" in conversa_id or                 "@newsletter" in conversa_id:
+        grupo = "@g.us" in conversa_id
+        if grupo and metodo == "ligar" and self.suporta_chamadas and \
+                config.Config().get("chamada_grupo_whatsapp"):
+            grupo = False           # chamada em grupo (experimental): vale
+        if not self.suporta_chamadas or grupo or \
+                "@newsletter" in conversa_id:
             self._avisar("Chamadas de voz não estão disponíveis nesta "
                          "conversa.")
             return

@@ -321,6 +321,10 @@ class Opcao:
 
 MENSAGENS_POR_VEZ = (50, 5000)
 
+# Recursos que ainda nao sabemos se funcionam bem para todos: cada um tem uma
+# caixa propria, desligada, e marcar qualquer uma mostra um aviso (so OK).
+CATEGORIA_EXPERIMENTAL = "Recursos experimentais"
+
 # Escondida enquanto aparencia.MODO_VISUAL_DISPONIVEL for False
 OPCAO_MODO_EXIBICAO = Opcao(
     "modo_exibicao", "Modo de exibição", "Interface", "automatico",
@@ -373,6 +377,84 @@ OPCOES = (
           "acontecido. Ele não recusa a chamada: o celular e os outros "
           "aparelhos continuam tocando. Vale para as chamadas que chegarem "
           "depois de desmarcar.", servico="whatsapp,telegram"),
+    Opcao("chat_de_voz_telegram",
+          "Chat de voz de grupo e lives de canal do Telegram",
+          CATEGORIA_EXPERIMENTAL, False,
+          "Experimental. Liga o botão Entrar no chat de voz (e o item do "
+          "menu Chamadas) nos grupos e canais do Telegram. Com um chat de "
+          "voz ou uma live em andamento, você entra com o microfone "
+          "silenciado, vê a lista de participantes, pode abrir o microfone "
+          "ou levantar a mão e é avisado de quem entra e sai (só em chats "
+          "pequenos). Nas lives de canal você só ouve. Entrar nunca cria um "
+          "chat de voz. Ainda não sabemos se funciona bem em todos os "
+          "computadores e contas; se o desempenho não for satisfatório, o "
+          "recurso pode sair do TeleZapp nas próximas versões. Desmarcada, "
+          "os botões e o item do menu somem.", servico="telegram"),
+    Opcao("chat_de_voz_avisar_inicio",
+          "Avisar chats de voz e lives que começam nas suas conversas",
+          CATEGORIA_EXPERIMENTAL, False,
+          "Experimental. Quando um chat de voz ou uma live começa num grupo "
+          "ou canal do Telegram, o TeleZapp fala o aviso, e a linha da "
+          "conversa na lista passa a dizer \"chat de voz em andamento\" ou "
+          "\"live em andamento\" enquanto durar. Ao abrir o TeleZapp, a "
+          "marca vale para o que já estava em andamento. Não precisa da "
+          "caixa do chat de voz marcada, mas sem ela você não consegue "
+          "entrar por aqui. Se o desempenho não for satisfatório, o recurso "
+          "pode sair do TeleZapp nas próximas versões.",
+          servico="telegram"),
+    Opcao("chamada_grupo_whatsapp",
+          "Chamadas em grupo do WhatsApp",
+          CATEGORIA_EXPERIMENTAL, False,
+          "Experimental. Nas conversas de grupo do WhatsApp, o botão Iniciar "
+          "chamada (e Ligar para esta conversa, no menu Chamadas) liga para "
+          "todos os membros: o WhatsApp só deixa em grupos de até 32 "
+          "participantes. Uma chamada em grupo que chega passa a tocar com o "
+          "nome do grupo, e a janela da chamada mostra quem está nela. "
+          "Só voz, sem vídeo. Desmarcada, uma chamada em grupo que chega "
+          "toca como antes, sem ser reconhecida como de grupo. Se o "
+          "desempenho não for satisfatório, o recurso pode sair do TeleZapp "
+          "nas próximas versões.", servico="whatsapp"),
+    Opcao("chamada_em_andamento_whatsapp",
+          "Entrar em chamadas em grupo do WhatsApp que já começaram",
+          CATEGORIA_EXPERIMENTAL, False,
+          "Experimental. Quando chega o convite de uma chamada em grupo, mesmo "
+          "sem você atender, o TeleZapp guarda: enquanto a chamada durar, o "
+          "botão da conversa do grupo vira Entrar na chamada em "
+          "andamento. Só vale para chamadas cujo convite chegou com o "
+          "TeleZapp aberto. Precisa da caixa das chamadas em grupo marcada. "
+          "Se o desempenho não for satisfatório, o recurso pode sair do "
+          "TeleZapp nas próximas versões.", servico="whatsapp"),
+    Opcao("chamada_adicionar_whatsapp",
+          "Adicionar participantes a uma chamada do WhatsApp",
+          CATEGORIA_EXPERIMENTAL, False,
+          "Experimental. Com uma chamada em andamento, liga o botão Adicionar "
+          "participantes na janela da chamada (e o item do menu Chamadas). "
+          "Numa chamada em grupo, oferece os membros do grupo que ainda não "
+          "entraram; quem já foi chamado e não entrou é chamado de novo. "
+          "Numa chamada individual, oferece os seus contatos salvos, e a "
+          "chamada passa a ter várias pessoas, como no WhatsApp. Se o "
+          "desempenho não for satisfatório, o recurso pode sair do TeleZapp "
+          "nas próximas versões.", servico="whatsapp"),
+    Opcao("chat_de_voz_iniciar",
+          "Poder iniciar um chat de voz em grupos e canais do Telegram",
+          CATEGORIA_EXPERIMENTAL, False,
+          "Experimental. Liga o item Iniciar um chat de voz nesta conversa, "
+          "no menu Chamadas, para criar um chat de voz onde ainda não há "
+          "nenhum. Isso avisa os membros do grupo ou canal, por isso o "
+          "TeleZapp sempre pergunta antes; só administradores podem. Precisa "
+          "da caixa do chat de voz marcada. Se o desempenho não for "
+          "satisfatório, o recurso pode sair do TeleZapp nas próximas "
+          "versões.", servico="telegram"),
+    Opcao("chat_de_voz_video",
+          "Mostrar o vídeo e a tela compartilhada dos chats de voz e lives",
+          CATEGORIA_EXPERIMENTAL, False,
+          "Experimental. Pede ao Telegram também a imagem (câmera e tela "
+          "compartilhada) de quem aparecer no chat de voz ou na live, e a "
+          "mostra na janela do chat de voz. Gasta mais do computador e da "
+          "internet, e vale na próxima vez que você entrar. O som funciona "
+          "igual com ou sem esta caixa. Precisa da caixa do chat de voz "
+          "marcada. Se o desempenho não for satisfatório, o recurso pode "
+          "sair do TeleZapp nas próximas versões.", servico="telegram"),
     Opcao("como_me_chamar", "Como me chamar nas mensagens", "Interface", "",
           "O nome que aparece no lugar de Você quando o autor é você: nas "
           "mensagens, na lista de conversas, nas reações, nos votos, na busca "

@@ -254,6 +254,74 @@ class EstadoChamada:
     som_pc: bool = False
     suporta_tela: bool = False
     suporta_som_pc: bool = False
+    # chamada em grupo do WhatsApp (experimental): quem esta nela, como
+    # tuplas (jid, nome, estado), e se da para convidar mais gente
+    grupo: bool = False
+    participantes: tuple = ()
+    suporta_adicionar: bool = False
+
+
+@dataclass
+class ChamadaEmAndamento:
+    """Uma chamada em grupo do WhatsApp comecou (chegou o convite) ou acabou:
+    enquanto dura, da para entrar nela (recurso experimental)."""
+    conta_id: str
+    conversa_id: str                # o grupo
+    call_id: str = ""
+    criador: str = ""
+    video: bool = False
+    ativa: bool = True
+
+
+@dataclass
+class ResultadoDeConvites:
+    """O que aconteceu com os convites para a chamada: `resultados` e uma
+    tupla de (nome, estado), estado "invited", "rang" ou "failed"."""
+    conta_id: str
+    conversa_id: str
+    resultados: tuple = ()
+
+
+@dataclass
+class EstadoChatDeVoz:
+    """Chat de voz de grupo ou live de canal do Telegram (recurso
+    experimental; ver nucleo.chat_de_voz). `participantes`: tuplas (id, nome,
+    mudo, mao, eu); `total`: quantos ha no chat de voz (a lista pode ser
+    menor). `aviso`: uma frase curta (alguem entrou, saiu, levantou a mao).
+    `motivo` e `erro` so valem quando encerrado."""
+    conta_id: str
+    conversa_id: str
+    estado: str
+    nome: str = ""
+    ao_vivo: bool = False
+    ouvinte: bool = False
+    mudo: bool = True
+    mao: bool = False
+    participantes: tuple = ()
+    total: int = 0
+    aviso: str = ""
+    motivo: str = ""
+    erro: str = ""
+    # o que estamos mandando (camera, tela, som do computador) e o que o
+    # provedor sabe fazer; so vale para quem fala (nao em live)
+    camera: bool = False
+    tela: bool = False
+    som_pc: bool = False
+    suporta_video: bool = False
+    suporta_tela: bool = False
+    suporta_som_pc: bool = False
+
+
+@dataclass
+class ChatDeVozAtivo:
+    """Uma conversa do Telegram tem (ou deixou de ter) chat de voz ou live em
+    andamento. `iniciou`: acabou de comecar (vale um aviso falado); sem ele, e
+    so o que ja estava em andamento quando o TeleZapp soube."""
+    conta_id: str
+    conversa_id: str
+    ativo: bool
+    ao_vivo: bool = False
+    iniciou: bool = False
 
 
 @dataclass

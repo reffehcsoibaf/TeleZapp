@@ -64,6 +64,16 @@ class Motor:
             self.Frame = Frame
         except Exception:
             log.info("quadros externos indisponíveis neste py-tgcalls")
+        try:
+            from pytgcalls.types import GroupCallConfig, GroupCallParticipant
+            self.GroupCallConfig = GroupCallConfig
+            self.AcaoParticipante = GroupCallParticipant.Action
+        except Exception:
+            log.info("chat de voz de grupo indisponível neste py-tgcalls")
+
+    def filtro_participantes(self):
+        """Quem entra, sai, silencia ou levanta a mao num chat de voz."""
+        return self.filters.call_participant()
 
     def cameras(self):
         return list(self.MediaDevices.camera_devices())
@@ -141,8 +151,14 @@ class Motor:
             dispositivo, audio_parameters=self.AudioQuality.HIGH,
             video_flags=self.MediaStream.Flags.IGNORE)
 
-    def fluxo_saida(self, dispositivo, camera=False):
-        return self.RecordStream(audio=dispositivo, camera=camera)
+    def fluxo_saida(self, dispositivo, camera=False, tela=False):
+        return self.RecordStream(audio=dispositivo, camera=camera,
+                                 screen=tela)
+
+    def filtro_quadros_tela(self):
+        """Os quadros de tela compartilhada que chegam (so no chat de voz)."""
+        return self.filters.stream_frame(self.Direction.INCOMING,
+                                         self.Device.SCREEN)
 
 
 def disponivel():
@@ -152,6 +168,13 @@ def disponivel():
         return True
     except Exception:
         return False
+
+
+def _chat_de_voz_em_uso(chamadas):
+    """Ha uma sessao de chat de voz aberta (tolera objetos de teste sem
+    o atributo `grupo`)."""
+    grupo = getattr(chamadas, "grupo", None)
+    return grupo is not None and grupo.em_uso
 
 
 def _abrir_microfone(nome, taxa, amostras):
@@ -214,6 +237,7 @@ class ChamadasTelegram:
         self._t0 = {}               # chat_id -> quando a chamada apareceu
         self._t_em_chamada = {}     # chat_id -> quando entrou em chamada
         self._lista_logada = None
+        self.grupo = None       # ChatDeVozTelegram (experimental), se houver
 
     # ---------------------------------------------------------- inicio
     async def iniciar(self):
@@ -233,6 +257,7 @@ class ChamadasTelegram:
                     self.motor.ouvir_pedidos(self.cliente, self._ao_pedido)
                 except Exception:
                     log.exception("não consegui ouvir os pedidos de vídeo")
+            self._iniciar_chat_de_voz()
             await self.app.start()
         except Exception as e:
             log.info("chamadas indisponíveis: %r", e)
@@ -241,6 +266,28 @@ class ChamadasTelegram:
         self.atualizar_dispositivos()
         log.info("chamadas de voz prontas")
         return True
+
+    def _iniciar_chat_de_voz(self):
+        """Chat de voz de grupo e live de canal (experimental): usa este
+        mesmo PyTgCalls. Qualquer erro aqui deixa so o chat de voz de fora."""
+        try:
+            if not hasattr(self.motor, "filtro_participantes") or                     not hasattr(self.motor, "GroupCallConfig"):
+                return
+            from telezapp.provedores.chat_de_voz_telegram import (
+                ChatDeVozTelegram)
+            self.grupo = ChatDeVozTelegram(self)
+            self.app.on_update(self.motor.filtro_participantes())(
+                self.grupo.ao_participante)
+            if hasattr(self.motor, "filtro_quadros_tela"):
+                self.app.on_update(self.motor.filtro_quadros_tela())(
+                    self._ao_quadro_do_grupo)
+            try:
+                self.grupo.registrar_brutos()
+            except Exception:
+                log.exception("não consegui ouvir os avisos de chat de voz")
+        except Exception:
+            log.exception("chat de voz indisponível")
+            self.grupo = None
 
     @property
     def pronta(self):
@@ -320,6 +367,9 @@ class ChamadasTelegram:
     def _marcar_compartilhamento(self, chat_id, tela=None, som_pc=None):
         c = self.chamadas.get(chat_id)
         if c is None:
+            g = getattr(self, "grupo", None)
+            if g is not None and g.dentro(chat_id):
+                return g.marcar_midia(tela=tela, som_pc=som_pc)
             return False
         mudou = c.aplicar_compartilhamento(
             c.tela if tela is None else tela,
@@ -333,6 +383,10 @@ class ChamadasTelegram:
     def _marcar_video(self, chat_id, video=None, camera=None, remoto=None):
         """Muda o que e do video na chamada e avisa a janela se mudou."""
         c = self.chamadas.get(chat_id)
+        if c is None:
+            g = getattr(self, "grupo", None)
+            if g is not None and g.dentro(chat_id):
+                return g.marcar_midia(camera=camera)
         if c is None:
             return False
         mudou = c.aplicar_video(
@@ -387,7 +441,7 @@ class ChamadasTelegram:
         primeira) ou None para comecar sem ela."""
         if not self.pronta:
             return
-        if self.chamadas:
+        if self.chamadas or _chat_de_voz_em_uso(self):
             log.info("já existe uma chamada; ligar ignorado")
             return
         self._escolhas[chat_id] = (microfone, saida)
@@ -447,8 +501,22 @@ class ChamadasTelegram:
             return self.motor.fluxo_com_camera(camera, dispositivo), True
         return self.motor.fluxo_microfone(dispositivo), False
 
+    def _chamada(self, chat_id):
+        """A chamada 1 a 1 deste chat ou, no chat de voz, o adaptador que
+        faz as rotinas de camera, tela e som funcionarem nos dois."""
+        c = self.chamadas.get(chat_id)
+        if c is None:
+            g = getattr(self, "grupo", None)
+            if g is not None:
+                c = g.sombra(chat_id)
+        return c
+
     def _fluxo_de_saida(self, chat_id, saida):
         """O que chega: o som e, numa chamada de video, a camera dele."""
+        g = getattr(self, "grupo", None)
+        if chat_id not in self.chamadas and g is not None and \
+                g.dentro(chat_id):
+            return g.fluxo_de_saida(saida)
         dispositivo = _escolher(self.motor.saidas(), saida)
         self._logar_escolha("saída (alto-falante)", saida, dispositivo)
         c = self.chamadas.get(chat_id)
@@ -460,7 +528,7 @@ class ChamadasTelegram:
     async def ligar_camera(self, chat_id, nome=""):
         """Liga a nossa camera. Numa chamada so de voz, passa a chamada para
         video."""
-        c = self.chamadas.get(chat_id)
+        c = self._chamada(chat_id)
         if c is None or c.estado != ch.EM_CHAMADA or not self.suporta_video:
             return
         self._cam[chat_id] = nome
@@ -485,7 +553,7 @@ class ChamadasTelegram:
 
     async def desligar_camera(self, chat_id):
         """Desliga a nossa camera; a chamada segue com o som."""
-        c = self.chamadas.get(chat_id)
+        c = self._chamada(chat_id)
         if c is None or not c.camera:
             return
         if chat_id in self._tela:
@@ -514,7 +582,7 @@ class ChamadasTelegram:
     async def compartilhar_tela(self, chat_id, nome="", com_som=True):
         """Manda a tela (a `nome`; vazia = a principal) no lugar da camera.
         Por padrao leva junto o som do computador."""
-        c = self.chamadas.get(chat_id)
+        c = self._chamada(chat_id)
         if c is None or c.estado != ch.EM_CHAMADA or not self.suporta_tela:
             return False
         telas = self.telas()
@@ -631,7 +699,7 @@ class ChamadasTelegram:
         """Manda o som do computador junto com o microfone: o audio passa a
         sair de quadros nossos (microfone somado ao som). O microfone
         continua valendo e continua podendo ser silenciado."""
-        c = self.chamadas.get(chat_id)
+        c = self._chamada(chat_id)
         if c is None or c.estado != ch.EM_CHAMADA or \
                 not self.suporta_som_pc:
             return False
@@ -672,7 +740,7 @@ class ChamadasTelegram:
         if chat_id not in self._som:
             return
         self._parar_audio_nosso(chat_id)
-        c = self.chamadas.get(chat_id)
+        c = self._chamada(chat_id)
         try:
             await self._tocar_de_novo(chat_id)
             if c is not None and c.mudo:    # voltou ao microfone do motor
@@ -698,7 +766,7 @@ class ChamadasTelegram:
         silencio = bytes(FRAME_AUDIO * 2)
         try:
             while not estado["parar"].is_set():
-                c = self.chamadas.get(chat_id)
+                c = self._chamada(chat_id)
                 if c is None:
                     break
                 mic = self._escolhas.get(chat_id, ("", ""))[0]
@@ -747,10 +815,21 @@ class ChamadasTelegram:
         if video:
             self._marcar_video(chat_id, video=True)
 
-    async def _ao_quadro(self, _cliente, update):
+    async def _ao_quadro_do_grupo(self, _cliente, update):
+        """Quadro de tela compartilhada num chat de voz."""
+        await self._ao_quadro(_cliente, update, so_grupo=True)
+
+    async def _ao_quadro(self, _cliente, update, so_grupo=False):
         """Um quadro de video do outro lado."""
         chat_id = update.chat_id
-        if chat_id not in self.chamadas or not update.frames:
+        if not update.frames:
+            return
+        grupo = getattr(self, "grupo", None)
+        do_grupo = chat_id not in self.chamadas and grupo is not None \
+            and grupo.aceita_quadros(chat_id)
+        if so_grupo and not do_grupo:
+            return
+        if chat_id not in self.chamadas and not do_grupo:
             return
         quadro = update.frames[-1]
         largura, altura = quadro.info.width, quadro.info.height
@@ -771,6 +850,10 @@ class ChamadasTelegram:
         graus = getattr(quadro.info.rotation, "value", 0)
         rgb, largura, altura = midia_video.girar_rgb(rgb, largura, altura,
                                                      graus)
+        if do_grupo:
+            if self.destino_video is not None:
+                self.destino_video(str(chat_id), largura, altura, rgb)
+            return
         self._ultimo_quadro[chat_id] = time.monotonic()
         self._marcar_video(chat_id, video=True, remoto=True)
         if chat_id not in self._vigias:
@@ -883,7 +966,7 @@ class ChamadasTelegram:
     # --------------------------------------------- eventos do motor
     async def _ao_receber(self, _cliente, update):
         chat_id = update.chat_id
-        if self.chamadas:
+        if self.chamadas or _chat_de_voz_em_uso(self):
             # ja ha uma chamada: recusa a nova sem incomodar
             log.info("chamada recebida enquanto outra está aberta: recusada")
             try:
@@ -906,6 +989,9 @@ class ChamadasTelegram:
 
     async def _ao_sair(self, _cliente, update):
         chat_id = update.chat_id
+        grupo = getattr(self, "grupo", None)
+        if grupo is not None and await grupo.ao_sair(update):
+            return
         c = self.chamadas.get(chat_id)
         if c is None:
             return

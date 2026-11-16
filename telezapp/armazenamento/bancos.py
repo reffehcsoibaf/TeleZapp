@@ -62,10 +62,16 @@ class Bancos:
         return [(i, self._de(i)) for i in self._conhecidas()]
 
     def _conhecidas(self):
-        """As contas conhecidas: as da configuracao e as com banco aberto."""
+        """As contas conhecidas: as da configuracao e as com banco aberto.
+        Sem separacao o banco e um so (chave None) e ele traz todas as
+        contas: e a unica 'conta' a percorrer, senao as passadas por conta
+        repetiriam as linhas e misturar None com texto quebrava o sorted
+        (relato de 16/11: Mencionar pessoas, agenda, enviar contatos)."""
+        if not config.contas_separadas():
+            return [None]
         with self._trava:
             ids = {c["id"] for c in self.cfg.contas() if c.get("id")}
-            ids.update(self._bancos)
+            ids.update(i for i in self._bancos if i is not None)
         return sorted(ids)
 
     def fechar(self, conta_id=None):
@@ -310,12 +316,17 @@ class Bancos:
                          incluir_trancadas=False, limite_de_linhas=200000):
         """A mesma busca, conta por conta, com o resultado junto na ordem
         certa (a ordem SQL de cada banco)."""
-        chaves = set(self._conhecidas()) & (
-            {str(c) for c in contas} if contas else set(self._conhecidas()))
+        if not config.contas_separadas():
+            alvos = [(None, tuple(str(c) for c in contas))]
+        else:
+            chaves = set(self._conhecidas()) & (
+                {str(c) for c in contas} if contas
+                else set(self._conhecidas()))
+            alvos = [(c, (c,) if contas else ()) for c in sorted(chaves)]
         achadas = []
-        for conta_id in sorted(chaves):
+        for conta_id, filtro in alvos:
             achadas.extend(self._de(conta_id).buscar_mensagens(
-                (conta_id,) if contas else (), servicos, tipos_de_conversa,
+                filtro, servicos, tipos_de_conversa,
                 situacoes, minha, data_de, data_ate, segundos_min,
                 segundos_max, tamanho_min, tamanho_max, estados,
                 mais_antigas_primeiro, agora, incluir_trancadas,

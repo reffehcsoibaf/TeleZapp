@@ -34,6 +34,13 @@ from telezapp.nucleo import eventos as ev
 
 log = logging.getLogger("telezapp.chamadas")
 
+# O WhatsApp nao deixa ligar para grupos com mais gente que isso
+LIMITE_DO_GRUPO = 32
+# Quanto esperar o convite de um grupo (evento "offer") depois do "incoming"
+ESPERA_DA_OFERTA_S = 2.0
+# Quanto tempo um convite de chamada em grupo continua valendo para entrar
+VALIDADE_DA_OFERTA_S = 3600
+
 BYTES_POR_QUADRO = 1920          # 960 amostras de 16 bits (60 ms a 16 kHz)
 TAXA = 16000
 AMOSTRAS = 960
@@ -116,6 +123,7 @@ class Ponte:
         g.CallWriteAudio.argtypes = [c.c_char_p, c.c_char_p, c.c_char_p,
                                      c.c_int]
         g.CallWriteAudio.restype = c.c_int
+        self._preparar_grupo()
         self._buf_ev = ctypes.create_string_buffer(4096)
         self._buf_audio = ctypes.create_string_buffer(BYTES_POR_QUADRO)
         if self.suporta_video():
@@ -131,6 +139,89 @@ class Ponte:
                                         c.c_int, c.c_int]
             g.CallReadVideo.restype = c.c_int
             self._buf_video = ctypes.create_string_buffer(BYTES_DO_VIDEO)
+
+    def _preparar_grupo(self):
+        """As funcoes de chamada em grupo, so se a DLL as tem."""
+        g, c = self.go, ctypes
+        if hasattr(g, "CallGroupDial"):
+            g.CallGroupDial.argtypes = [c.c_char_p, c.c_char_p, c.c_int,
+                                        c.c_char_p, c.c_int]
+            g.CallGroupDial.restype = c.c_int
+        if self.suporta_em_andamento():
+            g.CallLobby.argtypes = [c.c_char_p, c.c_char_p, c.c_char_p,
+                                    c.c_char_p, c.c_int]
+            g.CallLobby.restype = c.c_int
+            g.CallJoinOngoing.argtypes = [c.c_char_p, c.c_char_p, c.c_char_p,
+                                          c.c_int, c.c_char_p, c.c_int]
+            g.CallJoinOngoing.restype = c.c_int
+            g.CallRoster.argtypes = [c.c_char_p, c.c_char_p, c.c_char_p,
+                                     c.c_int]
+            g.CallRoster.restype = c.c_int
+        if hasattr(g, "CallAddParticipant"):
+            g.CallAddParticipant.argtypes = [c.c_char_p, c.c_char_p,
+                                             c.c_char_p, c.c_char_p, c.c_int]
+            g.CallAddParticipant.restype = c.c_int
+
+    def suporta_grupo(self):
+        return hasattr(self.go, "CallGroupDial")
+
+    def suporta_em_andamento(self):
+        return all(hasattr(self.go, n) for n in (
+            "CallLobby", "CallJoinOngoing", "CallRoster"))
+
+    def suporta_adicionar(self):
+        return hasattr(self.go, "CallAddParticipant")
+
+    def _json(self, funcao, *args, tamanho=16384):
+        """Chama uma funcao da DLL que escreve JSON e devolve o dict, ou
+        {"error": texto} se ela nao respondeu."""
+        buf = ctypes.create_string_buffer(tamanho)
+        n = funcao(self.uuid, *args, buf, tamanho)
+        if n <= 0:
+            return {"error": "A DLL não respondeu."}
+        try:
+            return json.loads(buf.value.decode("utf-8"))
+        except ValueError:
+            return {"error": "Resposta ilegível da DLL."}
+
+    def ligar_grupo(self, grupo, video=False):
+        """(id_da_chamada, erro): liga para todos os membros do grupo."""
+        r = self._json(self.go.CallGroupDial, grupo.encode(),
+                       1 if video else 0, tamanho=1024)
+        if "call" not in r:
+            return "", r.get("error", "erro desconhecido")
+        return r["call"], ""
+
+    def lobby(self, chamada, criador):
+        """Como esta uma chamada em grupo de que nao participamos:
+        {"call", "groupJid", "video", "participants"}, {"over": True} ou
+        {"error"}."""
+        return self._json(self.go.CallLobby, chamada.encode(),
+                          criador.encode())
+
+    def entrar(self, chamada, criador, video=False):
+        """(id_da_chamada, erro): entra numa chamada em grupo em andamento."""
+        r = self._json(self.go.CallJoinOngoing, chamada.encode(),
+                       criador.encode(), 1 if video else 0, tamanho=1024)
+        if "call" not in r:
+            return "", r.get("error", "erro desconhecido")
+        return r["call"], ""
+
+    def roster(self, chamada):
+        """Lista [{"jid", "pn", "state"}] de quem esta na chamada, ou None se
+        a DLL nao conhece a chamada."""
+        r = self._json(self.go.CallRoster, chamada.encode())
+        if "participants" not in r:
+            return None
+        return r["participants"]
+
+    def adicionar(self, chamada, alvo):
+        """Convida `alvo` (numero ou LID): "invited", "rang" ou "failed"."""
+        r = self._json(self.go.CallAddParticipant, chamada.encode(),
+                       alvo.encode(), tamanho=1024)
+        if r.get("rang"):
+            return "rang"
+        return "invited" if r.get("ok") else "failed"
 
     def ligada(self):
         return self.go.CallsEnabled(self.uuid) == 1
@@ -357,6 +448,14 @@ class ChamadasWhatsApp:
         self.video = midia_video        # trocavel nos testes
         self.som_pc = midia_som_pc      # trocavel nos testes
         self.ligacoes = {}              # id da conversa -> _Ligacao
+        # chamadas em grupo (recurso experimental): o provedor liga e le
+        # as caixas de Configuracoes, Recursos experimentais
+        self.grupo_ligado = lambda: False
+        self.andamento_ligado = lambda: False
+        self.adicionar_ligado = lambda: False
+        self.nome_de_jid = lambda jid, pn="": ""   # nome de um participante
+        self.membros_de = lambda cid: None         # [jid] do grupo, ou None
+        self._ofertas = {}              # call_id -> convite de chamada em grupo
         self._trava = threading.RLock()
         self._parar = threading.Event()
         self._thread = None
@@ -427,14 +526,26 @@ class ChamadasWhatsApp:
 
     # --------------------------------------------------------- estados
     def _publicar(self, c):
-        c.suporta_video = self.suporta_video
-        c.suporta_tela = self.suporta_video
+        # em grupo so ha voz: video e tela ficam de fora
+        c.suporta_video = self.suporta_video and not c.grupo
+        c.suporta_tela = self.suporta_video and not c.grupo
         c.suporta_som_pc = self.suporta_som_pc
+        c.suporta_adicionar = self._pode_convidar(c)
         self.barramento.publicar(ev.EstadoChamada(
             self.conta_id, str(c.conversa_id), c.estado, c.nome, c.entrante,
             c.motivo, c.erro, c.video, c.camera, c.video_remoto,
             c.suporta_video, c.tela, c.som_pc, c.suporta_tela,
-            c.suporta_som_pc))
+            c.suporta_som_pc, c.grupo, tuple(c.participantes),
+            c.suporta_adicionar))
+
+    def _pode_convidar(self, c):
+        """Da para convidar mais gente? So em chamada em andamento e com a
+        caixa dos Recursos experimentais marcada."""
+        try:
+            return bool(c.estado == ch.EM_CHAMADA and self.adicionar_ligado()
+                        and self.ponte.suporta_adicionar())
+        except Exception:
+            return False
 
     def _mudar(self, cid, estado, motivo="", erro=""):
         with self._trava:
@@ -477,9 +588,15 @@ class ChamadasWhatsApp:
 
     def _tratar(self, e):
         tipo, call_id = e.get("ev"), e.get("call", "")
-        if tipo == "incoming":
+        if tipo == "offer":
+            self._ao_convite_de_grupo(e)
+        elif tipo == "group":
+            cid, lig = self._achar(call_id)
+            if lig is not None:
+                self._atualizar_participantes(cid, lig)
+        elif tipo == "incoming":
             self._ao_receber(call_id, e.get("peer", ""),
-                             bool(e.get("video")))
+                             bool(e.get("video")), bool(e.get("group")))
         elif tipo == "video":
             cid, lig = self._achar(call_id)
             if lig is not None:
@@ -509,6 +626,7 @@ class ChamadasWhatsApp:
                 self._iniciar_audio(cid, lig)
                 self._iniciar_video(cid, lig)
         elif tipo == "end":
+            self._esquecer_convite(call_id)
             cid, lig = self._achar(call_id)
             if lig is not None:
                 self._ao_terminar(cid, lig, e.get("reason", ""))
@@ -573,11 +691,15 @@ class ChamadasWhatsApp:
         self.ligar(cid, lig.mic, lig.saida, video=lig.chamada.video,
                    camera=lig.camera_nome)
 
-    def _ao_receber(self, call_id, peer, video=False):
+    def _ao_receber(self, call_id, peer, video=False, grupo=False):
         # sem desligar: a chamada pode seguir em outro aparelho
         if self.oferta_velha is not None and self.oferta_velha(call_id):
             return
-        cid = self.conversa_do_peer(peer)
+        grupo = bool(grupo) and self.grupo_ligado()
+        cid = self._grupo_da_oferta(call_id) if grupo else ""
+        if not cid:
+            cid = self.conversa_do_peer(peer)
+            grupo = False          # sem saber o grupo, toca como antes
         with self._trava:
             ocupado = bool(self.ligacoes)
         if ocupado or not cid:
@@ -590,7 +712,7 @@ class ChamadasWhatsApp:
             nome = ""
         self.atualizar_dispositivos()
         c = ch.Chamada(self.conta_id, cid, nome, True, ch.TOCANDO,
-                       video=bool(video))
+                       video=bool(video) and not grupo, grupo=grupo)
         with self._trava:
             self.ligacoes[cid] = _Ligacao(c, call_id)
         self._publicar(c)
@@ -617,6 +739,9 @@ class ChamadasWhatsApp:
     def ligar(self, cid, microfone="", saida="", video=False, camera=None):
         """`video`: chamada de video; `camera`: o nome da camera (vazio = a
         primeira) ou None para comecar com ela desligada."""
+        grupo = cid.endswith("@g.us")
+        if grupo and not self._pode_ligar_para_grupo(cid):
+            return
         with self._trava:
             if self.ligacoes:
                 log.info("já existe uma chamada; ligar ignorado")
@@ -625,9 +750,9 @@ class ChamadasWhatsApp:
                 nome = self.nome_de(cid)
             except Exception:
                 nome = ""
-            video = bool(video) and self.suporta_video
+            video = bool(video) and self.suporta_video and not grupo
             c = ch.Chamada(self.conta_id, cid, nome, False, ch.CHAMANDO,
-                           video=video)
+                           video=video, grupo=grupo)
             lig = _Ligacao(c)
             lig.mic, lig.saida = microfone, saida
             lig.camera_nome = camera if video else None
@@ -637,9 +762,33 @@ class ChamadasWhatsApp:
         threading.Thread(target=self._discar, args=(cid, lig),
                          name="chamada-discar", daemon=True).start()
 
+    def _avisar(self, texto):
+        self.barramento.publicar(ev.Aviso(self.conta_id, texto, False))
+
+    def _pode_ligar_para_grupo(self, cid):
+        """Confere o que a chamada em grupo exige; avisa e devolve False se
+        nao da."""
+        if not (self.grupo_ligado() and self.ponte.suporta_grupo()):
+            self._avisar("Chamadas em grupo não estão disponíveis. Marque a "
+                         "caixa em Configurações, Recursos experimentais.")
+            return False
+        try:
+            membros = self.membros_de(cid)
+        except Exception:
+            membros = None
+        if membros is not None and len(membros) > LIMITE_DO_GRUPO:
+            self._avisar("O WhatsApp não deixa ligar para grupos com mais "
+                         "de %d participantes." % LIMITE_DO_GRUPO)
+            return False
+        return True
+
     def _discar(self, cid, lig):
-        call_id, _peer, erro = self.ponte.ligar(self.destino_de(cid),
-                                                lig.chamada.video)
+        if lig.chamada.grupo:
+            call_id, erro = self.ponte.ligar_grupo(cid, False)
+            _peer = ""
+        else:
+            call_id, _peer, erro = self.ponte.ligar(self.destino_de(cid),
+                                                    lig.chamada.video)
         if erro:
             log.warning("não foi possível ligar: %s", erro)
             self._mudar(cid, ch.ENCERRADA, ch.FALHA,
@@ -665,6 +814,168 @@ class ChamadasWhatsApp:
                 self.ponte.desligar(lig.call_id)
         threading.Thread(target=vigia, name="chamada-vigia",
                          daemon=True).start()
+
+    # ------------------------------------------- chamada em grupo
+    def _ao_convite_de_grupo(self, e):
+        """Chegou o convite de uma chamada em grupo (tocando ou nao): guarda
+        para poder entrar nela enquanto durar."""
+        if not self.grupo_ligado():
+            return
+        call_id, grupo = e.get("call", ""), e.get("group", "")
+        if not call_id or not grupo:
+            return
+        agora = time.monotonic()
+        with self._trava:
+            self._ofertas = {k: v for k, v in self._ofertas.items()
+                             if agora - v["quando"] < VALIDADE_DA_OFERTA_S}
+            self._ofertas[call_id] = {
+                "grupo": grupo, "criador": e.get("creator", ""),
+                "video": bool(e.get("video")), "quando": agora}
+        try:
+            cid = self.conversa_do_peer(grupo)
+        except Exception:
+            cid = ""
+        if cid and self.andamento_ligado():
+            self.barramento.publicar(ev.ChamadaEmAndamento(
+                self.conta_id, cid, call_id, e.get("creator", ""),
+                bool(e.get("video")), True))
+
+    def _esquecer_convite(self, call_id):
+        with self._trava:
+            oferta = self._ofertas.pop(call_id, None)
+        if oferta is None or not self.andamento_ligado():
+            return
+        try:
+            cid = self.conversa_do_peer(oferta["grupo"])
+        except Exception:
+            return
+        self.barramento.publicar(ev.ChamadaEmAndamento(
+            self.conta_id, cid, call_id, oferta["criador"], oferta["video"],
+            False))
+
+    def _grupo_da_oferta(self, call_id):
+        """O id da conversa do grupo de uma chamada que esta tocando. O
+        convite pode chegar um instante depois do aviso de chamada."""
+        fim = time.monotonic() + ESPERA_DA_OFERTA_S
+        while True:
+            with self._trava:
+                oferta = self._ofertas.get(call_id)
+            if oferta is not None:
+                try:
+                    return self.conversa_do_peer(oferta["grupo"])
+                except Exception:
+                    return ""
+            if time.monotonic() >= fim:
+                return ""
+            time.sleep(0.05)
+
+    def _atualizar_participantes(self, cid, lig):
+        """Le a lista de quem esta na chamada em grupo e avisa a janela."""
+        if not lig.call_id:
+            return
+        try:
+            lista = self.ponte.roster(lig.call_id)
+        except Exception:
+            log.exception("erro ao ler os participantes da chamada")
+            return
+        if lista is None:
+            return
+        novos = []
+        for p in lista:
+            jid = p.get("pn") or p.get("jid", "")
+            try:
+                nome = self.nome_de_jid(p.get("jid", ""), p.get("pn", ""))
+            except Exception:
+                nome = ""
+            novos.append((jid, nome, p.get("state", "")))
+        novos.sort(key=lambda x: (x[2] != ch.CONECTADO,
+                                  (x[1] or "").casefold()))
+        with self._trava:
+            c = lig.chamada
+            mudou = not c.grupo or c.participantes != novos
+            c.grupo = True
+            c.participantes = novos
+        if mudou:
+            self._publicar(c)
+
+    def adicionar(self, cid, alvos):
+        """Convida gente para a chamada em andamento. `alvos`: [(jid, nome)].
+        Avisa o resultado de cada um."""
+        with self._trava:
+            lig = self.ligacoes.get(cid)
+        if lig is None or lig.chamada.estado != ch.EM_CHAMADA or \
+                not lig.call_id:
+            self._avisar("Só dá para convidar com a chamada em andamento.")
+            return
+        if not (self.adicionar_ligado() and self.ponte.suporta_adicionar()):
+            self._avisar("Convidar para a chamada não está disponível.")
+            return
+
+        def trabalho():
+            resultados = []
+            for jid, nome in list(alvos)[:LIMITE_DO_GRUPO - 1]:
+                try:
+                    estado = self.ponte.adicionar(lig.call_id, jid)
+                except Exception:
+                    log.exception("erro ao convidar para a chamada")
+                    estado = "failed"
+                resultados.append((nome, estado))
+            self.barramento.publicar(ev.ResultadoDeConvites(
+                self.conta_id, cid, tuple(resultados)))
+            self._atualizar_participantes(cid, lig)
+        threading.Thread(target=trabalho, name="chamada-convidar",
+                         daemon=True).start()
+
+    def entrar_em_andamento(self, cid, call_id, microfone="", saida=""):
+        """Entra na chamada em grupo `call_id` que ja esta acontecendo no
+        grupo `cid` (o convite chegou antes e continua valendo)."""
+        with self._trava:
+            oferta = self._ofertas.get(call_id)
+            ocupado = bool(self.ligacoes)
+        if ocupado:
+            self._avisar("Já há uma chamada em andamento.")
+            return
+        if oferta is None or not (self.andamento_ligado()
+                                  and self.ponte.suporta_em_andamento()):
+            self._avisar("Não achei essa chamada em andamento.")
+            return
+        threading.Thread(target=self._entrar,
+                         args=(cid, call_id, oferta, microfone, saida),
+                         name="chamada-entrar", daemon=True).start()
+
+    def _entrar(self, cid, call_id, oferta, microfone="", saida=""):
+        r = self.ponte.lobby(call_id, oferta["criador"])
+        if r.get("over"):
+            self._avisar("Essa chamada em grupo já terminou.")
+            self._esquecer_convite(call_id)
+            return
+        if "error" in r:
+            self._avisar("Não consegui saber como está a chamada em grupo.")
+            return
+        with self._trava:
+            if self.ligacoes:
+                return
+            try:
+                nome = self.nome_de(cid)
+            except Exception:
+                nome = ""
+            c = ch.Chamada(self.conta_id, cid, nome, False, ch.CONECTANDO,
+                           grupo=True)
+            lig = _Ligacao(c)
+            lig.mic, lig.saida = microfone, saida
+            self.ligacoes[cid] = lig
+        self.atualizar_dispositivos()
+        self._publicar(c)
+        nova, erro = self.ponte.entrar(call_id, oferta["criador"],
+                                       bool(r.get("video")))
+        if erro:
+            log.warning("não consegui entrar na chamada em grupo: %s", erro)
+            self._mudar(cid, ch.ENCERRADA, ch.FALHA,
+                        "Não consegui entrar na chamada em grupo.")
+            return
+        with self._trava:
+            lig.call_id = nova
+        self._ao_conectar(cid, lig)
 
     # ----------------------------------------------------- controles
     def atender(self, cid, microfone="", saida="", camera=None):
@@ -723,7 +1034,8 @@ class ChamadasWhatsApp:
     def _iniciar_video(self, cid, lig):
         """Chamada de video que conectou: comeca a ler o video do outro lado
         e, se a camera foi pedida, a ligar."""
-        if not lig.chamada.video or not self.suporta_video:
+        if not lig.chamada.video or not self.suporta_video or \
+                lig.chamada.grupo:
             return
         self._receber_video_em_segundo_plano(cid, lig)
         if lig.camera_nome is not None:

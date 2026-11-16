@@ -74,8 +74,13 @@ class DialogoChamada(wx.Dialog):
                                   "Compartilhar o so&m do computador")
         # esconde a janela sem encerrar a chamada (Ctrl+Shift+O traz de volta)
         self.b_ocultar = wx.Button(self, wx.ID_ANY, "&Ocultar a janela")
+        self.b_adicionar = wx.Button(self, wx.ID_ANY,
+                                     "Adicionar &participantes")
+        self.rot_lista = wx.StaticText(self, label="Pessoas na chamada:")
+        self.lista = wx.ListBox(self, name="Pessoas na chamada")
         self.botoes = {
             ch.ATENDER: self.b_atender, ch.SILENCIAR: self.b_silenciar,
+            ch.ADICIONAR: self.b_adicionar,
             ch.CAMERA: self.b_camera, ch.TELA: self.b_tela,
             ch.SOM_PC: self.b_som_pc,
             ch.TEMPO: self.b_tempo, ch.RECUSAR: self.b_recusar,
@@ -130,6 +135,9 @@ class DialogoChamada(wx.Dialog):
         lay = wx.BoxSizer(wx.VERTICAL)
         lay.Add(self.situacao, 0, wx.ALL, 12)
         self.lay = lay
+        lay.Add(self.rot_lista, 0, wx.LEFT | wx.RIGHT | wx.TOP, 12)
+        lay.Add(self.lista, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND,
+                12)
         linha = wx.BoxSizer(wx.HORIZONTAL)
         for b in list(self.botoes.values()) + [self.b_ocultar]:
             linha.Add(b, 0, wx.RIGHT, 6)
@@ -162,6 +170,9 @@ class DialogoChamada(wx.Dialog):
         self.b_recusar.Bind(wx.EVT_BUTTON, lambda e: acoes["recusar"]())
         self.b_desligar.Bind(wx.EVT_BUTTON, lambda e: acoes["desligar"]())
         self.b_silenciar.Bind(wx.EVT_BUTTON, self._silenciar)
+        self.b_adicionar.Bind(
+            wx.EVT_BUTTON,
+            lambda e: acoes["adicionar"]() if "adicionar" in acoes else None)
         self.b_tempo.Bind(wx.EVT_BUTTON, lambda e: acoes["tempo"]())
         self.b_fechar.Bind(wx.EVT_BUTTON, lambda e: self.fechar())
         self.b_ocultar.Bind(wx.EVT_BUTTON, lambda e: self.ocultar())
@@ -176,7 +187,8 @@ class DialogoChamada(wx.Dialog):
     def _controles_com_foco(self):
         """Tudo o que pode ter o foco dentro desta janela."""
         return (list(self.botoes.values())
-                + [self.b_ocultar, self.escolha_mic, self.escolha_saida,
+                + [self.b_ocultar, self.lista, self.escolha_mic,
+                   self.escolha_saida,
                    self.escolha_camera, self.escolha_tela, self.cx_tela_som,
                    self.escolha_saida_pc])
 
@@ -199,6 +211,17 @@ class DialogoChamada(wx.Dialog):
         self.b_camera.SetLabel(ch.rotulo_camera(c))
         self.b_tela.SetLabel(ch.rotulo_tela(c))
         self.b_som_pc.SetLabel(ch.rotulo_som_pc(c))
+        com_lista = bool(c.grupo and c.participantes)
+        self.rot_lista.Show(com_lista)
+        self.lista.Show(com_lista)
+        if com_lista:
+            textos = [ch.rotulo_participante(n, e)
+                      for _jid, n, e in c.participantes]
+            if textos != self.lista.GetStrings():
+                escolhido = self.lista.GetSelection()
+                self.lista.Set(textos)
+                self.lista.SetSelection(
+                    escolhido if 0 <= escolhido < len(textos) else 0)
         em_chamada = c.estado in (ch.CONECTANDO, ch.EM_CHAMADA)
         com_tela = c.suporta_tela and c.suporta_video and bool(self.telas) \
             and em_chamada

@@ -195,7 +195,7 @@ def texto_de_quem_reagiu(pessoas, maximo=3):
 
 
 def rotulo(c, valor=None, previa="", reacoes=0, quem_reagiu=(), autor="",
-           estado=""):
+           estado="", voz=""):
     """A linha da conversa na lista. Fixada e silenciada aparecem sempre,
     logo depois do servico (ou do nome, se o servico estiver de fora). Se os
     itens ativados nao tiverem nada para mostrar nesta conversa (sem nao
@@ -203,7 +203,8 @@ def rotulo(c, valor=None, previa="", reacoes=0, quem_reagiu=(), autor="",
     reacoes as mensagens minhas receberam desde que a conversa foi aberta
     pela ultima vez; quem_reagiu: [(quem, emoji)] dessas reacoes; autor: quem
     escreveu a ultima mensagem, em grupos; estado: o da ultima mensagem se ela e
-    minha (so vale com o trecho ativado)."""
+    minha (so vale com o trecho ativado); voz: "chat de voz em andamento" ou
+    "live em andamento" (Telegram, recurso experimental)."""
     partes = []
     itens = ativos(valor)
     for chave in itens:
@@ -218,7 +219,8 @@ def rotulo(c, valor=None, previa="", reacoes=0, quem_reagiu=(), autor="",
         if texto:
             partes.append((chave, texto))
     marcas = (["fixada"] if c.fixada else []) + (
-        ["silenciada"] if c.silenciada() else [])
+        ["silenciada"] if c.silenciada() else []) + (
+        [voz] if voz else [])
     if marcas:
         # depois do servico; sem ele, do nome; sem os dois, no comeco
         onde = {chave: k for k, (chave, _) in enumerate(partes)}

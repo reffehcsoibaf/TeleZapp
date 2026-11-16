@@ -32,9 +32,74 @@ FALHA = "falha"
 ATENDER, RECUSAR, DESLIGAR, SILENCIAR, TEMPO, FECHAR, CAMERA = (
     "atender", "recusar", "desligar", "silenciar", "tempo", "fechar",
     "camera")
+ADICIONAR = "adicionar"        # convidar mais gente (WhatsApp, experimental)
+
+# Estados de quem esta numa chamada em grupo (os do WhatsApp)
+CONECTADO, CONVIDADO, TOCANDO_PARA = "connected", "invited", "ringing"
 
 # Compartilhar a tela e o som do computador
 TELA, SOM_PC = "tela", "som_pc"
+
+
+def rotulo_participante(nome, estado):
+    """A linha da lista de quem esta na chamada em grupo."""
+    nome = nome or "Participante"
+    return "%s, %s" % (nome, {
+        CONECTADO: "na chamada", CONVIDADO: "convidado, ainda não entrou",
+        TOCANDO_PARA: "chamando"}.get(estado, "convidado"))
+
+
+def conectados(c):
+    """Quantos participantes da chamada em grupo estao conectados."""
+    return sum(1 for p in c.participantes if p[2] == CONECTADO)
+
+
+def texto_dos_participantes(c):
+    """"3 pessoas na chamada." (vazio fora de chamada em grupo)."""
+    if not c.grupo:
+        return ""
+    n = conectados(c)
+    return "%d %s na chamada." % (n, "pessoa" if n == 1 else "pessoas")
+
+
+# Passando disso, os avisos de quem entra e sai ficam calados
+AVISOS_ATE = 15
+
+
+def fala_da_lista(antes, depois):
+    """O que falar quando a lista de quem esta na chamada em grupo mudou:
+    quem entrou e quem saiu (so os conectados). Listas de (jid, nome,
+    estado); "" se nada a dizer."""
+    def conectados_de(lista):
+        return {jid: nome for jid, nome, estado in lista
+                if estado == CONECTADO}
+    antes, depois = conectados_de(antes), conectados_de(depois)
+    entraram = [depois[j] or "Alguém" for j in depois if j not in antes]
+    sairam = [antes[j] or "Alguém" for j in antes if j not in depois]
+    partes = []
+    if entraram:
+        partes.append("%s entrou na chamada." % ", ".join(entraram)
+                      if len(entraram) == 1 else
+                      "%s entraram na chamada." % ", ".join(entraram))
+    if sairam:
+        partes.append("%s saiu da chamada." % ", ".join(sairam)
+                      if len(sairam) == 1 else
+                      "%s saíram da chamada." % ", ".join(sairam))
+    return " ".join(partes)
+
+
+def fala_dos_convites(resultados):
+    """O que falar depois de convidar. `resultados`: [(nome, estado)]."""
+    ok = [n or "Participante" for n, e in resultados
+          if e in ("invited", "rang")]
+    falhou = [n or "Participante" for n, e in resultados if e == "failed"]
+    partes = []
+    if ok:
+        partes.append("%s %s." % (
+            "Convidei" if len(ok) == 1 else "Convidei", ", ".join(ok)))
+    if falhou:
+        partes.append("Não consegui convidar %s." % ", ".join(falhou))
+    return " ".join(partes) or "Não consegui convidar ninguém."
 
 
 def formatar_duracao(segundos):
@@ -80,6 +145,9 @@ class Chamada:
     som_pc: bool = False            # estamos compartilhando o som do computador
     suporta_tela: bool = False      # a conta sabe compartilhar a tela
     suporta_som_pc: bool = False    # a conta sabe mandar o som do computador
+    grupo: bool = False             # chamada em grupo (WhatsApp)
+    participantes: list = field(default_factory=list)  # (jid, nome, estado)
+    suporta_adicionar: bool = False  # da para convidar mais gente
     _agora: object = field(default=time.monotonic, repr=False)
 
     @property
@@ -251,7 +319,8 @@ def apresentar(c):
     """O que mostrar e falar para o estado atual da chamada `c`."""
     quem = _quem(c.nome)
     if c.estado == TOCANDO:
-        de = "Chamada de vídeo de %s" if c.video else "Chamada de %s"
+        de = "Chamada de vídeo de %s" if c.video else (
+            "Chamada em grupo: %s" if c.grupo else "Chamada de %s")
         return Apresentacao(
             de % quem,
             ("%s está ligando para você por vídeo." if c.video
@@ -260,6 +329,12 @@ def apresentar(c):
             (ATENDER, RECUSAR), ATENDER, "toque")
     if c.estado == CHAMANDO:
         por_video = " por vídeo" if c.video else ""
+        if c.grupo:
+            return Apresentacao(
+                "Chamando o grupo %s" % quem,
+                "Chamando o grupo %s. Esperando entrarem." % quem,
+                "Chamando o grupo %s." % quem,
+                (DESLIGAR,), DESLIGAR, "chamando")
         return Apresentacao(
             "Chamando %s%s" % (quem, por_video),
             "Chamando %s%s. Esperando atender." % (quem, por_video),
@@ -278,6 +353,8 @@ def apresentar(c):
         if partilha:
             video += " " + partilha
         botoes = [SILENCIAR]
+        if c.suporta_adicionar:
+            botoes.append(ADICIONAR)
         if c.suporta_som_pc:
             botoes.append(SOM_PC)
         if c.suporta_tela and c.suporta_video:
@@ -285,6 +362,13 @@ def apresentar(c):
         if c.suporta_video:
             botoes.append(CAMERA)
         botoes = tuple(botoes + [TEMPO, DESLIGAR])
+        if c.grupo:
+            quantos = " " + texto_dos_participantes(c)
+            return Apresentacao(
+                "Em chamada em grupo: %s" % quem,
+                "Em chamada em grupo com %s.%s%s" % (quem, quantos, mudo),
+                "Conectado ao grupo %s.%s%s" % (quem, quantos, mudo),
+                botoes, DESLIGAR, "conectado")
         return Apresentacao(
             "Em chamada com %s" % quem,
             "Em chamada com %s.%s%s" % (quem, mudo, video),

@@ -521,7 +521,7 @@ Na janela do som do computador, a caixa "Gravar também o microfone" já vem mar
 Se a gravação sair quase em silêncio, o TeleZapp avisa antes de você enviar. Ela vai como mensagem de voz, em Ogg/Opus.
 
 # Chamadas de voz
-As chamadas são feitas em conversas com uma pessoa, não em grupos nem canais; nesses, o botão Iniciar chamada fica escondido. Use fones de ouvido, para a voz da outra pessoa não voltar pelo microfone.
+As chamadas são feitas em conversas com uma pessoa, não em grupos nem canais; nesses, o botão Iniciar chamada fica escondido. Para o chat de voz de grupos e as lives de canais do Telegram, veja a seção Chat de voz e lives (experimental), mais abaixo. Use fones de ouvido, para a voz da outra pessoa não voltar pelo microfone.
 
 Ligar: abra ou selecione uma conversa e use Chamadas, Ligar para esta conversa (Ctrl+Shift+L). O TeleZapp fala "Chamando" e o nome, toca um som grave de espera e abre a janela da chamada, com o foco em Desligar. Quando a pessoa atende, ouve-se um som de conectado e a fala diz "Conectado com" o nome. Se ela não atender, recusar ou estiver ocupada, o TeleZapp diz o que aconteceu e a janela fica com o botão Fechar.
 
@@ -530,6 +530,30 @@ Receber: o TeleZapp fala "Chamada de" e o nome, toca um som repetido e abre uma 
 Durante a chamada, a janela tem os botões Silenciar o microfone, que vira Ativar o microfone, Tempo de chamada, que fala há quanto tempo vocês falam, e Desligar, além das listas Microfone e Saída de som, que valem na hora.
 
 Esc não desliga uma chamada que já começou, para não encerrar sem querer: ele só lembra do botão Desligar.
+
+# Chamadas em grupo do WhatsApp (experimental)
+São recursos experimentais: ainda não sabemos se funcionam bem em todos os computadores e contas, e podem mudar ou sair do TeleZapp nas próximas versões se o desempenho não for satisfatório. Cada um tem a sua caixa, desligada, em Configurações, Recursos experimentais, e marcar qualquer uma abre um aviso que só fecha com OK.
+
+Chamadas em grupo do WhatsApp: nas conversas de grupo, o botão Iniciar chamada em grupo (e Ligar para esta conversa, no menu Chamadas) liga para todos os membros. O WhatsApp só deixa em grupos de até 32 participantes, e o TeleZapp avisa quando o grupo passa disso. A chamada é só de voz. Uma chamada em grupo que chega toca com o nome do grupo, e a janela da chamada mostra a lista Pessoas na chamada, com quem entrou e quem foi convidado e ainda não entrou; em grupos de até 15 pessoas, o TeleZapp fala quando alguém entra ou sai. Sem a caixa marcada, uma chamada em grupo que chega toca como antes.
+
+Entrar em chamadas em grupo que já começaram: quando chega o convite de uma chamada em grupo, mesmo que você não atenda, o TeleZapp guarda, e enquanto ela durar o botão da conversa do grupo vira Entrar na chamada em andamento. Só vale para chamadas cujo convite chegou com o TeleZapp aberto. Antes de entrar, ele confere com o WhatsApp se a chamada ainda existe.
+
+Adicionar participantes: com uma chamada em andamento, o botão Adicionar participantes (ou o item do menu Chamadas) abre uma lista para marcar quem convidar. Numa chamada em grupo, aparecem os membros do grupo que ainda não entraram; quem já foi chamado e não entrou é chamado de novo. Numa chamada individual, aparecem os seus contatos salvos, e a chamada passa a ter várias pessoas, como no WhatsApp. Depois, o TeleZapp diz quem foi convidado e quem não deu.
+
+# Chat de voz e lives do Telegram (experimental)
+É um recurso experimental: ainda não sabemos se funciona bem em todos os computadores e contas, e ele pode mudar ou sair do TeleZapp nas próximas versões se o desempenho não for satisfatório. Fica desligado até você marcar a caixa "Chat de voz de grupo e lives de canal do Telegram", em Configurações, Recursos experimentais. Ao marcar qualquer caixa dessa categoria, uma janela avisa que o recurso é experimental e só fecha com o botão OK.
+
+Com a caixa marcada, em um grupo ou canal do Telegram o botão Iniciar chamada vira Entrar no chat de voz. O mesmo vale pelo menu Chamadas, Entrar no chat de voz ou live desta conversa. Por padrão, o TeleZapp só entra em um chat de voz que já existe e, se não houver nenhum, avisa. Para criar um, veja a caixa Poder iniciar um chat de voz, mais abaixo.
+
+Você entra com o microfone silenciado. A janela tem a lista de Participantes, com o estado de cada um (silenciado, microfone aberto ou mão levantada), e os botões Abrir o microfone, Levantar a mão, Tempo no chat de voz, Sair do chat de voz e Ocultar a janela, além das listas Microfone e Saída de som. Se o administrador não liberou a sua fala, use Levantar a mão para pedir a vez. Em chats de voz pequenos (até 15 pessoas), o TeleZapp fala quando alguém entra, sai ou levanta a mão. Quem está falando aparece na lista com a palavra "falando", no topo, e o botão Quem está falando (ou o item do menu Chamadas) diz os nomes.
+
+Nas lives de canal você só ouve: não há microfone nem mão levantada. Esc esconde a janela com o chat de voz em andamento (Ctrl+Shift+O, Mostrar a janela oculta, traz de volta); para sair, use o botão Sair do chat de voz. Não dá para estar em uma chamada e em um chat de voz ao mesmo tempo.
+
+Quem fala no chat de voz pode mandar também a câmera, a tela e o som do computador, com os mesmos botões e escolhas da janela da chamada (Ligar a câmera, Compartilhar a tela, Compartilhar o som do computador). Nas lives de canal não há o que mandar: você só ouve. Se o administrador não liberou a sua fala, esses botões avisam e não fazem nada. Mandar a câmera ou a tela não abre o seu microfone: ele continua silenciado até você abri-lo.
+
+A caixa "Poder iniciar um chat de voz em grupos e canais do Telegram" (também desligada) liga, no menu Chamadas, o item Iniciar um chat de voz nesta conversa. Ele cria um chat de voz onde não há nenhum, o que avisa os membros do grupo ou canal; por isso o TeleZapp sempre pergunta antes, e só administradores conseguem. Se já houver um chat de voz, o item apenas entra nele.
+
+Duas outras caixas da mesma categoria, também desligadas: "Avisar chats de voz e lives que começam nas suas conversas" faz o TeleZapp falar o aviso quando um chat de voz ou uma live começa num grupo ou canal e põe "chat de voz em andamento" ou "live em andamento" na linha da conversa, na lista, enquanto durar (ao abrir o TeleZapp, a marca vale para o que já estava em andamento). "Mostrar o vídeo e a tela compartilhada dos chats de voz e lives" pede ao Telegram também a imagem e a mostra na janela do chat de voz; gasta mais do computador e da internet e vale na próxima vez que você entrar.
 
 Com a janela principal em foco, os mesmos comandos estão em Chamadas:
 Mostrar a janela da chamada: Ctrl+Shift+J.

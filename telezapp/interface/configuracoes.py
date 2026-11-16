@@ -19,7 +19,19 @@ from telezapp.acessibilidade.fala import bipe, tocar_tom_de_chamada
 from telezapp.nucleo import atalhos as nucleo_atalhos
 from telezapp.nucleo import pacotes_de_som
 from telezapp.nucleo.configuracoes import (CATEGORIA_BUSCA,
-                                           ModeloConfiguracoes)
+                                           ModeloConfiguracoes,
+                                           aviso_experimental)
+
+
+def avisar_experimental(dono, opcao):
+    """Marcou uma caixa dos recursos experimentais: uma janela so com OK diz
+    que e experimental. Nao e modal de verdade para o resto do programa: e a
+    janela de configuracoes, que ja e modal, que a abre."""
+    texto = aviso_experimental(opcao)
+    if texto is None:
+        return
+    wx.MessageBox(texto, "Recurso experimental", wx.OK | wx.ICON_WARNING,
+                  dono)
 
 
 class DialogoConfiguracoes(wx.Dialog):
@@ -1088,6 +1100,8 @@ class DialogoConfiguracoes(wx.Dialog):
 
     def _ao_marcar(self, opcao, valor):
         self.modelo.definir(opcao.chave, valor)
+        if valor:
+            avisar_experimental(self, opcao)
         if opcao.chave == "trancadas_exigir_codigo":
             self._mostrar_campos_codigo()
         self._sincronizar_atualizacoes()
@@ -1308,6 +1322,8 @@ class DialogoGrupoOpcoes(wx.Dialog):
 
     def _ao_marcar(self, opcao, caixa):
         self.pai.modelo.definir(opcao.chave, caixa.GetValue())
+        if caixa.GetValue():
+            avisar_experimental(self, opcao)
         if opcao.chave == "trancadas_exigir_codigo":
             self._mostrar_campos_codigo()
 
