@@ -187,6 +187,15 @@ class Provedor(ABC):
         """Silencia ou reativa o microfone durante a chamada."""
         raise NotImplementedError
 
+    # Segunda chamada com outra em andamento (recurso experimental): a
+    # pessoa recusa a nova ou encerra a atual para atender a nova.
+    def recusar_chamada_em_espera(self, conversa_id):
+        raise NotImplementedError
+
+    def aceitar_chamada_em_espera(self, conversa_id, microfone="", saida="",
+                                  camera=None):
+        raise NotImplementedError
+
     # Video nas chamadas: so o WhatsApp faz por enquanto.
     suporta_video = False
 

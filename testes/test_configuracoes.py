@@ -252,7 +252,8 @@ def test_interface_e_mensagens_reunem_as_categorias_antigas(mod):
     assert falado == {"falar_novas", "falar_novas_outras_conversas",
                       "falar_novas_fora_do_telezapp", "confirmar_envio",
                       "falar_reacoes", "falar_descricoes",
-                      "falar_quantas_no_filtro"}
+                      "falar_quantas_no_filtro",
+                      "falar_aviso_estado_celular"}
     assert "avisar_chamadas_whatsapp" not in {   # sem conta, nao aparece
         o.chave for o in mod.opcoes("Interface")}
     mod.cfg.salvar_conta({"id": "t1", "servico": "telegram"})

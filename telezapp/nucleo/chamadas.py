@@ -469,6 +469,21 @@ def texto_do_aviso(nome, video):
             "uma conversa." % (nome or "Alguém", _tipo(video)))
 
 
+def texto_da_espera(nome, video):
+    """O aviso de uma segunda chamada, com outra em andamento."""
+    return ("%s está ligando por %s enquanto você está em outra chamada. "
+            "Encerrar e aceitar desliga a chamada atual e atende esta; "
+            "Recusar mantém a atual." % (nome or "Alguém", _tipo(video)))
+
+
+def texto_do_fim_da_espera(nome, video, fase):
+    """O aviso atualizado quando a segunda chamada acaba antes da escolha."""
+    coisa = "A chamada de %s de %s" % (_tipo(video), nome or "Alguém")
+    if fase == "recusada":
+        return coisa + " foi recusada."
+    return coisa + " terminou sem ser atendida."
+
+
 def texto_do_fim(nome, video, fase, segundos=0):
     """O aviso atualizado quando a chamada acaba antes de a pessoa fechar a
     janela."""

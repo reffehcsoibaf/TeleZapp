@@ -9547,32 +9547,72 @@ def _contas_para_filtros():
                                  ("t1", "telegram", "Tel")])
 
 
-def test_formulario_do_filtro_sugere_o_nome_e_respeita_o_que_a_pessoa_escreve():
+def _condicoes_falsas(monkeypatch, jf, respostas):
+    """Troca a janela de Contem/Nao contem por uma que devolve, em ordem, as
+    marcas de `respostas` ([(contas, tipos)])."""
+    abertas = []
+
+    class CondicoesFalsa:
+        def __init__(self, pai, titulo, ajuda, contas, tipos, mc=(), mt=()):
+            self.titulo, self.contas, self.tipos = titulo, contas, tipos
+            self.entrada = (list(mc), list(mt))
+            abertas.append(self)
+
+        def ShowModal(self):
+            return wx_falso.ID_OK
+
+        def contas_marcadas(self):
+            return respostas[len(abertas) - 1][0]
+
+        def tipos_marcados(self):
+            return respostas[len(abertas) - 1][1]
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(jf, "DialogoCondicoes", CondicoesFalsa)
+    return abertas
+
+
+def test_formulario_do_filtro_sugere_o_nome_e_respeita_o_que_a_pessoa_escreve(
+        monkeypatch):
     from telezapp.interface import filtros as jf
+    abertas = _condicoes_falsas(monkeypatch, jf, [
+        (["whatsapp"], ["nao_lidas", "grupos", "arquivadas"]),
+        ([], ["silenciadas"])])
     d = jf.DialogoNovoFiltro(None, _contas_para_filtros(), [])
     assert d.nome.GetValue() == "Todas as conversas"       # nada marcado
-    d.lista_contas.Check(2)                               # WhatsApp
-    for i, (valor, _) in enumerate(d._tipos):
-        if valor in ("nao_lidas", "grupos", "arquivadas"):
-            d.lista_tipos.Check(i)
-    d._marcou(None)
+    assert "nada marcado" in d.resumo_contem.GetLabel()
+    d.abrir_contem()
+    assert abertas[0].titulo == "Contém"
     assert d.nome.GetValue() == "WhatsApp, Não lidas, Grupos, Arquivadas"
+    assert d.resumo_contem.GetLabel() == (
+        "Contém: WhatsApp, Não lidas, Grupos, Arquivadas")
+    d.abrir_nao_contem()
+    assert abertas[1].titulo == "Não contém"
+    assert "todas" not in [v for v, _ in abertas[1].tipos]  # nao serve p/ tirar
+    assert m_todas_fora(abertas[1].contas)
+    assert d.nome.GetValue() ==         "WhatsApp, Não lidas, Grupos, Arquivadas menos Silenciadas"
+    assert d.resumo_nao_contem.GetLabel() == "Não contém: Silenciadas"
     d.nome.SetValue("Meu zap")
     d._digitou(None)                                      # a pessoa escreveu
-    d.lista_tipos.Check(0)
-    d._marcou(None)
+    d._atualizar()
     assert d.nome.GetValue() == "Meu zap"                 # nao muda mais
     filtro = d.resultado()
     assert filtro["nome"] == "Meu zap"
     assert filtro["contas"] == ["whatsapp"]
+    assert filtro["nao_tipos"] == ["silenciadas"] and         "nao_contas" not in filtro
     assert "trancadas" not in dict(d._tipos)              # nao ha trancadas
-    assert set(filtro["tipos"]) == {"todas", "nao_lidas", "grupos",
-                                    "arquivadas"}
 
 
-def test_formulario_do_filtro_nao_salva_vazio_e_nao_repete_nome():
+def m_todas_fora(contas):
+    return "todas" not in [v for v, _ in contas]
+
+
+def test_formulario_do_filtro_nao_salva_vazio_nem_repetido_e_nao_repete_nome(
+        monkeypatch):
     from telezapp.interface import filtros as jf
     wx_falso.mensagens.clear()
+    _condicoes_falsas(monkeypatch, jf, [([], ["grupos"]), ([], ["grupos"])])
     d = jf.DialogoNovoFiltro(None, _contas_para_filtros(), [
         {"id": "f1", "nome": "Grupos", "contas": [], "tipos": ["grupos"]}])
 
@@ -9584,15 +9624,39 @@ def test_formulario_do_filtro_nao_salva_vazio_e_nao_repete_nome():
     e = Evt()
     d._salvar(e)                                          # nada marcado
     assert not e.pulou and "pelo menos um item" in wx_falso.mensagens[-1]
-    d.lista_tipos.Check(4)                                # Grupos
-    d._marcou(None)
+    d.abrir_contem()
+    d.abrir_nao_contem()                                  # o mesmo em ambos
+    e = Evt()
+    d._salvar(e)
+    assert not e.pulou and "mesmo item" in wx_falso.mensagens[-1]
+    d._nao_contem = ([], [])
+    d._atualizar()
     e = Evt()
     d._salvar(e)
     assert e.pulou
     assert d.resultado()["nome"] == "Grupos (2)"          # nome ja usado
 
 
-def test_janela_de_filtros_cria_renomeia_e_exclui(monkeypatch):
+def test_editar_filtro_comeca_com_o_que_ele_ja_tem_e_guarda_o_id(
+        monkeypatch):
+    from telezapp.interface import filtros as jf
+    abertas = _condicoes_falsas(monkeypatch, jf, [(["whatsapp"], ["grupos"])])
+    velho = {"id": "f1", "nome": "Meu filtro", "contas": ["telegram"],
+             "tipos": ["canais"], "nao_tipos": ["silenciadas"]}
+    d = jf.DialogoNovoFiltro(None, _contas_para_filtros(), [velho],
+                             filtro=velho)
+    assert d.GetTitle() == "Editar filtro"
+    assert d.nome.GetValue() == "Meu filtro"
+    assert d.resumo_nao_contem.GetLabel() == "Não contém: Silenciadas"
+    d.abrir_contem()
+    assert abertas[0].entrada == (["telegram"], ["canais"])   # ja marcado
+    f = d.resultado()
+    assert f["id"] == "f1" and f["nome"] == "Meu filtro"      # nao muda sozinho
+    assert f["contas"] == ["whatsapp"] and f["tipos"] == ["grupos"]
+    assert f["nao_tipos"] == ["silenciadas"]
+
+
+def test_janela_de_filtros_cria_edita_renomeia_e_exclui(monkeypatch):
     from telezapp.interface import filtros as jf
     guardado = [{"ativo": False, "lista": []}]
     dita = []
@@ -9624,6 +9688,15 @@ def test_janela_de_filtros_cria_renomeia_e_exclui(monkeypatch):
     assert d.novo_filtro() is True
     assert [f["nome"] for f in guardado[0]["lista"]] == ["Grupos"]
     assert d.lista.itens == ["Grupos"]
+    class EditorFalso(FormularioFalso):
+        def resultado(self):
+            return {"id": "f1", "nome": "Grupos 2", "contas": [],
+                    "tipos": ["grupos"], "nao_tipos": ["silenciadas"]}
+    monkeypatch.setattr(jf, "DialogoNovoFiltro", EditorFalso)
+    assert d.editar_filtro() is True
+    assert guardado[0]["lista"][0]["nao_tipos"] == ["silenciadas"]
+    assert guardado[0]["lista"][0]["nome"] == "Grupos 2"
+    assert "alterado" in dita[-1]
     wx_falso.texto_digitado[0] = "Só grupos"
     try:
         assert d.renomear_filtro() is True
@@ -10349,3 +10422,57 @@ def test_resultado_dos_convites_e_falado(j):
     j.b.publicar(ev.ResultadoDeConvites(
         "w1", GRUPO_WA, (("Bia", "invited"), ("Caio", "failed"))))
     assert ditas[-1] == "Convidei Bia. Não consegui convidar Caio."
+
+
+def test_segunda_chamada_avisa_e_atalhos_trocam_ou_recusam(j, monkeypatch):
+    sons = []
+    monkeypatch.setattr(jm, "bipe", lambda t, *a, **k: sons.append(t))
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    chamadas = []
+
+    class P:
+        suporta_video = False
+
+        def aceitar_chamada_em_espera(self, cid, mic, saida, camera=None):
+            chamadas.append(("aceitar", cid))
+
+        def recusar_chamada_em_espera(self, cid):
+            chamadas.append(("recusar", cid))
+    monkeypatch.setattr(j, "_provedor_de_chamada", lambda conta: P())
+    j.b.publicar(ev.ChamadaEmEspera("t1", "20", "Ana", False, "tocando"))
+    dlg = j.espera_de_chamada["dlg"]
+    assert sons[-1] == "toque"
+    assert "está ligando por voz enquanto você está em outra chamada" in \
+        ditas[-1]
+    assert "Encerrar" in dlg.aceitar.GetLabel() and \
+        "Recusar" in dlg.recusar.GetLabel()
+    # o atalho de recusar recusa so a nova; o de atender troca de chamada
+    j._ids_globais = {"recusar_global": 7}
+    j._ao_atalho_global(types.SimpleNamespace(GetId=lambda: 7))
+    assert chamadas == [("recusar", "20")]
+    j._ids_globais = {"atender_global": 8}
+    j._ao_atalho_global(types.SimpleNamespace(GetId=lambda: 8))
+    assert chamadas[-1] == ("aceitar", "20")
+    assert j.espera_de_chamada is None
+
+
+def test_segunda_chamada_que_acaba_atualiza_o_aviso(j, monkeypatch):
+    monkeypatch.setattr(jm, "bipe", lambda *a, **k: None)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.b.publicar(ev.ChamadaEmEspera("t1", "20", "Ana", False, "tocando"))
+    dlg = j.espera_de_chamada["dlg"]
+    j.b.publicar(ev.ChamadaEmEspera("t1", "20", "Ana", False, "perdida"))
+    assert j.espera_de_chamada is None
+    assert "sem ser atendida" in dlg.aviso.GetLabel()
+    assert "sem ser atendida" in ditas[-1]
+
+
+def test_segunda_chamada_que_vira_comum_fecha_o_aviso(j, monkeypatch):
+    monkeypatch.setattr(jm, "bipe", lambda *a, **k: None)
+    j.fala.falar = lambda *a, **k: None
+    j.b.publicar(ev.ChamadaEmEspera("t1", "20", "Ana", False, "tocando"))
+    assert j.espera_de_chamada is not None
+    j.b.publicar(ev.EstadoChamada("t1", "20", ch.TOCANDO, "Ana", True))
+    assert j.espera_de_chamada is None

@@ -5,9 +5,12 @@ o que as duas caixas da tela principal fazem separadas (serviço ou conta, e
 tipo de conversa).
 
 Um filtro e {"id", "nome", "contas": [valores do filtro de conta],
-"tipos": [valores do filtro de tipo]}. Dentro de cada lista, basta casar
-com um dos itens marcados (Individuais ou Grupos); entre as duas listas, as
-duas precisam casar (WhatsApp e Grupos). Lista vazia nao filtra. As
+"tipos": [valores do filtro de tipo], "nao_contas": [...], "nao_tipos":
+[...]}. Dentro de cada lista, basta casar com um dos itens marcados
+(Individuais ou Grupos); entre as duas listas, as duas precisam casar
+(WhatsApp e Grupos). Lista vazia nao filtra. As listas "nao_" dizem o que o
+filtro NAO mostra: a conversa que casa com qualquer item delas sai, mesmo
+casando com o resto (WhatsApp e Grupos, menos Silenciadas). As
 conversas trancadas nao entram em filtro nenhum: so aparecem do jeito de
 sempre, com o codigo secreto.
 
@@ -21,6 +24,8 @@ from telezapp.nucleo import modelos as m
 # Os tipos que um filtro personalizado pode usar (todos, menos as trancadas)
 TIPOS = tuple(t for t in m.FILTROS_TIPO if t[0] != "trancadas")
 _TIPOS_VALIDOS = {v for v, _ in TIPOS}
+# "Todas" nao serve para excluir: tiraria tudo
+_TIPOS_EXCLUIVEIS = _TIPOS_VALIDOS - {"todas"}
 
 
 def padrao():
@@ -50,10 +55,18 @@ def normalizar(valor):
         if not nome or not id_ or id_ in ids:
             continue
         ids.add(id_)
-        lista.append({"id": id_, "nome": nome,
-                      "contas": _lista_de_texto(f.get("contas")),
-                      "tipos": _lista_de_texto(f.get("tipos"),
-                                               _TIPOS_VALIDOS)})
+        filtro = {"id": id_, "nome": nome,
+                  "contas": _lista_de_texto(f.get("contas")),
+                  "tipos": _lista_de_texto(f.get("tipos"), _TIPOS_VALIDOS)}
+        # so entram quando ha algo: o filtro antigo continua igual
+        nao_contas = [c for c in _lista_de_texto(f.get("nao_contas"))
+                      if c != m.CONTA_TODAS]
+        nao_tipos = _lista_de_texto(f.get("nao_tipos"), _TIPOS_EXCLUIVEIS)
+        if nao_contas:
+            filtro["nao_contas"] = nao_contas
+        if nao_tipos:
+            filtro["nao_tipos"] = nao_tipos
+        lista.append(filtro)
     return {"ativo": bool(valor.get("ativo")), "lista": lista}
 
 
@@ -70,15 +83,32 @@ def passa(c, filtro, busca="", com_favoritas=()):
     contas = filtro.get("contas") or [m.CONTA_TODAS]
     tipos = ([t for t in filtro.get("tipos") or () if t != "trancadas"]
              or ["todas"])
-    return any(m.passa_filtro(c, t, v, busca, com_favoritas)
-               for v in contas for t in tipos)
+    if not any(m.passa_filtro(c, t, v, busca, com_favoritas)
+               for v in contas for t in tipos):
+        return False
+    return not _excluida(c, filtro, com_favoritas)
+
+
+def _excluida(c, filtro, com_favoritas=()):
+    """A conversa casa com algum item de "Nao mostrar"?"""
+    for v in filtro.get("nao_contas") or ():
+        if (v in m.SERVICOS and c.servico == v) or (
+                v.startswith("conta:") and c.conta_id == v[6:]):
+            return True
+    for t in filtro.get("nao_tipos") or ():
+        if t != "trancadas" and m.passa_filtro(
+                c, t, m.CONTA_TODAS, "", com_favoritas):
+            return True
+    return False
 
 
 def usa_favoritas(filtro):
-    return "favoritas" in (filtro.get("tipos") or ())
+    return "favoritas" in (tuple(filtro.get("tipos") or ())
+                           + tuple(filtro.get("nao_tipos") or ()))
 
 
-def nome_sugerido(contas, tipos, rotulos_de_conta):
+def nome_sugerido(contas, tipos, rotulos_de_conta, nao_contas=(),
+                  nao_tipos=()):
     """O nome que o TeleZapp sugere para o filtro, com os itens marcados:
     "WhatsApp, Não lidas, Grupos, Arquivadas". "Todas as contas" e "Todas
     as conversas" so aparecem quando nao ha outro item na lista."""
@@ -98,7 +128,12 @@ def nome_sugerido(contas, tipos, rotulos_de_conta):
         if todos_tipos:
             tipos = []
     partes = [r_conta[c] for c in contas] + [r_tipo[t] for t in tipos]
-    return ", ".join(partes) if partes else r_tipo["todas"]
+    nome = ", ".join(partes) if partes else r_tipo["todas"]
+    fora = ([r_conta[c] for c in nao_contas if c in r_conta]
+            + [r_tipo[t] for t in nao_tipos if t in r_tipo])
+    if fora:
+        nome += (" " if partes else ", ") + "menos " + ", ".join(fora)
+    return nome
 
 
 def nome_livre(nome, filtros, ignorar_id=""):

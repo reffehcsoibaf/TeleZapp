@@ -809,3 +809,112 @@ def test_telegram_sem_quadros_externos_nao_oferece_tela_nem_som():
         assert await s.chamadas.compartilhar_tela(10) is False
         assert await s.chamadas.compartilhar_som(10) is False
     rodar(cena())
+
+
+# ----------------------------------------- segunda chamada (experimental)
+def com_espera(monkeypatch, ligada=True):
+    class CfgFalsa:
+        def get(self, chave, padrao=None):
+            return ligada if chave == "chamada_em_espera" else True
+    monkeypatch.setattr(ct.config, "Config", CfgFalsa)
+
+
+def espera_de(s, fase=None):
+    return [e for e in s.eventos if isinstance(e, ev.ChamadaEmEspera)
+            and (fase is None or e.fase == fase)]
+
+
+def entrada(chat_id):
+    return MotorFalso.app.handlers[("chat_update", "entrada")](
+        None, types.SimpleNamespace(chat_id=chat_id))
+
+
+def test_telegram_segunda_chamada_com_a_opcao_ligada_avisa(monkeypatch):
+    com_espera(monkeypatch)
+    s = Sala()
+
+    async def cena():
+        await s.chamadas.iniciar()
+        await s.chamadas.ligar(10)
+        await entrada(20)
+    rodar(cena())
+    assert espera_de(s, "tocando")[0].conversa_id == "20"
+    assert ("leave", 20, None) not in MotorFalso.app.chamadas
+    assert list(s.chamadas.chamadas) == [10]
+
+
+def test_telegram_recusar_a_segunda_mantem_a_atual(monkeypatch):
+    com_espera(monkeypatch)
+    s = Sala()
+
+    async def cena():
+        await s.chamadas.iniciar()
+        await s.chamadas.ligar(10)
+        await entrada(20)
+        await s.chamadas.recusar_espera(20)
+    rodar(cena())
+    assert ("leave", 20, None) in MotorFalso.app.chamadas
+    assert espera_de(s, "recusada")
+    assert s.chamadas.chamadas[10].estado == ch.EM_CHAMADA
+
+
+def test_telegram_quem_ligou_desistiu(monkeypatch):
+    com_espera(monkeypatch)
+    s = Sala()
+
+    async def cena():
+        await s.chamadas.iniciar()
+        await s.chamadas.ligar(10)
+        await entrada(20)
+        await MotorFalso.app.handlers[("chat_update", "saiu")](
+            None, types.SimpleNamespace(chat_id=20))
+    rodar(cena())
+    assert espera_de(s, "perdida")
+    assert s.chamadas.chamadas[10].estado == ch.EM_CHAMADA
+
+
+def test_telegram_encerrar_e_aceitar_troca_de_chamada(monkeypatch):
+    com_espera(monkeypatch)
+    s = Sala()
+
+    async def cena():
+        await s.chamadas.iniciar()
+        await s.chamadas.ligar(10)
+        await entrada(20)
+        await s.chamadas.aceitar_espera(20, "", "")
+    rodar(cena())
+    assert ("leave", 10, None) in MotorFalso.app.chamadas
+    assert list(s.chamadas.chamadas) == [20]
+    assert s.chamadas.chamadas[20].estado == ch.EM_CHAMADA
+    estados = [(e.conversa_id, e.estado) for e in s.eventos
+               if isinstance(e, ev.EstadoChamada)]
+    assert ("10", ch.ENCERRADA) in estados
+    assert ("20", ch.TOCANDO) not in estados      # entrou atendendo
+
+
+def test_telegram_atual_acaba_e_a_segunda_passa_a_tocar(monkeypatch):
+    com_espera(monkeypatch)
+    s = Sala()
+
+    async def cena():
+        await s.chamadas.iniciar()
+        await s.chamadas.ligar(10)
+        await entrada(20)
+        await s.chamadas.encerrar(10)
+    rodar(cena())
+    assert s.chamadas.chamadas[20].estado == ch.TOCANDO
+    assert s.estados()[-1] == (ch.TOCANDO, "")
+
+
+def test_telegram_segunda_chamada_com_a_opcao_desligada_segue_recusada(
+        monkeypatch):
+    com_espera(monkeypatch, ligada=False)
+    s = Sala()
+
+    async def cena():
+        await s.chamadas.iniciar()
+        await s.chamadas.ligar(10)
+        await entrada(20)
+    rodar(cena())
+    assert ("leave", 20, None) in MotorFalso.app.chamadas
+    assert not espera_de(s)

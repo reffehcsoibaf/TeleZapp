@@ -99,6 +99,48 @@ def test_erro_do_recebedor_e_da_rede_viram_frase():
     def sem_rede(pedido, tempo):
         raise urllib.error.URLError("sem rede")
     with pytest.raises(rl.ErroRelato, match="Muitos envios"):
-        rl.enviar("problema", "", "a@b", "x", "", False, abrir=recusa)
+        rl.enviar("duvida", "", "a@b", "x", "", False, abrir=recusa)
     with pytest.raises(rl.ErroRelato, match="internet"):
-        rl.enviar("problema", "", "a@b", "x", "", False, abrir=sem_rede)
+        rl.enviar("duvida", "", "a@b", "x", "", False, abrir=sem_rede)
+
+
+def test_relato_de_problema_exige_os_logs(tmp_path):
+    assert rl.logs_obrigatorios("problema")
+    assert not rl.logs_obrigatorios("sugestao")
+    assert not rl.logs_obrigatorios("duvida")
+    with pytest.raises(rl.ErroRelato, match="obrigat"):
+        rl.enviar("problema", "", "a@b", "descrevi tudo", "", False,
+                  abrir=None, pasta_logs=str(tmp_path))
+    # com descricao, mas sem nenhum arquivo de log: tambem nao sai
+    with pytest.raises(rl.ErroRelato, match="Não achei logs"):
+        rl.enviar("problema", "", "a@b", "descrevi tudo", "", True,
+                  abrir=None, pasta_logs=str(tmp_path))
+
+
+def test_janela_desliga_o_envio_sem_logs_para_relato_de_problema(monkeypatch):
+    import sys
+    from testes import wx_falso
+    monkeypatch.setitem(sys.modules, "wx", wx_falso)
+    sys.modules.pop("telezapp.interface.relato", None)
+    from telezapp.interface import relato as ir
+    falas = []
+    dlg = ir.DialogoRelato(None, falar=falas.append)
+    # abre em "Relatar um problema": so com os logs
+    assert dlg.sem_logs.IsEnabled() is False
+    assert dlg.com_logs.IsEnabled() is not False
+    assert ir.LOGS_OBRIGATORIOS in dlg.sobre.GetValue()
+    dlg.tipo.SetSelection(1)                      # Sugerir algo
+    dlg._ao_trocar_tipo(True)
+    assert dlg.sem_logs.IsEnabled() is True
+    assert ir.LOGS_OBRIGATORIOS not in dlg.sobre.GetValue()
+    dlg.tipo.SetSelection(0)
+    dlg._ao_trocar_tipo(True)
+    assert falas[-1] == ir.LOGS_OBRIGATORIOS
+    # o atalho do botao desligado nao enviar nada
+    dlg.contato.SetValue("@fulano")
+    dlg.descricao.SetValue("deu erro")
+    avisos = []
+    dlg._avisar = lambda t, i: avisos.append(t)
+    dlg._enviar(False)
+    assert avisos == [ir.LOGS_OBRIGATORIOS] and not dlg._enviando
+    sys.modules.pop("telezapp.interface.relato", None)

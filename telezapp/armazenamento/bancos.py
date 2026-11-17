@@ -54,6 +54,21 @@ class Bancos:
                 self._bancos[chave] = b
             return b
 
+    def arquivos(self):
+        """[(rotulo, caminho)] dos arquivos de banco que existem, para a
+        conferencia de saude. Sem separacao, o banco unico; com separacao,
+        um por conta conhecida."""
+        if not config.contas_separadas():
+            return [("de conversas", os.path.join(
+                config.pasta_do_layout_antigo(), "telezapp.db"))]
+        saida = []
+        for conta_id in self._conhecidas():
+            arquivo = os.path.join(config.pasta_da_conta(conta_id),
+                                   NOME_ARQUIVO)
+            if os.path.isfile(arquivo):
+                saida.append(("da conta %s" % conta_id, arquivo))
+        return saida
+
     def _todas(self):
         """[(conta_id, banco)] para o que nao filtra por conta (listas de
         todas as contas). Sem separacao, uma passada so no banco unico."""

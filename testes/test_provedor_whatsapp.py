@@ -1694,6 +1694,41 @@ def test_arquivadas_seguem_o_celular(tmp_path):
     banco.fechar()
 
 
+def test_conversa_apagada_e_recriada_volta_com_o_silencio_do_celular(tmp_path):
+    """Apagar a conversa no celular (ou limpar, em alguns aparelhos) a tira
+    daqui; a proxima mensagem a recria sem silencio. A conferencia tem de ler
+    o silencio do celular de novo, mesmo ele nao tendo mudado."""
+    b = ev.Barramento()
+    banco = Banco(str(tmp_path / "s.db"))
+    p = wa.ProvedorWhatsApp(m.Conta("w1", "whatsapp"), b, banco,
+                            pasta_sessoes=str(tmp_path),
+                            fabrica_cliente=ClienteFalso)
+    cid = "5551@s.whatsapp.net"
+
+    class Armazem:
+        def get_chat_settings(self, alvo):
+            return N.LocalChatSettings(Found=True, Pinned=True,
+                                       MutedUntil=9_999_999_999)
+
+    p.cliente = types.SimpleNamespace(
+        chat_settings=Armazem(),
+        get_lid_from_pn=lambda j: (_ for _ in ()).throw(RuntimeError("n")))
+    p._conectada = True
+    conv = m.Conversa("w1", cid, "A", "whatsapp")
+    p._conversas = {cid: conv}
+    p._conferir_arquivadas()
+    assert conv.silenciada_ate == -1 and conv.fixada
+    p._ao_apagar_conversa(None, types.SimpleNamespace(
+        JID=jid("5551"), Timestamp=TS, FromFullSync=False))
+    assert cid not in p._conversas
+    # chegou mensagem nova: a conversa ja nasce com os ajustes do celular
+    nova = p._conversa(cid, jid("5551"), "A", False, TS)
+    assert nova.silenciada_ate == -1 and nova.fixada
+    p._conferir_arquivadas()
+    assert nova.silenciada_ate == -1 and nova.fixada
+    banco.fechar()
+
+
 def test_avisos_de_arquivar_e_trancar_do_celular(tmp_path):
     b = ev.Barramento()
     banco = Banco(str(tmp_path / "s.db"))

@@ -9,11 +9,13 @@ baixa ao receber ou so quando ela abrir.
 import logging
 import os
 import queue
+import sqlite3
 import threading
 import time
 
 from telezapp.midia import armazem
 from telezapp.nucleo import eventos as ev
+from telezapp.nucleo import saude_dados
 from telezapp.provedores.base import (CelularSemResposta, DownloadCancelado,
                                        ErroMidia)
 
@@ -92,7 +94,14 @@ class GerenteMidias:
     # ------------------------------------------------------------ consulta
     def caminho(self, msg):
         """Arquivo ja baixado da mensagem, ou None."""
-        reg = self.banco.midia(msg.conta_id, msg.conversa_id, msg.id)
+        try:
+            reg = self.banco.midia(msg.conta_id, msg.conversa_id, msg.id)
+        except sqlite3.DatabaseError as erro:
+            # banco danificado: a conversa tem de abrir mesmo assim, so
+            # sem saber das midias ja baixadas (a janela avisa uma vez)
+            if saude_dados.registrar_erro_do_banco(erro, "as mídias"):
+                return None
+            raise
         if reg is None:
             return None
         if os.path.isfile(reg[0]):
