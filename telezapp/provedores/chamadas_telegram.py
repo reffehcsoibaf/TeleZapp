@@ -238,6 +238,9 @@ class ChamadasTelegram:
         self._t_em_chamada = {}     # chat_id -> quando entrou em chamada
         self._lista_logada = None
         self.grupo = None       # ChatDeVozTelegram (experimental), se houver
+        # segunda chamada com outra em andamento (recurso experimental)
+        self._espera = {}       # chat_id -> (nome, video) da que esta tocando
+        self._trocando = False
 
     # ---------------------------------------------------------- inicio
     async def iniciar(self):
@@ -426,6 +429,7 @@ class ChamadasTelegram:
             vigia = self._vigias.pop(chat_id, None)
             if vigia is not None:
                 vigia.cancel()
+            self._promover_espera()
 
     def _nova(self, chat_id, nome, entrante, estado, video=False):
         c = ch.Chamada(self.conta_id, str(chat_id), nome, entrante, estado,
@@ -963,9 +967,71 @@ class ChamadasTelegram:
         except Exception:
             log.exception("erro ao trocar de dispositivo")
 
+    # ------------------------------------------ segunda chamada (experimental)
+    async def _receber_em_espera(self, chat_id):
+        """Chegou uma chamada com outra em andamento: guarda e avisa, sem
+        atender nem recusar. A pessoa escolhe recusar_espera ou
+        aceitar_espera."""
+        try:
+            nome = await self.nome_de(chat_id)
+        except Exception:
+            nome = ""
+        video = self._video_pedido.get(chat_id, False)
+        self._espera[chat_id] = (nome, video)
+        log.info("segunda chamada em espera: %s", chat_id)
+        self.barramento.publicar(ev.ChamadaEmEspera(
+            self.conta_id, str(chat_id), nome, video, "tocando"))
+
+    def _promover_espera(self):
+        """A chamada atual acabou e a outra ainda toca: passa a tocar como
+        uma chamada comum (a menos que estejamos trocando de chamada)."""
+        if self._trocando or self.chamadas or not self._espera:
+            return
+        chat_id, (nome, video) = next(iter(self._espera.items()))
+        self._espera.pop(chat_id)
+        self._nova(chat_id, nome, True, ch.TOCANDO, video=video)
+
+    async def recusar_espera(self, chat_id):
+        """Recusa a segunda chamada; a atual segue."""
+        espera = self._espera.pop(chat_id, None)
+        if espera is None:
+            return
+        try:
+            await self.app.leave_call(chat_id)
+        except Exception as e:
+            log.info("leave_call (espera): %r", e)
+        self.barramento.publicar(ev.ChamadaEmEspera(
+            self.conta_id, str(chat_id), espera[0], espera[1], "recusada"))
+
+    async def aceitar_espera(self, chat_id, microfone="", saida="",
+                             camera=None):
+        """Encerra a chamada atual e atende a segunda."""
+        espera = self._espera.get(chat_id)
+        if espera is None or not self.pronta:
+            return
+        self._trocando = True
+        try:
+            for outra in list(self.chamadas):
+                await self.encerrar(outra)
+            if self.chamadas:
+                self._avisar_falha("Não consegui encerrar a chamada atual. "
+                                   "A chamada em espera continua tocando.")
+                return
+            self._espera.pop(chat_id, None)
+            self.chamadas[chat_id] = ch.Chamada(
+                self.conta_id, str(chat_id), espera[0], True, ch.TOCANDO,
+                video=espera[1])
+        finally:
+            self._trocando = False
+        log.info("troca de chamada: atendendo a segunda (%s)", chat_id)
+        await self.atender(chat_id, microfone, saida, camera)
+
     # --------------------------------------------- eventos do motor
     async def _ao_receber(self, _cliente, update):
         chat_id = update.chat_id
+        if self.chamadas and not _chat_de_voz_em_uso(self) and                 not self._espera and chat_id not in self.chamadas and                 config.Config().get("chamada_em_espera"):
+            await self._receber_em_espera(chat_id)
+            return
         if self.chamadas or _chat_de_voz_em_uso(self):
             # ja ha uma chamada: recusa a nova sem incomodar
             log.info("chamada recebida enquanto outra está aberta: recusada")
@@ -991,6 +1057,13 @@ class ChamadasTelegram:
         chat_id = update.chat_id
         grupo = getattr(self, "grupo", None)
         if grupo is not None and await grupo.ao_sair(update):
+            return
+        if chat_id in self._espera and chat_id not in self.chamadas:
+            nome, video = self._espera.pop(chat_id)
+            log.info("a segunda chamada (%s) acabou antes de a atendermos",
+                     chat_id)
+            self.barramento.publicar(ev.ChamadaEmEspera(
+                self.conta_id, str(chat_id), nome, video, "perdida"))
             return
         c = self.chamadas.get(chat_id)
         if c is None:

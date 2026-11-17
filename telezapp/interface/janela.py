@@ -28,7 +28,7 @@ from telezapp.acessibilidade.fala import (Fala, intervalo_do_tom_de_chamada,
 from telezapp.interface import colagem, dialogos, robos, visualizadores
 from telezapp.interface import salvar as ui_salvar
 from telezapp.nucleo import agendamento as ag_nucleo
-from telezapp.nucleo import copia_oficial, localizacao, silenciados
+from telezapp.nucleo import copia_oficial, localizacao, saude_dados, silenciados
 from telezapp.nucleo import links_externos, links_recebidos, resumo_midias
 from telezapp.nucleo.links_externos import motivo_de_nao_achar
 from telezapp.interface import emojis as ui_emojis
@@ -539,6 +539,7 @@ class Janela(wx.Frame):
         self._ia_texto_ocupada = False     # redigir, resumir, corrigir
         self._ia_vagas = threading.Semaphore(2)    # pedidos automaticos
         self.avisos_de_chamada = {}   # (conta, chamada) -> janela de aviso
+        self.espera_de_chamada = None  # segunda chamada tocando (experimental)
         self._ultima_busca = None     # criterios da busca por criterios
         self._quadro_de_video_pendente = False
         self.presenca = None      # ev.Presenca (online / visto) da aberta
@@ -598,6 +599,7 @@ class Janela(wx.Frame):
         self._windows_ate = 0.0       # o Windows pediu para encerrar a sessao
         self._fora_do_alttab = False  # em segundo plano: so na barra de tarefas
         self._espera_de_versao = None   # temporizador da busca periodica
+        self._bancos_alertados = set()  # bancos ja avisados como danificados
         self._copia_conferida = None    # ver copia_oficial; None: ainda nao
         self._trava_da_copia = threading.Lock()
         self._versao_ja_avisada = ""    # nao repete a janela a cada consulta
@@ -1335,6 +1337,14 @@ class Janela(wx.Frame):
         if chave == "mostrar_janela":
             self._mostrar_da_bandeja()
             return
+        if self.espera_de_chamada is not None:
+            # segunda chamada tocando: atender troca de chamada e recusar
+            # recusa so a nova (nunca desliga a atual sem querer)
+            if chave == "atender_global":
+                self._aceitar_chamada_em_espera()
+            else:
+                self._recusar_chamada_em_espera()
+            return
         c = self.chamada
         if chave == "atender_global":
             if c is None or c.estado != ch.TOCANDO:
@@ -1890,6 +1900,10 @@ class Janela(wx.Frame):
         wx.CallLater(5000, self._conferir_agendadas)
         threading.Thread(target=self._conferir_copia_ao_abrir, daemon=True,
                          name="conferir-copia").start()
+        saude_dados.ao_falhar = lambda onde, detalhe: wx.CallAfter(
+            self._alertar_banco, "lendo " + onde, detalhe)
+        threading.Thread(target=self._conferir_dados_ao_abrir, daemon=True,
+                         name="conferir-dados").start()
         if self.cfg.get("verificar_atualizacoes"):
             wx.CallLater(8000, lambda: self._verificar_atualizacoes(False))
         self._agendar_busca_de_versao()
@@ -2259,6 +2273,7 @@ class Janela(wx.Frame):
             ev.PareamentoFalhou: self._ev_pareamento_falhou,
             ev.Presenca: self._ev_presenca,
             ev.ChamadaWhatsApp: self._ev_chamada_whatsapp,
+            ev.ChamadaEmEspera: self._ev_chamada_em_espera,
             ev.SincronizacaoConcluida: self._ev_sincronia,
             ev.ProgressoSincronia: self._ev_progresso_sincronia,
             ev.ProgressoMidia: self._ev_progresso_midia,
@@ -5052,7 +5067,90 @@ class Janela(wx.Frame):
         self.avisos_de_chamada.pop(chave, None)
         dlg.Destroy()
 
+    # ---------------------------------------- segunda chamada (experimental)
+    def _ev_chamada_em_espera(self, e):
+        """Uma segunda chamada chegou com outra em andamento: avisa e deixa
+        escolher entre Recusar e Encerrar e aceitar. Janela sem bloqueio."""
+        atual = self.espera_de_chamada
+        if e.fase == "tocando":
+            if atual is not None:
+                return
+            texto = ch.texto_da_espera(e.nome, e.video)
+            bipe("toque", servico=self._servico_da_conta(e.conta_id))
+            self.fala.falar(texto, interromper=True)
+            dlg = dialogos.DialogoChamadaEmEspera(
+                self, texto, self._aceitar_chamada_em_espera,
+                self._recusar_chamada_em_espera)
+            self.espera_de_chamada = {
+                "conta_id": e.conta_id, "conversa_id": e.conversa_id,
+                "nome": e.nome, "video": e.video, "dlg": dlg}
+            dlg.Bind(wx.EVT_CLOSE, lambda ev_, d=dlg:
+                     self._fechou_chamada_em_espera(d))
+            dlg.Show()
+            dlg.Raise()
+            self.RequestUserAttention()
+            return
+        if atual is None or (atual["conta_id"], atual["conversa_id"]) != \
+                (e.conta_id, e.conversa_id):
+            return
+        texto = ch.texto_do_fim_da_espera(e.nome, e.video, e.fase)
+        bipe("desligada", servico=self._servico_da_conta(e.conta_id))
+        self.fala.falar(texto, interromper=True)
+        atual["dlg"].atualizar(texto, acabou=True)
+        self.espera_de_chamada = None
+
+    def _fechou_chamada_em_espera(self, dlg):
+        """Fechar a janela nao decide nada: a chamada segue em espera e os
+        atalhos de atender e de recusar ainda valem. Se ja acabou, so
+        destroi."""
+        espera = self.espera_de_chamada
+        if espera is not None and espera["dlg"] is dlg:
+            self.fala.falar("A segunda chamada continua tocando. Atender "
+                            "troca de chamada; recusar a recusa.",
+                            interromper=True)
+            dlg.Hide()
+            return
+        dlg.Destroy()
+
+    def _limpar_chamada_em_espera(self):
+        """A segunda chamada virou uma chamada comum: some a janela."""
+        espera, self.espera_de_chamada = self.espera_de_chamada, None
+        if espera is not None:
+            espera["dlg"].Destroy()
+
+    @seguro
+    def _aceitar_chamada_em_espera(self):
+        espera = self.espera_de_chamada
+        p = self._provedor_de_chamada(espera["conta_id"]) if espera else None
+        if p is None:
+            return
+        mic, saida = self._dispositivos_da_chamada()
+        camera = None
+        if espera["video"] and getattr(p, "suporta_video", False):
+            self._registrar_destino_de_video(p)
+            if self.cfg.get("video_camera_ao_atender"):
+                camera = self.cfg.get("chamada_camera") or ""
+        self._limpar_chamada_em_espera()
+        self.fala.falar("Encerrando a chamada atual para atender %s." %
+                        (espera["nome"] or "a nova chamada"),
+                        interromper=True)
+        p.aceitar_chamada_em_espera(espera["conversa_id"], mic, saida,
+                                    camera)
+
+    @seguro
+    def _recusar_chamada_em_espera(self):
+        espera = self.espera_de_chamada
+        p = self._provedor_de_chamada(espera["conta_id"]) if espera else None
+        if p is None:
+            return
+        p.recusar_chamada_em_espera(espera["conversa_id"])
+
     def _ev_chamada(self, e):
+        espera = self.espera_de_chamada
+        if espera is not None and e.estado != ch.ENCERRADA and \
+                (e.conta_id, e.conversa_id) == (espera["conta_id"],
+                                                espera["conversa_id"]):
+            self._limpar_chamada_em_espera()
         c = self.chamada
         mesma = c is not None and c.ativa and \
             (c.conta_id, c.conversa_id) == (e.conta_id, e.conversa_id)
@@ -6020,7 +6118,8 @@ class Janela(wx.Frame):
 
     def _ev_aviso(self, e):
         self.SetStatusText(e.texto)
-        self.fala.falar(e.texto)
+        if getattr(e, "falar", True):
+            self.fala.falar(e.texto)
         if e.grave:
             wx.MessageBox(e.texto, NOME, wx.OK | wx.ICON_WARNING, self)
 
@@ -12485,6 +12584,48 @@ class Janela(wx.Frame):
         estado = self._estado_da_copia()
         if copia_oficial.nao_oficial(estado):
             wx.CallAfter(self._alertar_copia, estado)
+
+    def _conferir_dados_ao_abrir(self):
+        """Em segundo plano: o banco esta inteiro? Os dados estao em disco
+        que pode sumir? Avisa so quando ha o que fazer."""
+        try:
+            for onde, arquivo in getattr(self.banco, "arquivos", list)():
+                estado, detalhe, segundos = saude_dados.conferir_banco(arquivo)
+                log.info("conferência do banco %s: %s em %.1f s%s", onde,
+                         estado, segundos, " (%s)" % detalhe if detalhe
+                         else "")
+                if estado == "danificado":
+                    wx.CallAfter(self._alertar_banco, onde, detalhe)
+            if self.cfg.get("avisar_disco_externo"):
+                pasta = config.pasta_dados()
+                tipo = saude_dados.tipo_do_disco(pasta)
+                log.info("disco dos dados (%s): %s", pasta, tipo or
+                         "interno ou desconhecido")
+                if tipo:
+                    wx.CallAfter(self._alertar_disco, tipo, pasta)
+        except Exception:
+            log.exception("conferência dos dados")
+
+    @seguro
+    def _alertar_banco(self, onde, detalhe):
+        if self._ocupado_para_avisar():
+            wx.CallLater(30000, self._alertar_banco, onde, detalhe)
+            return
+        if onde in self._bancos_alertados:
+            return
+        self._bancos_alertados.add(onde)
+        bipe("erro")
+        wx.MessageBox(saude_dados.aviso_do_banco(onde, detalhe, NOME),
+                      "Banco de conversas com defeito", wx.OK | wx.ICON_ERROR,
+                      self)
+
+    @seguro
+    def _alertar_disco(self, tipo, pasta):
+        if self._ocupado_para_avisar():
+            wx.CallLater(30000, self._alertar_disco, tipo, pasta)
+            return
+        wx.MessageBox(saude_dados.aviso_do_disco(tipo, pasta, NOME),
+                      "Dados em disco externo", wx.OK | wx.ICON_WARNING, self)
 
     @seguro
     def _alertar_copia(self, estado):

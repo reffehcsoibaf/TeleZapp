@@ -1283,6 +1283,45 @@ class DialogoAvisoDeChamada(wx.Dialog):
         self.ao_conversar()
 
 
+class DialogoChamadaEmEspera(wx.Dialog):
+    """Chegou uma segunda chamada com outra em andamento (recurso
+    experimental): janela sem bloqueio com os botoes Encerrar e aceitar e
+    Recusar. O texto muda se a chamada acaba com a janela aberta."""
+
+    def __init__(self, pai, texto, ao_aceitar, ao_recusar):
+        super().__init__(pai, title="Segunda chamada")
+        lay = wx.BoxSizer(wx.VERTICAL)
+        self.aviso = wx.StaticText(self, label=texto)
+        self.aviso.Wrap(420)
+        lay.Add(self.aviso, 0, wx.ALL, 12)
+        linha = wx.BoxSizer(wx.HORIZONTAL)
+        self.aceitar = wx.Button(self, wx.ID_ANY, "&Encerrar e aceitar")
+        self.recusar = wx.Button(self, wx.ID_ANY, "&Recusar")
+        self.fechar = wx.Button(self, wx.ID_CANCEL, "&Fechar")
+        self.recusar.SetDefault()
+        linha.Add(self.aceitar, 0, wx.RIGHT, 8)
+        linha.Add(self.recusar, 0, wx.RIGHT, 8)
+        linha.Add(self.fechar, 0)
+        lay.Add(linha, 0, wx.ALL | wx.ALIGN_RIGHT, 12)
+        self.SetSizerAndFit(lay)
+        self.SetEscapeId(wx.ID_CANCEL)
+        self.aceitar.Bind(wx.EVT_BUTTON, lambda e: ao_aceitar())
+        self.recusar.Bind(wx.EVT_BUTTON, lambda e: ao_recusar())
+        self.fechar.Bind(wx.EVT_BUTTON, lambda e: self.Close())
+        self.CentreOnParent()
+        self.recusar.SetFocus()
+
+    def atualizar(self, texto, acabou=False):
+        """Muda o texto; se a chamada acabou, so resta Fechar."""
+        self.aviso.SetLabel(texto)
+        self.aviso.Wrap(420)
+        if acabou:
+            self.aceitar.Enable(False)
+            self.recusar.Enable(False)
+            self.fechar.SetFocus()
+        self.Fit()
+
+
 def confirmacao_desligada(chave, cfg=None):
     """A pessoa desligou esta pergunta em Configuracoes, Interface,
     Confirmacoes? (`cfg`: as configuracoes ja abertas; sem elas, le do

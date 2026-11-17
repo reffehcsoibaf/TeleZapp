@@ -1506,8 +1506,8 @@ class ProvedorWhatsApp(Provedor):
             self._threads.append(t)
             t.start()
 
-    def _avisar(self, texto, grave=False):
-        self.barramento.publicar(ev.Aviso(self.conta.id, texto, grave))
+    def _avisar(self, texto, grave=False, falar=True):
+        self.barramento.publicar(ev.Aviso(self.conta.id, texto, grave, falar))
 
     def _estado(self, estado, detalhe=""):
         log.info("estado: %s %s", estado, detalhe)
@@ -2076,7 +2076,9 @@ class ProvedorWhatsApp(Provedor):
                     "Para as mudanças do celular (favoritar, apagar, "
                     "silenciar, arquivar) voltarem a chegar, abra o WhatsApp "
                     "no celular e deixe-o aberto por um minuto; o TeleZapp "
-                    "tenta de novo a cada poucos minutos.", False)
+                    "tenta de novo a cada poucos minutos.", False,
+                    falar=bool(config.Config().get(
+                        "falar_aviso_estado_celular")))
                 self._tentar_de_novo(nome)
             return False
         finally:
@@ -3448,6 +3450,13 @@ class ProvedorWhatsApp(Provedor):
             cid = self._id_da_conversa(evento.JID)
             with self._trava:
                 self._conversas.pop(cid, None)
+                # a conversa volta com a proxima mensagem, sem silencio nem
+                # fixacao: esquecer o que o celular tinha dito faz a
+                # conferencia ler os ajustes de novo (senao "igual ao visto"
+                # e nada e devolvido)
+                self._arquivada_vista.pop(cid, None)
+                for campo in ("fixada", "silenciada_ate"):
+                    self._ajustes_vistos.pop((cid, campo), None)
             log.info("conversa apagada no celular")
             self.barramento.publicar(ev.ConversaApagadaNoCelular(
                 self.conta.id, cid, float(evento.Timestamp)))
@@ -3485,6 +3494,29 @@ class ProvedorWhatsApp(Provedor):
         except Exception:
             log.exception("erro ao tratar o aviso de limpar conversa")
 
+    def _ler_ajustes(self, conv):
+        """Poe na conversa a arquivada, a fixada e o silencio que o celular
+        tem; so conta o que mudou desde a ultima leitura (o que se muda aqui
+        nao e desfeito). True se algo mudou."""
+        dados = self._ajustes_no_celular(conv.id)
+        if dados is None:
+            return False
+        valor = bool(dados.Archived)
+        visto = self._arquivada_vista.get(conv.id)
+        self._arquivada_vista[conv.id] = valor
+        alterada = valor != visto and valor != conv.arquivada
+        if alterada:
+            conv.arquivada = valor
+        for campo, novo in (
+                ("fixada", bool(dados.Pinned)),
+                ("silenciada_ate", silencio_do_armazem(dados.MutedUntil))):
+            visto = self._ajustes_vistos.get((conv.id, campo))
+            self._ajustes_vistos[(conv.id, campo)] = novo
+            if novo != visto and novo != getattr(conv, campo):
+                setattr(conv, campo, novo)
+                alterada = True
+        return alterada
+
     def _conferir_arquivadas(self):
         """Poe em cada conversa a marca de arquivada que o celular tem. O
         celular manda isso como aviso de estado (nao ha evento no neonize),
@@ -3499,25 +3531,7 @@ class ProvedorWhatsApp(Provedor):
                      if c.id not in IGNORAR_CONVERSAS]
         mudou = []
         for conv in convs:
-            dados = self._ajustes_no_celular(conv.id)
-            if dados is None:
-                continue
-            valor = bool(dados.Archived)
-            visto = self._arquivada_vista.get(conv.id)
-            self._arquivada_vista[conv.id] = valor
-            alterada = valor != visto and valor != conv.arquivada
-            if alterada:
-                conv.arquivada = valor
-            for campo, novo in (
-                    ("fixada", bool(dados.Pinned)),
-                    ("silenciada_ate",
-                     silencio_do_armazem(dados.MutedUntil))):
-                visto = self._ajustes_vistos.get((conv.id, campo))
-                self._ajustes_vistos[(conv.id, campo)] = novo
-                if novo != visto and novo != getattr(conv, campo):
-                    setattr(conv, campo, novo)
-                    alterada = True
-            if alterada:
+            if self._ler_ajustes(conv):
                 mudou.append(conv)
         if mudou:
             log.info("arquivadas conferidas: %d conversas mudaram de lugar",
@@ -4249,6 +4263,7 @@ class ProvedorWhatsApp(Provedor):
 
     def _conversa(self, conversa_id, chat, pushname, grupo, data):
         canal = chat.Server == "newsletter"
+        criada = False
         with self._trava:
             conv = self._conversas.get(conversa_id)
             if conv is None:
@@ -4264,6 +4279,7 @@ class ProvedorWhatsApp(Provedor):
                                       "canal" if canal else "privada"),
                                   data=data)
                 self._conversas[conversa_id] = conv
+                criada = True
             elif not grupo and not canal and (
                     parece_codigo(conv.nome) or conv.nome == SEM_NOME or
                     conv.nome.startswith("+") or
@@ -4288,6 +4304,14 @@ class ProvedorWhatsApp(Provedor):
                 self._nomes_grupo_pedidos.add(conversa_id)
                 self._fila.put(lambda: self._buscar_nome_canal(conversa_id,
                                                                chat))
+        if criada and not canal and self._conectada:
+            # conversa recriada (por exemplo depois de apagada no celular):
+            # ja nasce com o silencio, a fixacao e o arquivamento do celular,
+            # sem esperar a conferencia periodica
+            try:
+                self._ler_ajustes(conv)
+            except Exception:
+                log.debug("ajustes da conversa nova nao lidos", exc_info=True)
         return conv
 
     def _buscar_nome_empresa(self, conversa_id, chat):
@@ -6474,6 +6498,7 @@ class ProvedorWhatsApp(Provedor):
         self._voz.grupo_ligado = caixa("chamada_grupo_whatsapp")
         self._voz.andamento_ligado = caixa("chamada_em_andamento_whatsapp")
         self._voz.adicionar_ligado = caixa("chamada_adicionar_whatsapp")
+        self._voz.espera_ligada = caixa("chamada_em_espera")
         self._voz.nome_de_jid = self._nome_na_chamada
         self._voz.membros_de = self._membros_do_grupo
 
@@ -6675,6 +6700,14 @@ class ProvedorWhatsApp(Provedor):
 
     def encerrar_chamada(self, conversa_id):
         self._comando_de_chamada("encerrar", conversa_id)
+
+    def recusar_chamada_em_espera(self, conversa_id):
+        self._comando_de_chamada("recusar_espera", conversa_id)
+
+    def aceitar_chamada_em_espera(self, conversa_id, microfone="", saida="",
+                                  camera=None):
+        self._comando_de_chamada("aceitar_espera", conversa_id, microfone,
+                                 saida, camera)
 
     def silenciar_chamada(self, conversa_id, silenciar):
         self._comando_de_chamada("silenciar", conversa_id, silenciar)

@@ -1263,3 +1263,100 @@ def test_ponte_lobby_roster_entrar_e_adicionar():
     assert p.entrar("G9", "1@lid") == ("G9", "")
     assert p.roster("G9") == [{"jid": "1@lid", "state": "connected"}]
     assert p.adicionar("G9", "2@lid") == "rang"
+
+
+# ----------------------------------------- segunda chamada (experimental)
+CID2 = "5552@s.whatsapp.net"
+
+
+def espera_ativa(v):
+    v.espera_ligada = lambda: True
+    v.conversa_do_peer = lambda peer: CID2 if peer == "2@lid" else CID
+
+
+def em_espera(bus, fase=None):
+    return [e for e in bus.eventos if isinstance(e, ev.ChamadaEmEspera)
+            and (fase is None or e.fase == fase)]
+
+
+def chamada_em_curso_e_segunda(v, ponte, bus):
+    espera_ativa(v)
+    chamada_recebida(ponte, bus)
+    v.atender(CID)
+    ponte.fila.put({"ev": "ready", "call": "R1"})
+    assert esperar(lambda: (ch.EM_CHAMADA, "") in bus.estados())
+    ponte.fila.put({"ev": "incoming", "call": "R2", "peer": "2@lid"})
+    assert esperar(lambda: em_espera(bus, "tocando"))
+
+
+def test_segunda_chamada_com_a_opcao_desligada_segue_recusada(mundo):
+    v, ponte, bus, _ = mundo
+    v.conversa_do_peer = lambda peer: CID2 if peer == "2@lid" else CID
+    chamada_recebida(ponte, bus)
+    ponte.fila.put({"ev": "incoming", "call": "R2", "peer": "2@lid"})
+    assert esperar(lambda: "R2" in ponte.desligadas)
+    assert not em_espera(bus)
+
+
+def test_segunda_chamada_com_a_opcao_ligada_avisa_e_nao_recusa(mundo):
+    v, ponte, bus, _ = mundo
+    chamada_em_curso_e_segunda(v, ponte, bus)
+    e = em_espera(bus, "tocando")[0]
+    assert (e.conversa_id, e.nome) == (CID2, "Ana")
+    assert "R2" not in ponte.desligadas and "R2" not in ponte.atendidas
+    # a atual continua: so uma chamada publicada como em curso
+    assert list(v.ligacoes) == [CID]
+
+
+def test_recusar_a_segunda_mantem_a_atual(mundo):
+    v, ponte, bus, _ = mundo
+    chamada_em_curso_e_segunda(v, ponte, bus)
+    v.recusar_espera(CID2)
+    assert "R2" in ponte.desligadas and "R1" not in ponte.desligadas
+    assert em_espera(bus, "recusada")
+    assert v.ligacoes[CID].chamada.estado == ch.EM_CHAMADA
+
+
+def test_quem_ligou_desistiu_avisa_e_esquece(mundo):
+    v, ponte, bus, _ = mundo
+    chamada_em_curso_e_segunda(v, ponte, bus)
+    ponte.fila.put({"ev": "end", "call": "R2", "reason": "timeout"})
+    assert esperar(lambda: em_espera(bus, "perdida"))
+    assert not v._espera and v.ligacoes[CID].chamada.estado == ch.EM_CHAMADA
+
+
+def test_so_uma_segunda_chamada_espera_de_cada_vez(mundo):
+    v, ponte, bus, _ = mundo
+    chamada_em_curso_e_segunda(v, ponte, bus)
+    v.conversa_do_peer = lambda peer: "5553@s.whatsapp.net"
+    ponte.fila.put({"ev": "incoming", "call": "R3", "peer": "3@lid"})
+    assert esperar(lambda: "R3" in ponte.desligadas)
+    assert len(em_espera(bus, "tocando")) == 1
+
+
+def test_encerrar_e_aceitar_troca_de_chamada(mundo):
+    import threading
+    v, ponte, bus, _ = mundo
+    chamada_em_curso_e_segunda(v, ponte, bus)
+    t = threading.Thread(target=v.aceitar_espera,
+                         args=(CID2, "Mic A", "Saida A"))
+    t.start()
+    assert esperar(lambda: "R1" in ponte.desligadas)
+    ponte.fila.put({"ev": "end", "call": "R1", "reason": "hangup"})
+    t.join(5)
+    assert not t.is_alive()
+    assert "R2" in ponte.atendidas
+    assert list(v.ligacoes) == [CID2]
+    assert (ch.ENCERRADA, ch.DESLIGADA) in bus.estados()
+    assert (ch.CONECTANDO, "") in bus.estados()
+    # nao passou por "tocando" para a pessoa: ja entrou atendendo
+    assert bus.estados().count((ch.TOCANDO, "")) == 1
+
+
+def test_atual_acaba_e_a_segunda_passa_a_tocar_como_comum(mundo):
+    v, ponte, bus, _ = mundo
+    chamada_em_curso_e_segunda(v, ponte, bus)
+    ponte.fila.put({"ev": "end", "call": "R1", "reason": "hangup"})
+    assert esperar(lambda: list(v.ligacoes) == [CID2])
+    assert esperar(lambda: bus.estados()[-1] == (ch.TOCANDO, ""))
+    assert not v._espera

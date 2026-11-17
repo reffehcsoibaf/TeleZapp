@@ -3935,6 +3935,14 @@ class ProvedorTelegram(Provedor):
     def encerrar_chamada(self, conversa_id):
         self._comando_de_chamada("encerrar", conversa_id)
 
+    def recusar_chamada_em_espera(self, conversa_id):
+        self._comando_de_chamada("recusar_espera", conversa_id)
+
+    def aceitar_chamada_em_espera(self, conversa_id, microfone="", saida="",
+                                  camera=None):
+        self._comando_de_chamada("aceitar_espera", conversa_id, microfone,
+                                 saida, camera)
+
     def silenciar_chamada(self, conversa_id, silenciar):
         self._comando_de_chamada("silenciar", conversa_id, silenciar)
 

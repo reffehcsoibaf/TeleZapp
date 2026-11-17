@@ -20,6 +20,8 @@ Ao abrir o arquivo baixado, a primeira tela tem os botões Instalar, Criar cópi
 
 Na instalação, os dados ficam na pasta do seu usuário do Windows. Na cópia portátil, ficam na pasta dados, ao lado do programa.
 
+Cópia portátil em pendrive ou disco externo: o banco de conversas pode se danificar se o disco for desconectado com o TeleZapp aberto, se o computador suspender com ele aberto ou se a pasta for copiada com ele aberto. Feche o TeleZapp (Ferramentas, Sair) antes de ejetar o disco, use Remover com segurança do Windows e, para levar os dados a outro lugar, use Fazer backup e Restaurar backup. Quando os dados estão em disco externo, em pendrive ou em rede, o TeleZapp avisa isso ao abrir; para não ver o aviso, desmarque Avisar quando os dados estão em disco externo, em Configurações, Sistema. Ao abrir, ele também confere em segundo plano se o banco de conversas está inteiro e avisa se encontrar defeito.
+
 Ajuda, Verificar atualizações consulta as versões publicadas. Se houver uma nova, a janela mostra as novidades. Com Sim, o TeleZapp baixa o arquivo, confere, fecha e abre de novo já atualizado. Seus dados não são afetados.
 
 Uma cópia que não se atualiza sozinha mostra um botão que abre a página de download. Baixe o zip, feche o TeleZapp e troque a pasta do programa pela nova.
@@ -133,9 +135,15 @@ O TeleZapp não fala a porcentagem. Se a barra fala, bipa, faz os dois ou fica q
 # Filtros personalizados
 Em Configurações, Interface, o botão Filtros abre uma janela para criar os seus próprios filtros da lista de conversas. Cada filtro junta, de uma vez, o serviço ou a conta e o tipo de conversa.
 
-Marque "Ativar filtros personalizados". Aparece então a lista dos filtros, com os botões Novo filtro, Renomear filtro e Excluir filtro, e o botão Fechar.
+Marque "Ativar filtros personalizados". Aparece então a lista dos filtros, com os botões Novo filtro, Editar filtro, Renomear filtro e Excluir filtro, e o botão Fechar.
 
-Em Novo filtro há duas listas de caixas. A primeira traz as contas e os serviços: Todas as contas, Telegram, WhatsApp e, onde um serviço tem mais de uma conta, cada conta, como na tela principal (Alt+4). A segunda traz os tipos de conversa, os mesmos de Alt+5, menos as trancadas. Marque o que o filtro mostra: dentro de cada lista basta uma das opções marcadas, e entre as duas listas as duas valem. Por exemplo, WhatsApp com Não lidas, Grupos e Arquivadas mostra, só no WhatsApp, as conversas não lidas, os grupos e as arquivadas.
+Em Novo filtro você escreve o nome e usa dois botões: Contém e Não contém. Cada um abre uma janela com duas listas de caixas. A primeira traz as contas e os serviços: Todas as contas, Telegram, WhatsApp e, onde um serviço tem mais de uma conta, cada conta, como na tela principal (Alt+4). A segunda traz os tipos de conversa, os mesmos de Alt+5, menos as trancadas. Ao lado de cada botão, uma linha diz o que já está marcado.
+
+Em Contém, marque o que o filtro mostra: dentro de cada lista basta uma das opções marcadas, e entre as duas listas as duas valem. Por exemplo, WhatsApp com Não lidas, Grupos e Arquivadas mostra, só no WhatsApp, as conversas não lidas, os grupos e as arquivadas.
+
+Em Não contém, marque o que o filtro tira da lista: a conversa que casar com qualquer opção marcada ali não aparece, mesmo que case com o resto. Por exemplo, WhatsApp e Grupos em Contém, com Silenciadas em Não contém, mostra os grupos do WhatsApp menos os silenciados. O mesmo item não pode estar nos dois. Se você marca só o Não contém, o filtro mostra todas as conversas menos essas.
+
+Para mudar um filtro que já existe, escolha-o na lista e use Editar filtro: abre a mesma janela, com tudo já preenchido, e o filtro guarda o mesmo lugar na lista.
 
 O TeleZapp sugere um nome com o que você marcou, e você pode escrever outro. Salvar filtro guarda.
 
@@ -539,6 +547,17 @@ Chamadas em grupo do WhatsApp: nas conversas de grupo, o botão Iniciar chamada 
 Entrar em chamadas em grupo que já começaram: quando chega o convite de uma chamada em grupo, mesmo que você não atenda, o TeleZapp guarda, e enquanto ela durar o botão da conversa do grupo vira Entrar na chamada em andamento. Só vale para chamadas cujo convite chegou com o TeleZapp aberto. Antes de entrar, ele confere com o WhatsApp se a chamada ainda existe.
 
 Adicionar participantes: com uma chamada em andamento, o botão Adicionar participantes (ou o item do menu Chamadas) abre uma lista para marcar quem convidar. Numa chamada em grupo, aparecem os membros do grupo que ainda não entraram; quem já foi chamado e não entrou é chamado de novo. Numa chamada individual, aparecem os seus contatos salvos, e a chamada passa a ter várias pessoas, como no WhatsApp. Depois, o TeleZapp diz quem foi convidado e quem não deu.
+
+# Segunda chamada com outra em andamento (experimental)
+É um recurso experimental: ainda não sabemos se funciona bem em todos os computadores e contas, e ele pode mudar ou sair do TeleZapp nas próximas versões se o desempenho não for satisfatório. Fica desligado até você marcar a caixa "Aviso de segunda chamada (chamada em espera)", em Configurações, Recursos experimentais. Vale para o WhatsApp e para o Telegram.
+
+Sem a caixa, uma chamada que chega com outra em andamento é recusada em silêncio, como antes. Com a caixa marcada, o TeleZapp toca o aviso, fala quem está ligando e abre a janela Segunda chamada, com os botões Encerrar e aceitar, Recusar e Fechar. O foco começa em Recusar.
+
+Recusar mantém a chamada atual e recusa a nova. Encerrar e aceitar desliga a chamada atual e atende a nova, no mesmo tipo (voz ou vídeo). Não há colocar a primeira em espera: ao trocar, ela termina.
+
+Com a segunda chamada tocando, os atalhos globais mudam de sentido: o de atender faz Encerrar e aceitar e o de recusar recusa só a nova, sem desligar a que está em andamento. Fechar a janela não decide nada: a chamada continua tocando e os atalhos seguem valendo. Se quem ligou desistir, o aviso diz isso. Se a chamada atual terminar antes da sua escolha, a segunda passa a tocar como uma chamada comum.
+
+Só uma chamada fica em espera de cada vez; uma terceira é recusada. Não vale durante um chat de voz do Telegram nem para chamadas em grupo.
 
 # Chat de voz e lives do Telegram (experimental)
 É um recurso experimental: ainda não sabemos se funciona bem em todos os computadores e contas, e ele pode mudar ou sair do TeleZapp nas próximas versões se o desempenho não for satisfatório. Fica desligado até você marcar a caixa "Chat de voz de grupo e lives de canal do Telegram", em Configurações, Recursos experimentais. Ao marcar qualquer caixa dessa categoria, uma janela avisa que o recurso é experimental e só fecha com o botão OK.

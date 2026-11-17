@@ -19,6 +19,10 @@ SOBRE_OS_LOGS = (
     "tudo é apagado depois de 90 dias. A versão do programa vai junto." % NOME)
 
 
+LOGS_OBRIGATORIOS = ("Para relatar um problema, os logs são obrigatórios: "
+                     "use Enviar com os logs.")
+
+
 class DialogoRelato(wx.Dialog):
     def __init__(self, pai, nome="", contato="", falar=None, via=""):
         super().__init__(pai, title="Feedback do %s" % NOME, size=(620, 620),
@@ -33,6 +37,7 @@ class DialogoRelato(wx.Dialog):
         self.tipo = wx.Choice(self, choices=[t[0] for t in TIPOS], name=rotulo)
         self.tipo.SetSelection(0)
         lay.Add(self.tipo, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
+        self.tipo.Bind(wx.EVT_CHOICE, lambda e: self._ao_trocar_tipo(True))
 
         def texto(rotulo, valor="", estilo=0):
             lay.Add(wx.StaticText(self, label=rotulo), 0,
@@ -74,12 +79,26 @@ class DialogoRelato(wx.Dialog):
         for botao in (self.com_logs, self.sem_logs, self.fechar):
             linha.Add(botao, 0, wx.RIGHT, 8)
         lay.Add(linha, 0, wx.ALL | wx.ALIGN_RIGHT, 8)
+        self._ao_trocar_tipo(False)
         self.SetSizer(lay)
         self.SetEscapeId(wx.ID_CANCEL)
         self.Bind(wx.EVT_BUTTON, self._ao_fechar, self.fechar)
         self.Bind(wx.EVT_CLOSE, self._ao_fechar)
         self.tipo.SetFocus()
         self.CentreOnParent()
+
+    def _tipo(self):
+        return TIPOS[max(self.tipo.GetSelection(), 0)][1]
+
+    def _ao_trocar_tipo(self, falar):
+        """Relato de problema so sai com os logs: o botao sem logs fica
+        desligado (o Tab passa direto) e a janela diz por que."""
+        obrigatorio = relatos.logs_obrigatorios(self._tipo())
+        self.sem_logs.Enable(not obrigatorio)
+        self.sobre.SetValue(SOBRE_OS_LOGS + (" " + LOGS_OBRIGATORIOS
+                                             if obrigatorio else ""))
+        if falar and obrigatorio:
+            self._falar(LOGS_OBRIGATORIOS)
 
     def _via(self):
         return relatos.VIAS[max(self.via.GetSelection(), 0)][0]
@@ -96,9 +115,14 @@ class DialogoRelato(wx.Dialog):
     def _botoes(self, ativos):
         for botao in (self.com_logs, self.sem_logs, self.fechar):
             botao.Enable(ativos)
+        if ativos:
+            self._ao_trocar_tipo(False)
 
     def _enviar(self, com_logs):
         if self._enviando:
+            return
+        if not com_logs and relatos.logs_obrigatorios(self._tipo()):
+            self._avisar(LOGS_OBRIGATORIOS, wx.ICON_WARNING)
             return
         faltou = relatos.falta(self.contato.GetValue(),
                                self.descricao.GetValue(), com_logs)
@@ -116,7 +140,7 @@ class DialogoRelato(wx.Dialog):
             self._avisar(erro, wx.ICON_WARNING)
             self.contato.SetFocus()
             return
-        dados = (TIPOS[self.tipo.GetSelection()][1], self.nome.GetValue(),
+        dados = (self._tipo(), self.nome.GetValue(),
                  contato, self.descricao.GetValue(),
                  self.quando.GetValue(), com_logs)
         self._enviando = True

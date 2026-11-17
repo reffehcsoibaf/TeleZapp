@@ -402,6 +402,19 @@ OPCOES = (
           "entrar por aqui. Se o desempenho não for satisfatório, o recurso "
           "pode sair do TeleZapp nas próximas versões.",
           servico="telegram"),
+    Opcao("chamada_em_espera",
+          "Aviso de segunda chamada (chamada em espera)",
+          CATEGORIA_EXPERIMENTAL, False,
+          "Experimental. Quando uma chamada chega com outra em andamento, "
+          "no WhatsApp ou no Telegram, o TeleZapp avisa em vez de recusar "
+          "sozinho: você escolhe entre Recusar, que mantém a chamada atual, "
+          "e Encerrar e aceitar, que desliga a atual e atende a nova. Não há "
+          "colocar a primeira em espera: ao trocar, ela termina. Com a "
+          "chamada em espera tocando, o atalho de atender faz Encerrar e "
+          "aceitar e o de recusar recusa só a nova. Desmarcada, a segunda "
+          "chamada é recusada em silêncio, como antes. Se o desempenho não "
+          "for satisfatório, o recurso pode sair do TeleZapp nas próximas "
+          "versões."),
     Opcao("chamada_grupo_whatsapp",
           "Chamadas em grupo do WhatsApp",
           CATEGORIA_EXPERIMENTAL, False,
@@ -703,6 +716,15 @@ OPCOES = (
           "Faz o TeleZapp aparecer entre as opções do Windows para abrir links "
           "tg:// e whatsapp://. Quem abre continua sendo o programa que você "
           "escolheu: troque em Configurações do Windows, Aplicativos padrão."),
+    Opcao("avisar_disco_externo",
+          "Avisar quando os dados estão em disco externo", "Sistema", True,
+          "Se a pasta de dados do TeleZapp está em um pendrive, disco "
+          "externo (USB) ou disco de rede, mostra ao abrir um aviso com os "
+          "cuidados para não danificar o banco de conversas: fechar o "
+          "TeleZapp antes de ejetar o disco, não deixar o computador "
+          "suspender com o programa aberto e usar Backup e Restaurar para "
+          "levar os dados para outro lugar. Desmarque para não ver mais "
+          "esse aviso."),
     Opcao("iniciar_com_windows", "Abrir o TeleZapp ao entrar no Windows",
           "Sistema", False,
           "Abre o TeleZapp sozinho quando você entra na sua conta do "
@@ -1362,6 +1384,16 @@ OPCOES = OPCOES + (
           "busca, de sair de um grupo pelos detalhes e de seguir ou deixar "
           "de seguir um canal. Desmarcada, faz na hora.",
           grupo="Confirmações"),
+    Opcao("falar_aviso_estado_celular",
+          "Falar o aviso para abrir o WhatsApp quando o celular não manda o estado",
+          "Interface", True,
+          "Quando as mudanças feitas no celular (favoritar, apagar, "
+          "silenciar, arquivar) deixam de chegar porque o celular não "
+          "mandou a cópia do estado, o TeleZapp fala que é preciso abrir o "
+          "WhatsApp no celular por um minuto. Desmarcada, o aviso não é "
+          "falado: aparece só na barra de status e no registro, e o "
+          "TeleZapp continua tentando de novo sozinho.",
+          grupo="Conteúdo falado", servico="whatsapp"),
     Opcao("confirmar_bloqueio",
           "Perguntar antes de bloquear ou desbloquear contatos",
           "Interface", True,

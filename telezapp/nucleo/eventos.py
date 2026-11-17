@@ -339,11 +339,25 @@ class ChamadaWhatsApp:
 
 
 @dataclass
+class ChamadaEmEspera:
+    """Uma segunda chamada chegou com outra em andamento (recurso
+    experimental). `fase`: "tocando" (a pessoa escolhe entre recusar e
+    encerrar a atual para atender), "perdida" (quem ligou desistiu) ou
+    "recusada" (fomos nos)."""
+    conta_id: str
+    conversa_id: str
+    nome: str = ""
+    video: bool = False
+    fase: str = "tocando"
+
+
+@dataclass
 class Aviso:
     """Algo que a pessoa precisa saber (erro de rede, limite do servico)."""
     conta_id: str
     texto: str
     grave: bool = False
+    falar: bool = True
 
 
 class Barramento:

@@ -398,6 +398,10 @@ class Audio:
         return fluxo
 
 
+# quanto esperar a chamada atual acabar ao trocar para a segunda (segundos)
+ESPERA_PARA_TROCAR_S = 6.0
+
+
 class _Ligacao:
     """Uma chamada em andamento: ids, motivo desejado e as threads de audio."""
 
@@ -456,6 +460,10 @@ class ChamadasWhatsApp:
         self.nome_de_jid = lambda jid, pn="": ""   # nome de um participante
         self.membros_de = lambda cid: None         # [jid] do grupo, ou None
         self._ofertas = {}              # call_id -> convite de chamada em grupo
+        # segunda chamada com outra em andamento (recurso experimental)
+        self.espera_ligada = lambda: False
+        self._espera = {}               # id da conversa -> _Ligacao tocando
+        self._trocando = False          # estamos trocando de chamada
         self._trava = threading.RLock()
         self._parar = threading.Event()
         self._thread = None
@@ -559,6 +567,8 @@ class ChamadasWhatsApp:
                 self._parar_som_pc(lig)
                 self.ligacoes.pop(cid, None)
         self._publicar(c)
+        if estado == ch.ENCERRADA:
+            self._promover_espera()
 
     def _achar(self, call_id):
         with self._trava:
@@ -627,6 +637,8 @@ class ChamadasWhatsApp:
                 self._iniciar_video(cid, lig)
         elif tipo == "end":
             self._esquecer_convite(call_id)
+            if self._acabou_a_espera(call_id):
+                return
             cid, lig = self._achar(call_id)
             if lig is not None:
                 self._ao_terminar(cid, lig, e.get("reason", ""))
@@ -702,6 +714,12 @@ class ChamadasWhatsApp:
             grupo = False          # sem saber o grupo, toca como antes
         with self._trava:
             ocupado = bool(self.ligacoes)
+            pode_esperar = (ocupado and bool(cid) and not grupo
+                            and not self._espera and cid not in self.ligacoes
+                            and self._espera_ligada())
+        if pode_esperar:
+            self._receber_em_espera(cid, call_id, bool(video))
+            return
         if ocupado or not cid:
             log.info("chamada recebida com outra aberta: recusada")
             self.ponte.desligar(call_id)
@@ -716,6 +734,99 @@ class ChamadasWhatsApp:
         with self._trava:
             self.ligacoes[cid] = _Ligacao(c, call_id)
         self._publicar(c)
+
+    # ------------------------------------------ segunda chamada (experimental)
+    def _espera_ligada(self):
+        try:
+            return bool(self.espera_ligada())
+        except Exception:
+            return False
+
+    def _receber_em_espera(self, cid, call_id, video):
+        """Chegou uma chamada com outra em andamento: guarda e avisa, sem
+        atender nem recusar. A pessoa escolhe (recusar_espera ou
+        aceitar_espera)."""
+        try:
+            nome = self.nome_de(cid)
+        except Exception:
+            nome = ""
+        c = ch.Chamada(self.conta_id, cid, nome, True, ch.TOCANDO,
+                       video=video)
+        with self._trava:
+            self._espera[cid] = _Ligacao(c, call_id)
+        log.info("segunda chamada em espera: %s", call_id)
+        self.barramento.publicar(ev.ChamadaEmEspera(
+            self.conta_id, str(cid), nome, video, "tocando"))
+
+    def _acabou_a_espera(self, call_id):
+        """A chamada em espera terminou (quem ligou desistiu)? Avisa e
+        esquece; True se era ela."""
+        with self._trava:
+            achou = next((cid for cid, lig in self._espera.items()
+                          if lig.call_id == call_id), None)
+            lig = self._espera.pop(achou, None) if achou else None
+        if lig is None:
+            return False
+        c = lig.chamada
+        self.barramento.publicar(ev.ChamadaEmEspera(
+            self.conta_id, str(achou), c.nome, c.video, "perdida"))
+        return True
+
+    def _promover_espera(self):
+        """A chamada atual acabou e a outra ainda toca: passa a tocar como
+        uma chamada comum (a menos que estejamos trocando de chamada)."""
+        with self._trava:
+            if self._trocando or self.ligacoes or not self._espera:
+                return
+            cid, lig = next(iter(self._espera.items()))
+            self._espera.pop(cid)
+            self.ligacoes[cid] = lig
+        self._publicar(lig.chamada)
+
+    def recusar_espera(self, cid):
+        """Recusa a segunda chamada; a atual segue."""
+        with self._trava:
+            lig = self._espera.pop(cid, None)
+        if lig is None:
+            return
+        c = lig.chamada
+        self.ponte.desligar(lig.call_id)
+        self.barramento.publicar(ev.ChamadaEmEspera(
+            self.conta_id, str(cid), c.nome, c.video, "recusada"))
+
+    def aceitar_espera(self, cid, microfone="", saida="", camera=None):
+        """Encerra a chamada atual e atende a segunda. Se a atual nao acabar
+        a tempo, a segunda continua em espera."""
+        with self._trava:
+            lig = self._espera.get(cid)
+            if lig is None:
+                return
+            atuais = list(self.ligacoes)
+            self._trocando = True
+        try:
+            for outra in atuais:
+                self.encerrar(outra)
+            fim = time.monotonic() + ESPERA_PARA_TROCAR_S
+            while time.monotonic() < fim:
+                with self._trava:
+                    if not self.ligacoes:
+                        break
+                time.sleep(0.05)
+            with self._trava:
+                if self.ligacoes or self._espera.get(cid) is not lig:
+                    livre = False
+                else:
+                    self._espera.pop(cid)
+                    self.ligacoes[cid] = lig
+                    livre = True
+        finally:
+            self._trocando = False
+        if not livre:
+            self._avisar("Não consegui encerrar a chamada atual a tempo. A "
+                         "chamada em espera continua tocando.")
+            return
+        log.info("troca de chamada: atendendo a segunda (%s)", lig.call_id)
+        self.atender(cid, microfone, saida, camera)
 
     def _ao_terminar(self, cid, lig, razao):
         c = lig.chamada

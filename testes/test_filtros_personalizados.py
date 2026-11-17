@@ -75,3 +75,38 @@ def test_achar_devolve_o_filtro_ou_o_primeiro():
     assert fp.achar(v, "b")["nome"] == "B"
     assert fp.achar(v, "sumiu")["nome"] == "A"
     assert fp.achar(None, "a") is None
+
+
+def test_nao_mostrar_tira_conversas_do_filtro():
+    f = {"contas": ["whatsapp"], "tipos": ["grupos"],
+         "nao_tipos": ["silenciadas"]}
+    g = conv(tipo="grupo")
+    assert fp.passa(g, f)
+    g.silenciada_ate = -1
+    assert not fp.passa(g, f)
+    so_fora = {"nao_contas": ["telegram"], "nao_tipos": ["grupos"]}
+    assert fp.passa(conv(), so_fora)
+    assert not fp.passa(conv(tipo="grupo"), so_fora)
+    assert not fp.passa(conv(servico="telegram"), so_fora)
+    assert not fp.passa(conv(trancada=True), so_fora)
+
+
+def test_nao_mostrar_conta_e_normalizar():
+    f = {"nao_contas": ["conta:w2"]}
+    assert not fp.passa(conv(conta="w2"), f)
+    assert fp.passa(conv(conta="w1"), f)
+    v = fp.normalizar({"lista": [{"id": "a", "nome": "X",
+                                  "nao_tipos": ["todas", "grupos",
+                                                "trancadas", "zzz"],
+                                  "nao_contas": ["todas", "telegram"]}]})
+    assert v["lista"][0]["nao_tipos"] == ["grupos"]
+    assert v["lista"][0]["nao_contas"] == ["telegram"]
+    assert fp.usa_favoritas({"nao_tipos": ["favoritas"]})
+
+
+def test_nome_sugerido_com_menos():
+    assert fp.nome_sugerido(["whatsapp"], ["grupos"], CONTAS, [],
+                            ["silenciadas"]) == \
+        "WhatsApp, Grupos menos Silenciadas"
+    assert fp.nome_sugerido([], [], CONTAS, [], ["grupos"]) == \
+        "Todas as conversas, menos Grupos"

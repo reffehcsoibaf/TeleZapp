@@ -70,6 +70,11 @@ def contato_de(via, valor):
     return "%s: @%s" % (nome, usuario), ""
 
 
+def logs_obrigatorios(tipo):
+    """Relato de problema so vale com os logs: sem eles nao ha como apurar."""
+    return tipo == "problema"
+
+
 def falta(contato, descricao, com_logs):
     """O campo obrigatorio vazio, ou "". Com os logs a descricao e opcional."""
     if not contato.strip():
@@ -129,7 +134,14 @@ def corpo_do_envio(campos, logs, fronteira):
 def enviar(tipo, nome, contato, descricao, quando, com_logs, abrir=abrir_url,
            pasta_logs=None):
     """Manda o relato. ErroRelato com o motivo, se nao der."""
+    if logs_obrigatorios(tipo) and not com_logs:
+        raise ErroRelato("Para relatar um problema os logs são obrigatórios. "
+                         "Use Enviar com os logs.")
     logs = juntar_logs(pasta_logs) if com_logs else []
+    if logs_obrigatorios(tipo) and not logs:
+        raise ErroRelato("Não achei logs para enviar. Um relato de problema "
+                         "precisa deles: abra o programa, repita o que "
+                         "aconteceu e envie de novo.")
     if not descricao.strip() and not logs:
         raise ErroRelato("Não achei logs para enviar. Escreva a descrição.")
     campos = {"tipo": tipo, "nome": nome, "contato": contato,
