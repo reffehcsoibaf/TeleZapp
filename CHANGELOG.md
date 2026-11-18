@@ -7,6 +7,14 @@ Antes de escrever aqui, confira a versão em vigor: `git fetch --tags` e
 `gh release list -L 3` (a Latest é a publicada). O que veio depois dela vai em
 "Próxima versão (ainda sem número)".
 
+## 2026.11.18.0
+
+Chamadas por link do WhatsApp (`call.whatsapp.com/voice|video/CODIGO`), EXPERIMENTAL, caixa `chamada_por_link_whatsapp` (desligada): entrar por link (`links_externos` reconhece a ação `chamada`; item Entrar em chamada por link no menu Chamadas), criar link de voz ou de vídeo, sala de espera e aprovação, grade de vídeo (`video.Mosaico`), câmera e tela, ver o vídeo de uma pessoa, reações, mão levantada e histórico. DLL com 9 exportações novas (`docs/neonize/chamadas-calls*.go`), instalada no venv; `Ponte` testa cada função com `hasattr`. **Sem teste ao vivo.**
+
+Enquetes novas do WhatsApp. Leitura (sempre): `pollCreationMessageV4` (envelope), V5 e V6, quiz e resposta certa, anônima, prazo, `pollAddOptionMessage` (opção nova) e `pollResultSnapshotMessage` (resultado final); `modelos.enquete_de`, `descricao_da_enquete`, `mostrar_resposta_certa` (só depois de votar ou de a enquete acabar). Criação, EXPERIMENTAL, caixa `enquetes_avancadas_whatsapp` (desligada): `criar_enquete(..., avancada=)` e `tornar_enquete_avancada` preenchem `pollType`, `correctAnswer`, `hideParticipantName`, `allowAddOption` e `endTime` (em segundos, palpite) e movem a enquete para `pollCreationMessageV6`; a janela Nova enquete ganha Quiz, Resposta certa, Ocultar quem votou, Permitir acrescentar opções e Encerrar a enquete. Opções com imagem não foram feitas (formato não documentado). Não sabemos se o WhatsApp honra os campos nem se dá para votar em V6. **Sem teste ao vivo.**
+
+Nova mensagem e Nova chamada: a lista (`DialogoEscolherPessoa`) cortava em 200 itens sem avisar; agora mostra 200 por vez e o último item, "Mostrar mais", traz os 200 seguintes (Enter ou duplo clique; o OK padrão é interceptado). **Sem teste ao vivo.**
+
 ## 2026.11.17.0
 
 Silêncio, fixação e arquivamento que sumiam quando a conversa era apagada no celular (relato de 17/11, versão 2026.11.16.0, com logs: "limpar" e "apagar" no celular dele chegam como `DeleteChat`, em rajadas). `_ao_apagar_conversa` tira a conversa do provedor e do banco; a próxima mensagem a recriava sem silêncio nem fixação, e a conferência de 60 s (`_conferir_arquivadas`) não devolvia porque `_ajustes_vistos` e `_arquivada_vista` guardavam o valor antigo (celular "igual ao visto"). Agora o aviso de apagar esquece esses valores e `_conversa()` lê os ajustes do celular na hora em que recria a conversa (`_ler_ajustes`, o mesmo código da conferência). Teste: `test_conversa_apagada_e_recriada_volta_com_o_silencio_do_celular`. Não confirmado: se o armazém do whatsmeow mantém o silêncio depois do apagar (os logs não mostram o valor). **Sem teste ao vivo.**

@@ -306,10 +306,57 @@ def enquete_de(msg):
             "contagem": contagem, "total": bruta.get("total"),
             "meus": [i for i in bruta.get("meus") or []
                      if isinstance(i, int) and 0 <= i < len(opcoes)],
-            "encerrada": bool(bruta.get("encerrada")),
+            "encerrada": bool(bruta.get("encerrada")) or _prazo_vencido(
+                bruta.get("encerra_em")),
             "anonima": bool(bruta.get("anonima")),
             "ids": list(bruta.get("ids") or []),
-            "poll_id": str(bruta.get("poll_id") or "")}
+            "poll_id": str(bruta.get("poll_id") or ""),
+            # quiz (resposta certa), prazo, opcoes de quem participa e
+            # opcoes com imagem: so o WhatsApp manda
+            "quiz": bool(bruta.get("quiz")),
+            "correta": bruta.get("correta")
+            if isinstance(bruta.get("correta"), int)
+            and 0 <= bruta.get("correta") < len(opcoes) else None,
+            "encerra_em": _numero(bruta.get("encerra_em")),
+            "permite_adicionar": bool(bruta.get("permite_adicionar")),
+            "com_imagens": bool(bruta.get("com_imagens"))}
+
+
+def _numero(valor):
+    try:
+        return float(valor) if valor else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _prazo_vencido(prazo):
+    """True se a enquete tem prazo (segundos desde 1970) e ele ja passou."""
+    prazo = _numero(prazo)
+    return bool(prazo) and prazo <= time.time()
+
+
+def mostrar_resposta_certa(enq):
+    """Num quiz, a resposta certa so aparece depois que eu votei ou que a
+    enquete acabou (antes, estragaria o quiz)."""
+    return bool(enq["quiz"] and enq["correta"] is not None
+                and (enq["meus"] or enq["encerrada"]))
+
+
+def descricao_da_enquete(enq):
+    """Frases curtas sobre como a enquete funciona (vazio numa comum)."""
+    partes = []
+    if enq["quiz"]:
+        partes.append("Quiz: tem uma resposta certa")
+    if enq["anonima"]:
+        partes.append("Anônima: ninguém vê quem votou")
+    if enq["permite_adicionar"]:
+        partes.append("Dá para acrescentar opções")
+    if enq["com_imagens"]:
+        partes.append("As opções têm imagem")
+    if enq["encerra_em"] and not enq["encerrada"]:
+        partes.append("Encerra em " + time.strftime(
+            "%d/%m às %H:%M", time.localtime(enq["encerra_em"])))
+    return partes
 
 
 def contagens_da_enquete(enq):
@@ -336,6 +383,8 @@ def votantes_da_enquete(enq):
 
 def quem_votou_em(enq, posicao):
     """Nomes de quem votou na opcao (vazio nas enquetes anonimas)."""
+    if enq["anonima"]:
+        return []
     return [nome_a_mostrar(v["nome"]) or quem
             for quem, v in enq["votos"].items()
             if posicao in v["escolhas"]]
@@ -348,7 +397,8 @@ def resumo_enquete(msg):
         return ""
     n = len(enq["opcoes"])
     votantes = votantes_da_enquete(enq)
-    partes = ["enquete" + (" encerrada" if enq["encerrada"] else "") + ": " +
+    partes = [("quiz" if enq["quiz"] else "enquete") +
+              (" encerrada" if enq["encerrada"] else "") + ": " +
               enq["pergunta"],
               "%d opções" % n,
               "nenhum voto" if votantes == 0 else
@@ -368,6 +418,8 @@ def linhas_da_enquete(enq):
         n = cont[i]
         pct = int(round(100.0 * n / votantes)) if votantes else 0
         extra = ", seu voto" if i in enq["meus"] else ""
+        if mostrar_resposta_certa(enq) and enq["correta"] == i:
+            extra += ", resposta certa"
         linhas.append("%s: %s (%d%%)%s" % (
             opcao, "nenhum voto" if n == 0 else "1 voto" if n == 1
             else "%d votos" % n, pct, extra))

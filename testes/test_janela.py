@@ -10476,3 +10476,26 @@ def test_segunda_chamada_que_vira_comum_fecha_o_aviso(j, monkeypatch):
     assert j.espera_de_chamada is not None
     j.b.publicar(ev.EstadoChamada("t1", "20", ch.TOCANDO, "Ana", True))
     assert j.espera_de_chamada is None
+
+
+def test_nova_enquete_avancada_so_com_a_caixa_experimental(j, monkeypatch):
+    _abrir_com_caixa(j)
+    pedidos, vistos = [], []
+    j.contas.p.PODE_CRIAR_ENQUETE = True
+    j.contas.p.PODE_ENQUETE_AVANCADA = True
+    j.contas.p.criar_enquete = lambda *a, **k: pedidos.append((a, k))
+    j.estados["t1"] = ev.CONECTADA
+    monkeypatch.setattr(j.contas, "servico", lambda c: "whatsapp")
+
+    def pedir(pai, servico, fala, avancada=False):
+        vistos.append(avancada)
+        base = ("Q?", ["A", "B"], False, False)
+        return base + ({"quiz": 0},) if avancada else base
+    monkeypatch.setattr(jm.ui_nova_enquete, "pedir_enquete", pedir)
+    j.cfg.set("enquetes_avancadas_whatsapp", False)
+    j._nova_enquete()
+    assert vistos == [False] and pedidos[-1][1] == {}
+    j.cfg.set("enquetes_avancadas_whatsapp", True)
+    j._nova_enquete()
+    assert vistos == [False, True]
+    assert pedidos[-1][1] == {"avancada": {"quiz": 0}}

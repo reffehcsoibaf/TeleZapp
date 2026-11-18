@@ -102,6 +102,11 @@ from telezapp.nucleo.midias import TEXTO_LIMPA
 
 log = logging.getLogger("telezapp.janela")
 
+# reações da chamada por link (o WhatsApp aceita qualquer emoji)
+REACOES_DA_CHAMADA = (("👍", "curti"), ("❤️", "coração"), ("😂", "risada"),
+                      ("😮", "surpresa"), ("😢", "tristeza"),
+                      ("🙏", "obrigado"), ("👏", "palmas"), ("🎉", "festa"))
+
 INTERVALO_VIGIA_TRANCADAS_MS = 1000
 
 MARCADOR = "marcador"
@@ -800,6 +805,26 @@ class Janela(wx.Frame):
         item(m_cham, "chamada_tempo", "&Falar há quanto tempo a chamada dura")
         item(m_cham, "chamada_desligar", "&Desligar\tCtrl+Shift+H")
         m_cham.AppendSeparator()
+        item(m_cham, "chamada_link_entrar",
+             "Entrar em chamada por lin&k... (experimental)")
+        item(m_cham, "chamada_link_criar",
+             "Criar link de c&hamada de voz (experimental)")
+        item(m_cham, "chamada_link_criar_video",
+             "Criar link de chamada de víd&eo (experimental)")
+        item(m_cham, "chamada_sala",
+             "&Sala de espera da chamada por link... (experimental)")
+        item(m_cham, "chamada_aprovacao",
+             "Exigir aprovação para entrar pelo lin&k (liga ou desliga)")
+        item(m_cham, "chamada_reagir",
+             "&Reagir na chamada por link...")
+        item(m_cham, "chamada_mao",
+             "Levantar ou baixar a &mão na chamada por link")
+        item(m_cham, "chamada_maos",
+             "Dizer quem está com a mão levantada na chamada por link")
+        item(m_cham, "chamada_video_de",
+             "Escolher de quem ver o &vídeo na chamada por link...")
+        item(m_cham, "chamada_historico",
+             "Ver o histórico da chamada por link...")
         item(m_cham, "chat_de_voz",
              "&Entrar no chat de voz ou live desta conversa (experimental)")
         item(m_cham, "chamada_adicionar",
@@ -1100,6 +1125,17 @@ class Janela(wx.Frame):
             "chamada_desligar": lambda e: self._desligar_chamada(),
             "chat_de_voz": lambda e: self._entrar_chat_de_voz(),
             "chamada_adicionar": lambda e: self._adicionar_participantes(),
+            "chamada_link_entrar": lambda e: self._entrar_em_chamada_por_link(),
+            "chamada_link_criar": lambda e: self._criar_link_de_chamada(),
+            "chamada_sala": lambda e: self._sala_de_espera_da_chamada(),
+            "chamada_aprovacao": lambda e: self._alternar_aprovacao(),
+            "chamada_reagir": lambda e: self._reagir_na_chamada(),
+            "chamada_mao": lambda e: self._alternar_mao_na_chamada(),
+            "chamada_maos": lambda e: self._falar_maos_levantadas(),
+            "chamada_video_de": lambda e: self._escolher_video_da_chamada(),
+            "chamada_historico": lambda e: self._ver_historico_da_chamada(),
+            "chamada_link_criar_video":
+                lambda e: self._criar_link_de_chamada(video=True),
             "chat_de_voz_iniciar": lambda e: self._iniciar_chat_de_voz(),
             "chat_de_voz_quem": lambda e: self._quem_fala_no_chat_de_voz(),
             "chat_de_voz_sair": lambda e: self._sair_chat_de_voz(),
@@ -5368,6 +5404,251 @@ class Janela(wx.Frame):
         log.info("ligando para um grupo (%s)", conv.conta_id)
         p.ligar(conv.id, mic, saida)
 
+    # ---------------------- chamadas por link do WhatsApp (experimental)
+    def _contas_de_chamada_por_link(self):
+        return [c for c in self._contas_do_servico("whatsapp") if getattr(
+            self.contas.provedor(c[0]), "suporta_chamada_por_link", False)]
+
+    def _conta_para_chamada_por_link(self):
+        """(conta_id, provedor) ou (None, None), falando por que."""
+        contas = self._contas_de_chamada_por_link()
+        if not contas:
+            bipe("erro")
+            self.fala.falar(
+                "Chamadas por link não estão disponíveis. Confira se há uma "
+                "conta do WhatsApp conectada e se a caixa está marcada em "
+                "Configurações, Recursos experimentais.", interromper=True)
+            return None, None
+        conta_id = contas[0][0]
+        if len(contas) > 1:
+            conta_id = self._escolher_da_lista(
+                "Qual conta", "Usar qual conta?", contas, contas[0][0])
+            if conta_id is None:
+                return None, None
+        return conta_id, self.contas.provedor(conta_id)
+
+    @seguro
+    def _entrar_em_chamada_por_link(self):
+        """Menu Chamadas: pergunta o link da chamada e segue o mesmo caminho
+        de abrir o link de uma mensagem."""
+        conta_id, prov = self._conta_para_chamada_por_link()
+        if prov is None:
+            return
+        dlg = wx.TextEntryDialog(
+            self, "Cole o link da chamada (call.whatsapp.com):",
+            "Entrar em chamada por link")
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            texto = dlg.GetValue()
+        finally:
+            dlg.Destroy()
+        info = links_externos.interpretar(texto)
+        if not info or info.get("acao") != "chamada":
+            bipe("erro")
+            self.fala.falar("Isso não parece um link de chamada do "
+                            "WhatsApp.", interromper=True)
+            return
+        self._confirmar_chamada_por_link(
+            conta_id, prov, info["codigo"], info["video"])
+
+    def _confirmar_chamada_por_link(self, conta_id, prov, codigo, video):
+        """Consulta o link (fora da janela) e, se a pessoa confirmar, entra."""
+        if self.estados.get(conta_id) != ev.CONECTADA:
+            bipe("erro")
+            self.fala.falar("A conta não está conectada.", interromper=True)
+            return
+        self.fala.falar("Consultando o link da chamada...", interromper=True)
+
+        def trabalho():
+            try:
+                dados, erro = prov.previa_da_chamada_por_link(codigo, video)
+            except Exception:
+                log.exception("prévia do link de chamada")
+                dados, erro = {}, "Não consegui consultar o link."
+            wx.CallAfter(self._perguntar_chamada_por_link, prov, codigo,
+                         video, dados, erro)
+        threading.Thread(target=trabalho, daemon=True,
+                         name="previa-link-chamada").start()
+
+    @seguro
+    def _perguntar_chamada_por_link(self, prov, codigo, video, dados, erro):
+        if erro:
+            bipe("erro")
+            self.fala.falar(erro, interromper=True)
+            wx.MessageBox(erro, NOME, wx.OK | wx.ICON_WARNING, self)
+            return
+        partes = ["Entrar na chamada por link?"]
+        if dados.get("video") or video:
+            partes.append("É uma chamada de vídeo. A sua câmera começa "
+                          "desligada.")
+        if dados.get("approval") and not dados.get("admin"):
+            partes.append("O anfitrião precisa aprovar a sua entrada.")
+        pergunta = " ".join(partes)
+        self.fala.falar(pergunta, interromper=True)
+        if wx.MessageBox(pergunta, NOME, wx.YES_NO | wx.ICON_QUESTION,
+                         self) != wx.YES:
+            return
+        mic, saida = self._dispositivos_da_chamada()
+        self.fala.falar("Entrando na chamada por link. Recurso "
+                        "experimental.", interromper=True)
+        prov.entrar_chamada_por_link(codigo, bool(video), mic, saida)
+
+    def _chamada_por_link_em_curso(self):
+        """(chamada, provedor) da chamada por link em andamento; fala por que
+        não, se não há."""
+        c = self.chamada
+        p = self._provedor_de_chamada(c.conta_id) if c else None
+        if c is None or not c.ativa or p is None or \
+                not str(c.conversa_id).startswith("link:"):
+            self.fala.falar("Isso só vale dentro de uma chamada por link.",
+                            interromper=True)
+            return None, None
+        return c, p
+
+    @seguro
+    def _sala_de_espera_da_chamada(self):
+        """Quem espera para entrar na chamada por link: deixar entrar ou
+        recusar."""
+        c, p = self._chamada_por_link_em_curso()
+        if c is None:
+            return
+        espera, anfitriao = p.sala_de_espera_da_chamada(c.conversa_id)
+        if not anfitriao:
+            self.fala.falar("Só quem administra o link vê a sala de espera.",
+                            interromper=True)
+            return
+        if not espera:
+            self.fala.falar("Não há ninguém esperando para entrar.",
+                            interromper=True)
+            return
+        dono = self.dlg_chamada if self.dlg_chamada is not None and \
+            self.dlg_chamada.IsShown() else self
+        dlg = DialogoConvidar(
+            dono, espera, "a chamada", "Sala de espera",
+            "Quem está esperando para entrar em %s", "&Escolher")
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            escolhidos = dlg.escolhidos()
+        finally:
+            dlg.Destroy()
+        if not escolhidos:
+            self.fala.falar("Ninguém foi marcado.", interromper=True)
+            return
+        r = wx.MessageBox(
+            "Deixar entrar as %d pessoas marcadas? Sim deixa entrar, Não "
+            "recusa." % len(escolhidos) if len(escolhidos) != 1 else
+            "Deixar entrar a pessoa marcada? Sim deixa entrar, Não recusa.",
+            NOME, wx.YES_NO | wx.CANCEL | wx.ICON_QUESTION, dono)
+        if r == wx.CANCEL:
+            return
+        p.tratar_sala_de_espera(c.conversa_id, [a for a, _n in escolhidos],
+                                r == wx.YES)
+
+    @seguro
+    def _alternar_aprovacao(self):
+        c, p = self._chamada_por_link_em_curso()
+        if c is None:
+            return
+        ligado = not p.aprovacao_para_entrar(c.conversa_id)
+        p.exigir_aprovacao_na_chamada(c.conversa_id, ligado)
+
+    @seguro
+    def _reagir_na_chamada(self):
+        c, p = self._chamada_por_link_em_curso()
+        if c is None:
+            return
+        emoji = self._escolher_da_lista(
+            "Reagir", "Reagir com:",
+            [(e, "%s %s" % (e, n)) for e, n in REACOES_DA_CHAMADA], "👍")
+        if emoji:
+            p.reagir_na_chamada(c.conversa_id, emoji)
+
+    @seguro
+    def _falar_maos_levantadas(self):
+        c, p = self._chamada_por_link_em_curso()
+        if c is None:
+            return
+        nomes = p.maos_levantadas_na_chamada(c.conversa_id)
+        if not nomes:
+            self.fala.falar("Ninguém está com a mão levantada.",
+                            interromper=True)
+        else:
+            self.fala.falar("Mão levantada: %s." % ", ".join(nomes),
+                            interromper=True)
+
+    @seguro
+    def _escolher_video_da_chamada(self):
+        """Ver só o vídeo de uma pessoa, ou voltar para a grade com todos."""
+        c, p = self._chamada_por_link_em_curso()
+        if c is None:
+            return
+        pessoas = p.participantes_com_video_na_chamada(c.conversa_id)
+        if not pessoas:
+            self.fala.falar("Ninguém mandou vídeo ainda.", interromper=True)
+            return
+        escolhas = [("", "Todos, em grade")] + pessoas
+        quem = self._escolher_da_lista(
+            "Vídeo", "Ver o vídeo de quem:", escolhas, "")
+        if quem is None:
+            return
+        p.escolher_video_na_chamada(c.conversa_id, quem or None)
+        self.fala.falar("Mostrando o vídeo de %s." % next(
+            r for v, r in escolhas if v == quem).lower()
+            if quem else "Mostrando todos, em grade.", interromper=True)
+
+    @seguro
+    def _ver_historico_da_chamada(self):
+        c, p = self._chamada_por_link_em_curso()
+        if c is None:
+            return
+        linhas = p.historico_da_chamada_por_link(c.conversa_id)
+        if not linhas:
+            self.fala.falar("Ainda não aconteceu nada na chamada.",
+                            interromper=True)
+            return
+        self._escolher_da_lista(
+            "Histórico da chamada", "O que aconteceu (mais recente por "
+            "último):", [(i, t) for i, t in enumerate(linhas)],
+            len(linhas) - 1)
+
+    @seguro
+    def _alternar_mao_na_chamada(self):
+        c, p = self._chamada_por_link_em_curso()
+        if c is None:
+            return
+        p.alternar_mao_na_chamada(c.conversa_id)
+
+    @seguro
+    def _criar_link_de_chamada(self, video=False):
+        """Menu Chamadas: cria um link de chamada (de voz ou de vídeo) e o
+        copia."""
+        conta_id, prov = self._conta_para_chamada_por_link()
+        if prov is None:
+            return
+        self.fala.falar("Criando o link da chamada...", interromper=True)
+
+        def trabalho():
+            try:
+                link, erro = prov.criar_link_de_chamada(video)
+            except Exception:
+                log.exception("criar link de chamada")
+                link, erro = "", "Não consegui criar o link de chamada."
+            wx.CallAfter(self._link_de_chamada_criado, link, erro)
+        threading.Thread(target=trabalho, daemon=True,
+                         name="criar-link-chamada").start()
+
+    @seguro
+    def _link_de_chamada_criado(self, link, erro):
+        if erro:
+            bipe("erro")
+            self.fala.falar(erro, interromper=True)
+            return
+        bipe("tarefa_pronta")
+        self._copiar_texto(link, "Link da chamada criado e copiado. Cole "
+                                 "onde quiser enviar.")
+
     def _ev_chamada_em_andamento(self, e):
         """Um convite de chamada em grupo chegou ou a chamada acabou: o botao
         da conversa do grupo passa a oferecer Entrar (ou volta a Iniciar)."""
@@ -7322,13 +7603,25 @@ class Janela(wx.Frame):
             self.fala.falar("Este serviço não cria enquetes.",
                             interromper=True)
             return
-        pedido = ui_nova_enquete.pedir_enquete(
-            self, self.contas.servico(conta_id), self.fala)
+        servico = self.contas.servico(conta_id)
+        avancada = bool(servico == "whatsapp" and getattr(
+            prov, "PODE_ENQUETE_AVANCADA", False)
+            and self.cfg.get("enquetes_avancadas_whatsapp"))
+        if avancada:
+            pedido = ui_nova_enquete.pedir_enquete(
+                self, servico, self.fala, avancada=True)
+        else:
+            pedido = ui_nova_enquete.pedir_enquete(self, servico, self.fala)
         if pedido is None:
             self.caixa.SetFocus()
             return
-        pergunta, opcoes, multipla, anonima = pedido
-        prov.criar_enquete(conversa_id, pergunta, opcoes, multipla, anonima)
+        pergunta, opcoes, multipla, anonima = pedido[:4]
+        if len(pedido) > 4 and pedido[4]:
+            prov.criar_enquete(conversa_id, pergunta, opcoes, multipla,
+                               anonima, avancada=pedido[4])
+        else:
+            prov.criar_enquete(conversa_id, pergunta, opcoes, multipla,
+                               anonima)
         self.fala.falar("Criando a enquete.", interromper=True)
         self.caixa.SetFocus()
 
@@ -10367,6 +10660,14 @@ class Janela(wx.Frame):
             log.info("link %s: nenhuma conta conectada do serviço; vai para "
                      "o navegador", info["servico"])
             return False
+        if info["acao"] == "chamada":
+            # so com a caixa das chamadas por link marcada e a DLL pronta;
+            # senao o link segue para o navegador, como antes
+            contas = [c for c in contas if getattr(
+                self.contas.provedor(c[0]), "suporta_chamada_por_link",
+                False)]
+            if not contas:
+                return False
         conta_id = contas[0][0]
         if len(contas) > 1:
             conta_id = self._escolher_da_lista(
@@ -10375,7 +10676,10 @@ class Janela(wx.Frame):
             if conta_id is None:
                 return True
         prov = self.contas.provedor(conta_id)
-        if info["acao"] == "entrar":
+        if info["acao"] == "chamada":
+            self._confirmar_chamada_por_link(
+                conta_id, prov, info["codigo"], info["video"])
+        elif info["acao"] == "entrar":
             self._entrar_no_grupo(None, info["convite"], prov)
         elif info["acao"] == "telefone":
             self._abrir_link_de_telefone(conta_id, info)

@@ -78,6 +78,11 @@ class DialogoEnquete(wx.Dialog):
         situacao += " %s." % ("Nenhum voto" if votantes == 0 else
                               "1 voto" if votantes == 1 else
                               "%d votos" % votantes)
+        for frase in m.descricao_da_enquete(self.enq):
+            situacao += " %s." % frase
+        if m.mostrar_resposta_certa(self.enq):
+            situacao += " Resposta certa: %s." % self.enq["opcoes"][
+                self.enq["correta"]]
         if not self.pode_votar and not self.enq["encerrada"]:
             situacao += " Sem conexão ou sem suporte a voto: só leitura."
         self.aviso.SetLabel(situacao)

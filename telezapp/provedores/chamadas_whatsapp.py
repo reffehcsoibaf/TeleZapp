@@ -52,6 +52,8 @@ PERIODO_DO_DIAGNOSTICO_S = 5     # janela do diagnostico do alto-falante
 MINIMO_DE_QUADROS_TOCADOS = 20   # em 5 s (o normal passa de 70)
 QUADROS_POR_REGISTRO = 83        # um registro do eco a cada 5 s (quadros de 60 ms)
 FASE_CONECTANDO = 3              # CallPhase do meowcaller: Connecting
+FASE_ATIVA = 4                   # CallPhase do meowcaller: Active
+PREFIXO_DE_LINK = "link:"        # id da "conversa" de uma chamada por link
 BYTES_DO_VIDEO = 512 * 1024      # uma unidade de acesso H.264 cabe com folga
 FIM_DO_VIDEO = -2                # retorno da DLL: a chamada acabou
 # CallVideo: o que fazer com o video da chamada
@@ -139,6 +141,12 @@ class Ponte:
                                         c.c_int, c.c_int]
             g.CallReadVideo.restype = c.c_int
             self._buf_video = ctypes.create_string_buffer(BYTES_DO_VIDEO)
+            if hasattr(g, "CallReadParticipantVideo"):
+                g.CallReadParticipantVideo.argtypes = [
+                    c.c_char_p, c.c_char_p, c.c_char_p, c.c_int,
+                    c.c_char_p, c.c_int, c.c_int]
+                g.CallReadParticipantVideo.restype = c.c_int
+                self._buf_quem = ctypes.create_string_buffer(256)
 
     def _preparar_grupo(self):
         """As funcoes de chamada em grupo, so se a DLL as tem."""
@@ -161,6 +169,80 @@ class Ponte:
             g.CallAddParticipant.argtypes = [c.c_char_p, c.c_char_p,
                                              c.c_char_p, c.c_char_p, c.c_int]
             g.CallAddParticipant.restype = c.c_int
+        if self.suporta_link():
+            for nome in ("CallLinkPreview", "CallLinkJoin"):
+                f = getattr(g, nome)
+                f.argtypes = [c.c_char_p, c.c_char_p, c.c_int,
+                              c.c_char_p, c.c_int]
+                f.restype = c.c_int
+            g.CallLinkCreate.argtypes = [c.c_char_p, c.c_int, c.c_char_p,
+                                         c.c_int]
+            g.CallLinkCreate.restype = c.c_int
+        if self.suporta_controles_de_grupo():
+            for nome in ("CallWaitingAdmit", "CallWaitingDeny"):
+                f = getattr(g, nome)
+                f.argtypes = [c.c_char_p, c.c_char_p, c.c_char_p,
+                              c.c_char_p, c.c_int]
+                f.restype = c.c_int
+            for nome in ("CallApprovalRequired", "CallHand"):
+                f = getattr(g, nome)
+                f.argtypes = [c.c_char_p, c.c_char_p, c.c_int,
+                              c.c_char_p, c.c_int]
+                f.restype = c.c_int
+            g.CallReact.argtypes = [c.c_char_p, c.c_char_p, c.c_char_p,
+                                    c.c_char_p, c.c_int]
+            g.CallReact.restype = c.c_int
+
+    def suporta_controles_de_grupo(self):
+        """Sala de espera, reacoes e mao levantada (chamada por link)."""
+        return all(hasattr(self.go, n) for n in (
+            "CallWaitingAdmit", "CallWaitingDeny", "CallApprovalRequired",
+            "CallReact", "CallHand"))
+
+    def admitir(self, chamada, quem, aceitar=True):
+        """True se o servidor aceitou deixar entrar (ou recusar) `quem`."""
+        f = self.go.CallWaitingAdmit if aceitar else self.go.CallWaitingDeny
+        return bool(self._json(f, chamada.encode(), quem.encode(),
+                               tamanho=512).get("ok"))
+
+    def exigir_aprovacao(self, chamada, ligado):
+        return bool(self._json(self.go.CallApprovalRequired,
+                               chamada.encode(), 1 if ligado else 0,
+                               tamanho=512).get("ok"))
+
+    def reagir(self, chamada, emoji):
+        return bool(self._json(self.go.CallReact, chamada.encode(),
+                               emoji.encode(), tamanho=512).get("ok"))
+
+    def levantar_mao(self, chamada, levantada):
+        return bool(self._json(self.go.CallHand, chamada.encode(),
+                               1 if levantada else 0, tamanho=512).get("ok"))
+
+    def suporta_link(self):
+        """A DLL sabe consultar, entrar e criar links de chamada?"""
+        return all(hasattr(self.go, n) for n in (
+            "CallLinkPreview", "CallLinkJoin", "CallLinkCreate"))
+
+    def previa_link(self, codigo, video):
+        """{"video", "approval", "admin", "creator"...} ou {"error"}."""
+        return self._json(self.go.CallLinkPreview, codigo.encode(),
+                          1 if video else 0, tamanho=2048)
+
+    def entrar_por_link(self, codigo, video):
+        """{"call", "waiting", "approval", "admin"} ou {"error"}."""
+        return self._json(self.go.CallLinkJoin, codigo.encode(),
+                          1 if video else 0, tamanho=1024)
+
+    def criar_link(self, video):
+        """{"url", "video"} ou {"error"}."""
+        buf = ctypes.create_string_buffer(1024)
+        n = self.go.CallLinkCreate(self.uuid, 1 if video else 0, buf, 1024)
+        if n <= 0:
+            return {"error": "A DLL não respondeu."}
+        try:
+            return json.loads(buf.value.decode("utf-8"))
+        except ValueError:
+            return {"error": "Resposta ilegível da DLL."}
 
     def suporta_grupo(self):
         return hasattr(self.go, "CallGroupDial")
@@ -270,6 +352,21 @@ class Ponte:
                                   self._buf_video, BYTES_DO_VIDEO, espera_ms)
         if n > 0:
             return self._buf_video.raw[:n]
+        return False if n == FIM_DO_VIDEO else None
+
+    def suporta_video_de_participantes(self):
+        return hasattr(self.go, "CallReadParticipantVideo") and \
+            self.suporta_video()
+
+    def ler_video_de_participante(self, chamada, espera_ms=500):
+        """(quem, bytes) de uma unidade de acesso de um participante da
+        chamada em grupo, None (nada a tempo) ou False (a chamada acabou)."""
+        n = self.go.CallReadParticipantVideo(
+            self.uuid, chamada.encode(), self._buf_quem, 256,
+            self._buf_video, BYTES_DO_VIDEO, espera_ms)
+        if n > 0:
+            return (self._buf_quem.value.decode("utf-8", "replace"),
+                    self._buf_video.raw[:n])
         return False if n == FIM_DO_VIDEO else None
 
     def atender(self, chamada):
@@ -418,6 +515,14 @@ class _Ligacao:
         self.quadros_retorno = 0
         self.quadros_mic = 0
         self.vigia_audio = False
+        self.na_sala = False            # link: esperando o anfitriao aprovar
+        self.sala = {}                  # link: ultima sala de espera (evento)
+        self.sala_avisada = set()       # quem ja foi anunciado na sala
+        self.mao = False                # a nossa mao esta levantada
+        self.maos = {}                  # link: quem esta com a mao levantada
+        self.historico = []             # link: o que aconteceu (texto)
+        self.video_de = {}              # link: quem manda video -> numero
+        self.foco_video = None          # link: so o video desta pessoa
         self.parar = threading.Event()
         self.trocar_mic = threading.Event()
         self.trocar_saida = threading.Event()
@@ -457,9 +562,11 @@ class ChamadasWhatsApp:
         self.grupo_ligado = lambda: False
         self.andamento_ligado = lambda: False
         self.adicionar_ligado = lambda: False
+        self.link_ligado = lambda: False   # chamadas por link (experimental)
         self.nome_de_jid = lambda jid, pn="": ""   # nome de um participante
         self.membros_de = lambda cid: None         # [jid] do grupo, ou None
         self._ofertas = {}              # call_id -> convite de chamada em grupo
+        self._eventos_cedo = {}         # call_id -> eventos antes do id
         # segunda chamada com outra em andamento (recurso experimental)
         self.espera_ligada = lambda: False
         self._espera = {}               # id da conversa -> _Ligacao tocando
@@ -534,9 +641,11 @@ class ChamadasWhatsApp:
 
     # --------------------------------------------------------- estados
     def _publicar(self, c):
-        # em grupo so ha voz: video e tela ficam de fora
-        c.suporta_video = self.suporta_video and not c.grupo
-        c.suporta_tela = self.suporta_video and not c.grupo
+        # em grupo so ha voz: video e tela ficam de fora, menos na chamada
+        # por link (experimental)
+        com_video = not c.grupo or (c.por_link and self.suporta_video_de_link)
+        c.suporta_video = self.suporta_video and com_video
+        c.suporta_tela = self.suporta_video and com_video
         c.suporta_som_pc = self.suporta_som_pc
         c.suporta_adicionar = self._pode_convidar(c)
         self.barramento.publicar(ev.EstadoChamada(
@@ -611,6 +720,8 @@ class ChamadasWhatsApp:
             cid, lig = self._achar(call_id)
             if lig is not None:
                 self._ao_video_do_outro(cid, lig, e)
+        elif tipo in ("waiting", "reaction", "hand", "screen"):
+            self._ao_controle_de_grupo(tipo, call_id, e)
         elif tipo == "keyframe":
             cid, lig = self._achar(call_id)
             if lig is not None and lig.codificador is not None:
@@ -622,6 +733,13 @@ class ChamadasWhatsApp:
             # na chamada de saida a fase Connecting vem quando o relay e
             # alocado, ainda tocando: so a de entrada (que atendemos) conta
             if lig is not None and fase == FASE_CONECTANDO and                     lig.chamada.entrante:
+                self._ao_conectar(cid, lig)
+            elif lig is not None and lig.na_sala and \
+                    fase in (FASE_CONECTANDO, FASE_ATIVA):
+                # o anfitriao deixou entrar: agora abre o som
+                log.info("chamada por link: aprovado pelo anfitrião")
+                lig.na_sala = False
+                self._mudar(cid, ch.CONECTANDO)
                 self._ao_conectar(cid, lig)
         elif tipo == "accepted":
             cid, lig = self._achar(call_id)
@@ -837,6 +955,9 @@ class ChamadasWhatsApp:
                                       % razao)
         elif c.estado == ch.TOCANDO:
             motivo, erro = ch.PERDIDA, ""
+        elif c.estado == ch.ESPERANDO:
+            motivo, erro = ch.FALHA, ("O anfitrião não deixou você entrar "
+                                      "na chamada.")
         elif c.estado == ch.CHAMANDO:
             motivo = ch.RECUSADA if razao == "rejected" else ch.SEM_RESPOSTA
             erro = ""
@@ -1088,6 +1209,301 @@ class ChamadasWhatsApp:
             lig.call_id = nova
         self._ao_conectar(cid, lig)
 
+    # ------------------------------------------- chamadas por link
+    def suporta_link(self):
+        try:
+            return bool(self.link_ligado() and self.ponte.suporta_link())
+        except Exception:
+            return False
+
+    @property
+    def suporta_video_de_link(self):
+        """A DLL entrega o video de cada participante (chamada por link)?"""
+        try:
+            return bool(self.ponte.suporta_video_de_participantes())
+        except Exception:
+            return False
+
+    def entrar_por_link(self, codigo, video=False, microfone="", saida=""):
+        """Entra na chamada de um link call.whatsapp.com. Nunca grava o
+        codigo no log: quem o tem entra na chamada."""
+        if not self.suporta_link():
+            self._avisar("As chamadas por link não estão disponíveis. Marque "
+                         "a caixa em Configurações, Recursos experimentais.")
+            return
+        with self._trava:
+            ocupado = bool(self.ligacoes)
+        if ocupado:
+            self._avisar("Já há uma chamada em andamento.")
+            return
+        threading.Thread(target=self._entrar_por_link,
+                         args=(codigo, bool(video), microfone, saida),
+                         name="chamada-link", daemon=True).start()
+
+    def _entrar_por_link(self, codigo, video, microfone, saida):
+        cid = PREFIXO_DE_LINK + "chamada"
+        with self._trava:
+            if self.ligacoes:
+                return
+            c = ch.Chamada(self.conta_id, cid, "chamada por link", False,
+                           ch.CONECTANDO, grupo=True, por_link=True,
+                           video=bool(video) and self.suporta_video
+                           and self.suporta_video_de_link)
+            lig = _Ligacao(c)
+            lig.mic, lig.saida = microfone, saida
+            self.ligacoes[cid] = lig
+        self.atualizar_dispositivos()
+        self._publicar(c)
+        r = self.ponte.entrar_por_link(codigo, video)
+        if "call" not in r:
+            erro = r.get("error", "erro desconhecido")
+            log.warning("não consegui entrar na chamada por link: %s",
+                        erro.replace(codigo, "***"))
+            self._mudar(cid, ch.ENCERRADA, ch.FALHA, self._erro_do_link(erro))
+            return
+        with self._trava:
+            lig.call_id = r["call"]
+            lig.na_sala = bool(r.get("waiting"))
+            cedo = self._eventos_cedo.pop(r["call"], [])
+        for tipo, e in cedo:     # chegaram antes de sabermos o id da chamada
+            self._ao_controle_de_grupo(tipo, r["call"], e)
+        if lig.na_sala:
+            log.info("chamada por link: na sala de espera")
+            self._mudar(cid, ch.ESPERANDO)
+            return
+        self._ao_conectar(cid, lig)
+
+    @staticmethod
+    def _erro_do_link(texto):
+        """O erro da DLL em portugues para quem ouve."""
+        t = (texto or "").lower()
+        if "expired" in t or "not found" in t or "invalid" in t or \
+                "revoked" in t or "404" in t or "item-not-found" in t:
+            return ("Esse link de chamada não vale mais ou está "
+                    "incorreto.")
+        return "Não consegui entrar na chamada por link."
+
+    # ---- sala de espera, reações e mão levantada (chamada por link)
+    def _ao_controle_de_grupo(self, tipo, call_id, e):
+        cid, lig = self._achar(call_id)
+        if lig is None:
+            # o evento da sala vem durante a entrada, antes de a chamada ter
+            # id aqui: guarda e repete depois
+            with self._trava:
+                fila = self._eventos_cedo.setdefault(call_id, [])
+                if len(fila) < 20:
+                    fila.append((tipo, e))
+            return
+        if not lig.chamada.por_link:
+            return
+        quem = self._quem_e(e.get("who", ""))
+        if tipo == "waiting":
+            self._ao_mudar_a_sala(cid, lig, e)
+        elif tipo == "reaction":
+            if e.get("emoji") and not e.get("removed"):
+                self._avisar_e_guardar(
+                    lig, "%s reagiu com %s." % (quem, e["emoji"]))
+        elif tipo == "hand":
+            with self._trava:
+                if e.get("raised"):
+                    lig.maos[e.get("who", "")] = quem
+                else:
+                    lig.maos.pop(e.get("who", ""), None)
+            self._avisar_e_guardar(lig, "%s %s a mão." % (
+                quem, "levantou" if e.get("raised") else "baixou"))
+        elif tipo == "screen":
+            self._avisar_e_guardar(lig, "%s %s a tela." % (
+                quem, "começou a compartilhar" if e.get("active")
+                else "parou de compartilhar"))
+
+    def _avisar_e_guardar(self, lig, texto):
+        """Fala o aviso e o guarda no histórico da chamada (com a hora)."""
+        with self._trava:
+            lig.historico.append("%s %s" % (time.strftime("%H:%M"), texto))
+            del lig.historico[:-200]
+        self._avisar(texto)
+
+    def historico_da_chamada(self, cid):
+        with self._trava:
+            lig = self.ligacoes.get(cid)
+            return list(lig.historico) if lig is not None else []
+
+    def maos_levantadas(self, cid):
+        """Os nomes de quem está com a mão levantada."""
+        with self._trava:
+            lig = self.ligacoes.get(cid)
+            return sorted(lig.maos.values()) if lig is not None else []
+
+    def participantes_com_video(self, cid):
+        """[(quem, rótulo)] de quem mandou vídeo nesta chamada."""
+        with self._trava:
+            lig = self.ligacoes.get(cid)
+            if lig is None:
+                return []
+            itens = sorted(lig.video_de.items(), key=lambda x: x[1])
+        saida = []
+        for quem, n in itens:
+            try:
+                nome = self.nome_de_jid(quem, "")
+            except Exception:
+                nome = ""
+            saida.append((quem, nome or "Participante %d" % n))
+        return saida
+
+    def escolher_video(self, cid, quem=None):
+        """Mostra só o vídeo de `quem`; None volta para a grade."""
+        with self._trava:
+            lig = self.ligacoes.get(cid)
+            if lig is not None:
+                lig.foco_video = quem
+
+    def _quem_e(self, jid, pn=""):
+        try:
+            nome = self.nome_de_jid(jid, pn)
+        except Exception:
+            nome = ""
+        return nome or "Alguém"
+
+    def _ao_mudar_a_sala(self, cid, lig, e):
+        with self._trava:
+            lig.sala = e
+            novos = [u for u in e.get("users", [])
+                     if u.get("jid") not in lig.sala_avisada]
+            # quem sai da sala e volta é anunciado de novo
+            lig.sala_avisada = {u.get("jid") for u in e.get("users", [])}
+        if not e.get("admin") or not novos:
+            return
+        nomes = [self._quem_e(u.get("jid", ""), u.get("pn", ""))
+                 for u in novos]
+        self._avisar("%s quer entrar na chamada. Abra o menu Chamadas, Sala "
+                     "de espera." % ", ".join(nomes))
+
+    def sala_de_espera(self, cid):
+        """[(jid, nome)] de quem espera para entrar na chamada por link que
+        esta conta administra."""
+        with self._trava:
+            lig = self.ligacoes.get(cid)
+            sala = dict(lig.sala) if lig is not None else {}
+        return [(u.get("jid", ""), self._quem_e(u.get("jid", ""),
+                                                u.get("pn", "")))
+                for u in sala.get("users", [])]
+
+    def sou_anfitriao(self, cid):
+        with self._trava:
+            lig = self.ligacoes.get(cid)
+            return bool(lig is not None and lig.sala.get("admin"))
+
+    def aprovacao_exigida(self, cid):
+        with self._trava:
+            lig = self.ligacoes.get(cid)
+            return bool(lig is not None and lig.sala.get("enabled"))
+
+    def tratar_sala_de_espera(self, cid, jids, admitir):
+        """Deixa entrar (ou recusa) as pessoas escolhidas; avisa o resultado."""
+        with self._trava:
+            lig = self.ligacoes.get(cid)
+        if lig is None or not lig.call_id:
+            return
+
+        def trabalho():
+            ok = 0
+            for jid in jids:
+                try:
+                    if self.ponte.admitir(lig.call_id, jid, admitir):
+                        ok += 1
+                except Exception:
+                    log.exception("erro ao tratar a sala de espera")
+            acao = "deixei entrar" if admitir else "recusei"
+            if ok == len(jids):
+                self._avisar("Pronto, %s %d %s." % (
+                    acao, ok, "pessoa" if ok == 1 else "pessoas"))
+            else:
+                self._avisar("Não consegui tratar todas as pessoas (%d de "
+                             "%d)." % (ok, len(jids)))
+        threading.Thread(target=trabalho, name="chamada-sala",
+                         daemon=True).start()
+
+    def exigir_aprovacao(self, cid, ligado):
+        with self._trava:
+            lig = self.ligacoes.get(cid)
+        if lig is None or not lig.call_id:
+            return
+
+        def trabalho():
+            try:
+                ok = self.ponte.exigir_aprovacao(lig.call_id, ligado)
+            except Exception:
+                log.exception("erro ao mudar a aprovação para entrar")
+                ok = False
+            if ok:
+                self._avisar("Agora %s." % (
+                    "quem entrar pelo link espera a sua aprovação"
+                    if ligado else "todos entram pelo link sem aprovação"))
+            else:
+                self._avisar("Não consegui mudar a aprovação para entrar. "
+                             "Só o anfitrião pode.")
+        threading.Thread(target=trabalho, name="chamada-aprovacao",
+                         daemon=True).start()
+
+    def reagir(self, cid, emoji):
+        with self._trava:
+            lig = self.ligacoes.get(cid)
+        if lig is None or not lig.call_id:
+            return
+
+        def trabalho():
+            try:
+                ok = self.ponte.reagir(lig.call_id, emoji)
+            except Exception:
+                log.exception("erro ao reagir")
+                ok = False
+            self._avisar("Reagi com %s." % emoji if ok
+                         else "Não consegui reagir.")
+        threading.Thread(target=trabalho, name="chamada-reagir",
+                         daemon=True).start()
+
+    def alternar_mao(self, cid):
+        with self._trava:
+            lig = self.ligacoes.get(cid)
+        if lig is None or not lig.call_id:
+            return
+
+        def trabalho():
+            levantar = not lig.mao
+            try:
+                ok = self.ponte.levantar_mao(lig.call_id, levantar)
+            except Exception:
+                log.exception("erro ao levantar a mão")
+                ok = False
+            if ok:
+                lig.mao = levantar
+                self._avisar("Mão levantada." if levantar
+                             else "Mão baixada.")
+            else:
+                self._avisar("Não consegui mudar a mão levantada.")
+        threading.Thread(target=trabalho, name="chamada-mao",
+                         daemon=True).start()
+
+    def previa_do_link(self, codigo, video=False):
+        """(texto, erro): o que o servidor diz do link antes de entrar."""
+        if not self.suporta_link():
+            return {}, "As chamadas por link não estão disponíveis."
+        r = self.ponte.previa_link(codigo, video)
+        if "error" in r:
+            return {}, self._erro_do_link(r["error"])
+        return r, ""
+
+    def criar_link(self, video=False):
+        """(endereco, erro): cria um link de chamada que pode ser reusado."""
+        if not self.suporta_link():
+            return "", "As chamadas por link não estão disponíveis."
+        r = self.ponte.criar_link(video)
+        if not r.get("url"):
+            log.warning("não consegui criar o link de chamada: %s",
+                        r.get("error", "erro desconhecido"))
+            return "", "Não consegui criar o link de chamada."
+        return r["url"], ""
+
     # ----------------------------------------------------- controles
     def atender(self, cid, microfone="", saida="", camera=None):
         with self._trava:
@@ -1145,8 +1561,8 @@ class ChamadasWhatsApp:
     def _iniciar_video(self, cid, lig):
         """Chamada de video que conectou: comeca a ler o video do outro lado
         e, se a camera foi pedida, a ligar."""
-        if not lig.chamada.video or not self.suporta_video or \
-                lig.chamada.grupo:
+        if not lig.chamada.video or not self.suporta_video or (
+                lig.chamada.grupo and not lig.chamada.por_link):
             return
         self._receber_video_em_segundo_plano(cid, lig)
         if lig.camera_nome is not None:
@@ -1196,6 +1612,8 @@ class ChamadasWhatsApp:
 
     def _receber_video(self, cid, lig):
         """DLL -> decodificador -> a janela."""
+        if lig.chamada.por_link and self.suporta_video_de_link:
+            return self._receber_video_de_grupo(cid, lig)
         try:
             dec = self.video.Decodificador()
             while not lig.parar.is_set():
@@ -1214,6 +1632,45 @@ class ChamadasWhatsApp:
         finally:
             lig.recebendo_video = False
             log.info("vídeo do outro lado encerrado")
+
+    def _receber_video_de_grupo(self, cid, lig):
+        """Chamada por link: o video de cada participante tem o seu
+        decodificador; a janela recebe uma imagem so, em grade."""
+        decodificadores, mosaico = {}, self.video.Mosaico()
+        try:
+            while not lig.parar.is_set():
+                lido = self.ponte.ler_video_de_participante(lig.call_id, 500)
+                if lido is False:
+                    break
+                if not lido:
+                    continue
+                quem, unidade = lido
+                dec = decodificadores.get(quem)
+                if dec is None:
+                    dec = decodificadores[quem] = self.video.Decodificador()
+                    log.info("chamada por link: vídeo de mais um "
+                             "participante (%d)", len(decodificadores))
+                    with self._trava:
+                        lig.video_de[quem] = len(lig.video_de) + 1
+                    self._avisar_e_guardar(
+                        lig, "Mais um participante ligou o vídeo.")
+                foco = lig.foco_video
+                for largura, altura, rgb in dec.decodificar(unidade):
+                    if not lig.chamada.video_remoto:
+                        self._marcar_video(cid, lig, video=True, remoto=True)
+                    if foco is not None:
+                        # só uma pessoa: o quadro dela como veio
+                        if quem == foco and self.destino_video is not None:
+                            self.destino_video(cid, largura, altura, rgb)
+                        continue
+                    imagem = mosaico.atualizar(quem, largura, altura, rgb)
+                    if imagem is not None and self.destino_video is not None:
+                        self.destino_video(cid, *imagem)
+        except Exception:
+            log.exception("erro ao receber o vídeo da chamada por link")
+        finally:
+            lig.recebendo_video = False
+            log.info("vídeo da chamada por link encerrado")
 
     def _iniciar_camera(self, cid, lig, nome):
         """Abre a camera `nome` (vazio = a primeira) e manda o video."""

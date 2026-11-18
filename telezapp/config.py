@@ -448,6 +448,39 @@ OPCOES = (
           "chamada passa a ter várias pessoas, como no WhatsApp. Se o "
           "desempenho não for satisfatório, o recurso pode sair do TeleZapp "
           "nas próximas versões.", servico="whatsapp"),
+    Opcao("enquetes_avancadas_whatsapp",
+          "Enquetes avançadas do WhatsApp",
+          CATEGORIA_EXPERIMENTAL, False,
+          "Experimental. Na janela Nova enquete, num chat do WhatsApp, "
+          "aparecem mais opções: quiz (com uma resposta certa), ocultar "
+          "quem votou, permitir que os participantes acrescentem opções e "
+          "um prazo para encerrar. A enquete sai no formato novo do "
+          "WhatsApp (o mesmo que o aplicativo do celular usa para esses "
+          "tipos). Se o WhatsApp não aceitar, a enquete pode chegar sem "
+          "essas características; avise-nos se isso acontecer. Receber e "
+          "ver esses tipos de enquete funciona sempre, com ou sem a caixa.",
+          servico="whatsapp"),
+    Opcao("chamada_por_link_whatsapp",
+          "Chamadas por link do WhatsApp",
+          CATEGORIA_EXPERIMENTAL, False,
+          "Experimental. Entre em uma chamada a partir de um link "
+          "call.whatsapp.com: ao abrir o link de uma mensagem (Enter na "
+          "mensagem, Abrir link) ou pelo item Entrar em chamada por link, "
+          "no menu Chamadas, o TeleZapp entra na chamada. Se o anfitrião "
+          "exigir aprovação, você fica na sala de espera até ele deixar "
+          "entrar. O item Criar link de chamada, no mesmo menu, cria um "
+          "link de voz ou de vídeo para você mandar a outras pessoas. Nos "
+          "links de vídeo (e nos de voz, se você ligar a câmera) a sua "
+          "câmera e a tela podem ser enviadas, e o vídeo de quem está na "
+          "chamada aparece numa grade só. A câmera sempre começa desligada. "
+          "Se você administra o link, o menu Chamadas tem a Sala de espera "
+          "(deixar entrar ou recusar, com aviso falado de quem pede para "
+          "entrar) e a opção de exigir aprovação; qualquer pessoa pode "
+          "reagir e levantar a mão, e o TeleZapp avisa quando outros fazem "
+          "isso ou compartilham a tela. "
+          "Desmarcada, o link abre no navegador, como antes. Se o "
+          "desempenho não for satisfatório, o recurso pode sair do "
+          "TeleZapp nas próximas versões.", servico="whatsapp"),
     Opcao("chat_de_voz_iniciar",
           "Poder iniciar um chat de voz em grupos e canais do Telegram",
           CATEGORIA_EXPERIMENTAL, False,
