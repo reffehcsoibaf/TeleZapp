@@ -134,6 +134,9 @@ type chamadaAtiva struct {
 	// (calls_video.go)
 	video          chan []byte
 	videoRecebidos atomic.Int64
+	// videoPart: o video de cada participante de uma chamada em grupo ou por
+	// link (o canal acima mistura todos os participantes)
+	videoPart chan quadroDeParticipante
 }
 
 func (c *chamadaAtiva) encerrar() { c.uma.Do(func() { close(c.fim) }) }
@@ -218,6 +221,7 @@ func ligarChamada(cliente string, c *meowcaller.Call, entrante bool) *chamadaAti
 		saida:    make(chan []byte, quadrosNaFila),
 		fim:      make(chan struct{}),
 		video:    make(chan []byte, videoNaFila),
+		videoPart: make(chan quadroDeParticipante, videoNaFila),
 	}
 	id := c.ID()
 	chamadasMu.Lock()

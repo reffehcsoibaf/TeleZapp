@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 CHAMANDO = "chamando"          # eu liguei e o outro lado ainda nao atendeu
 TOCANDO = "tocando"            # estao me ligando
 CONECTANDO = "conectando"      # atendi, abrindo o audio
+ESPERANDO = "esperando"        # sala de espera de um link: o anfitriao aprova
 EM_CHAMADA = "em chamada"
 ENCERRADA = "encerrada"
 
@@ -148,6 +149,7 @@ class Chamada:
     grupo: bool = False             # chamada em grupo (WhatsApp)
     participantes: list = field(default_factory=list)  # (jid, nome, estado)
     suporta_adicionar: bool = False  # da para convidar mais gente
+    por_link: bool = False          # entrou por um link (grupo com video)
     _agora: object = field(default=time.monotonic, repr=False)
 
     @property
@@ -340,6 +342,13 @@ def apresentar(c):
             "Chamando %s%s. Esperando atender." % (quem, por_video),
             "Chamando %s%s." % (quem, por_video),
             (DESLIGAR,), DESLIGAR, "chamando")
+    if c.estado == ESPERANDO:
+        return Apresentacao(
+            "Aguardando aprovação em %s" % quem,
+            "Aguardando o anfitrião deixar você entrar em %s." % quem,
+            "Você está na sala de espera de %s. Aguardando o anfitrião "
+            "deixar você entrar." % quem,
+            (DESLIGAR,), DESLIGAR)
     if c.estado == CONECTANDO:
         return Apresentacao(
             "Conectando com %s" % quem,

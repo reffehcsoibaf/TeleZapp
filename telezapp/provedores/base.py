@@ -575,10 +575,16 @@ class Provedor(ABC):
 
     PODE_CRIAR_ENQUETE = False
 
+    # True no servico que cria enquete com quiz, prazo etc. (experimental)
+    PODE_ENQUETE_AVANCADA = False
+
     def criar_enquete(self, conversa_id, pergunta, opcoes, multipla,
-                      anonima=True):
+                      anonima=True, avancada=None):
         """Cria a enquete na conversa. Volta na hora; a mensagem criada chega
-        como ev.MensagemNova(enviada_daqui=True) ou o erro como ev.Aviso."""
+        como ev.MensagemNova(enviada_daqui=True) ou o erro como ev.Aviso.
+        `avancada` (so onde PODE_ENQUETE_AVANCADA): {"quiz": posicao da
+        resposta certa, "oculta": bool, "permite_adicionar": bool,
+        "encerra_em": segundos desde 1970}."""
 
     # True nos servicos em que da para votar numa enquete
     PODE_VOTAR = False

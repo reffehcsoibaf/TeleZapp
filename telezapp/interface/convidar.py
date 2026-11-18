@@ -11,17 +11,19 @@ import wx
 
 
 class DialogoConvidar(wx.Dialog):
-    def __init__(self, pai, candidatos, quem_chama="a chamada"):
+    def __init__(self, pai, candidatos, quem_chama="a chamada",
+                 titulo="Adicionar participantes",
+                 pergunta="Quem convidar para %s", botao="&Convidar"):
         """candidatos: [(endereco, nome)]."""
-        super().__init__(pai, title="Adicionar participantes",
+        super().__init__(pai, title=titulo,
                          style=wx.DEFAULT_DIALOG_STYLE)
         self.candidatos = list(candidatos)
         self.rotulo = wx.StaticText(
-            self, label="Quem convidar para %s (Espaço marca):" % quem_chama)
+            self, label=(pergunta % quem_chama) + " (Espaço marca):")
         self.lista = wx.CheckListBox(
             self, choices=[n or "Participante" for _a, n in self.candidatos],
             name="Quem convidar")
-        self.b_ok = wx.Button(self, wx.ID_OK, "&Convidar")
+        self.b_ok = wx.Button(self, wx.ID_OK, botao)
         self.b_cancelar = wx.Button(self, wx.ID_CANCEL, "Cance&lar")
         lay = wx.BoxSizer(wx.VERTICAL)
         lay.Add(self.rotulo, 0, wx.ALL, 12)

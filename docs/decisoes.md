@@ -1356,3 +1356,66 @@ Relato de um usuário que roda o TeleZapp portátil em disco externo (`E:\TeleZa
 - Aviso de disco: se a pasta de dados está em disco removível, de rede ou em disco ligado por USB (barramento consultado por `IOCTL_STORAGE_QUERY_PROPERTY`, sem precisar de administrador), mostra os cuidados ao abrir (ejetar com o programa fechado, sem suspensão com ele aberto, backup e restaurar em vez de copiar a pasta). Opção `avisar_disco_externo` (Sistema, ligada).
 - Guia: parágrafo na seção de cópia portátil.
 - Limites: o programa não repara o banco; a recuperação continua manual. Detecção USB só testada sem disco externo (nesta máquina só há disco interno): o ramo USB não foi visto em disco real. Sem teste ao vivo, sem commit.
+
+## 18/11/2026 — Chamadas por link do WhatsApp (experimental)
+
+Pedido dele: entrar em chamadas a partir de links `call.whatsapp.com/voice/CODIGO` (e criar o link).
+
+- O meowcaller já tinha `PreviewCallLink`, `JoinCallLink` e `CreateCallLink`; faltava expor na DLL. `calls_grupo.go` ganhou `CallLinkPreview`, `CallLinkJoin` e `CallLinkCreate` (JSON como as outras; fonte em `fontes\chamadas-0.10`, cópia em `docs/neonize/chamadas-calls_grupo.go`). DLL recompilada em `saida\0.10-chamadas`; instalar com `Backup\instalar-dll-com-link-de-chamada.cmd` (TeleZapp fechado).
+- `links_externos.interpretar` reconhece o endereço (`acao: "chamada"`, `codigo`, `video`). Abrir o link de uma mensagem passa por `_abrir_link_por_dentro`: com a caixa desmarcada ou sem DLL nova, o link segue para o navegador como antes.
+- Fluxo: consulta o link (fora da janela), pergunta se entra (avisa se é de vídeo e se o anfitrião precisa aprovar), entra só com voz. A "conversa" da chamada é o id fixo `link:chamada` (só há uma chamada por vez); a chamada é de grupo na janela (lista de quem está nela).
+- Sala de espera: novo estado `ESPERANDO` (fase 6 do meowcaller); o som só abre quando chega a fase Connecting/Active. Recusa vira "O anfitrião não deixou você entrar na chamada."
+- O código do link não vai ao log (quem o tem entra na chamada).
+- Menu Chamadas: "Entrar em chamada por link..." e "Criar link de chamada" (copia o link). Opção `chamada_por_link_whatsapp` em Recursos experimentais.
+- Limites: vídeo não (link de vídeo entra só com voz); sala de espera, aprovação e a entrada real nunca vistas ao vivo; o meowcaller pode não ter o mesmo comportamento do WhatsApp oficial. Sem teste ao vivo, sem commit.
+
+### Vídeo nas chamadas por link (18/11/2026, mesma data)
+
+Ele perguntou por que era só voz: não era limite do WhatsApp (o link tem versão `/video/` e o meowcaller tem vídeo em grupo), era escolha minha herdada das chamadas em grupo, que são só de voz. Pediu para implementar tudo, já que é experimental e o feedback dos usuários entra no teste.
+
+- DLL: `CallReadParticipantVideo` + fila `videoPart` por chamada (o sink comum do meowcaller mistura todos os participantes e não serve a um decodificador só). Fonte em `fontes\chamadas-0.10` e cópias em `docs/neonize/chamadas-*.go`; a DLL é a mesma do `instalar-dll-com-link-de-chamada.cmd`.
+- Python: um decodificador por participante e `midia.video.Mosaico` (grade de 320x180 por participante; com um só, o quadro como veio; sai da grade quem fica 4 s sem quadro; no máximo ~12 imagens por segundo). A janela de vídeo recebe uma imagem só, como na chamada individual.
+- Enviar: câmera e tela entram na chamada por link (`Chamada.por_link`); chamada em grupo comum segue só de voz. A câmera sempre começa desligada (privacidade). Link de voz + ligar a câmera pede a passagem para vídeo (`StartVideo`).
+- Menu: "Criar link de chamada de voz" e "de vídeo".
+- Limites: o meowcaller diz que o envio de vídeo não foi validado e que o grupo é experimental; nada visto ao vivo (nem receber, nem enviar, nem a grade). Quem usa leitor de tela não ouve o vídeo: o aviso de "mais um participante com vídeo" não existe ainda.
+
+### Experiência completa da chamada por link (18/11/2026, mesma data)
+
+Ele pediu a experiência completa: além do vídeo, tudo o que o link tem.
+
+- DLL (`calls_grupo.go`, `ligarControlesDeGrupo`): eventos `waiting` (sala de espera: admin, aprovação ligada, até 20 pessoas), `reaction`, `hand` e `screen`; funções `CallWaitingAdmit`, `CallWaitingDeny`, `CallApprovalRequired`, `CallReact` e `CallHand`.
+- Sala de espera: o anfitrião (quem entrou pelo link com `admin`) ouve "Fulano quer entrar na chamada" e abre Chamadas, Sala de espera (lista com caixas; Sim deixa entrar, Não recusa). O evento da sala chega durante a entrada, antes de a chamada ter id aqui: fica guardado (`_eventos_cedo`) e é repetido depois.
+- Menu Chamadas: Sala de espera, Exigir aprovação (liga/desliga), Reagir (8 emojis) e Levantar/baixar a mão. Só valem dentro de uma chamada por link (`link:chamada`).
+- Avisos falados: reação, mão levantada, tela compartilhada e "Mais um participante ligou o vídeo" (o vídeo chega por participante sem nome certo). Só em chamada por link.
+- Para ser anfitrião: criar o link e entrar nele pelo próprio menu (a chamada só existe quando alguém entra). Se o servidor não der `admin` a quem criou o link, a sala não aparece; é o ponto mais incerto.
+- Não feito: lista de participantes com mãos levantadas, reações recebidas no histórico, vídeo de um participante específico (só a grade).
+- Sem teste ao vivo; 1982 testes automáticos passam.
+
+### Fechando o que ficou de fora (18/11/2026, mesma data)
+
+Ele estranhou eu ter deixado itens para depois sem motivo técnico; não havia. Feitos em seguida, sem mudar a DLL: lista de quem está com a mão levantada (`lig.maos`, fala pelo menu), histórico da chamada por link (reações, mãos, telas e vídeos, com a hora, até 200 linhas, em lista no menu) e ver o vídeo de uma pessoa só (`lig.foco_video`; "Todos, em grade" volta ao mosaico; quem não tem nome aparece como "Participante N"). 1984 testes passam.
+
+## 18/11/2026 - Enquetes novas do WhatsApp (V4 a V6, quiz, anônima, prazo)
+
+- Causa: no grupo de testes chegaram duas enquetes `pollCreationMessageV6` e o
+  TeleZapp só conhecia o básico, V2 e V3 (apareciam como "tipo do WhatsApp").
+- Agora: V4 (dentro de envelope), V5 e V6 são lidas; quiz (resposta certa só
+  aparece depois de votar ou de a enquete acabar), anônima (não mostra quem
+  votou), prazo (`endTime` encerra), opção acrescentada por participante
+  (`pollAddOptionMessage`), opções com imagem (só avisa) e o resumo final
+  (`pollResultSnapshotMessage`).
+- Limite: votar em V5/V6 e em quiz só será confirmado ao vivo; as imagens das
+  opções ainda não são mostradas. Sem mudança de DLL.
+
+### Criar enquetes avançadas (experimental)
+
+- Caixa `enquetes_avancadas_whatsapp` (Recursos experimentais). Com ela, a
+  janela Nova enquete do WhatsApp ganha: quiz (com a resposta certa), ocultar
+  quem votou, permitir opções novas e prazo (1 h a 7 dias).
+- A DLL monta a enquete básica; o Python preenche `pollType`, `correctAnswer`,
+  `hideParticipantName`, `allowAddOption`, `endTime` e move tudo para
+  `pollCreationMessageV6`, o campo que o celular usa (visto no grupo de testes).
+  `endTime` vai em segundos (hipótese; a leitura aceita também milissegundos).
+- Sem teste ao vivo: não se sabe se o WhatsApp honra os campos nem se votar em
+  V6 funciona. Opções com imagem: não implementado (o formato das imagens por
+  opção, mensagens associadas, não está documentado; sem como verificar).

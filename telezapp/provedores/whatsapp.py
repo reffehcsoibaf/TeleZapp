@@ -72,7 +72,14 @@ EMBRULHOS = ("deviceSentMessage", "ephemeralMessage", "viewOnceMessage",
              # outros envelopes (FutureProofMessage) do WhatsApp
              "groupMentionedMessage", "spoilerMessage", "botInvokeMessage",
              "limitSharingMessage", "questionMessage", "questionReplyMessage",
-             "botForwardedMessage", "groupStatusMessage")
+             "botForwardedMessage", "groupStatusMessage",
+             # a enquete V4 vem dentro de um envelope
+             "pollCreationMessageV4")
+# Todas as versoes da mensagem que cria uma enquete (a V4 e aberta como
+# envelope, ver EMBRULHOS)
+CRIACAO_DE_ENQUETE = ("pollCreationMessage", "pollCreationMessageV2",
+                      "pollCreationMessageV3", "pollCreationMessageV5",
+                      "pollCreationMessageV6")
 # Campos sem conteudo para a pessoa (chaves, controle): a mensagem e ignorada
 SO_CONTROLE = {"senderKeyDistributionMessage", "messageContextInfo",
                "protocolMessage", "reactionMessage", "pollUpdateMessage",
@@ -964,17 +971,50 @@ def enquete_do_whatsapp(interna):
     """Pergunta, opcoes e quantas dá para marcar de uma enquete criada ({} se
     a mensagem nao e uma enquete)."""
     presentes = set(campos(interna))
-    for nome in ("pollCreationMessage", "pollCreationMessageV2",
-                 "pollCreationMessageV3"):
+    for nome in CRIACAO_DE_ENQUETE:
         if nome in presentes:
             p = getattr(interna, nome)
             opcoes = [o.optionName for o in p.options]
             if not opcoes:
                 return {}
-            return {"pergunta": p.name, "opcoes": opcoes,
-                    "maximo": int(p.selectableOptionsCount or 0) or
-                    len(opcoes)}
+            enq = {"pergunta": p.name, "opcoes": opcoes,
+                   "maximo": int(p.selectableOptionsCount or 0) or
+                   len(opcoes)}
+            if p.pollType == 1:            # PollType.QUIZ
+                enq["quiz"] = True
+                certa = p.correctAnswer.optionName
+                if certa in opcoes:
+                    enq["correta"] = opcoes.index(certa)
+            if p.hideParticipantName:
+                enq["anonima"] = True
+            if p.allowAddOption:
+                enq["permite_adicionar"] = True
+            if p.pollContentType == 2:     # PollContentType.IMAGE
+                enq["com_imagens"] = True
+            if p.endTime:
+                # o WhatsApp manda em segundos; por garantia, aceita ms
+                fim = float(p.endTime)
+                enq["encerra_em"] = fim / 1000 if fim > 1e11 else fim
+            return enq
     return {}
+
+
+def resultado_da_enquete(interna):
+    """Texto do resumo final que o WhatsApp manda quando a enquete fecha
+    ('' se a mensagem nao e esse resumo)."""
+    presentes = set(campos(interna))
+    for nome in ("pollResultSnapshotMessage", "pollResultSnapshotMessageV3"):
+        if nome in presentes:
+            r = getattr(interna, nome)
+            linhas = ["Resultado da %s: %s" % (
+                "quiz" if r.pollType == 1 else "enquete", r.name)]
+            for v in r.pollVotes:
+                n = int(v.optionVoteCount)
+                linhas.append("%s: %s" % (
+                    v.optionName, "nenhum voto" if n == 0 else
+                    "1 voto" if n == 1 else "%d votos" % n))
+            return "; ".join(linhas)
+    return ""
 
 
 def consertar_decifrar_voto(cliente):
@@ -1037,11 +1077,14 @@ def conteudo_de(interna):
                 x.fileLength)
     if "stickerMessage" in presentes:
         return m.FIGURINHA, "", 0, "", 0
-    for nome in ("pollCreationMessage", "pollCreationMessageV2",
-                 "pollCreationMessageV3"):
+    for nome in CRIACAO_DE_ENQUETE:
         if nome in presentes:
-            return m.OUTRO, "enquete: " + getattr(interna, nome).name, 0, \
-                "", 0
+            p = getattr(interna, nome)
+            return m.OUTRO, ("quiz: " if p.pollType == 1 else "enquete: ") \
+                + p.name, 0, "", 0
+    resultado = resultado_da_enquete(interna)
+    if resultado:
+        return m.OUTRO, resultado, 0, "", 0
     if "locationMessage" in presentes:
         x = interna.locationMessage
         return m.OUTRO, localizacao.descrever(
@@ -4877,6 +4920,9 @@ class ProvedorWhatsApp(Provedor):
         if "pollUpdateMessage" in presentes:
             self._tratar_voto(evento, cid, info, origem, interna)
             return True
+        if "pollAddOptionMessage" in presentes:
+            self._tratar_opcao_nova(cid, info, origem, interna)
+            return True
         if "protocolMessage" in presentes:
             p = interna.protocolMessage
             if p.HasField("type") and p.type == p.EPHEMERAL_SETTING:
@@ -5045,6 +5091,26 @@ class ProvedorWhatsApp(Provedor):
             atual["votos"] = votos
             if origem.IsFromMe:
                 atual["meus"] = escolhas
+            m.atualizar_extras(x, enquete=atual)
+        self._alterar(cid, alvo, aplicar, "enquete", quem)
+
+    def _tratar_opcao_nova(self, cid, info, origem, interna):
+        """Alguem acrescentou uma opcao a uma enquete que permite isso: ela
+        entra no fim da lista (os votos ja guardados seguem valendo)."""
+        p = interna.pollAddOptionMessage
+        alvo = p.pollCreationMessageKey.ID
+        nova = p.addOption.optionName
+        if not alvo or not nova:
+            return
+        quem = "Você" if origem.IsFromMe else self._nome_contato(
+            origem.Sender, info.Pushname or nome_verificado(info))
+
+        def aplicar(x):
+            enq = m.enquete_de(x)
+            if not enq or nova in enq["opcoes"]:
+                return
+            atual = dict(m.extras_de(x)["enquete"])
+            atual["opcoes"] = list(enq["opcoes"]) + [nova]
             m.atualizar_extras(x, enquete=atual)
         self._alterar(cid, alvo, aplicar, "enquete", quem)
 
@@ -5309,12 +5375,51 @@ class ProvedorWhatsApp(Provedor):
 
     PODE_CRIAR_ENQUETE = True
 
-    def criar_enquete(self, conversa_id, pergunta, opcoes, multipla,
-                      anonima=True):
-        self._fila.put(lambda: self._criar_enquete(
-            conversa_id, pergunta, list(opcoes), multipla))
+    PODE_ENQUETE_AVANCADA = True
 
-    def _criar_enquete(self, cid, pergunta, opcoes, multipla):
+    def criar_enquete(self, conversa_id, pergunta, opcoes, multipla,
+                      anonima=True, avancada=None):
+        self._fila.put(lambda: self._criar_enquete(
+            conversa_id, pergunta, list(opcoes), multipla, avancada))
+
+    @staticmethod
+    def tornar_enquete_avancada(criada, opcoes, avancada):
+        """Poe na enquete montada pela DLL as caracteristicas novas (quiz,
+        ocultar quem votou, aceitar opcoes, prazo) e a move para o campo
+        `pollCreationMessageV6`, que e o que o aplicativo do celular usa
+        para esses tipos. Devolve o dicionario das extras guardadas."""
+        nome = next((n for n in CRIACAO_DE_ENQUETE
+                     if criada.HasField(n)), None)
+        if nome is None:
+            raise ValueError("a DLL não devolveu uma enquete")
+        enquete = getattr(criada, nome)
+        extras = {}
+        pos = avancada.get("quiz")
+        if isinstance(pos, int) and 0 <= pos < len(opcoes):
+            enquete.pollType = 1
+            enquete.selectableOptionsCount = 1
+            enquete.correctAnswer.optionName = opcoes[pos]
+            extras.update(quiz=True, correta=pos, maximo=1)
+        if avancada.get("oculta"):
+            enquete.hideParticipantName = True
+            extras["anonima"] = True
+        if avancada.get("permite_adicionar"):
+            enquete.allowAddOption = True
+            extras["permite_adicionar"] = True
+        if avancada.get("encerra_em"):
+            enquete.endTime = int(avancada["encerra_em"])
+            extras["encerra_em"] = int(avancada["encerra_em"])
+        enquete.pollContentType = 1             # PollContentType.TEXT
+        if nome != "pollCreationMessageV6":
+            copia = type(enquete)()
+            copia.CopyFrom(enquete)
+            criada.ClearField(nome)
+            criada.pollCreationMessageV6.CopyFrom(copia)
+        return extras
+
+    def _criar_enquete(self, cid, pergunta, opcoes, multipla,
+                       avancada=None):
+        extras = {}
         try:
             if not self._conectada or self.cliente is None:
                 raise ConnectionError("sem conexão")
@@ -5323,6 +5428,9 @@ class ProvedorWhatsApp(Provedor):
             criada = self.cliente.build_poll_vote_creation(
                 pergunta, opcoes,
                 VoteType.MULTIPLE if multipla else VoteType.SINGLE)
+            if avancada:
+                extras = self.tornar_enquete_avancada(
+                    criada, opcoes, avancada)
             resp = self.cliente.send_message(
                 jid, com_expiracao(criada, self._prazo_da_conversa(cid)))
         except Exception as e:
@@ -5332,10 +5440,12 @@ class ProvedorWhatsApp(Provedor):
                          ("sem conexão" if isinstance(e, ConnectionError)
                           else type(e).__name__), False)
             return
+        enquete = {"pergunta": pergunta, "opcoes": opcoes,
+                   "maximo": len(opcoes) if multipla else 1}
+        enquete.update(extras)
         self._registrar_enviada(
-            resp, cid, "enquete: " + pergunta, tipo=m.OUTRO,
-            enquete={"pergunta": pergunta, "opcoes": opcoes,
-                     "maximo": len(opcoes) if multipla else 1})
+            resp, cid, ("quiz: " if extras.get("quiz") else "enquete: ")
+            + pergunta, tipo=m.OUTRO, enquete=enquete)
 
     PODE_VOTAR = True
 
@@ -6498,6 +6608,7 @@ class ProvedorWhatsApp(Provedor):
         self._voz.grupo_ligado = caixa("chamada_grupo_whatsapp")
         self._voz.andamento_ligado = caixa("chamada_em_andamento_whatsapp")
         self._voz.adicionar_ligado = caixa("chamada_adicionar_whatsapp")
+        self._voz.link_ligado = caixa("chamada_por_link_whatsapp")
         self._voz.espera_ligada = caixa("chamada_em_espera")
         self._voz.nome_de_jid = self._nome_na_chamada
         self._voz.membros_de = self._membros_do_grupo
@@ -6535,6 +6646,78 @@ class ProvedorWhatsApp(Provedor):
     def suporta_adicionar_na_chamada(self):
         return bool(self.suporta_chamadas
                     and self._voz.ponte.suporta_adicionar())
+
+    @property
+    def suporta_chamada_por_link(self):
+        """A DLL sabe as chamadas por link e a caixa esta marcada."""
+        return bool(self.suporta_chamadas and self._voz.suporta_link())
+
+    def entrar_chamada_por_link(self, codigo, video=False, microfone="",
+                                saida=""):
+        if not self.suporta_chamadas:
+            self._avisar("Chamadas de voz não estão disponíveis.")
+            return
+        self._voz.entrar_por_link(codigo, video, microfone, saida)
+
+    # sala de espera, reações e mão levantada (chamada por link)
+    def sala_de_espera_da_chamada(self, conversa_id):
+        """[(endereco, nome)] de quem espera aprovação, e se esta conta é a
+        anfitriã. Só leitura local."""
+        if not self.suporta_chamadas:
+            return [], False
+        return (self._voz.sala_de_espera(conversa_id),
+                self._voz.sou_anfitriao(conversa_id))
+
+    def aprovacao_para_entrar(self, conversa_id):
+        return bool(self.suporta_chamadas
+                    and self._voz.aprovacao_exigida(conversa_id))
+
+    def tratar_sala_de_espera(self, conversa_id, enderecos, admitir):
+        if self.suporta_chamadas:
+            self._voz.tratar_sala_de_espera(conversa_id, list(enderecos),
+                                            admitir)
+
+    def exigir_aprovacao_na_chamada(self, conversa_id, ligado):
+        if self.suporta_chamadas:
+            self._voz.exigir_aprovacao(conversa_id, ligado)
+
+    def reagir_na_chamada(self, conversa_id, emoji):
+        if self.suporta_chamadas:
+            self._voz.reagir(conversa_id, emoji)
+
+    def historico_da_chamada_por_link(self, conversa_id):
+        return self._voz.historico_da_chamada(conversa_id) \
+            if self.suporta_chamadas else []
+
+    def maos_levantadas_na_chamada(self, conversa_id):
+        return self._voz.maos_levantadas(conversa_id) \
+            if self.suporta_chamadas else []
+
+    def participantes_com_video_na_chamada(self, conversa_id):
+        return self._voz.participantes_com_video(conversa_id) \
+            if self.suporta_chamadas else []
+
+    def escolher_video_na_chamada(self, conversa_id, quem=None):
+        if self.suporta_chamadas:
+            self._voz.escolher_video(conversa_id, quem)
+
+    def alternar_mao_na_chamada(self, conversa_id):
+        if self.suporta_chamadas:
+            self._voz.alternar_mao(conversa_id)
+
+    def previa_da_chamada_por_link(self, codigo, video=False):
+        """(dados, erro): o que o servidor diz do link, sem entrar. Fora da
+        thread da janela: espera o servidor."""
+        if not self.suporta_chamadas:
+            return {}, "Chamadas de voz não estão disponíveis."
+        return self._voz.previa_do_link(codigo, video)
+
+    def criar_link_de_chamada(self, video=False):
+        """(endereco, erro). Chamar fora da thread da janela: espera o
+        servidor."""
+        if not self.suporta_chamadas:
+            return "", "Chamadas de voz não estão disponíveis."
+        return self._voz.criar_link(video)
 
     def candidatos_da_chamada(self, conversa_id):
         """[(endereco, nome)] de quem da para convidar para a chamada em

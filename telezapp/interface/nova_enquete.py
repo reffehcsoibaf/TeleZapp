@@ -3,16 +3,23 @@
 """Janela para criar uma enquete: a pergunta, as opcoes (digite e aperte
 Enter para acrescentar; Remover tira a selecionada), se aceita varias
 respostas e, no Telegram, se os votos sao anonimos."""
+import time
+
 import wx
 
 from telezapp.nucleo import modelos as m
 
+# Prazos para encerrar a enquete: (texto, segundos; 0 = sem prazo)
+PRAZOS = (("Sem prazo", 0), ("Em 1 hora", 3600), ("Em 8 horas", 8 * 3600),
+          ("Em 24 horas", 24 * 3600), ("Em 3 dias", 3 * 24 * 3600),
+          ("Em 7 dias", 7 * 24 * 3600))
+
 
 class DialogoNovaEnquete(wx.Dialog):
-    def __init__(self, pai, servico, fala):
+    def __init__(self, pai, servico, fala, avancada=False):
         super().__init__(pai, title="Nova enquete",
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
-        self.servico, self.fala = servico, fala
+        self.servico, self.fala, self.avancada = servico, fala, avancada
         self.minimo, self.maximo = m.LIMITE_OPCOES_ENQUETE.get(
             servico, (2, 10))
         self.opcoes = []
@@ -50,6 +57,8 @@ class DialogoNovaEnquete(wx.Dialog):
         self.anonima.SetValue(True)
         self.anonima.Show(servico == "telegram")
         lay.Add(self.anonima, 0, wx.ALL, 10)
+        if avancada:
+            self._montar_avancadas(lay)
         self.aviso = wx.StaticText(self, label="", name="Situação")
         lay.Add(self.aviso, 0, wx.LEFT | wx.RIGHT, 10)
         botoes = wx.BoxSizer(wx.HORIZONTAL)
@@ -67,10 +76,37 @@ class DialogoNovaEnquete(wx.Dialog):
         self.b_subir.Bind(wx.EVT_BUTTON, lambda e: self._mover(-1))
         self.b_descer.Bind(wx.EVT_BUTTON, lambda e: self._mover(1))
         self.pergunta.Bind(wx.EVT_TEXT, lambda e: self._atualizar())
+        if avancada:
+            self.quiz.Bind(wx.EVT_CHECKBOX, lambda e: self._atualizar())
         self.ok.Bind(wx.EVT_BUTTON, self._ao_ok)
         self.CentreOnParent()
         self._atualizar()
         self.pergunta.SetFocus()
+
+    def _montar_avancadas(self, lay):
+        """Recursos experimentais do WhatsApp: quiz, ocultar quem votou,
+        opcoes novas dos participantes e prazo."""
+        self.quiz = wx.CheckBox(
+            self, label="É um &quiz (uma resposta certa)", name="Quiz")
+        lay.Add(self.quiz, 0, wx.LEFT | wx.RIGHT, 10)
+        self.rot_certa = wx.StaticText(self, label="Resposta &certa")
+        lay.Add(self.rot_certa, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.certa = wx.Choice(self, choices=[], name="Resposta certa")
+        lay.Add(self.certa, 0, wx.LEFT | wx.RIGHT, 10)
+        self.oculta = wx.CheckBox(
+            self, label="&Ocultar quem votou", name="Ocultar quem votou")
+        lay.Add(self.oculta, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.adicionar = wx.CheckBox(
+            self, label="Permitir que os participantes acrescentem &opções "
+            "novas", name="Permitir acrescentar opções")
+        lay.Add(self.adicionar, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        lay.Add(wx.StaticText(self, label="&Encerrar a enquete"), 0,
+                wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.prazo = wx.Choice(
+            self, choices=[nome for nome, _s in PRAZOS],
+            name="Encerrar a enquete")
+        self.prazo.SetSelection(0)
+        lay.Add(self.prazo, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
 
     def _dizer(self, texto):
         self.fala.falar(texto, interromper=True)
@@ -87,6 +123,19 @@ class DialogoNovaEnquete(wx.Dialog):
                                  self.opcoes)
         self.aviso.SetLabel(erro)
         self.ok.Enable(not erro)
+        if self.avancada:
+            quiz = self.quiz.GetValue()
+            antes = self.certa.GetSelection()
+            self.certa.Set(list(self.opcoes))
+            if 0 <= antes < len(self.opcoes):
+                self.certa.SetSelection(antes)
+            elif self.opcoes:
+                self.certa.SetSelection(0)
+            self.certa.Enable(quiz and bool(self.opcoes))
+            self.rot_certa.Enable(quiz and bool(self.opcoes))
+            if quiz:
+                self.multipla.SetValue(False)
+            self.multipla.Enable(not quiz)
 
     def _acrescentar(self):
         texto = self.campo.GetValue().strip()
@@ -127,6 +176,20 @@ class DialogoNovaEnquete(wx.Dialog):
             self.lista.SetSelection(j)
             self._dizer("Opção %d." % (j + 1))
 
+    def _avancadas(self):
+        """So o que foi escolhido (vazio numa enquete comum)."""
+        extras = {}
+        if self.quiz.GetValue() and self.certa.GetSelection() >= 0:
+            extras["quiz"] = self.certa.GetSelection()
+        if self.oculta.GetValue():
+            extras["oculta"] = True
+        if self.adicionar.GetValue():
+            extras["permite_adicionar"] = True
+        segundos = PRAZOS[max(0, self.prazo.GetSelection())][1]
+        if segundos:
+            extras["encerra_em"] = int(time.time()) + segundos
+        return extras
+
     def _ao_ok(self, evt):
         # a opcao que ficou digitada e nao foi acrescentada entra tambem
         if self.campo.GetValue().strip():
@@ -139,12 +202,16 @@ class DialogoNovaEnquete(wx.Dialog):
         self.resultado = (self.pergunta.GetValue().strip(),
                           list(self.opcoes), self.multipla.GetValue(),
                           self.anonima.GetValue())
+        if self.avancada:
+            self.resultado += (self._avancadas(),)
         self.EndModal(wx.ID_OK)
 
 
-def pedir_enquete(pai, servico, fala):
-    """(pergunta, opcoes, multipla, anonima) ou None se cancelou."""
-    dlg = DialogoNovaEnquete(pai, servico, fala)
+def pedir_enquete(pai, servico, fala, avancada=False):
+    """(pergunta, opcoes, multipla, anonima) ou None se cancelou. Com
+    `avancada`, vem um quinto item: o dicionario do quiz, de ocultar quem
+    votou, de opcoes novas e do prazo (so as caracteristicas escolhidas)."""
+    dlg = DialogoNovaEnquete(pai, servico, fala, avancada)
     try:
         return dlg.resultado if dlg.ShowModal() == wx.ID_OK else None
     finally:

@@ -66,9 +66,29 @@ func ligarVideo(cliente string, c *meowcaller.Call, a *chamadaAtiva) {
 		emitirEvento(cliente, map[string]any{"ev": "video", "call": id, "active": v.Active,
 			"upgrade": v.Upgrade, "orientation": v.Orientation, "raw": v.Raw})
 	})
+	c.OnParticipantVideoFrame(func(f meowcaller.ParticipantVideoFrame) {
+		quem := f.ParticipantID
+		if quem == "" {
+			quem = f.Sender.ToNonAD().String()
+		}
+		q := quadroDeParticipante{quem: quem, au: append([]byte(nil), f.AccessUnit...)}
+		select {
+		case a.videoPart <- q:
+		default: // fila cheia: descarta o mais antigo
+			select {
+			case <-a.videoPart:
+			default:
+			}
+			select {
+			case a.videoPart <- q:
+			default:
+			}
+		}
+	})
 	c.OnVideoKeyframeRequest(func() {
 		emitirEvento(cliente, map[string]any{"ev": "keyframe", "call": id})
 	})
+	ligarControlesDeGrupo(cliente, c)
 	c.OnGroupState(func(g meowcaller.GroupCallState) {
 		emitirEvento(cliente, map[string]any{"ev": "group", "call": id, "participants": len(g.Participants)})
 	})
@@ -203,4 +223,38 @@ func CallInfo(id *C.char, call *C.char, buf *C.char, cap C.int) C.int {
 		"receivingVideo": a.call.IsReceivingVideo(), "group": grupo,
 		"participants": len(g.Participants)})
 	return escreverTexto(string(b), buf, cap)
+}
+
+// quadroDeParticipante: uma unidade de acesso H.264 e de quem ela e.
+type quadroDeParticipante struct {
+	quem string
+	au   []byte
+}
+
+// CallReadParticipantVideo entrega uma unidade de acesso do video de um
+// participante de uma chamada em grupo ou por link, esperando ate timeoutMs.
+// `who` recebe o id do participante (texto terminado em zero). Devolve o
+// tamanho, 0 (nada), -2 (chamada acabou) ou -4 (buffer pequeno: descartada).
+//
+//export CallReadParticipantVideo
+func CallReadParticipantVideo(id *C.char, call *C.char, who *C.char, whoCap C.int, buf *C.uchar, cap C.int, timeoutMs C.int) C.int {
+	a := buscarChamada(C.GoString(id), C.GoString(call))
+	if a == nil {
+		return erroSemChamada
+	}
+	select {
+	case q := <-a.videoPart:
+		if len(q.au) > int(cap) || len(q.quem)+1 > int(whoCap) {
+			return erroTamanho
+		}
+		copy(unsafe.Slice((*byte)(unsafe.Pointer(buf)), int(cap)), q.au)
+		nome := unsafe.Slice((*byte)(unsafe.Pointer(who)), int(whoCap))
+		copy(nome, q.quem)
+		nome[len(q.quem)] = 0
+		return C.int(len(q.au))
+	case <-a.fim:
+		return erroSemChamada
+	case <-time.After(time.Duration(timeoutMs) * time.Millisecond):
+		return erroTempoLimite
+	}
 }

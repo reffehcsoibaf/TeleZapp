@@ -362,6 +362,9 @@ class DialogoEscolherPessoa(wx.Dialog):
     conversas que casam com o que foi digitado (vazio = todos). Nao tem o
     texto: a mensagem se escreve depois, na conversa que se abre."""
 
+    # A lista mostra de 200 em 200; o ultimo item, "Mostrar mais", traz os
+    # 200 seguintes (Enter nele ou duplo clique). Mostrar tudo de uma
+    # vez ficaria lento com milhares de contatos.
     LIMITE_LISTA = 200
 
     def __init__(self, pai, contas, buscar, titulo="Nova mensagem",
@@ -409,6 +412,8 @@ class DialogoEscolherPessoa(wx.Dialog):
             lambda: wx.ListBox(self, name="Encontrados",
                                size=(420, 160)), 1)
         self.lista.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self._escolher())
+        # Enter na lista aciona o OK: em "Mostrar mais" ele traz mais itens
+        self.Bind(wx.EVT_BUTTON, self._ao_ok, id=wx.ID_OK)
         lay.Add(self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL), 0,
                 wx.ALL | wx.ALIGN_RIGHT, 10)
         self.SetSizerAndFit(lay)
@@ -429,9 +434,31 @@ class DialogoEscolherPessoa(wx.Dialog):
                 nm.MODOS[max(self.modo.GetSelection(), 0)][0])
         else:
             achados = self.buscar(self._conta_id(), self.para.GetValue())
-        self._achados = achados[:self.LIMITE_LISTA]
-        self.lista.Set([nm.rotulo(n, t) for _, n, t in self._achados]
-                       or ["Nada encontrado"])
+        self._todos = achados
+        self._mostrando = self.LIMITE_LISTA
+        self._montar_lista()
+
+    def _montar_lista(self, selecionar=-1):
+        from telezapp.nucleo import nova_mensagem as nm
+        self._achados = self._todos[:self._mostrando]
+        itens = [nm.rotulo(n, t) for _, n, t in self._achados]
+        resto = len(self._todos) - len(self._achados)
+        if resto > 0:
+            itens.append("Mostrar mais (%d de %d mostrados, faltam %d)" % (
+                len(self._achados), len(self._todos), resto))
+        self.lista.Set(itens or ["Nada encontrado"])
+        if selecionar >= 0 and selecionar < len(itens):
+            self.lista.SetSelection(selecionar)
+
+    def _mostrar_mais(self):
+        """Traz os proximos 200 e deixa o foco no primeiro item novo."""
+        antes = len(self._achados)
+        self._mostrando += self.LIMITE_LISTA
+        self._montar_lista(selecionar=antes)
+
+    def _no_mostrar_mais(self):
+        i = self.lista.GetSelection()
+        return i == len(self._achados) and len(self._todos) > len(self._achados)
 
     def _selecionado(self):
         i = self.lista.GetSelection()
@@ -446,9 +473,17 @@ class DialogoEscolherPessoa(wx.Dialog):
         elif self.para.GetValue().strip():
             self.EndModal(wx.ID_OK)
 
+    def _ao_ok(self, ev_):
+        if self._no_mostrar_mais():
+            self._mostrar_mais()
+        else:
+            ev_.Skip()
+
     def _escolher(self):
         """Enter ou duplo clique na lista: escolhe a pessoa."""
-        if self._selecionado() is not None:
+        if self._no_mostrar_mais():
+            self._mostrar_mais()
+        elif self._selecionado() is not None:
             self.EndModal(wx.ID_OK)
 
     def escolhido(self):

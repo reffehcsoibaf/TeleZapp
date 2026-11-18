@@ -7,11 +7,13 @@ e destes servicos (ou que o TeleZapp nao sabe abrir): esse segue para o
 navegador. Chaves:
   servico   "telegram" ou "whatsapp"
   acao      "entrar" (grupo ou canal por convite), "usuario" (Telegram: uma
-            pessoa, robo, grupo ou canal pelo @) ou "telefone" (WhatsApp)
+            pessoa, robo, grupo ou canal pelo @), "telefone" (WhatsApp) ou
+            "chamada" (WhatsApp: entrar numa chamada por link)
   convite   "entrar": a acao no formato de nucleo.grupo e do provedor
   usuario, start, startapp, app, texto   "usuario"; start e startapp ficam
             None quando o link nao os traz (startapp pode vir vazio)
   telefone, texto   "telefone"
+  codigo, video     "chamada" (WhatsApp: call.whatsapp.com/voice|video/CODIGO)
 """
 import re
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -23,6 +25,8 @@ HOSTS_WHATSAPP_CONVERSA = {"wa.me", "www.wa.me", "api.whatsapp.com",
                            "web.whatsapp.com", "www.whatsapp.com"}
 HOSTS_WHATSAPP_CONVITE = {"chat.whatsapp.com", "whatsapp.com",
                           "www.whatsapp.com"}
+HOST_WHATSAPP_CHAMADA = "call.whatsapp.com"
+RE_CODIGO_DE_CHAMADA = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 # caminhos de t.me que nao sao o @ de ninguem
 RESERVADOS = {"joinchat", "addstickers", "addemoji", "share", "proxy", "socks",
               "login", "setlanguage", "addtheme", "bg", "boost", "iv",
@@ -87,7 +91,18 @@ def _telefone(numero, q):
             "texto": _um(q, "text") or ""}
 
 
+def _chamada_por_link(partes):
+    """call.whatsapp.com/voice/CODIGO ou /video/CODIGO."""
+    if len(partes) != 2 or partes[0] not in ("voice", "video") or \
+            not RE_CODIGO_DE_CHAMADA.match(partes[1]):
+        return None
+    return {"servico": "whatsapp", "acao": "chamada", "codigo": partes[1],
+            "video": partes[0] == "video"}
+
+
 def _whatsapp_web(host, partes, q, url):
+    if host == HOST_WHATSAPP_CHAMADA:
+        return _chamada_por_link(partes)
     if host in HOSTS_WHATSAPP_CONVITE and (
             host == "chat.whatsapp.com" or partes[:1] == ["channel"]):
         convite = ng.acao_do_link(url)

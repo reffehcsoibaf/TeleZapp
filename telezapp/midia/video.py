@@ -340,3 +340,78 @@ def girar_rgb(rgb, largura, altura, graus):
     girada = np.rot90(imagem, k=-(graus // 90))
     nova_altura, nova_largura = girada.shape[0], girada.shape[1]
     return np.ascontiguousarray(girada).tobytes(), nova_largura, nova_altura
+
+
+# ------------------------------------------- varios participantes (grupo)
+class Mosaico:
+    """Junta o ultimo quadro de cada participante de uma chamada em grupo ou
+    por link numa imagem so, em grade. Com um participante, devolve o quadro
+    dele como veio. Quem fica mais de `validade_s` sem mandar quadro sai da
+    grade (camera desligada ou saiu da chamada).
+
+    `atualizar` devolve (largura, altura, rgb), ou None se ainda nao passou
+    `intervalo_s` desde a ultima imagem montada (evita montar uma imagem a
+    cada quadro de cada participante)."""
+
+    CELULA = (320, 180)
+
+    def __init__(self, validade_s=4.0, intervalo_s=0.08, agora=time.monotonic):
+        self.validade_s = validade_s
+        self.intervalo_s = intervalo_s
+        self._agora = agora
+        self._quadros = {}          # quem -> (largura, altura, rgb, quando)
+        self._ordem = []            # quem, na ordem em que apareceu
+        self._ultima = -1e9
+
+    def participantes(self):
+        return list(self._ordem)
+
+    def remover(self, quem):
+        self._quadros.pop(quem, None)
+        if quem in self._ordem:
+            self._ordem.remove(quem)
+
+    def atualizar(self, quem, largura, altura, rgb):
+        agora = self._agora()
+        if quem not in self._quadros:
+            self._ordem.append(quem)
+        self._quadros[quem] = (largura, altura, rgb, agora)
+        for q in [q for q, d in self._quadros.items()
+                  if agora - d[3] > self.validade_s]:
+            self.remover(q)
+        if agora - self._ultima < self.intervalo_s:
+            return None
+        self._ultima = agora
+        return self.montar()
+
+    def montar(self):
+        quadros = [self._quadros[q] for q in self._ordem
+                   if q in self._quadros]
+        if not quadros:
+            return None
+        if len(quadros) == 1:
+            larg, alt, rgb, _ = quadros[0]
+            return larg, alt, rgb
+        import math
+
+        import cv2
+        import numpy as np
+        colunas = math.ceil(math.sqrt(len(quadros)))
+        linhas = math.ceil(len(quadros) / colunas)
+        cl, ca = self.CELULA
+        tela = np.zeros((linhas * ca, colunas * cl, 3), dtype=np.uint8)
+        for i, (larg, alt, rgb, _) in enumerate(quadros):
+            try:
+                img = np.frombuffer(rgb, dtype=np.uint8).reshape(
+                    alt, larg, 3)
+                escala = min(cl / larg, ca / alt)
+                nl, na = max(1, int(larg * escala)), max(1, int(alt * escala))
+                img = cv2.resize(img, (nl, na), interpolation=cv2.INTER_AREA)
+            except Exception:
+                log.debug("quadro de participante ignorado no mosaico",
+                          exc_info=True)
+                continue
+            y0 = (i // colunas) * ca + (ca - na) // 2
+            x0 = (i % colunas) * cl + (cl - nl) // 2
+            tela[y0:y0 + na, x0:x0 + nl] = img
+        return colunas * cl, linhas * ca, tela.tobytes()

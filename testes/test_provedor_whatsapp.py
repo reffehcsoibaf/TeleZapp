@@ -5239,3 +5239,40 @@ def test_so_no_windows_arm_o_go_perde_a_preempcao_assincrona(monkeypatch):
     with wa.arquitetura_do_processo():
         pass
     assert chamadas == [1]                                     # ARM emulando x64
+
+
+def test_criar_enquete_avancada_vai_no_formato_novo_com_as_caracteristicas(
+        amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    cid = "5551988887777@s.whatsapp.net"
+    fim = 2000000000
+    amb.p.criar_enquete(
+        cid, "Capital?", ["Rio", "Brasília"], False, avancada={
+            "quiz": 1, "oculta": True, "permite_adicionar": True,
+            "encerra_em": fim})
+    nova = esperar(amb.fila, ev.MensagemNova)
+    enviada = amb.c.enviadas[-1][1]
+    assert enviada.HasField("pollCreationMessageV6")
+    assert not enviada.HasField("pollCreationMessage")
+    p = enviada.pollCreationMessageV6
+    assert p.pollType == 1 and p.correctAnswer.optionName == "Brasília"
+    assert p.hideParticipantName and p.allowAddOption and p.endTime == fim
+    assert p.selectableOptionsCount == 1
+    e = m.enquete_de(nova.mensagem)
+    assert e["quiz"] and e["correta"] == 1 and e["anonima"]
+    assert e["permite_adicionar"] and e["encerra_em"] == fim
+    assert nova.mensagem.texto == "quiz: Capital?"
+    # e o que o TeleZapp gravou e o que ele mesmo le de volta
+    from telezapp.provedores import whatsapp as w
+    lido = w.enquete_do_whatsapp(enviada)
+    assert lido["quiz"] and lido["correta"] == 1 and lido["anonima"]
+
+
+def test_criar_enquete_sem_avancada_continua_no_formato_antigo(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.p.criar_enquete("5551988887777@s.whatsapp.net", "Q?", ["A", "B"],
+                        False)
+    esperar(amb.fila, ev.MensagemNova)
+    assert amb.c.enviadas[-1][1].HasField("pollCreationMessage")
