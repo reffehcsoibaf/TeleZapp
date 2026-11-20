@@ -153,3 +153,28 @@ def test_regravar_a_mensagem_sem_ia_mantem_a_transcricao(tmp_path):
     texto = m.Mensagem("t1", "10", "6", data=2, texto="oi")
     b.salvar_mensagens([texto])
     assert m.extras_de(b.mensagens("t1", "10")[1])["ia"] == {}
+
+
+def test_avisos_de_membros_so_do_grupo_so_do_tipo_e_so_dos_dias_pedidos(
+        tmp_path):
+    import time
+    from telezapp.armazenamento.banco import Banco
+    from telezapp.nucleo import modelos as m
+    b = Banco(str(tmp_path / "b.db"))
+    agora = time.time()
+    dia = 86400
+    b.salvar_mensagens([
+        m.Mensagem("t1", "g1", "a1-e", data=agora - 70 * dia,
+                   tipo=m.AVISO_MEMBROS, texto="Ana entrou no grupo."),
+        m.Mensagem("t1", "g1", "a2-e", data=agora - 30 * dia,
+                   tipo=m.AVISO_MEMBROS, texto="Bia entrou no grupo."),
+        m.Mensagem("t1", "g1", "a3-s", data=agora - 1 * dia,
+                   tipo=m.AVISO_MEMBROS, texto="Bia saiu do grupo."),
+        m.Mensagem("t1", "g1", "5", data=agora - 1 * dia, texto="oi"),
+        m.Mensagem("t1", "g2", "a4-e", data=agora - 1 * dia,
+                   tipo=m.AVISO_MEMBROS, texto="Caio entrou no grupo."),
+    ])
+    achados = b.avisos_de_membros("t1", "g1", agora - 60 * dia)
+    assert [x.texto for x in achados] == ["Bia saiu do grupo.",
+                                          "Bia entrou no grupo."]
+    assert b.avisos_de_membros("t1", "g3", agora - 60 * dia) == []

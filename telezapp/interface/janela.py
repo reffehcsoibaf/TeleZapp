@@ -30,6 +30,9 @@ from telezapp.interface import salvar as ui_salvar
 from telezapp.nucleo import agendamento as ag_nucleo
 from telezapp.nucleo import copia_oficial, localizacao, saude_dados, silenciados
 from telezapp.nucleo import links_externos, links_recebidos, resumo_midias
+from telezapp.nucleo import uso
+from telezapp.nucleo import uso_chamadas
+from telezapp.nucleo import ritmo_de_envio as ritmo
 from telezapp.nucleo.links_externos import motivo_de_nao_achar
 from telezapp.interface import emojis as ui_emojis
 from telezapp.interface.chat_de_voz import DialogoChatDeVoz
@@ -57,9 +60,10 @@ from telezapp.midia import envio
 from telezapp.midia import prioridade
 from telezapp.provedores import chamadas_whatsapp
 from telezapp.midia import velocidade as vel
-from telezapp.midia.gravador import (MICROFONE, SOM_E_MICROFONE,
-                                     SOM_INTERNO, ErroGravacao, Gravador,
-                                     gravando_agora)
+from telezapp.midia.gravador import (LONGA_PARA_CODIFICAR_NA_HORA, MICROFONE,
+                                     SOM_E_MICROFONE, SOM_INTERNO,
+                                     ErroGravacao, Gravador, gravando_agora,
+                                     parar_em_segundo_plano)
 from telezapp.interface.localizacao import DialogoLocalizacao
 from telezapp.provedores.base import APAGAR_PENDENTE
 from telezapp.midia.reprodutor import (FormatoNaoSuportado, Reprodutor,
@@ -78,6 +82,7 @@ from telezapp.nucleo.ia import cofre as cofre_ia
 from telezapp.nucleo.ia import prompts as prompts_ia
 from telezapp.nucleo.ia.cabecalho_de_bot import sem_cabecalho_de_idiomas
 from telezapp.nucleo.ia import servico as servico_ia
+from telezapp.nucleo.ia import provedores as prov_ia
 from telezapp.nucleo.ia.provedores import ErroIA
 from telezapp.nucleo import backup
 from telezapp.nucleo import codigo_secreto
@@ -207,6 +212,31 @@ def texto_da_ajuda(registro):
             "Configurações, Atalhos.\n\n" + AJUDA_OUTRAS_TECLAS + AJUDA_FIM)
 
 
+TEXTO_PERGUNTA_USO = (
+    "Quer ajudar a melhorar o TeleZapp compartilhando informações de uso com "
+    "o desenvolvedor? É opcional.\n\n"
+    "O que é enviado, no máximo uma vez por dia: a versão do programa e do "
+    "Windows, o leitor de tela, quantas contas de cada serviço, uma faixa da "
+    "quantidade de conversas, os recursos experimentais ligados, o tempo que "
+    "o programa levou para abrir e para atualizar as conversas, e o nome e o "
+    "tempo das ações que demoraram ou deram erro. Também vão dados técnicos: "
+    "quedas de conexão e a causa, quantos avisos e erros o registro teve (só "
+    "a contagem por módulo), se o banco de conversas estava inteiro ao abrir "
+    "e a faixa do tamanho dele, se a vez anterior terminou sem fechar e as "
+    "versões do Python e das bibliotecas. Também vai uma amostra, de até 10 "
+    "por dia, das chamadas que você fez ou recebeu: se foi voz, vídeo ou "
+    "grupo, como terminou, quanto demorou, o codec, a plataforma e a versão "
+    "do WhatsApp de quem ligou. Serve para achar o que fica lento ou falha "
+    "em outros computadores.\n\n"
+    "O que nunca é enviado: mensagens, nomes, telefones, ids de conversa e "
+    "de chamada, arquivos, textos de erro e registros (logs). O identificador é sorteado "
+    "e não tem ligação com suas contas.\n\n"
+    "Enquanto você não decidir, nada é enviado. Esc deixa para depois: a "
+    "pergunta volta numa versão futura. Não compartilhar encerra o assunto. "
+    "Dá para mudar quando quiser em Configurações, Avançado, Compartilhar "
+    "informações de uso. Em Ajuda, Ver o que o compartilhamento de uso envia, "
+    "você vê o texto exato.")
+
 LIMITE_LENTO_S = 0.2     # tratador que demora mais que isso vai para o registro
 
 
@@ -221,11 +251,13 @@ def seguro(funcao):
         except Exception:
             log.error("erro em %s:\n%s", funcao.__name__,
                       traceback.format_exc())
+            uso.registrar_erro(funcao.__name__)
         finally:
             gasto = time.perf_counter() - inicio
             if gasto > LIMITE_LENTO_S:
                 log.warning("lento: %s demorou %.2f s", funcao.__name__,
                             gasto)
+                uso.registrar_lento(funcao.__name__, gasto)
     interno.__name__ = funcao.__name__
     return interno
 
@@ -353,9 +385,33 @@ class _IaParaConfig:
         return list((self.j.cfg.get("ia_lista_modelos") or {}).get(
             provedor, []))
 
-    def obter_modelos(self, provedor, chave):
+    def url_personalizada(self):
+        return self.j.cfg.get("ia_url_personalizada") or ""
+
+    def _com_url(self, provedor, url):
+        """No provedor personalizado, vale o endereco digitado na janela
+        durante o pedido (e o guardado volta depois). Devolve o erro, se o
+        endereco nao serve."""
+        if provedor != cat_ia.PERSONALIZADO:
+            return ""
+        if not prov_ia.definir_url_personalizada(url):
+            return ("O endereço precisa começar com https:// (ou http:// "
+                    "para este computador, como o Ollama) e não pode ter "
+                    "usuário, senha nem parâmetros.")
+        return ""
+
+    def _voltar_url(self, provedor):
+        if provedor == cat_ia.PERSONALIZADO:
+            prov_ia.definir_url_personalizada(self.url_personalizada())
+
+    def obter_modelos(self, provedor, chave, url=""):
         """(True, [modelos]) ou (False, texto do erro); guarda a lista."""
         chave = chave.strip() or self.j.cofre_ia.obter(provedor)
+        if provedor == cat_ia.PERSONALIZADO and not chave:
+            chave = prov_ia.SEM_CHAVE
+        erro = self._com_url(provedor, url)
+        if erro:
+            return False, erro
         try:
             lista = servico_ia.listar_modelos(provedor, chave)
         except ErroIA as e:
@@ -363,18 +419,25 @@ class _IaParaConfig:
         except Exception:
             log.exception("lista de modelos")
             return False, "Não consegui obter a lista de modelos."
+        finally:
+            self._voltar_url(provedor)
         listas = dict(self.j.cfg.get("ia_lista_modelos") or {})
         listas[provedor] = lista
         self.j.cfg.set("ia_lista_modelos", listas)
         return True, lista
 
-    def testar(self, provedor, chave, modelo):
+    def testar(self, provedor, chave, modelo, url=""):
         """(ok, texto) de um pedido minimo; usa a chave digitada ou, se o
         campo esta vazio, a guardada."""
         chave = chave.strip() or self.j.cofre_ia.obter(provedor)
+        if provedor == cat_ia.PERSONALIZADO and not chave:
+            chave = prov_ia.SEM_CHAVE      # servidor que nao pede chave
         if not chave:
             return False, "Digite uma chave para testar."
         modelo = modelo.strip() or cat_ia.PROVEDORES[provedor].modelo
+        erro = self._com_url(provedor, url)
+        if erro:
+            return False, erro
         try:
             servico_ia.testar(provedor, chave, modelo)
         except ErroIA as e:
@@ -382,6 +445,8 @@ class _IaParaConfig:
         except Exception:
             log.exception("teste do provedor de IA")
             return False, "O teste falhou."
+        finally:
+            self._voltar_url(provedor)
         return True, "%s respondeu: a chave e o modelo funcionam." % \
             cat_ia.PROVEDORES[provedor].nome
 
@@ -534,6 +599,8 @@ class Janela(wx.Frame):
         self._carregando_membros = None
         self.cofre_ia = cofre_ia.Cofre(
             os.path.join(config.pasta_dados(), "ia_chaves.json"))
+        prov_ia.definir_url_personalizada(
+            self.cfg.get("ia_url_personalizada"))
         self._ocultas = []        # [(nome, janela)] escondidas pela pessoa
         self._ia_pendentes = {}   # chave da mensagem -> esperando o download
         self._copia_pendente = {}  # chave -> mensagem a copiar ao baixar
@@ -545,6 +612,9 @@ class Janela(wx.Frame):
         self._ia_vagas = threading.Semaphore(2)    # pedidos automaticos
         self.avisos_de_chamada = {}   # (conta, chamada) -> janela de aviso
         self.espera_de_chamada = None  # segunda chamada tocando (experimental)
+        self._encaminhando = False     # encaminhamento em lote em andamento
+        self._fila_enc = []            # envios esperando a vez (so na memoria)
+        self._enc = {}
         self._ultima_busca = None     # criterios da busca por criterios
         self._quadro_de_video_pendente = False
         self.presenca = None      # ev.Presenca (online / visto) da aberta
@@ -935,6 +1005,7 @@ class Janela(wx.Frame):
         item(m_aj, "grupo_suporte", "Entrar no gr&upo de suporte no "
                                     "WhatsApp...")
         item(m_aj, "atualizacoes", "&Verificar atualizações...")
+        item(m_aj, "uso_dados", "Ver o que o compartilhamento de &uso envia...")
         item(m_aj, "exportar_logs", "E&xportar logs...")
         item(m_aj, "logs", "Abrir a pasta de &logs")
         item(m_aj, "pasta_sons", "Abrir a pasta de s&ons")
@@ -1165,6 +1236,7 @@ class Janela(wx.Frame):
             "pagina_projeto": lambda e: self._abrir_na_internet(
                 PAGINA_DO_PROJETO),
             "feedback": lambda e: self._feedback(),
+            "uso_dados": lambda e: self._ver_uso(),
             "grupo_suporte": lambda e: self._entrar_no_grupo_de_suporte(),
             "atualizacoes": lambda e: self._verificar_atualizacoes(),
             "instalar": lambda e: self._instalar(),
@@ -1614,22 +1686,21 @@ class Janela(wx.Frame):
         dir_ = wx.BoxSizer(wx.VERTICAL)
         dir_.Add(self.rot_msgs, 0, wx.BOTTOM, 4)
         dir_.Add(self.lista_msgs, 3, wx.EXPAND)
-        linha_midia = wx.WrapSizer(wx.HORIZONTAL)
-        for b in self.botoes_midia:
-            linha_midia.Add(b, 0, wx.RIGHT, 6)
-        dir_.Add(linha_midia, 0, wx.TOP, 4)
-        linha_acoes = wx.WrapSizer(wx.HORIZONTAL)
-        for b in self.botoes_acao:
-            linha_acoes.Add(b, 0, wx.RIGHT, 6)
-        dir_.Add(linha_acoes, 0, wx.TOP, 4)
-        linha_links = wx.WrapSizer(wx.HORIZONTAL)
-        for b in self.botoes_link:
-            linha_links.Add(b, 0, wx.RIGHT, 6)
-        dir_.Add(linha_links, 0, wx.TOP, 4)
-        linha_mencoes = wx.WrapSizer(wx.HORIZONTAL)
-        for b in self.botoes_mencao:
-            linha_mencoes.Add(b, 0, wx.RIGHT, 6)
-        dir_.Add(linha_mencoes, 0, wx.TOP, 4)
+        # uma linha so, na ordem de Tab (midia, resposta, links, pessoas), com
+        # a altura de um botao sempre reservada: quando a mensagem seguinte
+        # tem outros botoes (ou nenhum), a lista de mensagens nao muda de
+        # tamanho. Mudar o tamanho da lista em foco fazia o JAWS falar de novo
+        # a janela e a posicao do item (ex.: da mensagem de voz para a
+        # seguinte, sem botoes).
+        self.linha_botoes = wx.WrapSizer(wx.HORIZONTAL)
+        # espacador de altura fixa: mantem a linha com a altura de um botao
+        # (medido com o wx real: a lista fica do mesmo tamanho com 0, 2 ou 6
+        # botoes visiveis; SetMinSize na linha nao segurava)
+        self.linha_botoes.Add(1, self.botoes_midia[0].GetBestSize().height)
+        for b in (self.botoes_midia + self.botoes_acao + self.botoes_link
+                  + self.botoes_mencao):
+            self.linha_botoes.Add(b, 0, wx.RIGHT, 6)
+        dir_.Add(self.linha_botoes, 0, wx.TOP, 4)
         dir_.Add(self.rot_caixa, 0, wx.TOP | wx.BOTTOM, 4)
         dir_.Add(self.caixa, 1, wx.EXPAND)
         linha_envio = wx.WrapSizer(wx.HORIZONTAL)
@@ -1649,6 +1720,7 @@ class Janela(wx.Frame):
         self.lista_msgs.Bind(wx.EVT_CHAR, self._digitou_na_lista)
         self.lista_conv.Bind(wx.EVT_CHAR, self._digitou_na_lista)
         self.lista_msgs.Bind(wx.EVT_LISTBOX, seguro(self._ao_selecionar))
+        self.lista_msgs.Bind(wx.EVT_KILL_FOCUS, seguro(self._ao_sair_da_lista))
         self.caixa.Bind(wx.EVT_TEXT_PASTE, self._ao_colar)
         self.caixa.Bind(wx.EVT_TEXT_ENTER,
                         seguro(lambda e: self._enter_na_caixa()))
@@ -1736,16 +1808,20 @@ class Janela(wx.Frame):
         mencoes = [dict(p) for p in m.extras_de(x)["mencoes"]
                    ][:MAX_BOTOES_LINK] if x and ver("botoes_pessoas") else []
         rotulos_mencao = [dialogos.rotulo_mencao(p) for p in mencoes]
-        chave = (x.id if x else None, tuple(r for r, _ in midia),
+        # o que cada botao faz muda a cada mensagem; os botoes na tela (e o
+        # Layout, que redimensiona a lista) so mudam quando o conjunto
+        # visivel muda. Mexer neles a cada seta fazia o JAWS falar de novo a
+        # janela e a posicao do item.
+        self._acoes_atuais, self._msg_das_acoes = acoes, x
+        self._midia_atual = midia
+        self._links_atuais = links
+        self._mencoes_atuais = mencoes
+        chave = (tuple(r for r, _ in midia),
                  tuple(a.get("rotulo", "") for a in acoes),
                  tuple(links), tuple(rotulos_mencao))
         if chave == self._botoes_chave:
             return
         self._botoes_chave = chave
-        self._acoes_atuais, self._msg_das_acoes = acoes, x
-        self._midia_atual = midia
-        self._links_atuais = links
-        self._mencoes_atuais = mencoes
         perdeu_foco = False
         for i, b in enumerate(self.botoes_midia):
             if i < len(midia):
@@ -1943,6 +2019,48 @@ class Janela(wx.Frame):
         if self.cfg.get("verificar_atualizacoes"):
             wx.CallLater(8000, lambda: self._verificar_atualizacoes(False))
         self._agendar_busca_de_versao()
+        uso.registrar_tempo("abertura", time.time() - uso.INICIO)
+        uso.instalar_contador_de_registro()
+        uso_chamadas.instalar()
+        if self.cfg.get("compartilhar_uso"):
+            # soma o que a vez anterior deixou (so existiam na memoria)
+            uso.carregar_pendente()
+        # a pergunta vem logo, antes de a pessoa entrar nas conversas; o
+        # envio (sem tela) espera as contas conectarem
+        wx.CallLater(300, self._perguntar_uso)
+        wx.CallLater(20000, self._enviar_uso)
+
+    def _dados_de_uso(self):
+        leitor = getattr(self.fala, "leitor", "") or ""
+        return uso.montar(self.cfg, len(self.indice), leitor)
+
+    @seguro
+    def _ver_uso(self):
+        dialogos.mostrar_texto(self, "O que o compartilhamento de uso envia",
+                               uso.texto_para_ver(self._dados_de_uso()),
+                               "Informações de uso")
+
+    @seguro
+    def _perguntar_uso(self):
+        """Logo ao abrir (com contas ja cadastradas, para nao atrapalhar o
+        primeiro uso). Volta a cada versao nova (no minimo 7 dias depois)
+        para quem saiu com Esc; quem tocou em Nao compartilhar nao e mais
+        perguntado."""
+        if not self.cfg.contas() or not uso.devo_perguntar(self.cfg):
+            return
+        resposta = dialogos.perguntar_uso(self, TEXTO_PERGUNTA_USO,
+                                          self._ver_uso)
+        uso.registrar_pergunta(self.cfg, resposta)
+        if resposta == "sim":
+            self.fala.falar("Compartilhamento de uso ligado. Para mudar, "
+                            "Configurações, Interface.")
+            self._enviar_uso()
+
+    @seguro
+    def _enviar_uso(self):
+        uso.iniciar_gravacao(self.cfg)    # (so com a caixa marcada)
+        if uso.devido(self.cfg):
+            uso.enviar_em_segundo_plano(self.cfg, self._dados_de_uso())
 
     @seguro
     def _oferecer_primeira_conta(self):
@@ -2338,7 +2456,9 @@ class Janela(wx.Frame):
             # nao avisa: o som e a fala so vem se passar do prazo
             self._caiu.add(e.conta_id)
             self._queda_avisada.discard(e.conta_id)
-            numero = self._quedas.get(e.conta_id, 0) + 1
+            uso.contar("quedas", (self.contas.servico(e.conta_id)
+                                  if self.contas else "") or "outro")
+            numero =self._quedas.get(e.conta_id, 0) + 1
             self._quedas[e.conta_id] = numero
             wx.CallLater(SEGUNDOS_PARA_AVISAR_QUEDA * 1000,
                          self._avisar_queda_longa, e.conta_id, numero)
@@ -3939,6 +4059,15 @@ class Janela(wx.Frame):
             escolhidos = dlg.escolhidos()
         finally:
             dlg.Destroy()
+        plano = ritmo.avaliar(len(itens), [
+            (self.contas.servico(d[0]), enc.eh_status((d[0], d[1])))
+            for d in escolhidos])
+        if plano.confirmar:
+            r = wx.MessageBox(plano.confirmar, "Encaminhar",
+                              wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
+                              self)
+            if r != wx.YES:
+                return
         status = [d for d in escolhidos if enc.eh_status(d)]
         if status:
             # publicar e visivel a quem ve os meus status: confirmar antes
@@ -3955,55 +4084,142 @@ class Janela(wx.Frame):
                 escolhidos = [d for d in escolhidos if not enc.eh_status(d)]
                 if not escolhidos:
                     return
-        enviadas = falhas = 0
+        tarefas = []        # (servico, funcao que envia) na ordem de envio
         for conta_id, conversa_id, nome, tipo in escolhidos:
             prov = self.contas.provedor(conta_id)
+            servico = self.contas.servico(conta_id)
             if prov is None:
-                falhas += len(itens)
+                tarefas.append((servico, lambda n=len(itens): ("falha", n)))
                 continue
             if enc.eh_status((conta_id, conversa_id)):
-                e, f, p = self._encaminhar_para_status(
-                    prov, self.contas.servico(conta_id), itens)
-                enviadas, falhas = enviadas + e, falhas + f
-                pulados.extend(p)
+                for item in itens:
+                    tarefas.append((servico, lambda prov=prov, servico=servico,
+                                    item=item: self._status_de_um_item(
+                                        prov, servico, item)))
                 continue
             if (conta_id, conversa_id) not in self.indice:
                 conv = m.Conversa(conta_id, conversa_id, nome,
-                                  self.contas.servico(conta_id),
+                                  servico,
                                   "grupo" if tipo == "grupo" else "privada",
                                   data=time.time())
                 self.indice[(conta_id, conversa_id)] = conv
                 self._ordenar()
                 self._preencher_conversas()
             for item in itens:
+                tarefas.append((servico, lambda prov=prov, cid=conversa_id,
+                                item=item: self._enviar_um_item(
+                                    prov, cid, item)))
+        self._executar_encaminhamento(tarefas, len(escolhidos), pulados)
+
+    def _enviar_um_item(self, prov, conversa_id, item):
+        try:
+            if item.tipo == "texto":
+                prov.enviar_texto(conversa_id, item.texto)
+            else:
                 try:
-                    if item.tipo == "texto":
-                        prov.enviar_texto(conversa_id, item.texto)
-                    else:
-                        try:
-                            anexo = envio.preparar(
-                                item.caminho, voz=item.tipo_midia == m.VOZ)
-                        except envio.ErroEnvio:
-                            if item.tipo_midia != m.VOZ:
-                                raise
-                            # voz que nao e Ogg/Opus: segue como arquivo
-                            anexo = envio.preparar(item.caminho)
-                        prov.enviar_arquivo(conversa_id, anexo, item.texto)
-                    enviadas += 1
-                except Exception as e:
-                    log.warning("encaminhar falhou: %r", e)
-                    falhas += 1
-        texto = "%s para %s." % (
-            "Encaminhando %d envios" % enviadas if enviadas != 1 else
-            "Encaminhando 1 envio",
-            "1 conversa" if len(escolhidos) == 1 else
-            "%d conversas" % len(escolhidos))
-        if falhas:
-            texto += " %d não puderam ser enviados." % falhas
+                    anexo = envio.preparar(
+                        item.caminho, voz=item.tipo_midia == m.VOZ)
+                except envio.ErroEnvio:
+                    if item.tipo_midia != m.VOZ:
+                        raise
+                    # voz que nao e Ogg/Opus: segue como arquivo
+                    anexo = envio.preparar(item.caminho)
+                prov.enviar_arquivo(conversa_id, anexo, item.texto)
+            return "ok", None
+        except Exception as e:
+            log.warning("encaminhar falhou: %r", e)
+            return "falha", None
+
+    def _status_de_um_item(self, prov, servico, item):
+        ok, falhas, pulados = self._encaminhar_para_status(prov, servico,
+                                                           [item])
         if pulados:
+            return "pulado", pulados[0]
+        return ("ok", None) if ok else ("falha", None)
+
+    def _executar_encaminhamento(self, tarefas, n_conversas, pulados):
+        """Poe os envios na fila e os solta um a um, com pausa entre eles
+        (ritmo_de_envio): os primeiros saem logo e o resto aos poucos, para o
+        WhatsApp nao restringir a conta. A janela segue livre. Outro
+        encaminhamento durante este entra no fim da mesma fila. A fila fica
+        so na memoria: sair do programa a descarta (antes, ele pergunta)."""
+        if not tarefas:
+            return
+        self._fila_enc.extend(tarefas)
+        if self._encaminhando:
+            self._enc["conversas"] += n_conversas
+            self._enc["pulados"].extend(pulados)
+            self.fala.falar("%d envios acrescentados à fila. Faltam %d." % (
+                len(tarefas), len(self._fila_enc)), interromper=True)
+            return
+        self._encaminhando = True
+        self._enc = {"ok": 0, "falha": 0, "wa": 0, "conversas": n_conversas,
+                     "pulados": list(pulados), "devagar": False}
+        wa = sum(1 for s, _ in tarefas if s == ritmo.WHATSAPP)
+        if wa > ritmo.WA_RAPIDOS:
+            self.fala.falar(
+                "Encaminhando %d envios: %d saem logo e os outros ficam numa "
+                "fila, saindo devagar, em cerca de %s. Pode continuar usando "
+                "o TeleZapp." % (len(tarefas), ritmo.WA_RAPIDOS,
+                                 ritmo.duracao_estimada(wa)),
+                interromper=True)
+        self._passo_do_encaminhamento()
+
+    def _terminar_encaminhamento(self):
+        e = self._enc
+        self._encaminhando = False
+        texto = "%s para %s." % (
+            "Encaminhando %d envios" % e["ok"] if e["ok"] != 1 else
+            "Encaminhando 1 envio",
+            "1 conversa" if e["conversas"] == 1 else
+            "%d conversas" % e["conversas"])
+        if e["devagar"]:
+            texto = "Encaminhamento concluído: %d envios." % e["ok"]
+        if e["falha"]:
+            texto += " %d não puderam ser enviados." % e["falha"]
+        if e["pulados"]:
             texto += " Não foram encaminhadas: %s." % "; ".join(sorted(
-                set(pulados)))
+                set(e["pulados"])))
         self.fala.falar(texto, interromper=True)
+
+    def _passo_do_encaminhamento(self):
+        """Solta o proximo da fila; se ha pausa, agenda o seguinte."""
+        e = self._enc
+        while True:
+            if not self._fila_enc:
+                self._terminar_encaminhamento()
+                return
+            servico, tarefa = self._fila_enc.pop(0)
+            resultado, extra = tarefa()
+            if resultado == "pulado":
+                e["pulados"].append(extra)
+            elif resultado == "falha" and extra:
+                e["falha"] += extra              # conta sem provedor: todos
+            else:
+                e[resultado] += 1
+            if servico == ritmo.WHATSAPP and resultado == "ok":
+                e["wa"] += 1
+                if e["wa"] == ritmo.WA_RAPIDOS and self._fila_enc:
+                    self.fala.falar(
+                        "Os primeiros %d saíram. Faltam %d, que saem "
+                        "devagar." % (ritmo.WA_RAPIDOS, len(self._fila_enc)),
+                        interromper=True)
+                elif e["wa"] > ritmo.WA_RAPIDOS and e["wa"] % 50 == 0 \
+                        and self._fila_enc:
+                    self.fala.falar("Faltam %d envios." % len(self._fila_enc))
+            if not self._fila_enc:
+                self._terminar_encaminhamento()
+                return
+            espera = ritmo.pausa(servico, e["wa"])
+            if espera < 0.05:
+                continue
+            e["devagar"] = True
+            try:
+                wx.CallLater(int(espera * 1000),
+                             self._passo_do_encaminhamento)
+            except Exception:
+                self._encaminhando = False
+            return
 
     def _encaminhar_para_status(self, prov, servico, itens):
         """Publica cada item como status ou historia. -> (publicados, falhas,
@@ -5248,6 +5464,15 @@ class Janela(wx.Frame):
         self.SetStatusText(a.situacao)
         if c.estado == ch.CONECTANDO:
             self._anunciar_conexao(c, a.fala)
+        elif c.estado == ch.TOCANDO and self._toque_sem_janela(c):
+            # sem janela, "Enter atende" nao vale: diz o atalho
+            canon = self.atalhos.efetivo("atender_global")
+            rec = self.atalhos.efetivo("recusar_global")
+            fala = "%s Para atender, %s." % (
+                a.situacao, nucleo_atalhos.texto_falado(canon))
+            if rec:
+                fala += " Para recusar, %s." % nucleo_atalhos.texto_falado(rec)
+            self.fala.falar(fala, interromper=True)
         else:
             self.fala.falar(a.fala, interromper=True)
         toque = a.som in ("toque", "chamando")
@@ -5297,6 +5522,8 @@ class Janela(wx.Frame):
             if not c.ativa:
                 self._reexibir(self.dlg_chamada)   # acabou: volta para fechar
             return
+        if self._toque_sem_janela(c):
+            return
         p = self._provedor_de_chamada(c.conta_id)
         mics, saidas = p.dispositivos_de_audio() if p is not None \
             else ([], [])
@@ -5338,6 +5565,18 @@ class Janela(wx.Frame):
         self.dlg_chamada.Show()
         if hasattr(self.dlg_chamada, "Raise"):
             self.dlg_chamada.Raise()
+
+    def _toque_sem_janela(self, c):
+        """Chamada recebida que ainda nao foi atendida, com a opcao de abrir a
+        janela desmarcada e um atalho de atender escolhido: a janela fica
+        fechada para o foco nao sair de onde a pessoa digita e a barra de
+        espaco nao atender sem querer. Sem o atalho, a janela abre (e o unico
+        jeito de atender)."""
+        if self.cfg.get("chamada_janela_ao_tocar") or not c.entrante:
+            return False
+        if c.estado not in (ch.TOCANDO, ch.ENCERRADA):
+            return False
+        return bool(self.atalhos.efetivo("atender_global"))
 
     def _chamada_fechada(self):
         self.dlg_chamada = None
@@ -6938,6 +7177,7 @@ class Janela(wx.Frame):
                             "todas as contas.", interromper=True)
             return
         log.info("F5: conversas atualizadas em %.1f s", demorou)
+        uso.registrar_tempo("f5", demorou)
         bipe("tarefa_pronta")
         self.fala.falar("Conversas atualizadas.", interromper=True)
 
@@ -9554,7 +9794,8 @@ class Janela(wx.Frame):
             return
         dados = wx.DataObjectComposite()
         arquivos = wx.FileDataObject()
-        arquivos.AddFile(caminho)
+        # a copia colada leva o nome do arquivo, sem o codigo da mensagem
+        arquivos.AddFile(armazem.copia_para_colar(x, caminho))
         dados.Add(arquivos, True)
         if x.tipo == m.FOTO:
             img = wx.Image()
@@ -11293,18 +11534,47 @@ class Janela(wx.Frame):
             bipe("erro")
             self.fala.falar("Gravação descartada.", interromper=True)
             return
-        try:
-            gravacao = g.parar()
-        except ErroGravacao as e:
-            bipe("erro")
-            self.fala.falar(str(e), interromper=True)
+        chave = self.atual
+        if g.decorrido < LONGA_PARA_CODIFICAR_NA_HORA:
+            try:
+                gravacao = g.parar()
+            except ErroGravacao as e:
+                bipe("erro")
+                self.fala.falar(str(e), interromper=True)
+                return
+            self._gravacao_rapida_pronta(est["origem"], chave, gravacao)
             return
+        # gravacao longa: converter para Ogg/Opus leva alguns segundos; e
+        # feito em segundo plano e a voz sai sozinha quando termina
         bipe("gravacao_parada")
+        self.fala.falar("Preparando a gravação de %s..." % formatar_tempo(
+            g.decorrido), interromper=True)
+
+        def depois(gravacao, erro):
+            if erro is not None:
+                bipe("erro")
+                self.fala.falar(str(erro), interromper=True)
+                return
+            self._gravacao_rapida_pronta(est["origem"], chave, gravacao,
+                                         com_bipe=False)
+        parar_em_segundo_plano(g, depois)
+
+    @seguro
+    def _gravacao_rapida_pronta(self, origem, chave, gravacao, com_bipe=True):
+        """A gravacao do atalho esta convertida: envia como nota de voz."""
+        if com_bipe:
+            bipe("gravacao_parada")
         log.info("gravação rápida (%s) de %.0fs pronta para enviar",
-                 est["origem"], gravacao.segundos)
+                 origem, gravacao.segundos)
         if gravacao.silenciosa:
             self.fala.falar("Atenção: a gravação saiu quase em silêncio.",
                             interromper=True)
+        if self.atual != chave and chave is not None:
+            # a pessoa mudou de conversa enquanto a voz era preparada: ela
+            # vai para a conversa onde a gravacao foi parada
+            conv = self.indice.get(chave)
+            if conv is not None:
+                self._abrir_conversa_de(conv)
         # estereo (M4A) e mensagem de voz no WhatsApp; no Telegram, audio
         self._enviar_arquivo(gravacao.caminho, temporario=True,
                              voz=gravacao.como_voz_em(self._servico_do_envio()))
@@ -11647,12 +11917,24 @@ class Janela(wx.Frame):
         self._atualizar_botoes()
         self._aplicar_texto_adiado()
 
-    def _aplicar_texto_adiado(self):
-        """A selecao mudou: agora o item antigo pode receber o texto novo sem
-        o leitor de tela falar."""
-        if self._texto_adiado:
-            self._texto_adiado = False
-            self._preencher_mensagens()
+    def _aplicar_texto_adiado(self, forcar=False):
+        """O item antigo (que deixou de estar selecionado) recebe o texto
+        novo, mas so quando a lista nao esta em foco: SetString no ListBox do
+        Windows tira e poe o item de volta, e o JAWS, ao descer com a seta
+        logo depois de ouvir uma voz, falava de novo a janela e a posicao do
+        item. Com a lista em foco o texto espera o foco sair (forcar) ou a
+        proxima atualizacao normal da lista."""
+        if not self._texto_adiado:
+            return
+        if not forcar and self.FindFocus() is self.lista_msgs:
+            return
+        self._texto_adiado = False
+        self._preencher_mensagens()
+
+    def _ao_sair_da_lista(self, evt):
+        if evt is not None:
+            evt.Skip()
+        self._aplicar_texto_adiado(forcar=True)
 
     def _vigiar_audio(self, motor):
         """Libera o dispositivo de som quando o audio acaba."""
@@ -11774,8 +12056,10 @@ class Janela(wx.Frame):
         self.cfg.set("audio_velocidade", valor)
         if self.audio is not None:
             self.audio[1].velocidade = valor
-        self.fala.falar("Velocidade %s" % vel.rotulo(valor),
-                        interromper=True)
+        # um instante depois: o atalho de menu faz o foco passar por uma janela
+        # de menu e voltar, e o leitor (JAWS) corta a fala que ja estava saindo
+        texto = "Velocidade %s" % vel.rotulo(valor)
+        wx.CallLater(150, lambda: self.fala.falar(texto, interromper=True))
 
     def _mudar_velocidade(self, direcao):
         self._aplicar_velocidade(vel.proxima(
@@ -12265,6 +12549,9 @@ class Janela(wx.Frame):
             for erro in valor.get("erros", []):
                 self.fala.falar(erro)
         elif chave == "ia_credenciais":
+            if valor.get("url") is not None:
+                self.cfg.set("ia_url_personalizada",
+                             prov_ia.definir_url_personalizada(valor["url"]))
             for prov, k in valor["chaves"].items():
                 self.cofre_ia.guardar(prov, k)
             modelos = dict(self.cfg.get("ia_modelos") or {})
@@ -12895,6 +13182,11 @@ class Janela(wx.Frame):
         try:
             for onde, arquivo in getattr(self.banco, "arquivos", list)():
                 estado, detalhe, segundos = saude_dados.conferir_banco(arquivo)
+                try:
+                    tamanho = os.path.getsize(arquivo)
+                except OSError:
+                    tamanho = 0
+                uso.registrar_banco(estado, segundos, tamanho)
                 log.info("conferência do banco %s: %s em %.1f s%s", onde,
                          estado, segundos, " (%s)" % detalhe if detalhe
                          else "")
@@ -12903,6 +13195,7 @@ class Janela(wx.Frame):
             if self.cfg.get("avisar_disco_externo"):
                 pasta = config.pasta_dados()
                 tipo = saude_dados.tipo_do_disco(pasta)
+                uso.registrar_fato("disco", tipo or "interno")
                 log.info("disco dos dados (%s): %s", pasta, tipo or
                          "interno ou desconhecido")
                 if tipo:
@@ -13181,6 +13474,16 @@ class Janela(wx.Frame):
             evt.Veto()
             self._esconder_na_bandeja()
             return
+        if self._fila_enc and not windows:
+            r = wx.MessageBox(
+                "Ainda há %d envios na fila do encaminhamento. Fechar o "
+                "TeleZapp descarta o que falta. Fechar mesmo?" %
+                len(self._fila_enc), NOME,
+                wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
+            if r != wx.YES:
+                if hasattr(evt, "Veto"):
+                    evt.Veto()
+                return
         if self.chamada is not None and self.chamada.ativa and not windows:
             r = wx.MessageBox(
                 "Há uma chamada em andamento. Fechar o TeleZapp encerra a "

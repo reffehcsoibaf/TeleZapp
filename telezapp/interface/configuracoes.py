@@ -877,6 +877,12 @@ class DialogoConfiguracoes(wx.Dialog):
             chave = "chave guardada" if self.ia.tem(provedor) else "sem chave"
         escolhido = self.modelo.ia_modelos.get(
             provedor, self.ia.modelo(provedor))
+        if provedor == catalogo.PERSONALIZADO:
+            return "%s: %s, %s, %s. Configurar..." % (
+                catalogo.PROVEDORES[provedor].nome,
+                "endereço guardado" if self.modelo.ia_url_atual()
+                else "sem endereço", chave,
+                "modelo " + escolhido if escolhido else "sem modelo")
         return "%s: %s, modelo %s. Configurar..." % (
             catalogo.PROVEDORES[provedor].nome, chave,
             escolhido or "automático")
@@ -890,18 +896,31 @@ class DialogoConfiguracoes(wx.Dialog):
 
     def _configurar_provedor_ia(self, provedor):
         from telezapp.nucleo.ia import catalogo
+        personalizado = provedor == catalogo.PERSONALIZADO
         dlg = DialogoProvedorIA(self, provedor, self.ia, self.fala,
                                 self.modelo.ia_modelos.get(
                                     provedor, self.ia.modelo(provedor)),
                                 provedor in self.modelo.ia_chaves and
-                                self.modelo.ia_chaves[provedor] == "")
+                                self.modelo.ia_chaves[provedor] == "",
+                                self.modelo.ia_url_atual()
+                                if personalizado else "")
         try:
             if dlg.ShowModal() == wx.ID_OK:
                 if dlg.apagar:
                     self.modelo.ia_apagar_chave(provedor)
                 else:
                     self.modelo.ia_definir_chave(provedor, dlg.chave)
+                    if personalizado and dlg.url and not dlg.chave and \
+                            not self.ia.tem(provedor) and \
+                            provedor not in self.modelo.ia_chaves:
+                        # servidor que nao pede chave (Ollama, LM Studio):
+                        # o cofre guarda um texto sem valor, que o marca
+                        # como ligado
+                        from telezapp.nucleo.ia.provedores import SEM_CHAVE
+                        self.modelo.ia_definir_chave(provedor, SEM_CHAVE)
                 self.modelo.ia_definir_modelo(provedor, dlg.modelo)
+                if personalizado:
+                    self.modelo.ia_definir_url(dlg.url)
         finally:
             dlg.Destroy()
         self._atualizar_botoes_ia()
@@ -1356,44 +1375,73 @@ class DialogoProvedorIA(wx.Dialog):
 
     AUTOMATICO = "(Automático)"
 
-    def __init__(self, pai, provedor, ia, fala, modelo_atual, apagar_antes):
+    def __init__(self, pai, provedor, ia, fala, modelo_atual, apagar_antes,
+                 url_atual=""):
         from telezapp.nucleo.ia import catalogo
         prov = catalogo.PROVEDORES[provedor]
         super().__init__(pai, title="Configurar " + prov.nome,
                          style=wx.DEFAULT_DIALOG_STYLE)
         self.prov, self.ia, self.fala = prov, ia, fala
+        self.personalizado = provedor == catalogo.PERSONALIZADO
         self.chave, self.apagar = "", bool(apagar_antes)
         self.modelo = ""
+        self.url = url_atual
         lay = wx.BoxSizer(wx.VERTICAL)
         self.situacao = wx.StaticText(self, label="")
         lay.Add(self.situacao, 0, wx.ALL, 10)
+        if self.personalizado:
+            lay.Add(wx.StaticText(
+                self, label="Endereço do provedor (o início da API, por "
+                            "exemplo https://api.deepseek.com/v1; com "
+                            "http:// só vale para este computador, como "
+                            "http://localhost:11434/v1 do Ollama):"), 0,
+                wx.LEFT | wx.RIGHT, 10)
+            self.campo_url = wx.TextCtrl(self, size=(420, -1),
+                                         value=url_atual, name="Endereço")
+            lay.Add(self.campo_url, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
         lay.Add(wx.StaticText(
             self, label="Chave (vazio mantém a atual; ela fica cifrada "
-                        "neste computador e não vai no backup):"), 0,
-            wx.LEFT | wx.RIGHT, 10)
+                        "neste computador e não vai no backup)%s:" % (
+                            ". Deixe vazio se o servidor não pede chave"
+                            if self.personalizado else "")), 0,
+            wx.LEFT | wx.RIGHT | wx.TOP if self.personalizado
+            else wx.LEFT | wx.RIGHT, 10)
         self.campo = wx.TextCtrl(self, style=wx.TE_PASSWORD, size=(420, -1),
                                  name="Chave")
         self.campo.Bind(wx.EVT_TEXT, lambda e: self._atualizar())
         lay.Add(self.campo, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
-        lay.Add(wx.StaticText(self, label="Modelo:"), 0,
-                wx.LEFT | wx.RIGHT | wx.TOP, 10)
-        self.combo = wx.ComboBox(
-            self, choices=[self.AUTOMATICO] + ia.lista_de_modelos(provedor),
-            style=wx.CB_DROPDOWN, size=(420, -1), name="Modelo")
-        self.combo.SetValue(modelo_atual or self.AUTOMATICO)
-        lay.Add(self.combo, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
         lay.Add(wx.StaticText(
-            self, label="Automático: " + ", depois ".join(
-                (prov.modelo,) + prov.alternativos)), 0,
-            wx.LEFT | wx.RIGHT | wx.TOP, 10)
+            self, label="Modelo (obrigatório; use o nome que o serviço "
+                        "usa, ou Obter modelos):" if self.personalizado
+            else "Modelo:"), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.combo = wx.ComboBox(
+            self, choices=([] if self.personalizado else [self.AUTOMATICO])
+            + ia.lista_de_modelos(provedor),
+            style=wx.CB_DROPDOWN, size=(420, -1), name="Modelo")
+        self.combo.SetValue(modelo_atual or (
+            "" if self.personalizado else self.AUTOMATICO))
+        lay.Add(self.combo, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        if self.personalizado:
+            lay.Add(wx.StaticText(
+                self, label="Serve para descrever imagens e figurinhas, "
+                            "vídeos (por quadros) e redigir textos. Não "
+                            "transcreve voz."), 0,
+                wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        else:
+            lay.Add(wx.StaticText(
+                self, label="Automático: " + ", depois ".join(
+                    (prov.modelo,) + prov.alternativos)), 0,
+                wx.LEFT | wx.RIGHT | wx.TOP, 10)
         linha = wx.WrapSizer(wx.HORIZONTAL)
-        for rotulo, funcao in (
-                ("&Obter modelos", self._obter_modelos),
-                ("&Testar", self._testar),
-                ("&Apagar a chave", self._apagar),
+        botoes = [("&Obter modelos", self._obter_modelos),
+                  ("&Testar", self._testar),
+                  ("&Apagar a chave", self._apagar)]
+        if not self.personalizado:
+            botoes += [
                 ("&Onde conseguir a chave", lambda: ia.abrir(prov.url_chave)),
                 ("Política de &privacidade",
-                 lambda: ia.abrir(prov.url_privacidade))):
+                 lambda: ia.abrir(prov.url_privacidade))]
+        for rotulo, funcao in botoes:
             b = wx.Button(self, label=rotulo)
             b.Bind(wx.EVT_BUTTON, lambda e, f=funcao: f())
             linha.Add(b, 0, wx.RIGHT | wx.TOP, 6)
@@ -1404,7 +1452,7 @@ class DialogoProvedorIA(wx.Dialog):
         self.Bind(wx.EVT_BUTTON, self._ok, id=wx.ID_OK)
         self.CentreOnParent()
         self._atualizar()
-        self.campo.SetFocus()
+        (self.campo_url if self.personalizado else self.campo).SetFocus()
 
     def _atualizar(self):
         if self.apagar and not self.campo.GetValue().strip():
@@ -1424,6 +1472,22 @@ class DialogoProvedorIA(wx.Dialog):
     def _ok(self, evt):
         self.chave = self.campo.GetValue().strip()
         self.modelo = self._modelo_do_combo()
+        if self.personalizado:
+            from telezapp.nucleo.ia.provedores import endereco_valido
+            self.url = self.campo_url.GetValue().strip()
+            if self.url and not endereco_valido(self.url):
+                self._mostrar(
+                    "Endereço", False,
+                    "O endereço precisa começar com https:// (ou http:// "
+                    "para este computador, como o Ollama) e não pode ter "
+                    "usuário, senha nem parâmetros.")
+                self.campo_url.SetFocus()
+                return
+            if self.url and not self.modelo:
+                self._mostrar("Modelo", False, "Escolha o modelo do "
+                              "provedor. Use Obter modelos ou digite o nome.")
+                self.combo.SetFocus()
+                return
         evt.Skip()
 
     def _apagar(self):
@@ -1441,9 +1505,11 @@ class DialogoProvedorIA(wx.Dialog):
     def _testar(self):
         self._falar("Testando a conexão...")
         chave, modelo = self.campo.GetValue(), self._modelo_do_combo()
+        extra = (self.campo_url.GetValue(),) if self.personalizado else ()
 
         def trabalho():
-            ok, texto = self.ia.testar(self.prov.chave, chave, modelo)
+            ok, texto = self.ia.testar(self.prov.chave, chave, modelo,
+                                       *extra)
             wx.CallAfter(self._mostrar, "Testar", ok, texto)
         threading.Thread(target=trabalho, daemon=True,
                          name="testar-ia").start()
@@ -1451,9 +1517,11 @@ class DialogoProvedorIA(wx.Dialog):
     def _obter_modelos(self):
         self._falar("Obtendo a lista de modelos...")
         chave = self.campo.GetValue()
+        extra = (self.campo_url.GetValue(),) if self.personalizado else ()
 
         def trabalho():
-            ok, resultado = self.ia.obter_modelos(self.prov.chave, chave)
+            ok, resultado = self.ia.obter_modelos(self.prov.chave, chave,
+                                                  *extra)
             wx.CallAfter(self._modelos_obtidos, ok, resultado)
         threading.Thread(target=trabalho, daemon=True,
                          name="obter-modelos").start()
@@ -1465,10 +1533,12 @@ class DialogoProvedorIA(wx.Dialog):
             self._mostrar("Obter modelos", False, resultado)
             return
         atual = self.combo.GetValue()
-        self.combo.Set([self.AUTOMATICO] + resultado)
+        self.combo.Set(([] if self.personalizado else [self.AUTOMATICO])
+                       + resultado)
         self.combo.SetValue(atual)
-        self._falar("%d modelos encontrados. Abra a caixa e escolha um, ou "
-                    "deixe em automático." % len(resultado))
+        self._falar("%d modelos encontrados. Abra a caixa e escolha um%s." % (
+            len(resultado), "" if self.personalizado
+            else ", ou deixe em automático"))
         self.combo.SetFocus()
 
     def _mostrar(self, titulo, ok, texto):

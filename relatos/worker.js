@@ -68,6 +68,7 @@ export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     if (url.pathname === "/relato") return relato(req, env);
+    if (url.pathname === "/uso") return uso(req, env);
     if (url.pathname.startsWith("/admin")) return admin(req, env, url);
     return new Response("TeleZapp: recebimento de relatos.", { status: 200 });
   },
@@ -171,6 +172,249 @@ async function avisar(env, id, r) {
   }
 }
 
+// ---- uso do programa (opcional, so numeros) ---------------------------------
+// O programa (telezapp/nucleo/uso.py) manda no maximo um resumo por dia, so de
+// quem marcou "Compartilhar informacoes de uso". Aqui o resumo e reconstruido
+// campo a campo (o que nao estiver na lista e descartado), nunca guardado como
+// veio. Nao ha texto livre: so versoes, contagens, tempos e nomes de recursos.
+const DIAS_USO = 180;
+const POR_DIA_E_POR_REDE_USO = 30;
+
+function numero(v, max) {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 && n <= max ? Math.round(n * 1000) / 1000 : 0;
+}
+
+function mapa(obj, maxChaves, valor) {
+  const saida = {};
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return saida;
+  for (const [k, v] of Object.entries(obj).slice(0, maxChaves)) {
+    if (!/^[a-zA-Z0-9_]{1,60}$/.test(k)) continue;
+    saida[k] = valor(v);
+  }
+  return saida;
+}
+
+function limparUso(b) {
+  if (!b || typeof b !== "object") return null;
+  if (!/^\d{4}\.\d{1,2}\.\d{1,2}\.\d{1,2}$/.test(String(b.versao || ""))) return null;
+  if (!/^[0-9a-f]{32}$/.test(String(b.id || ""))) return null;
+  const texto = (v, max) => String(v ?? "").replace(/[^\w .,+()\-]/g, "").slice(0, max);
+  // uma chamada: so categorias e numeros (telezapp/nucleo/uso_chamadas.py)
+  const chamada = (c) => {
+    c = c && typeof c === "object" ? c : {};
+    return {
+      servico: texto(c.servico, 12), direcao: texto(c.direcao, 8),
+      tipo: texto(c.tipo, 8), grupo: c.grupo === true, link: c.link === true,
+      resultado: texto(c.resultado, 20), rx: texto(c.rx, 20), tx: texto(c.tx, 20),
+      pessoas: texto(c.pessoas, 20), plataforma: texto(c.plataforma, 12),
+      versao_wa: texto(c.versao_wa, 20), classe: numero(c.classe, 99999),
+      itens_da_oferta: numero(c.itens_da_oferta, 100), codec: texto(c.codec, 20),
+      relays: numero(c.relays, 50), relay_tentativa: numero(c.relay_tentativa, 50),
+      relay_posicao_rtt: numero(c.relay_posicao_rtt, 50),
+      relay_fna: c.relay_fna === true, relay_heuristica: c.relay_heuristica === true,
+      t_toque_s: numero(c.t_toque_s, 36000),
+      t_som_apos_atender_s: numero(c.t_som_apos_atender_s, 36000),
+      dur_s: numero(c.dur_s, 36000), motivo_dll: texto(c.motivo_dll, 30),
+    };
+  };
+  return {
+    chamadas: (Array.isArray(b.chamadas) ? b.chamadas : []).slice(0, 10).map(chamada),
+    versao: String(b.versao),
+    id: String(b.id),
+    sistema: texto(b.sistema, 60),
+    empacotado: b.empacotado === true,
+    leitor: texto(b.leitor, 12),
+    contas: mapa(b.contas, 4, (v) => numero(v, 1000)),
+    conversas: texto(b.conversas, 20),
+    experimentais: (Array.isArray(b.experimentais) ? b.experimentais : [])
+      .map((x) => String(x))
+      .filter((x) => /^[a-z0-9_]{1,60}$/.test(x)).slice(0, 40),
+    abertura_s: numero(b.abertura_s, 3600),
+    tempos: mapa(b.tempos, 20, (v) => numero(v, 3600)),
+    lentos: mapa(b.lentos, 40, (v) => ({
+      n: numero(v && v.n, 1e6), max_s: numero(v && v.max_s, 3600) })),
+    erros: mapa(b.erros, 40, (v) => numero(v, 1e6)),
+    ambiente: {
+      python: texto(b.ambiente && b.ambiente.python, 12),
+      arquitetura: texto(b.ambiente && b.ambiente.arquitetura, 12),
+      cpus: numero(b.ambiente && b.ambiente.cpus, 1024),
+      wx: texto(b.ambiente && b.ambiente.wx, 12),
+      neonize: texto(b.ambiente && b.ambiente.neonize, 12),
+      telethon: texto(b.ambiente && b.ambiente.telethon, 12),
+    },
+    quedas: mapa(b.quedas, 8, (v) => numero(v, 1e6)),
+    causas_de_queda: mapa(b.causas_de_queda, 8, (v) => numero(v, 1e6)),
+    registro: mapa(b.registro, 40, (v) => numero(v, 1e7)),
+    banco: {
+      estado: texto(b.banco && b.banco.estado, 20),
+      s: numero(b.banco && b.banco.s, 3600),
+      tamanho: texto(b.banco && b.banco.tamanho, 20),
+    },
+    disco: texto(b.disco, 20),
+    fechou_sem_fechar: b.fechou_sem_fechar === true,
+  };
+}
+
+async function uso(req, env) {
+  if (req.method !== "POST") return json({ erro: "Use POST." }, 405);
+  // so o programa (como no /relato); isso nao e senha, quem barra abuso e o
+  // limite por dia e a reconstrucao dos campos
+  if (req.headers.get("Origin") ||
+      !(req.headers.get("User-Agent") || "").startsWith("TeleZapp/")) {
+    return json({ erro: "Origem não permitida." }, 403);
+  }
+  const bruto = await req.text();
+  if (bruto.length > 16000) return json({ erro: "Grande demais." }, 413);
+  let corpo;
+  try { corpo = JSON.parse(bruto); } catch { return json({ erro: "JSON inválido." }, 400); }
+  const dados = limparUso(corpo);
+  if (!dados) return json({ erro: "Formato inválido." }, 400);
+
+  const ip = req.headers.get("CF-Connecting-IP") || "?";
+  const dia = new Date().toISOString().slice(0, 10);
+  const chaveLimite = "lim-uso:" + dia + ":" + await resumo(ip + (env.SAL || ""));
+  const n = parseInt((await env.RELATOS.get(chaveLimite)) || "0", 10);
+  if (n >= POR_DIA_E_POR_REDE_USO) return json({ erro: "Muitos envios hoje." }, 429);
+  await env.RELATOS.put(chaveLimite, String(n + 1), { expirationTtl: 2 * 86400 });
+
+  // um resumo por aparelho por dia: reenviar no mesmo dia substitui
+  dados.dia = dia;
+  await env.RELATOS.put("u:" + dia + ":" + dados.id, JSON.stringify(dados), {
+    expirationTtl: DIAS_USO * 86400,
+  });
+  return json({ ok: true });
+}
+
+function mediana(v) {
+  const o = [...v].sort((a, b) => a - b);
+  return o.length ? o[Math.floor(o.length / 2)] : 0;
+}
+
+// chamadas: cruza os campos de todos os registros (cada resumo traz ate 10,
+// com as que tiveram problema na frente: nao e a taxa real de falha)
+function secaoChamadas(registros) {
+  const todas = registros.flatMap((r) => (r.chamadas || []).map((c) => ({ ...c, _id: r.id })));
+  if (!todas.length) return "<h2>Chamadas</h2><p>Nenhuma.</p>";
+  const cruzar = (titulo, f) => {
+    const c = {};
+    for (const x of todas) {
+      const k = f(x);
+      (c[k] ||= { n: 0, aparelhos: new Set() });
+      c[k].n++; c[k].aparelhos.add(x._id);
+    }
+    return `<h3>${esc(titulo)}</h3><ul>` + Object.entries(c).sort((a, b) => b[1].n - a[1].n)
+      .map(([k, v]) => `<li>${esc(k)}: ${v.n} (${v.aparelhos.size} aparelhos)</li>`).join("") + "</ul>";
+  };
+  const som = {};
+  for (const x of todas) if (x.t_som_apos_atender_s !== undefined && x.t_toque_s !== undefined) (som[x.plataforma || "?"] ||= []).push(x.t_som_apos_atender_s);
+  const linhasSom = Object.entries(som).map(([p, v]) =>
+    `<li>${esc(p)}: mediana ${mediana(v)} s, máximo ${Math.max(...v)} s (${v.length} chamadas)</li>`).join("");
+  return `<h2>Chamadas (${todas.length} registros)</h2>` +
+    `<p>Cada aparelho manda até 10 por dia, com as que tiveram problema na frente: use para comparar grupos, não como taxa de falha.</p>` +
+    cruzar("Resultado", (x) => x.resultado) +
+    cruzar("Tipo e direção × resultado", (x) => `${x.servico} ${x.direcao} ${x.tipo}${x.grupo ? " grupo" : ""}${x.link ? " link" : ""} → ${x.resultado}`) +
+    cruzar("Quem liga (plataforma) × resultado, nas recebidas", (x) => x.direcao === "entrada" ? `${x.plataforma || "?"} → ${x.resultado}` : "(saída)") +
+    cruzar("Versão do WhatsApp de quem liga × resultado", (x) => x.versao_wa ? `${x.plataforma} ${x.versao_wa} → ${x.resultado}` : "(sem versão)") +
+    cruzar("Classe do aparelho × resultado", (x) => x.classe ? `${x.classe} → ${x.resultado}` : "(sem classe)") +
+    cruzar("Codec × resultado", (x) => x.codec ? `${x.codec} → ${x.resultado}` : "(sem codec)") +
+    cruzar("Grupo: pessoas × resultado", (x) => x.grupo ? `${x.pessoas} → ${x.resultado}` : "(não é grupo)") +
+    cruzar("Tentativa de relay que funcionou", (x) => x.relay_tentativa ? `tentativa ${x.relay_tentativa} de ${x.relays}` : "(sem tentativas)") +
+    cruzar("Posição do relay escolhido por RTT", (x) => x.relay_posicao_rtt ? `${x.relay_posicao_rtt}º de ${x.relays}${x.relay_heuristica ? " (regra sem FNA)" : ""}` : "(sem dado)") +
+    `<h3>Tempo entre atender e o som do outro lado chegar, por plataforma</h3><ul>${linhasSom || "<li>Nada.</li>"}</ul>`;
+}
+
+async function adminUso(env, t) {
+  const dias = parseInt(t.dias, 10) || 14;
+  const desde = new Date(Date.now() - dias * 86400000).toISOString().slice(0, 10);
+  const registros = [];
+  let cursor;
+  let cortado = false;
+  // o plano gratis limita as operacoes por pedido: le no maximo MAX_LIDOS
+  // resumos (os mais novos primeiro, pois a chave comeca pela data)
+  const MAX_LIDOS = 40;
+  const nomes = [];
+  do {
+    const lista = await env.RELATOS.list({ prefix: "u:", cursor });
+    for (const k of lista.keys) if (k.name.slice(2, 12) >= desde) nomes.push(k.name);
+    cursor = lista.list_complete ? undefined : lista.cursor;
+  } while (cursor);
+  nomes.sort().reverse();
+  if (nomes.length > MAX_LIDOS) cortado = true;
+  for (const nome of nomes.slice(0, MAX_LIDOS)) {
+    const v = await env.RELATOS.get(nome);
+    if (v) registros.push(JSON.parse(v));
+  }
+  const aparelhos = new Set(registros.map((r) => r.id));
+  const por = (campo) => {
+    const c = {};
+    for (const r of registros) c[r[campo]] = (c[r[campo]] || 0) + 1;
+    return Object.entries(c).sort((a, b) => b[1] - a[1]);
+  };
+  const lista = (pares) => "<ul>" + pares.map(([k, v]) =>
+    `<li>${esc(k)}: ${esc(v)}</li>`).join("") + "</ul>";
+  const lentos = {};
+  const tempos = {};
+  const experimentais = {};
+  const quedas = {};
+  const causas = {};
+  const registro = {};
+  const quedasDoPrograma = new Set();
+  const bancosRuins = new Set();
+  for (const r of registros) {
+    for (const [nome, v] of Object.entries(r.lentos || {})) {
+      (lentos[nome] ||= { n: 0, maximos: [], aparelhos: new Set() });
+      lentos[nome].n += v.n; lentos[nome].maximos.push(v.max_s); lentos[nome].aparelhos.add(r.id);
+    }
+    for (const [nome, v] of Object.entries(r.tempos || {})) (tempos[nome] ||= []).push(v);
+    if (r.abertura_s) (tempos.abertura ||= []).push(r.abertura_s);
+    for (const x of r.experimentais || []) experimentais[x] = (experimentais[x] || 0) + 1;
+    for (const [g, alvo] of [["quedas", quedas], ["causas_de_queda", causas], ["registro", registro]]) {
+      for (const [nome, v] of Object.entries(r[g] || {})) {
+        (alvo[nome] ||= { n: 0, aparelhos: new Set() });
+        alvo[nome].n += v; alvo[nome].aparelhos.add(r.id);
+      }
+    }
+    if (r.fechou_sem_fechar) quedasDoPrograma.add(r.id);
+    if (r.banco && r.banco.estado && r.banco.estado !== "ok") bancosRuins.add(r.id);
+  }
+  const linhasContagem = (o) => Object.entries(o).sort((a, b) => b[1].n - a[1].n).map(([nome, v]) =>
+    `<li>${esc(nome)}: ${v.n} em ${v.aparelhos.size} aparelhos</li>`).join("") || "<li>Nada.</li>";
+  const porSub = (campo, sub) => {
+    const c = {};
+    for (const r of registros) { const k = (r[campo] && r[campo][sub]) || "?"; c[k] = (c[k] || 0) + 1; }
+    return Object.entries(c).sort((a, b) => b[1] - a[1]);
+  };
+  const linhasLentos = Object.entries(lentos).sort((a, b) => b[1].n - a[1].n).map(([nome, v]) =>
+    `<li>${esc(nome)}: ${v.n} vezes em ${v.aparelhos.size} aparelhos; pior tempo mediano ${mediana(v.maximos)} s, máximo ${Math.max(...v.maximos)} s</li>`);
+  const linhasTempos = Object.entries(tempos).map(([nome, v]) =>
+    `<li>${esc(nome)}: mediana ${mediana(v)} s, máximo ${Math.max(...v)} s (${v.length} envios)</li>`);
+  return html(`<!doctype html><meta charset="utf-8"><title>Uso do TeleZapp</title>` +
+    `<h1>Uso do TeleZapp, últimos ${dias} dias</h1>` +
+    `<p>${aparelhos.size} aparelhos, ${registros.length} resumos.` +
+    `${cortado ? " Só os " + MAX_LIDOS + " mais novos (de " + nomes.length + ")." : ""}</p>` +
+    `<h2>Versões</h2>${lista(por("versao"))}` +
+    `<h2>Sistemas</h2>${lista(por("sistema"))}` +
+    `<h2>Leitores de tela</h2>${lista(por("leitor"))}` +
+    `<h2>Quantidade de conversas</h2>${lista(por("conversas"))}` +
+    `<h2>Tempos</h2><ul>${linhasTempos.join("") || "<li>Nada.</li>"}</ul>` +
+    `<h2>Tratadores lentos (acima de 0,2 s)</h2><ul>${linhasLentos.join("") || "<li>Nada.</li>"}</ul>` +
+    `<h2>Recursos experimentais ligados</h2>${lista(Object.entries(experimentais).sort((a, b) => b[1] - a[1]))}` +
+    `<h2>Quedas de conexão, por serviço</h2><ul>${linhasContagem(quedas)}</ul>` +
+    `<h2>Causa das quedas do WhatsApp</h2><ul>${linhasContagem(causas)}</ul>` +
+    `<h2>Avisos e erros do registro, por módulo</h2><ul>${linhasContagem(registro)}</ul>` +
+    `<h2>Programa fechado sem terminar na vez anterior</h2><p>${quedasDoPrograma.size} aparelhos.</p>` +
+    `<h2>Banco ao abrir</h2>${lista(porSub("banco", "estado"))}` +
+    `<p>${bancosRuins.size} aparelhos com banco que não estava ok.</p>` +
+    `<h2>Tamanho do banco</h2>${lista(porSub("banco", "tamanho"))}` +
+    `<h2>Disco dos dados</h2>${lista(por("disco"))}` +
+    `<h2>Python</h2>${lista(porSub("ambiente", "python"))}` +
+    `<h2>neonize</h2>${lista(porSub("ambiente", "neonize"))}` +
+    `<h2>wxPython</h2>${lista(porSub("ambiente", "wx"))}` +
+    `<h2>Processador</h2>${lista(porSub("ambiente", "arquitetura"))}` +
+    secaoChamadas(registros));
+}
+
 async function admin(req, env, url) {
   const dado = url.searchParams.get("t") || "";
   const comSenha = igual(dado, env.ADMIN_TOKEN || "");
@@ -185,6 +429,10 @@ async function admin(req, env, url) {
   }
   const t = encodeURIComponent(dado);
   const acesso = comSenha ? "t=" + t : "a=" + encodeURIComponent(dadoA);
+  if (url.pathname === "/admin/uso") {
+    if (!comSenha) return html("<p>Acesso negado.</p>", 403);
+    return adminUso(env, { dias: url.searchParams.get("dias") });
+  }
   if (url.pathname === "/admin" || url.pathname === "/admin/") {
     const lista = await env.RELATOS.list({ prefix: "r:" });
     const itens = lista.keys.sort((a, b) => (b.name > a.name ? 1 : -1)).map((k) => {
@@ -194,7 +442,7 @@ async function admin(req, env, url) {
         `${m.logs ? " (com log)" : ""}: ${esc(m.inicio || "")}</li>`;
     });
     return html(`<!doctype html><meta charset="utf-8"><title>Relatos do TeleZapp</title>` +
-      `<h1>Relatos do TeleZapp</h1><ul>${itens.join("") || "<li>Nenhum relato.</li>"}</ul>`);
+      `<h1>Relatos do TeleZapp</h1><p><a href="/admin/uso?${acesso}">Uso do programa</a></p><ul>${itens.join("") || "<li>Nenhum relato.</li>"}</ul>`);
   }
   const id = url.searchParams.get("id") || "";
   const bruto = await env.RELATOS.get("r:" + id);

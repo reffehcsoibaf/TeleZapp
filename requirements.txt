@@ -17,3 +17,4 @@ truststore>=0.10
 winrt-runtime>=3.2
 winrt-Windows.Foundation>=3.2
 winrt-Windows.Security.Credentials.UI>=3.2
+comtypes>=1.4

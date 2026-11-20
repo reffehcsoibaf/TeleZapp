@@ -100,6 +100,34 @@ def _chamada_por_link(partes):
             "video": partes[0] == "video"}
 
 
+def _convite_do_codigo(codigo, canal=False):
+    """Convite de grupo (ou de canal) a partir so do codigo."""
+    codigo = (codigo or "").strip()
+    if canal:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{10,64}", codigo):
+            return None
+        convite = {"codigo": codigo, "modo": "canal"}
+    else:
+        if not re.fullmatch(r"[A-Za-z0-9]{10,64}", codigo):
+            return None
+        convite = {"codigo": codigo}
+    return {"servico": "whatsapp", "acao": "entrar", "convite": convite}
+
+
+def _whatsapp_app(host, partes, q):
+    """Links whatsapp://. A pagina de convite do navegador ("Continuar para
+    o chat") abre whatsapp://chat?code=CODIGO; canais, whatsapp://channel/
+    CODIGO; e o de conversa, whatsapp://send?phone=."""
+    if host == "send":
+        return _telefone(_um(q, "phone"), q)
+    if host == "chat":
+        return _convite_do_codigo(_um(q, "code"))
+    if host == "channel":
+        return _convite_do_codigo(partes[0] if partes else _um(q, "code"),
+                                  canal=True)
+    return None
+
+
 def _whatsapp_web(host, partes, q, url):
     if host == HOST_WHATSAPP_CHAMADA:
         return _chamada_por_link(partes)
@@ -110,6 +138,8 @@ def _whatsapp_web(host, partes, q, url):
             if convite else None
     if host not in HOSTS_WHATSAPP_CONVERSA:
         return None
+    if partes[:1] == ["accept"]:        # api.whatsapp.com/accept?code=CODIGO
+        return _convite_do_codigo(_um(q, "code"))
     if host in ("wa.me", "www.wa.me"):
         return _telefone(partes[0], q) if partes else None
     if partes[:1] == ["send"]:
@@ -132,7 +162,7 @@ def interpretar(url):
     if esquema == "tg":
         return _telegram_tg(host, q)
     if esquema == "whatsapp":
-        return _telefone(_um(q, "phone"), q) if host == "send" else None
+        return _whatsapp_app(host, partes, q)
     if esquema not in ("http", "https"):
         return None
     if host in HOSTS_TELEGRAM:

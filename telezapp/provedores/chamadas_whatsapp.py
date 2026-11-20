@@ -677,7 +677,22 @@ class ChamadasWhatsApp:
                 self.ligacoes.pop(cid, None)
         self._publicar(c)
         if estado == ch.ENCERRADA:
+            self._registrar_para_uso(lig)
             self._promover_espera()
+
+    def _registrar_para_uso(self, lig):
+        """Entrega ao resumo de uso (opcional) so categorias e numeros da
+        chamada que acabou; nunca atrapalha a chamada."""
+        try:
+            from telezapp.nucleo import uso_chamadas
+            c = lig.chamada
+            uso_chamadas.concluir(
+                lig.call_id, entrante=c.entrante, video=c.video,
+                grupo=c.grupo, por_link=c.por_link, motivo=c.motivo,
+                sem_som=lig.erro in (SEM_AUDIO, SEM_AUDIO_COM_RETORNO),
+                pessoas=len(c.participantes))
+        except Exception:
+            log.exception("registro da chamada para o resumo de uso")
 
     def _achar(self, call_id):
         with self._trava:

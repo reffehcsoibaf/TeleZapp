@@ -8,6 +8,8 @@ import mimetypes
 import os
 import re
 import shutil
+import time
+import uuid
 
 from telezapp import config
 from telezapp.nucleo import modelos as m
@@ -56,6 +58,46 @@ def caminho_base(msg):
     nome = _limpo(msg.nome_arquivo)
     ident = _limpo(msg.id, 40) or "msg"
     return os.path.join(pasta, "%s_%s" % (ident, nome) if nome else ident)
+
+
+def nome_para_copiar(msg, caminho):
+    """O nome que a midia tem ao ser colada: o que quem enviou deu ao arquivo,
+    sem o codigo da mensagem que o armazem poe na frente ("<codigo>_nome"). Sem
+    nome (foto, voz...), o tipo e a data e hora, ex.: "foto 2026-11-19
+    14-30-05.jpg"."""
+    nome = os.path.basename(caminho)
+    prefixo = "%s_" % (_limpo(msg.id, 40) or "msg")
+    if nome.startswith(prefixo) and len(nome) > len(prefixo):
+        return nome[len(prefixo):]
+    quando = ""
+    try:
+        quando = " " + time.strftime("%Y-%m-%d %H-%M-%S",
+                                     time.localtime(float(msg.data)))
+    except (TypeError, ValueError, OverflowError, OSError):
+        pass
+    return m.NOMES_TIPOS.get(msg.tipo, "arquivo") + quando + \
+        os.path.splitext(nome)[1]
+
+
+def copia_para_colar(msg, caminho):
+    """Caminho de uma copia (elo fisico quando da, para nao duplicar um
+    video grande) com o nome limpo, na pasta temporaria, que o programa apaga
+    ao abrir e ao fechar. Se nao der, devolve o proprio arquivo."""
+    from telezapp.nucleo import pasta_salvar
+    try:
+        base = os.path.join(config.pasta_dados(), "temp", "copias")
+        shutil.rmtree(base, ignore_errors=True)    # as copias antigas
+        pasta = os.path.join(base, uuid.uuid4().hex[:8])
+        os.makedirs(pasta, exist_ok=True)
+        destino = os.path.join(
+            pasta, pasta_salvar.nome_seguro(nome_para_copiar(msg, caminho)))
+        try:
+            os.link(caminho, destino)
+        except OSError:
+            shutil.copy2(caminho, destino)
+        return destino
+    except OSError:
+        return caminho
 
 
 def extensao(mime, tipo, nome=""):

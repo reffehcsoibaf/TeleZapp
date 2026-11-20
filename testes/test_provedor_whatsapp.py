@@ -440,6 +440,39 @@ def test_grupo_renomeado_atualiza_a_conversa(amb):
     assert amb.fila.empty()
 
 
+def test_entrada_e_saida_de_membros_viram_aviso_no_grupo(amb):
+    amb.f["Message"](amb.c, evento(
+        "G9", E.Message(conversation="oi"), chat="12345", grupo=True,
+        remetente="5551988887777"))
+    esperar(amb.fila, ev.MensagemNova)
+    g = jid("12345", "g.us")
+    ana, bia = jid("5551911110000"), jid("5551922220000")
+    # entrou sozinha, por convite
+    amb.f["GroupInfoEvent"](amb.c, N.GroupInfoEvent(
+        JID=g, Sender=ana, Timestamp=1700000000, Join=[ana],
+        JoinReason="invite"))
+    n = esperar(amb.fila, ev.MensagemNova)
+    assert n.mensagem.tipo == m.AVISO_MEMBROS and n.silenciosa
+    assert n.mensagem.texto == \
+        "+5551911110000 entrou no grupo por um convite."
+    # adicionada por outra pessoa
+    amb.f["GroupInfoEvent"](amb.c, N.GroupInfoEvent(
+        JID=g, Sender=ana, Timestamp=1700000100, Join=[bia]))
+    assert esperar(amb.fila, ev.MensagemNova).mensagem.texto == \
+        "+5551911110000 adicionou +5551922220000 ao grupo."
+    # saiu; o mesmo evento reenviado nao duplica
+    for _ in range(2):
+        amb.f["GroupInfoEvent"](amb.c, N.GroupInfoEvent(
+            JID=g, Sender=bia, Timestamp=1700000200, Leave=[bia]))
+    esperar(amb.fila, ev.MensagemNova)
+    avisos = [x for x in amb.banco.mensagens("w1", "12345@g.us")
+              if x.tipo == m.AVISO_MEMBROS]
+    assert [x.texto for x in avisos] == [
+        "+5551911110000 entrou no grupo por um convite.",
+        "+5551911110000 adicionou +5551922220000 ao grupo.",
+        "+5551922220000 saiu do grupo."]
+
+
 def test_nomes_de_grupos_sao_conferidos_depois_de_ficar_fora(amb):
     amb.f["Connected"](amb.c, N.Connected())
     esperar(amb.fila, ev.ContaPronta)
@@ -4155,12 +4188,23 @@ def test_ao_reconectar_busca_sozinha_o_buraco_antes_da_mais_antiga_entregue(
             e = amb.fila.get(timeout=0.05)
         except queue.Empty:
             continue
-        if isinstance(e, ev.Aviso) and e.texto.startswith("Busca automática"):
+        if isinstance(e, ev.Aviso) and \
+                e.texto.startswith("Busca automática:"):
             aviso = e
             break
     assert aviso is not None
     assert aviso.texto.startswith("Busca automática: encontrei 2 mensagens")
     assert len(pedidos) == 2 and not amb.p._varreduras
+    fim = None
+    for _ in range(100):
+        try:
+            e = amb.fila.get(timeout=0.05)
+        except queue.Empty:
+            continue
+        if isinstance(e, ev.Aviso) and "concluída" in e.texto:
+            fim = e
+            break
+    assert fim is not None and "encontrei 2 mensagens" in fim.texto
     ids = [x.id for x in amb.banco.mensagens("w1", cid)]
     assert ids == ["OLD", "G1", "G2", "NEW1", "NEW2"]
 
@@ -4177,7 +4221,10 @@ def test_busca_sozinha_e_silenciosa_quando_nao_acha_nada(amb, monkeypatch):
         e = amb.fila.get_nowait()
         if isinstance(e, ev.Aviso):
             avisos.append(e.texto)
-    assert not [a for a in avisos if "mensagens" in a or "celular" in a]
+    # sem achados nao ha aviso por conversa, mas o fim da busca e anunciado
+    assert not [a for a in avisos if "encontrei" in a or "celular" in a]
+    assert any(a.startswith("Busca automática concluída em 1 conversa: não "
+                            "faltava nenhuma mensagem") for a in avisos)
     assert len(pedidos) == 1 and not amb.p._varreduras
 
 
@@ -5276,3 +5323,168 @@ def test_criar_enquete_sem_avancada_continua_no_formato_antigo(amb):
                         False)
     esperar(amb.fila, ev.MensagemNova)
     assert amb.c.enviadas[-1][1].HasField("pollCreationMessage")
+
+
+def _aviso_wmi(tipo, parametros, ts, autor="", de_mim=False):
+    from neonize.proto.waCommon import WACommon_pb2 as C
+    from neonize.proto.waWeb import WAWebProtobufsWeb_pb2 as W
+    return W.WebMessageInfo(
+        key=C.MessageKey(remoteJID="123@g.us", fromMe=de_mim,
+                         ID="S%d" % ts, participant=autor),
+        messageStubType=tipo, messageStubParameters=parametros,
+        messageTimestamp=ts)
+
+
+def test_historico_do_celular_traz_os_avisos_de_entrada_e_saida(amb):
+    import time as t
+    agora = int(t.time())
+    ana, bia = "5551911110000@s.whatsapp.net", "5551922220000@s.whatsapp.net"
+    h = H.HistorySync(syncType=3, conversations=[H.Conversation(
+        ID="123@g.us", name="Família", conversationTimestamp=agora,
+        messages=[H.HistorySyncMsg(message=_aviso_wmi(*a)) for a in (
+            (27, [bia], agora - 5000, ana),                 # Ana adicionou Bia
+            (32, [bia], agora - 4000, bia),                 # Bia saiu
+            (28, [ana], agora - 3000, bia),                 # Bia removeu Ana
+            (31, [bia], agora - 2000, bia),                 # entrou por convite
+            (140, ['{"pn":"%s"}' % ana], agora - 1000),     # pedido aprovado
+            (1, [], agora - 900),                           # outro aviso: fora
+        )])])
+    amb.p.historico = "365"
+    amb.p.guardar_historico(h)
+    avisos = [x for x in amb.banco.mensagens("w1", "123@g.us")
+              if x.tipo == m.AVISO_MEMBROS]
+    assert [x.texto for x in avisos] == [
+        "+5551911110000 adicionou +5551922220000 ao grupo.",
+        "+5551922220000 saiu do grupo.",
+        "+5551922220000 removeu +5551911110000 do grupo.",
+        "+5551922220000 entrou no grupo por um convite.",
+        "+5551911110000 entrou no grupo com o pedido aprovado."]
+    # o mesmo pacote de novo nao duplica
+    amb.p.guardar_historico(h)
+    assert len([x for x in amb.banco.mensagens("w1", "123@g.us")
+                if x.tipo == m.AVISO_MEMBROS]) == 5
+
+
+def test_aviso_do_historico_tem_o_mesmo_id_do_aviso_ao_vivo(amb):
+    import time as t
+    agora = int(t.time())
+    bia = "5551922220000@s.whatsapp.net"
+    x = amb.p._aviso_do_historico(
+        _aviso_wmi(32, [bia], agora, bia), "123@g.us", set())
+    assert x.id == "aviso-%d-s-5551922220000" % agora       # como o ao vivo
+
+
+def test_contagem_dos_avisos_de_sistema_do_pacote_para_o_log():
+    h = H.HistorySync(conversations=[H.Conversation(
+        ID="123@g.us", messages=[
+            H.HistorySyncMsg(message=_aviso_wmi(27, ["1@lid"], 5)),
+            H.HistorySyncMsg(message=_aviso_wmi(27, ["2@lid"], 6)),
+            H.HistorySyncMsg(message=_aviso_wmi(32, ["2@lid"], 7))])])
+    assert wa.stubs_do_historico(h) == {27: 2, 32: 1}
+
+
+def test_motivos_de_parar_da_busca_da_movimentacao():
+    corte = 1000.0
+    v = dict(corte=corte, ancora_anterior="X", rodadas=1)
+
+    def resumo(ancora="Y", total=50, mais_antiga=5000.0):
+        return dict(ancora=(ancora, False, "", mais_antiga) if ancora
+                    else None, total=total, mais_antiga=mais_antiga)
+    parar = wa.ProvedorWhatsApp._motivo_de_parar
+    assert parar(v, resumo(), 0) == ""                    # segue voltando
+    assert parar(v, resumo(mais_antiga=900.0), 0) == "chegou ao prazo"
+    assert parar(v, resumo(ancora=None, total=0), 0) == "fim do histórico"
+    assert parar(v, resumo(ancora="X"), 0) == "sem avanço"
+    assert parar(dict(v, rodadas=wa.RODADAS_MOVIMENTACAO), resumo(),
+                 0) == "limite"
+
+
+def test_busca_da_movimentacao_pede_a_partir_da_mensagem_mais_nova(amb):
+    import time as t
+    amb.p._conectada = True
+    pedidos = []
+    amb.c.request_history_sync = lambda *a: pedidos.append(a)
+    agora = int(t.time())
+    amb.banco.salvar_conversas([m.Conversa("w1", "123@g.us", "Família",
+                                           "whatsapp", "grupo")])
+    amb.banco.salvar_mensagens([
+        m.Mensagem("w1", "123@g.us", "M1", texto="oi", data=agora - 100),
+        m.Mensagem("w1", "123@g.us", "aviso-1-s-55", tipo=m.AVISO_MEMBROS,
+                   texto="Bia saiu do grupo.", data=agora - 10)])
+    assert amb.p.buscar_movimentacao("5551@s.whatsapp.net") == \
+        "Só os grupos têm movimentação de membros."
+    assert amb.p.buscar_movimentacao("123@g.us") == ""
+    v = amb.p._varreduras["123@g.us"]
+    assert abs((time_agora() - v["corte"]) - 60 * 86400) < 10
+    assert v["ancora_anterior"] == "M1"      # o aviso nao serve de ancora
+    assert amb.p.buscar_movimentacao("123@g.us") == \
+        "Já estou buscando as mensagens deste grupo."
+    amb.p._terminar_varredura("123@g.us")
+
+
+def time_agora():
+    import time as t
+    return t.time()
+
+
+def test_busca_da_movimentacao_conta_os_avisos_novos_e_usa_aviso_como_ancora(
+        amb):
+    import time as t
+    agora = int(t.time())
+    ana, bia = "5551911110000@s.whatsapp.net", "5551922220000@s.whatsapp.net"
+    amb.p._varreduras["123@g.us"] = dict(
+        rodadas=0, novas=0, consultadas=0, ancora_anterior="", auto=False,
+        antigas=False, corte=agora - 60 * 86400, avisos=0,
+        mais_antiga_local=0)
+    h = H.HistorySync(syncType=6, conversations=[H.Conversation(
+        ID="123@g.us", messages=[
+            H.HistorySyncMsg(message=_aviso_wmi(27, [bia], agora - 5000,
+                                                ana)),
+            H.HistorySyncMsg(message=_aviso_wmi(32, [bia], agora - 4000,
+                                                bia))])])
+    novas, resumo = amb.p._guardar_sob_demanda(h)
+    assert novas == 0 and resumo["avisos"] == 2        # nao contam como novas
+    assert resumo["ancora"][0] == "S%d" % (agora - 5000)   # o aviso mais velho
+    assert resumo["mais_antiga"] == agora - 5000
+    assert len([x for x in amb.banco.mensagens("w1", "123@g.us")
+                if x.tipo == m.AVISO_MEMBROS]) == 2
+    # de novo: ja existem, nao contam
+    assert amb.p._guardar_sob_demanda(h)[1]["avisos"] == 0
+    amb.p._varreduras.pop("123@g.us")
+
+
+def test_movimentacao_salta_para_uma_mensagem_guardada_mais_antiga(amb):
+    import time as t
+    agora = int(t.time())
+    amb.banco.salvar_conversas([m.Conversa("w1", "123@g.us", "Família",
+                                           "whatsapp", "grupo")])
+    amb.banco.salvar_mensagens([
+        m.Mensagem("w1", "123@g.us", "M1", texto="a", data=agora - 20 * 86400),
+        m.Mensagem("w1", "123@g.us", "M2", texto="b", data=agora - 9 * 86400),
+        m.Mensagem("w1", "123@g.us", "aviso-1-s-5", tipo=m.AVISO_MEMBROS,
+                   texto="x", data=agora - 12 * 86400)])
+    assert amb.banco.mensagem_anterior_a(
+        "w1", "123@g.us", agora - 9 * 86400).id == "M1"
+    assert amb.banco.mensagem_anterior_a(
+        "w1", "123@g.us", agora - 25 * 86400) is None
+    pedidos = []
+    amb.p._pedir_rodada = lambda cid, ancora: pedidos.append((cid, ancora[0]))
+    amb.p._fila.put = lambda f: f()
+    v = dict(corte=agora - 60 * 86400, alcance=agora - 9 * 86400,
+             ancora_anterior="X", saltos=0)
+    esperado = []
+    amb.p._varreduras["123@g.us"] = v
+    wa.ESPERA_ENTRE_RODADAS, antes = 0, wa.ESPERA_ENTRE_RODADAS
+    try:
+        assert amb.p._saltar_na_movimentacao("123@g.us", v)
+    finally:
+        wa.ESPERA_ENTRE_RODADAS = antes
+    import time as tt
+    tt.sleep(0.5)
+    assert pedidos == [("123@g.us", "M1")] and v["saltos"] == 1
+    # sem mensagem mais antiga que o alcance, ou sem saltos: desiste
+    v["alcance"] = agora - 25 * 86400
+    assert not amb.p._saltar_na_movimentacao("123@g.us", v)
+    v.update(alcance=agora - 9 * 86400, saltos=wa.SALTOS_DA_MOVIMENTACAO)
+    assert not amb.p._saltar_na_movimentacao("123@g.us", v)
+    amb.p._varreduras.pop("123@g.us")

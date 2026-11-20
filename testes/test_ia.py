@@ -20,7 +20,7 @@ def pedido(provedor, midia, modelo="m", perfil="medio"):
 
 def test_cada_tarefa_tem_provedores_e_so_o_gemini_recebe_o_video_inteiro():
     assert {c for c, _ in cat.provedores_da_tarefa("video")} == {
-        "gemini", "openai", "claude", "groq", "mistral", "openrouter",
+        "gemini", "openai", "claude", "groq", "mistral", "openrouter", "personalizado",
         }
     assert [c for c in cat.PROVEDORES if cat.video_nativo(c)] == ["gemini"]
     assert {c for c, _ in cat.provedores_da_tarefa("audio")} == {

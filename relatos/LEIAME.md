@@ -34,6 +34,15 @@ npx wrangler secret put TG_CHAT         # seu chat id
 4. Publique: `npx wrangler deploy`.
 5. Ler os relatos: `https://<endereço do Worker>/admin?t=<ADMIN_TOKEN>`.
 
+## Informações de uso (`/uso`)
+
+Quem marca "Compartilhar informações de uso" no programa manda no máximo um
+resumo por dia (só números e nomes de recursos; veja `telezapp/nucleo/uso.py`).
+O Worker reconstrói cada campo por lista e guarda um resumo por aparelho por
+dia no mesmo KV (`u:<dia>:<id>`, 180 dias). Para ler o resumo:
+`https://<endereço do Worker>/admin/uso?t=<ADMIN_TOKEN>` (`&dias=30` para mudar
+o período). A tela traz também as chamadas (até 10 por aparelho por dia, as com problema na frente; serve para comparar grupos, não como taxa de falha). Depois de mudar o `worker.js`, `npx wrangler deploy` outra vez.
+
 ## O que ele faz e não faz
 
 - Só aceita envios vindos de `https://reffehcsoibaf.github.io` e, no máximo,

@@ -82,6 +82,8 @@ def abrir_marca(pasta, log):
             log.warning("a vez anterior terminou sem fechar normalmente "
                         "(queda do programa ou do Windows); veja "
                         "falha-nativa.log. %s", descrever_marca(marca))
+            from telezapp.nucleo import uso
+            uso.registrar_fato("fechou_sem_fechar", True)
         escrever_marca(marca)
         threading.Thread(target=_manter_marca, args=(marca,), daemon=True,
                          name="marca-de-sessao").start()

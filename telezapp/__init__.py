@@ -8,12 +8,12 @@ import re
 NOME = "TeleZapp"
 # ano.mes.dia.digito: o ultimo numero sobe quando sai mais de uma versao no
 # mesmo dia (2026.10.13.0, 2026.10.13.1...)
-VERSAO = "2026.11.18.0"
+VERSAO = "2026.11.20.0"
 SITE = "https://github.com/reffehcsoibaf/TeleZapp"
 # a pagina do projeto (pasta site/, no GitHub Pages)
 PAGINA_DO_PROJETO = "https://reffehcsoibaf.github.io/TeleZapp/"
 # convite do grupo de suporte no WhatsApp (menu Ajuda)
-GRUPO_DE_SUPORTE = "https://chat.whatsapp.com/JULThiZpj4iFiJGHLGwVVd"
+GRUPO_DE_SUPORTE = "https://chat.whatsapp.com/Cl4ncLRvP9ZDXKTvQyP0Bb"
 
 
 def versao_valida(texto):

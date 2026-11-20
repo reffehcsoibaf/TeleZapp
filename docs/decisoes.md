@@ -890,7 +890,7 @@ eonize-0.5.2-chamadas-antes-do-log`). Quem rodar o TeleZapp pelo código precisa
 ## Versão 2026.10.24.1 (24/10/2026): ferramentas de grupo do WhatsApp
 
 - Pedido do responsável: o que o WinZapp tem em grupos e o TeleZapp não tem, feito em paralelo ("se foi possível para o TeleZapp deve ser possível para o WinZapp"). Auditoria primeiro: o TeleZapp já tinha detalhes, membros, promover/rebaixar/remover/adicionar por telefone, nome, descrição, só administradores enviam/editam, link (numa caixa de mensagem), sair, grupos em comum, criar grupo/comunidade e entrar pelo botão da mensagem. Faltavam: pedidos de entrada (listar, aprovar, recusar), foto do grupo (ver e trocar), convite com QR Code, entrar por link digitado e adicionar uma pessoa a um grupo pela conversa dela. Todos feitos. O TeleZapp não mostrava nenhuma foto de perfil, só trocava a própria.
-- Não viável hoje: modo de aprovação de entrada e "só administradores adicionam membros" (o `GroupInfo` do neonize não tem os campos nem há função que os mude; exigem mexer na DLL); remover a foto do grupo (o neonize não documenta foto vazia; não tentado).
+- Aprovação de entrada: feita em 20/11 (função `set_group_join_approval_mode` do neonize 0.10 + leitura pela `GroupSettings` da DLL do TeleZapp); "só administradores adicionam membros" ainda não está na janela (a função `set_group_member_add_mode` existe); remover a foto do grupo (o neonize não documenta foto vazia; não tentado).
 - Aprovar e recusar usam `client.update_group_request_participants`, só existente na DLL de teste `0.5.2-winzapp-teste.2` (contrato combinado com a sessão que a recompila). Sem a função, a mensagem diz que precisa da DLL de teste nova; a lista de pedidos funciona com o neonize atual. **Correção (24/10/2026):** o pacote da Release 2026.10.24.1 leva a DLL nova (o empacotador copia o neonize do `venv`; conferido no `TeleZapp.zip`: SHA-256 `51f845e3…`, com a função), então aprovar e recusar funcionam para quem baixa o exe; o aviso só aparece rodando pelo código-fonte com o neonize oficial. A primeira versão das notas da Release e das novidades dizia o contrário.
 - Sem opção nova em `config.OPCOES` (nada ajustável); o item de menu "Entrar em um grupo por link" nasce sem combinação de teclas.
 - **Não verificado ao vivo:** nada disto foi visto com conta real, só testes automáticos com cliente simulado. A conferir: a foto baixar e abrir; trocar a foto do grupo; o QR salvo ser lido pelo celular; o pedido de entrada aparecer com nome e telefone e, com a DLL nova, aprovar e recusar.
@@ -1419,3 +1419,137 @@ Ele estranhou eu ter deixado itens para depois sem motivo técnico; não havia. 
 - Sem teste ao vivo: não se sabe se o WhatsApp honra os campos nem se votar em
   V6 funciona. Opções com imagem: não implementado (o formato das imagens por
   opção, mensagens associadas, não está documentado; sem como verificar).
+
+## 19/11/2026 - Fala da velocidade do áudio some no JAWS (atalho de menu)
+
+- Sintoma: no JAWS 2027, ao mudar a velocidade do áudio pelo atalho de menu
+  (`vel_mais`/`vel_menos`), o JAWS dizia só "selecionado" e não a velocidade.
+  A fala direta funcionava (teste fora do app: `FreedomSci.JawsApi.SayString`
+  devolve `True` e o JAWS fala).
+- Causa: o atalho de menu faz o foco passar por uma janela de menu e voltar. O
+  JAWS do usuário tem um script global que descarta a fila de fala
+  (`StopSpeech()`) a cada mudança de foco; ele cortava o "Velocidade X" que
+  `_aplicar_velocidade` tinha acabado de mandar.
+- Correção (`telezapp/interface/janela.py`, `_aplicar_velocidade`): a fala sai
+  150 ms depois, com `wx.CallLater`, já depois do foco voltar. As teclas `+` e
+  `-` do player (`visualizadores.py`, `mudar_velocidade`) ficam como estavam: são
+  tratadas dentro da janela, sem passar por menu.
+- Vale para qualquer fala direta disparada por atalho de menu: com leitor que
+  corta a fala ao mudar o foco, falar logo no tratador pode ser cortado; adiar
+  um instante resolve. Testado pelo Fábio no JAWS 2027: ficou bom.
+- O script do JAWS não faz parte do TeleZapp (fica em
+  `%appdata%\Freedom Scientific\JAWS\2027\Settings\ptb\Default.jss`, só nesta
+  máquina); aqui fica só o efeito sobre o app.
+
+## 19/11/2026 - Informações de uso opcionais
+
+- Pedido: amostra maior para analisar desempenho de recursos. Ele notou que
+  deixar a caixa desmarcada em Configurações faz quase ninguém marcar; por isso
+  há uma pergunta única depois de abrir (com contas), com "Ver o que seria
+  enviado". Sem resposta (Esc, fechar) vale Não, e a pergunta não volta.
+- Só números e nomes de recursos; nunca conteúdo, nomes, telefones, ids de
+  conversa, textos de erro nem logs. Identificador sorteado, sem ligação com
+  contas. No máximo um resumo por dia. O Worker reconstrói os campos por lista.
+- Sem teste ao vivo; o Worker precisa de `npx wrangler deploy` antes de valer.
+
+## 19/11/2026 - JAWS repetia a janela ao descer pelas mensagens (resolvido)
+
+- Sintoma: no JAWS, descendo com as setas pela lista de mensagens (nunca na de
+  conversas), às vezes falava de novo o nome da janela e a posição do item,
+  "não selecionado".
+- Causa provável: `_atualizar_botoes` rodava a cada seta com `painel.Layout()`,
+  porque a chave incluía o id da mensagem; mostrar/esconder os botões depois
+  da lista redimensiona a lista em foco.
+- Volta do sintoma (19/11): da mensagem de voz (com botões de mídia) para a
+  seguinte (sem botões) o JAWS repetia de novo. Causa: a altura das 4 linhas
+  de botões mudava e a lista em foco era redimensionada. Correção: uma linha
+  só (`linha_botoes`, mesma ordem de Tab) com um espaçador de altura de um
+  botão; medido com o wx real, a lista fica do mesmo tamanho com 0, 2, 3 ou 6
+  botões (SetMinSize na linha e no item não seguravam). Falta confirmar no JAWS.
+- Ainda voltava depois de ouvir uma voz (19/11, 2ª tentativa): o espaçador não
+  bastou. Causa real: ao ouvir, a linha ganha "ouvida" mas o texto fica
+  adiado; ao descer com a seta, `_ao_selecionar` aplicava o texto com
+  `SetString` na voz que acabou de sair de foco, e no ListBox do Windows isso
+  tira e põe o item de volta (o JAWS fala a janela e a posição). Agora, com a
+  lista em foco, o texto adiado não é aplicado; entra quando o foco sai da
+  lista (`_ao_sair_da_lista`) ou na próxima atualização normal. Custo: o
+  "ouvida" só aparece na linha depois disso. Falta confirmar no JAWS.
+- Correção: os dados dos botões seguem a mensagem, mas os botões na tela e o
+  Layout só mudam quando o conjunto visível muda (chave sem o id). Teste em
+  `test_janela.py`. Confirmado pelo Fábio no JAWS: resolveu.
+
+- Ajuste (19/11, depois de ele ver a janela): 20 s era tarde, a pessoa já
+  estaria nas conversas; a pergunta vem logo ao abrir (só com contas). "Não
+  compartilhar" encerra o assunto; Esc ou fechar é "decidir depois" e a
+  pergunta volta numa versão nova, no mínimo 7 dias depois (escolha minha: as
+  versões saem quase todo dia). Quem ligou a caixa ou respondeu Sim não é mais
+  perguntado. O envio segue 20 s depois, sem tela.
+
+- Ampliação (19/11, pedido dele: "coletar o máximo de dados técnicos já logo
+  de cara"): entram quedas de conexão por serviço e causa (WhatsApp),
+  contagem de avisos/erros do registro por módulo (handler que lê só o nome
+  do logger e o nível, nunca a mensagem), conferência do banco ao abrir
+  (estado, tempo, faixa de tamanho), tipo do disco, "vez anterior terminou
+  sem fechar" e versões do Python/wx/neonize/Telethon. Continua sem
+  conteúdo. Corpo máximo do Worker 8000 -> 16000 bytes. Sem teste ao vivo; o
+  Worker precisa de `npx wrangler deploy`.
+- Chamadas (19/11, pedido dele: dados segmentados, por amostragem, sem identificar
+  ninguém): a DLL já escreve no registro a plataforma e a versão do WhatsApp de
+  quem liga (`stanza`), `device_class`, codec, relays com RTT, tentativa e
+  tempos; o Python lê essas linhas (sem recompilar), junta por id da chamada
+  na memória e, no fim, vira um registro de categorias/faixas. Limites: na
+  saída a plataforma do outro vem vazia; os valores dos codecs da oferta não
+  são registrados (só os nomes dos atributos; precisaria mexer no Go); não há
+  versão do Android/iOS nem plataforma por participante de grupo. O módulo
+  `whatsmeow.Client.Chamadas` chega ao Python sempre como WARNING (3293 linhas
+  num log real), então fica fora do contador de avisos. Amostra: até 10 por
+  resumo, falhas na frente (por isso a tela do admin diz que não é taxa de
+  falha). Telegram fica para depois. Sem teste ao vivo.
+- Falha achada na mesma conversa: as medidas só viviam na memória e o envio
+  era uma vez, 20 s depois de abrir; quedas, ações lentas e erros do uso nunca
+  chegariam. Agora são gravadas em `uso-pendente.json` (só com a caixa
+  marcada) e enviadas na abertura seguinte. A tela "Ver o que seria enviado"
+  avisa que logo depois de abrir várias medidas aparecem vazias.
+
+## 19/11/2026 - Provedor de IA personalizado (sugestão de um usuário)
+
+- Pedido (Feedback): poder cadastrar provedores com URL compatível com a API da
+  OpenAI, para aumentar a compatibilidade (DeepSeek, Together, Fireworks,
+  Ollama, LM Studio...).
+- Um provedor só, `personalizado`, com endereço, chave e modelo digitados. Usa
+  o dialeto de chat que Groq/OpenRouter/Mistral já usam (`_CHAT`), então o
+  pedido e a resposta são os mesmos. Faz texto e imagem (vídeo por quadros);
+  não faz voz (precisaria do modelo de transcrição) nem PDF.
+- Segurança: só https; http apenas para localhost/127.0.0.1/::1 (Ollama e LM
+  Studio), para a chave nunca ir em texto aberto pela rede; sem
+  usuário/senha/parâmetros no endereço. Servidor sem chave: o cofre guarda
+  `sem-chave`, que só marca o provedor como ligado.
+- Modelo obrigatório (não há "automático" sem saber o servidor); sem endereço
+  ou sem modelo o erro diz o que falta e o TeleZapp passa ao próximo provedor
+  da ordem (códigos `provedor` e `pedido`).
+- Limite conhecido: vários provedores personalizados ao mesmo tempo não cabem
+  (é um só). Se virar necessidade, o catálogo passa a ser dinâmico.
+- Testado com um servidor local de verdade (`test_ia_personalizado.py`) e a
+  janela montada com o wx real; falta teste ao vivo com um serviço de verdade.
+
+## 19/11/2026 - Estatísticas a partir dos logs dos relatos
+
+- Ideia dele: cada log completo que chega pelo Feedback é mais uma amostra do
+  comportamento do programa. Ele decidiu NÃO mudar o texto da janela de
+  Feedback (o comportamento com os dados dos usuários não mudou).
+- `ferramentas/analisar_logs.py`: roda só neste computador, offline, lê as
+  subpastas de `C:\logs\relatos` (reconhece log pelo conteúdo), tira as linhas
+  repetidas entre relatos e usa o mesmo leitor de chamadas do resumo de uso.
+  Gera `C:\logs\estatisticas-dos-relatos.md`: chamadas (plataforma/versão do
+  WhatsApp de quem liga, classe, codec, relay, tempos, resultado), quedas por
+  causa, ações lentas, avisos/erros por módulo, versões. Não guarda registro
+  por relato nem ids/nomes; só totais (assim "apagado em 90 dias" continua
+  valendo para o conteúdo dos relatos).
+- Amostra de suporte: só quem tem problema manda log. Serve para comparar
+  grupos e achar padrões, nunca como taxa de falha.
+- Correção de medição achada ao rodar nos relatos: o tempo "até o som chegar"
+  contava desde o toque, então em chamada recebida incluía o tempo de atender.
+  Agora `t_toque_s` (até atender; na chamada recebida é a fase 3, em que
+  nós atendemos; na de saída, o "a outra pessoa atendeu") e
+  `t_som_apos_atender_s`. Nos relatos: mediana 0,3 s (iPhone) e 0,4 s
+  (Android) depois de atender; o pior Android (10,9 s) é a troca de relay.

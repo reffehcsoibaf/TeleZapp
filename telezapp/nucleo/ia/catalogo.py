@@ -65,7 +65,13 @@ PROVEDORES = {
         "openrouter", "OpenRouter", "google/gemini-3.5-flash-lite",
         frozenset({"texto", "imagem", "pdf"}), "https://openrouter.ai/settings/keys",
         "https://openrouter.ai/privacy"),
+    # qualquer servico que fale o dialeto de chat da OpenAI (DeepSeek, Together,
+    # Fireworks, Ollama, LM Studio...): o endereco e o modelo vem da pessoa
+    "personalizado": Provedor(
+        "personalizado", "Provedor personalizado (compatível com OpenAI)", "",
+        frozenset({"texto", "imagem"}), "", ""),
 }
+PERSONALIZADO = "personalizado"
 
 # O detalhe das descricoes
 PERFIS = (("curto", "Curto: um parágrafo"),

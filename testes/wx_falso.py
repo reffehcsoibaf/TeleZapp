@@ -34,7 +34,7 @@ WXK_UP, WXK_DOWN, WXK_HOME, WXK_END, WXK_PAGEUP, WXK_PAGEDOWN = range(
 LC_REPORT = LC_SINGLE_SEL = LC_NO_HEADER = LC_VIRTUAL = 0
 EVT_LIST_ITEM_ACTIVATED = object()
 EVT_CLOSE = EVT_CHAR_HOOK = EVT_MENU = EVT_LISTBOX_DCLICK = object()
-EVT_CONTEXT_MENU = EVT_KEY_DOWN = EVT_BUTTON = EVT_LISTBOX = object()
+EVT_CONTEXT_MENU = EVT_KEY_DOWN = EVT_BUTTON = EVT_LISTBOX = EVT_KILL_FOCUS = object()
 EVT_CHAR = object()
 EVT_SET_FOCUS = object()
 TE_PASSWORD = 2048
@@ -78,6 +78,11 @@ class Janela:
     def __init__(self, *a, **k):
         self.vivo = True
         criados.append(self)
+
+    def GetBestSize(self):
+        class Tamanho(tuple):
+            width, height = property(lambda s: s[0]), property(lambda s: s[1])
+        return Tamanho((80, 23))
 
     def Bind(self, *a, **k):
         # guarda o tratador de cada evento, para os testes o chamarem
@@ -413,6 +418,9 @@ class ListBox(Janela):
     def GetString(self, i):
         return self.itens[i]
 
+    def GetStrings(self):
+        return list(self.itens)
+
     def selecionado(self):
         return self.itens[self.sel] if self.sel >= 0 else None
 
@@ -521,6 +529,12 @@ class TextCtrl(Janela):
         self.valor += texto
 
     def SetInsertionPoint(self, i):
+        self.ponto = i
+
+    def GetInsertionPoint(self):
+        return getattr(self, "ponto", 0)
+
+    def ShowPosition(self, i):
         pass
 
     def SetInsertionPointEnd(self):
@@ -563,6 +577,9 @@ class BoxSizer:
         pass
 
     def Clear(self, *a, **k):
+        pass
+
+    def SetMinSize(self, *a, **k):
         pass
 
 

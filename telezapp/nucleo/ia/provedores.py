@@ -41,6 +41,59 @@ _GROQ = "https://api.groq.com/openai/v1"
 _OPENROUTER = "https://openrouter.ai/api/v1"
 _MISTRAL = "https://api.mistral.ai/v1"
 _CHAT = {"groq": _GROQ, "openrouter": _OPENROUTER, "mistral": _MISTRAL}
+# Sem chave de verdade (Ollama, LM Studio): a janela guarda este texto, que
+# vai no cabecalho e nao vale nada para quem nao pede chave
+SEM_CHAVE = "sem-chave"
+
+
+def endereco_valido(url):
+    """O endereco base do provedor personalizado, sem barra no fim e sem
+    "/chat/completions" (e comum colar o endereco inteiro), ou "" se nao serve.
+    So https; http apenas para este computador (Ollama, LM Studio): a chave
+    nunca vai em texto aberto pela rede. Sem usuario e senha no endereco."""
+    import urllib.parse
+    url = (url or "").strip()
+    try:
+        p = urllib.parse.urlsplit(url)
+        host = (p.hostname or "").lower()
+        p.port
+    except ValueError:
+        return ""
+    local = host in ("localhost", "127.0.0.1", "::1") or         host.endswith(".localhost")
+    if not host or p.username or p.password or p.query or p.fragment:
+        return ""
+    if p.scheme != "https" and not (p.scheme == "http" and local):
+        return ""
+    caminho = p.path.rstrip("/")
+    for sufixo in ("/chat/completions", "/models"):
+        if caminho.endswith(sufixo):
+            caminho = caminho[:-len(sufixo)]
+    return urllib.parse.urlunsplit((p.scheme, p.netloc, caminho, "", ""))
+
+
+def definir_url_personalizada(url):
+    """Liga (ou desliga, se vazio ou invalido) o provedor personalizado.
+    Devolve o endereco aceito ou ""."""
+    ok = endereco_valido(url)
+    if ok:
+        _CHAT[cat.PERSONALIZADO] = ok
+    else:
+        _CHAT.pop(cat.PERSONALIZADO, None)
+    return ok
+
+
+def _exigir_personalizado(provedor, modelo):
+    """O personalizado precisa de endereco e de modelo; o erro diz qual falta
+    (codigos que deixam o TeleZapp tentar o proximo provedor)."""
+    if provedor != cat.PERSONALIZADO:
+        return
+    if cat.PERSONALIZADO not in _CHAT:
+        raise ErroIA("provedor", "Falta o endereço do provedor personalizado "
+                                 "(https://...) em Configurações, "
+                                 "Inteligência artificial.")
+    if not (modelo or "").strip():
+        raise ErroIA("pedido", "Escolha o modelo do provedor personalizado "
+                               "em Configurações, Inteligência artificial.")
 _TRANSCRICAO = {"openai": _OPENAI, "groq": _GROQ, "mistral": _MISTRAL}
 # a Groq documenta cerca de 4 MB de imagem em base64 por pedido
 LIMITE_IMAGEM_GROQ = 4_000_000
@@ -77,6 +130,9 @@ def pedido_de_modelos(provedor, chave):
     if provedor in _CHAT:
         return Pedido(_CHAT[provedor] + "/models",
                       {"Authorization": "Bearer " + chave}, metodo="GET")
+    if provedor == cat.PERSONALIZADO:
+        raise ErroIA("provedor", "Digite o endereço do provedor "
+                                 "personalizado (https://...).")
     raise ErroIA("provedor", "Provedor desconhecido.")
 
 
@@ -121,6 +177,7 @@ def montar_pedido(provedor, modelo, chave, midia, instrucoes, pergunta,
     if midia.genero == "video" and not cat.video_nativo(provedor):
         raise ErroIA("nao_aceita", "Este provedor só vê os quadros do vídeo, "
                                    "não o arquivo.")
+    _exigir_personalizado(provedor, modelo)
     if e_transcricao(provedor, midia):
         return _transcricao(provedor, chave, midia)
     tokens = cat.MAX_TOKENS[midia.genero]
@@ -184,6 +241,7 @@ def montar_pedido_de_texto(provedor, modelo, chave, instrucoes, pergunta):
     """Pedido so de texto (redigir, resumir, corrigir): sem arquivo."""
     if provedor not in cat.PROVEDORES or not cat.aceita(provedor, "texto"):
         raise ErroIA("nao_aceita", "Este provedor não faz isso com texto.")
+    _exigir_personalizado(provedor, modelo)
     tokens = cat.MAX_TOKENS["texto"]
     if provedor == "openai":
         return Pedido(

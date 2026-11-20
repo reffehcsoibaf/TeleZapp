@@ -198,6 +198,10 @@ class Bancos:
     def mensagem_mais_antiga(self, conta_id, conversa_id):
         return self._de(conta_id).mensagem_mais_antiga(conta_id, conversa_id)
 
+    def mensagem_anterior_a(self, conta_id, conversa_id, data):
+        return self._de(conta_id).mensagem_anterior_a(conta_id, conversa_id,
+                                                      data)
+
     def mensagens_expiradas(self, agora=None):
         saida = []
         for _, b in self._todas():
@@ -206,6 +210,10 @@ class Bancos:
 
     def mensagens(self, conta_id, conversa_id, limite=100):
         return self._de(conta_id).mensagens(conta_id, conversa_id, limite)
+
+    def avisos_de_membros(self, conta_id, conversa_id, desde):
+        return self._de(conta_id).avisos_de_membros(conta_id, conversa_id,
+                                                    desde)
 
     def mensagens_que_citam(self, conta_id, conversa_id, meus=()):
         return self._de(conta_id).mensagens_que_citam(conta_id, conversa_id,

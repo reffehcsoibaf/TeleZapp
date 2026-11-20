@@ -14,7 +14,7 @@ from testes.test_provedor_whatsapp import (  # noqa: E402
     TS, _grupo_info, _provedor_com_cliente, jid)
 
 from telezapp.nucleo import grupo as ng  # noqa: E402
-from telezapp.provedores import base  # noqa: E402
+from telezapp.provedores import base, whatsapp as wa  # noqa: E402
 
 
 def _pedido(user, quando=TS, servidor="s.whatsapp.net"):
@@ -299,3 +299,80 @@ def test_servicos_sem_o_recurso_dizem_que_nao_tem():
                 or base.Provedor.FOTO_DO_CONTATO
                 or base.Provedor.LISTA_GRUPOS_ADMIN
                 or base.Provedor.ENTRA_POR_LINK)
+
+
+# ------------------------------------- aprovacao de entrada e historico
+def test_ler_ajustes_do_grupo_nos_nos_que_a_dll_devolve():
+    ler = wa.ProvedorWhatsApp.ler_ajustes
+    assert ler([]) == {"aprovacao": False, "historico": "",
+                       "no_historico": "", "adicionar": ""}
+    assert ler([{"tag": "member_add_mode", "texto": "admin_add"}]
+               )["adicionar"] == "admin"
+    assert ler([{"tag": "member_add_mode", "texto": "all_member_add"}]
+               )["adicionar"] == "todos"
+    assert ler([{"tag": "membership_approval_mode", "sub": [
+        {"tag": "group_join", "attrs": {"state": "on"}}]}])["aprovacao"]
+    assert not ler([{"tag": "membership_approval_mode", "sub": [
+        {"tag": "group_join", "attrs": {"state": "off"}}]}])["aprovacao"]
+    assert ler([{"tag": "membership_approval_mode"}])["aprovacao"]
+    adm = ler([{"tag": "member_share_group_history_mode",
+                "texto": "admin_share"}])
+    assert adm["historico"] == "admin"
+    assert adm["no_historico"] == "member_share_group_history_mode"
+    assert ler([{"tag": "group_history_mode", "texto": "all_member_share"}]
+               )["historico"] == "todos"
+    assert ler([{"tag": "outra", "texto": "x"}])["historico"] == ""
+
+
+def test_aprovacao_de_entrada_chama_o_neonize_e_diz_o_que_mudou(tmp_path):
+    chamadas = []
+    p, banco = _provedor_com_cliente(tmp_path, types.SimpleNamespace(
+        set_group_join_approval_mode=lambda j_, v: chamadas.append(
+            (j_.User, v))))
+    ok, texto = p.administrar_grupo("123@g.us", "aprovacao", True)
+    assert ok and "precisa da aprovação" in texto
+    ok, texto = p.administrar_grupo("123@g.us", "aprovacao", False)
+    assert ok and "entra direto" in texto
+    assert chamadas == [("123", True), ("123", False)]
+    banco.fechar()
+
+
+def test_historico_do_grupo_manda_o_no_pela_dll_e_traduz_o_erro(tmp_path):
+    p, banco = _provedor_com_cliente(tmp_path, types.SimpleNamespace())
+    enviados = []
+    respostas = [{"ok": True}, {"ok": False, "erro": "bad-request"}]
+
+    def dll(funcao, *args):
+        enviados.append((funcao,) + args)
+        return respostas.pop(0)
+    p._ajuste_da_dll = dll
+    ok, texto = p.administrar_grupo("123@g.us", "historico", "admin")
+    assert ok and "só administradores" in texto.lower()
+    assert enviados[0] == ("GroupSetNode", "123@g.us",
+                           "member_share_group_history_mode", "admin_share")
+    ok, texto = p.administrar_grupo("123@g.us", "historico", "todos")
+    assert not ok and "bad-request" in texto
+    assert enviados[1][-1] == "all_member_share"
+    ok, texto = p.administrar_grupo("123@g.us", "historico", "outro")
+    assert not ok
+    banco.fechar()
+
+
+def test_ajustes_do_grupo_sem_a_funcao_da_dll_ficam_de_fora(tmp_path):
+    p, banco = _provedor_com_cliente(tmp_path, types.SimpleNamespace())
+    assert p.ajustes_do_grupo("123@g.us") is None
+    banco.fechar()
+
+
+def test_quem_adiciona_membros_chama_o_neonize_com_o_modo_certo(tmp_path):
+    chamadas = []
+    p, banco = _provedor_com_cliente(tmp_path, types.SimpleNamespace(
+        set_group_member_add_mode=lambda j_, modo: chamadas.append(
+            (j_.User, modo.value))))
+    ok, texto = p.administrar_grupo("123@g.us", "quem_adiciona", "admin")
+    assert ok and "só administradores adicionam" in texto
+    ok, texto = p.administrar_grupo("123@g.us", "quem_adiciona", "todos")
+    assert ok and "todos os membros podem adicionar" in texto
+    assert chamadas == [("123", "admin_add"), ("123", "all_member_add")]
+    assert not p.administrar_grupo("123@g.us", "quem_adiciona", "x")[0]
+    banco.fechar()

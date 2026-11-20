@@ -325,3 +325,31 @@ def test_misturar_microfone_no_som_em_estereo():
     assert r.shape == (4, 2)
     assert np.allclose(r[:, 0], mic) and np.allclose(r[:, 1], mic)
 
+
+
+def test_parar_em_segundo_plano_devolve_a_gravacao_ou_o_erro(monkeypatch):
+    import wx
+    from telezapp.midia import gravador as g
+    monkeypatch.setattr(wx, "CallAfter", lambda f, *a: f(*a), raising=False)
+    vistos = []
+
+    class Bom:
+        def parar(self):
+            return "GRAVACAO"
+
+    class ComErro:
+        def parar(self):
+            raise g.ErroGravacao("Nada foi gravado.")
+
+    class Quebra:
+        def parar(self):
+            raise RuntimeError("x")
+    g.parar_em_segundo_plano(Bom(), lambda r, e: vistos.append((r, e)),
+                             rodar=lambda f: f())
+    g.parar_em_segundo_plano(ComErro(), lambda r, e: vistos.append((r, e)),
+                             rodar=lambda f: f())
+    g.parar_em_segundo_plano(Quebra(), lambda r, e: vistos.append((r, e)),
+                             rodar=lambda f: f())
+    assert vistos[0] == ("GRAVACAO", None)
+    assert vistos[1][0] is None and str(vistos[1][1]) == "Nada foi gravado."
+    assert vistos[2][0] is None and "RuntimeError" in str(vistos[2][1])
