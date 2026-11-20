@@ -559,6 +559,37 @@ def nivel_de_compressao(kbps, canais):
     return min(1.0, max(0.0, 1.0 - (por_canal - 6.0) / 250.0))
 
 
+# Acima desta duracao a conversao para Ogg/Opus (cerca de 10 ms por segundo
+# gravado) e feita em segundo plano, para nao travar a janela; abaixo, e tao
+# rapida que sai na hora.
+LONGA_PARA_CODIFICAR_NA_HORA = 20.0
+
+
+def parar_em_segundo_plano(gravador, depois, rodar=None):
+    """Para a gravacao e a converte fora da thread da janela. `depois(
+    gravacao, erro)` roda de volta na thread da janela (wx.CallAfter), com a
+    Gravacao ou com o ErroGravacao. `rodar` so existe para os testes."""
+    import threading
+
+    import wx
+
+    def trabalho():
+        try:
+            resultado = (gravador.parar(), None)
+        except ErroGravacao as e:
+            resultado = (None, e)
+        except Exception as e:             # nunca deixa a janela esperando
+            log.exception("falha ao preparar a gravação")
+            resultado = (None, ErroGravacao(
+                "Não consegui preparar a gravação (%s)." % type(e).__name__))
+        wx.CallAfter(depois, *resultado)
+    if rodar is not None:
+        rodar(trabalho)
+        return
+    threading.Thread(target=trabalho, daemon=True,
+                     name="preparar-gravacao").start()
+
+
 def converter(wav, destino, kbps=None):
     """WAV mono ou estereo (qualquer taxa) -> Ogg/Opus de 48 kHz com os
     mesmos canais, em blocos, com interpolacao linear quando a taxa nao e

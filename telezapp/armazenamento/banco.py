@@ -15,7 +15,8 @@ import threading
 import time
 from dataclasses import astuple, fields
 
-from telezapp.nucleo.modelos import (AGUARDANDO, ORDEM_ESTADOS, TEXTO,
+from telezapp.nucleo.modelos import (AGUARDANDO, AVISO_MEMBROS,
+                                     ORDEM_ESTADOS, TEXTO,
                                      Conversa, Mensagem, atualizar_extras,
                                      extras_de)
 
@@ -498,6 +499,20 @@ class Banco:
                 (conta_id, conversa_id, AGUARDANDO)).fetchone()
         return _msg(linha) if linha else None
 
+    def mensagem_anterior_a(self, conta_id, conversa_id, data):
+        """A mensagem real mais recente guardada com data anterior a `data`
+        (nem "aguardando", nem aviso de membros, nem a ainda nao enviada),
+        ou None."""
+        with self._trava:
+            linha = self._con.execute(
+                "SELECT %s FROM mensagens WHERE conta_id=? AND conversa_id=? "
+                "AND tipo NOT IN (?, ?) AND data<? AND id NOT LIKE 'local-%%' "
+                "ORDER BY data DESC, CAST(id AS INTEGER) DESC LIMIT 1"
+                % ", ".join(_CAMPOS_MSG),
+                (conta_id, conversa_id, AGUARDANDO, AVISO_MEMBROS,
+                 data)).fetchone()
+        return _msg(linha) if linha else None
+
     def mensagens_expiradas(self, agora=None):
         """Chaves (conta, conversa, id) das mensagens temporarias cujo prazo
         ja passou."""
@@ -516,6 +531,18 @@ class Banco:
                 % ", ".join(_CAMPOS_MSG),
                 (conta_id, conversa_id, limite)).fetchall()
         return [_msg(l) for l in reversed(linhas)]
+
+    def avisos_de_membros(self, conta_id, conversa_id, desde):
+        """Os avisos de entrada e saida de membros do grupo desta data em
+        diante, do mais novo para o mais antigo."""
+        with self._trava:
+            linhas = self._con.execute(
+                "SELECT %s FROM mensagens WHERE conta_id=? AND conversa_id=? "
+                "AND tipo=? AND data>=? "
+                "ORDER BY data DESC, CAST(id AS INTEGER) DESC"
+                % ", ".join(_CAMPOS_MSG),
+                (conta_id, conversa_id, AVISO_MEMBROS, desde)).fetchall()
+        return [_msg(l) for l in linhas]
 
     def mensagens_que_citam(self, conta_id, conversa_id, meus=()):
         """As mensagens dos outros que me mencionam ou respondem a uma minha,

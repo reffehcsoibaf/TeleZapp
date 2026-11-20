@@ -255,13 +255,17 @@ def test_interface_e_mensagens_reunem_as_categorias_antigas(mod):
                       "falar_quantas_no_filtro",
                       "falar_aviso_estado_celular"}
     assert "avisar_chamadas_whatsapp" not in {   # sem conta, nao aparece
-        o.chave for o in mod.opcoes("Interface")}
+        o.chave for o in mod.opcoes("Mídias")}
     mod.cfg.salvar_conta({"id": "t1", "servico": "telegram"})
+    assert "avisar_chamadas_whatsapp" in {
+        o.chave for o in mod.opcoes_do_grupo("Mídias",
+                                             "Chamadas de voz e vídeo")}
     soltas = {o.chave for o in mod.opcoes("Interface")}
-    assert soltas == {"status_no_titulo", "avisar_chamadas_whatsapp",
+    assert soltas == {"status_no_titulo",
                       "ocultar_contatos_duplicados", "manter_posicao_fixadas",
-                      "trazer_contatos_ao_abrir",
-                      "como_me_chamar", "tamanho_letra"}
+                      "trazer_contatos_ao_abrir", "tamanho_letra"}
+    assert "compartilhar_uso" in {o.chave for o in mod.opcoes("Avançado")}
+    assert "como_me_chamar" in {o.chave for o in mod.opcoes("Mensagens")}
     assert "prioridade_abertura" in {o.chave for o in mod.opcoes("Sistema")}
     assert "estilo" not in {o.chave for o in config.OPCOES}   # virou a lista
     assert {"ortografia_idioma", "enter_envia"} <= {

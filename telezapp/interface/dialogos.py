@@ -6,12 +6,14 @@ Cada campo tem um rotulo (StaticText antes do controle, que o NVDA le ao
 focar) e o mesmo texto como nome do controle. Erros aparecem numa caixa de
 mensagem do Windows antes de pedir de novo, que o NVDA le sozinho.
 """
+import os
 import time
 
 import wx
 
 from telezapp.acessibilidade.fala import bipe
-from telezapp.midia.gravador import ErroGravacao
+from telezapp.midia.gravador import (LONGA_PARA_CODIFICAR_NA_HORA,
+                                     ErroGravacao, parar_em_segundo_plano)
 from telezapp.midia.reprodutor import (FormatoNaoSuportado, Reprodutor,
                                        formatar_tempo)
 from telezapp.provedores.base import PEDIR_CODIGO, PEDIR_SENHA, PEDIR_TELEFONE
@@ -307,11 +309,12 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
     dlg.SetEscapeId(b_descartar.GetId())
     temporizador = wx.Timer(dlg)
     est = {"gravador": None, "gravacao": None, "player": None,
-           "fase": "inicio", "feito": False}
+           "fase": "inicio", "feito": False, "fechado": False}
 
     def encerrar(ok):
         """Termina: no modo modal fecha o dialogo; sem travar, limpa, fecha e
         entrega o resultado a `ao_terminar`."""
+        est["fechado"] = True
         if ao_terminar is None:
             dlg.EndModal(wx.ID_OK if ok else wx.ID_CANCEL)
             return
@@ -328,7 +331,8 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
         ao_terminar(resultado)
 
     def mostrar(fase):
-        """fase: inicio, gravando, pausada ou pronta."""
+        """fase: inicio, gravando, pausada, preparando (convertendo uma
+        gravacao longa) ou pronta."""
         est["fase"] = fase
         ativa = fase in ("gravando", "pausada")
         b_gravar.Show(fase == "inicio")
@@ -340,9 +344,11 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
         dlg.Layout()
         dlg.Fit()
         foco = {"inicio": b_gravar, "gravando": b_parar,
-                "pausada": b_pausar, "pronta": b_enviar}[fase]
+                "pausada": b_pausar, "pronta": b_enviar,
+                "preparando": b_descartar}[fase]
         foco.SetFocus()
-        foco.SetDefault()
+        if fase != "preparando":        # Enter nao pode descartar sem querer
+            foco.SetDefault()
 
     def fechar_player():
         p, est["player"] = est["player"], None
@@ -416,15 +422,46 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
         if est["fase"] not in ("gravando", "pausada") or g is None:
             return
         temporizador.Stop()
-        try:
-            est["gravacao"] = g.parar()
-        except ErroGravacao as e:
-            est["gravador"] = None
-            bipe("erro")
-            wx.MessageBox(str(e), titulo, wx.OK | wx.ICON_WARNING, dlg)
-            encerrar(False)
+        if g.decorrido < LONGA_PARA_CODIFICAR_NA_HORA:
+            try:
+                est["gravacao"] = g.parar()
+            except ErroGravacao as e:
+                est["gravador"] = None
+                bipe("erro")
+                wx.MessageBox(str(e), titulo, wx.OK | wx.ICON_WARNING, dlg)
+                encerrar(False)
+                return
+            gravacao_pronta(g)
             return
+        # gravacao longa: a conversao para Ogg/Opus leva alguns segundos e
+        # roda em segundo plano, com a janela livre
         bipe("gravacao_parada")
+        texto = "Preparando a gravação de %s..." % formatar_tempo(g.decorrido)
+        situacao.SetLabel(texto)
+        mostrar("preparando")
+        fala.falar(texto, interromper=True)
+
+        def depois(gravacao, erro):
+            if est["fechado"]:           # descartada enquanto convertia
+                if gravacao is not None:
+                    try:
+                        os.remove(gravacao.caminho)
+                    except OSError:
+                        pass
+                return
+            if erro is not None:
+                est["gravador"] = None
+                bipe("erro")
+                wx.MessageBox(str(erro), titulo, wx.OK | wx.ICON_WARNING, dlg)
+                encerrar(False)
+                return
+            est["gravacao"] = gravacao
+            gravacao_pronta(g, com_bipe=False)
+        parar_em_segundo_plano(g, depois)
+
+    def gravacao_pronta(g, com_bipe=True):
+        if com_bipe:
+            bipe("gravacao_parada")
         r = est["gravacao"]
         texto = "Gravação pronta: %s." % formatar_tempo(r.segundos)
         if r.silenciosa:
@@ -749,6 +786,40 @@ def documento_baixado(pai, nome, ver_na_pasta, salvar):
         return dlg.ShowModal() == wx.ID_OPEN
     finally:
         dlg.Destroy()
+
+
+def perguntar_uso(pai, texto, ver):
+    """A pergunta sobre compartilhar informacoes de uso. Devolve "sim"
+    (Compartilhar), "nao" (Nao compartilhar: nao pergunta mais) ou "depois"
+    (Esc ou fechar: volta a perguntar numa versao futura). `ver()` abre o
+    texto exato que seria enviado, por cima desta janela."""
+    dlg = wx.Dialog(pai, title="Compartilhar informações de uso?",
+                    size=(640, 460),
+                    style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+    rot = wx.StaticText(dlg, label="Sobre o compartilhamento de uso")
+    caixa = wx.TextCtrl(dlg, value=texto, name="Sobre o compartilhamento "
+                        "de uso", style=wx.TE_MULTILINE | wx.TE_READONLY)
+    b_sim = wx.Button(dlg, wx.ID_ANY, "&Compartilhar")
+    b_ver = wx.Button(dlg, wx.ID_ANY, "&Ver o que seria enviado")
+    b_nao = wx.Button(dlg, wx.ID_ANY, "&Não compartilhar")
+    b_sim.Bind(wx.EVT_BUTTON, lambda e: dlg.EndModal(wx.ID_YES))
+    b_nao.Bind(wx.EVT_BUTTON, lambda e: dlg.EndModal(wx.ID_NO))
+    b_ver.Bind(wx.EVT_BUTTON, lambda e: ver())
+    linha = wx.BoxSizer(wx.HORIZONTAL)
+    for b in (b_sim, b_ver, b_nao):
+        linha.Add(b, 0, wx.RIGHT, 8)
+    lay = wx.BoxSizer(wx.VERTICAL)
+    lay.Add(rot, 0, wx.ALL, 8)
+    lay.Add(caixa, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
+    lay.Add(linha, 0, wx.ALL | wx.ALIGN_RIGHT, 8)
+    dlg.SetSizer(lay)
+    dlg.SetEscapeId(wx.ID_CANCEL)
+    caixa.SetFocus()
+    try:
+        r = dlg.ShowModal()
+    finally:
+        dlg.Destroy()
+    return {wx.ID_YES: "sim", wx.ID_NO: "nao"}.get(r, "depois")
 
 
 def mostrar_mensagem(pai, titulo, texto, copiar):

@@ -84,7 +84,8 @@ dispositivo.
   áudio, descreve fotos, figurinhas e vídeos (por quadros, fora do Gemini) e
   converte PDF em texto acessível; pode agir sozinha nas conversas que você
   escolher. Os provedores são Google Gemini, OpenAI, Claude, Groq, Mistral e
-  OpenRouter, e as chaves ficam cifradas neste computador.
+  OpenRouter, mais um personalizado para qualquer serviço compatível com a
+  API da OpenAI (como o Ollama), e as chaves ficam cifradas neste computador.
 - **Acessibilidade**: tudo com controles nativos, lidos pelo leitor de tela;
   os avisos falados do programa (mensagens novas, resultados da IA e
   semelhantes) usam hoje a fala direta do NVDA; com outros leitores, boa

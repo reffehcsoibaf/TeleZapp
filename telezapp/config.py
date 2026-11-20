@@ -364,7 +364,7 @@ OPCOES = (
           "deixar de tocar nesse tempo) e, como no próprio WhatsApp, quem "
           "esconde o seu status também não vê o dos outros."),
     Opcao("avisar_chamadas_whatsapp", "Avisar chamadas recebidas",
-          "Interface", True,
+          "Mídias", True,
           "Quando alguém liga pelo WhatsApp ou pelo Telegram, o TeleZapp "
           "avisa: no WhatsApp, quando ele não consegue atender (sem o "
           "componente de chamadas), abre uma janela dizendo quem está "
@@ -376,7 +376,8 @@ OPCOES = (
           "ela não conta como mensagem não lida, como se não tivesse "
           "acontecido. Ele não recusa a chamada: o celular e os outros "
           "aparelhos continuam tocando. Vale para as chamadas que chegarem "
-          "depois de desmarcar.", servico="whatsapp,telegram"),
+          "depois de desmarcar.", servico="whatsapp,telegram",
+          grupo="Chamadas de voz e vídeo"),
     Opcao("chat_de_voz_telegram",
           "Chat de voz de grupo e lives de canal do Telegram",
           CATEGORIA_EXPERIMENTAL, False,
@@ -501,7 +502,7 @@ OPCOES = (
           "igual com ou sem esta caixa. Precisa da caixa do chat de voz "
           "marcada. Se o desempenho não for satisfatório, o recurso pode "
           "sair do TeleZapp nas próximas versões.", servico="telegram"),
-    Opcao("como_me_chamar", "Como me chamar nas mensagens", "Interface", "",
+    Opcao("como_me_chamar", "Como me chamar nas mensagens", "Mensagens", "",
           "O nome que aparece no lugar de Você quando o autor é você: nas "
           "mensagens, na lista de conversas, nas reações, nos votos, na busca "
           "e nas conversas salvas. Vale só neste computador; quem recebe não "
@@ -715,6 +716,27 @@ OPCOES = (
           "avisa quando encontra alguma. O celular precisa estar ligado e "
           "com internet. Desmarcada, só a busca que você pede em Buscar "
           "mensagens que faltam no celular."),
+    Opcao("falar_fim_da_busca_sozinha",
+          "Falar quando a busca sozinha de mensagens terminar", "Mensagens",
+          True,
+          "Ao reconectar, o TeleZapp busca no celular as mensagens que "
+          "faltam, uma conversa de cada vez. Marcada, ele fala quando a "
+          "busca acaba em todas as conversas, dizendo quantas mensagens "
+          "encontrou ou que não faltava nenhuma. Desmarcada, o aviso "
+          "aparece só na barra de status e no registro.",),
+    Opcao("compartilhar_uso",
+          "Compartilhar informações de uso com o desenvolvedor", "Avançado",
+          False,
+          "Ajuda a saber quais recursos ficam lentos ou dão erro em outros "
+          "computadores. Marcada, o TeleZapp envia, no máximo uma vez por "
+          "dia, só números: versão do programa e do Windows, leitor de tela, "
+          "quantas contas de cada serviço, faixa de quantidade de conversas, "
+          "recursos experimentais ligados, tempo de abertura e do F5, e o "
+          "nome e o tempo das ações da janela que demoraram ou deram erro. "
+          "Nunca vão mensagens, nomes, telefones, arquivos nem registros "
+          "(logs). O identificador é sorteado e não tem ligação com contas. "
+          "Para ver o texto exato, use Ajuda, Ver o que o compartilhamento "
+          "de uso envia. Desmarcada, nada é enviado."),
     Opcao("manter_posicao_fixadas", "Manter a posição das conversas fixadas",
           "Interface", False,
           "Marcada, as conversas fixadas ficam no topo da lista sempre na "
@@ -860,10 +882,11 @@ OPCOES = (
           "nos detalhes e nas conversas salvas.",),
     Opcao("mostrar_avisos_de_membros",
           "Mostrar os avisos de entrada e saída de membros", "Mensagens", True,
-          "Nos grupos do Telegram, mostra na lista de mensagens quem entrou, "
-          "saiu, foi adicionado ou removido. Esses avisos não tocam som nem são "
-          "falados ao chegar. Desmarcada, ficam escondidos, mas o Telegram "
-          "ainda pode contá-los como não lidas ao abrir o programa."),
+          "Nos grupos do Telegram e do WhatsApp, mostra na lista de mensagens "
+          "quem entrou, saiu, foi adicionado ou removido. Esses avisos não "
+          "tocam som nem são falados ao chegar. Desmarcada, ficam escondidos, "
+          "mas o Telegram ainda pode contá-los como não lidas ao abrir o "
+          "programa."),
     Opcao("falar_descricoes", "Falar a descrição de cada opção",
           "Interface", True,
           "Na janela de configurações, o TeleZapp fala a explicação de cada "
@@ -1091,6 +1114,19 @@ OPCOES = (
           "último. Desmarcada, a seleção fica onde você deixou. Só vale se a "
           "conversa dos áudios estiver aberta.",
           grupo="Sequência de áudio"),
+    Opcao("chamada_janela_ao_tocar", "Abrir a janela da chamada quando "
+          "alguém me ligar", "Mídias", True,
+          "Marcada, ao receber uma chamada o TeleZapp abre a janela da "
+          "chamada e põe o foco no botão Atender: se você estiver digitando, "
+          "a barra de espaço ou o Enter podem atender sem querer. Desmarcada, "
+          "a janela não abre e o foco não sai de onde está: o TeleZapp toca e "
+          "diz quem está ligando, e você atende ou recusa pelos atalhos "
+          "Atender a chamada que está tocando e Recusar a chamada que está "
+          "tocando, em Configurações, Atalhos, categoria Chamadas. A janela "
+          "abre depois que você atende. Sem um atalho de atender escolhido, a "
+          "janela abre mesmo assim, senão não haveria como atender. Vale "
+          "para as chamadas que chegarem depois de mudar.",
+          grupo="Chamadas de voz e vídeo", servico="whatsapp,telegram"),
     Opcao("chamada_eco", "Cancelar o eco nas chamadas de voz", "Mídias", True,
           "Quando você ouve a chamada pelo alto-falante, o microfone capta "
           "a voz da outra pessoa e ela se ouve de volta. Marcada, o TeleZapp "
@@ -1500,6 +1536,11 @@ OPCOES_DE_GERENCIAR_CONTAS = ("contas_em_pastas", "contas_pasta")
 
 PADROES = {o.chave: o.padrao for o in OPCOES}
 PADROES.update({
+    "uso_resposta": "",        # "sim", "nao" (tocou no botao) ou "" (Esc)
+    "uso_versao_perguntada": "",   # versao em que a pergunta foi feita
+    "uso_pergunta_em": 0.0,    # quando a pergunta foi feita (sem resposta)
+    "uso_id": "",              # identificador anonimo sorteado (nucleo/uso.py)
+    "uso_ultimo_envio": 0.0,   # quando o ultimo resumo foi aceito
     "estilo": 1,             # antigo "Como cada mensagem e lida"; so migra
     "atalhos": {},           # funcao -> combinacao escolhida ("" = sem atalho)
     "participantes_silenciados": {},  # ver nucleo/silenciados.py
@@ -1511,6 +1552,7 @@ PADROES.update({
     "ia_ordem": {},          # tarefa -> provedores ligados, na ordem de tentativa
     "ia_lista_modelos": {},  # provedor -> modelos que ele ofereceu
     "ia_modelos": {},        # provedor -> modelo escolhido ("" = o padrao)
+    "ia_url_personalizada": "",   # endereco do provedor personalizado (https)
     "pacote_de_sons": "padrao",   # padrao, telezapp ou p:<nome>
     "sons_desativados": {},      # pacote -> eventos sem som
     "lista_conversas": {"ordem": ["nome", "servico", "nao_lidas", "previa",

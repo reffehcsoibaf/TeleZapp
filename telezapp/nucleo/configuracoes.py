@@ -157,6 +157,7 @@ class ModeloConfiguracoes:
         self.ia_chaves = {}
         self.ia_modelos = {}
         self.ia_ordens = {}       # tarefa -> provedores ligados, em ordem
+        self.ia_url = None        # endereco do provedor personalizado (novo)
         self.sons = EstadoDeSons(cfg)    # pacote, eventos e arquivos de som
         self.registro = None      # nucleo.atalhos.Registro, dado pela janela
         self.atalhos_pendentes = None    # personalizados ainda nao aplicados
@@ -397,6 +398,20 @@ class ModeloConfiguracoes:
         else:
             self.ia_modelos[provedor] = modelo.strip()
 
+    def ia_url_atual(self):
+        """O endereco do provedor personalizado, com o que ainda nao foi
+        aplicado."""
+        if self.ia_url is not None:
+            return self.ia_url
+        return self.cfg.get("ia_url_personalizada") or ""
+
+    def ia_definir_url(self, url):
+        url = (url or "").strip()
+        if url == (self.cfg.get("ia_url_personalizada") or ""):
+            self.ia_url = None
+        else:
+            self.ia_url = url
+
     def ia_ordem(self, tarefa):
         """Provedores ligados para a tarefa, na ordem de tentativa."""
         if tarefa in self.ia_ordens:
@@ -412,9 +427,9 @@ class ModeloConfiguracoes:
 
     def ia_mudancas(self):
         """{'chaves', 'modelos', 'ordem'} do que mudou, ou None."""
-        if not self.ia_chaves and not self.ia_modelos and not self.ia_ordens:
+        if not self.ia_chaves and not self.ia_modelos and not self.ia_ordens                 and self.ia_url is None:
             return None
-        return {"chaves": dict(self.ia_chaves),
+        return {"url": self.ia_url, "chaves": dict(self.ia_chaves),
                 "modelos": dict(self.ia_modelos),
                 "ordem": {t: list(v) for t, v in self.ia_ordens.items()}}
 
@@ -548,6 +563,7 @@ class ModeloConfiguracoes:
         self.lista_msg_pendente = None
         ia = self.ia_mudancas()
         self.ia_chaves, self.ia_modelos, self.ia_ordens = {}, {}, {}
+        self.ia_url = None
         acao = self.acao_codigo() if not self.erro_codigo() else None
         priv = self.priv_mudancas()
         sons = self.sons.aplicar() if self.sons.mudou() else None

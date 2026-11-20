@@ -223,3 +223,166 @@ def test_deixar_de_seguir_pergunta_e_apaga_se_a_pessoa_quiser():
 def test_deixar_de_seguir_mantem_na_lista_por_padrao():
     removidos, _ = _canal_deixado(wx_falso.NO)
     assert removidos == []
+
+
+# ------------------------------------------ movimentacao dos membros (60 dias)
+def test_lista_de_membros_tem_o_botao_da_movimentacao(monkeypatch):
+    prov = types.SimpleNamespace()
+    ctl = _controle(prov, "grupo", {"participantes": [
+        {"id": "1@lid", "nome": "Ana"}]})
+    guardado = {}
+
+    class Lista:
+        def __init__(self, pai, titulo, rotulo, filtros, itens, menu,
+                     varios=None, falar=None, botoes=()):
+            guardado["botoes"] = list(botoes)
+
+        def ShowModal(self):
+            return 0
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(det, "DialogoLista", Lista)
+    ctl.membros()
+    rotulos = [r.replace("&", "") for r, _ in guardado["botoes"]]
+    assert rotulos == ["Movimentação dos últimos 60 dias"]
+
+
+def test_movimentacao_lista_do_mais_novo_ao_mais_antigo(monkeypatch):
+    import time
+    ctl = _controle(types.SimpleNamespace(), "grupo", {})
+    agora = time.time()
+    pedido = {}
+
+    def avisos(conta, conversa, desde):
+        pedido.update(conta=conta, conversa=conversa, desde=desde)
+        return [m.Mensagem("w1", "9@g.us", "2", data=agora - 3600,
+                           tipo=m.AVISO_MEMBROS, texto="Bia saiu do grupo."),
+                m.Mensagem("w1", "9@g.us", "1", data=agora - 86400 * 5,
+                           tipo=m.AVISO_MEMBROS,
+                           texto="Ana entrou no grupo.")]
+    ctl.jan.banco = types.SimpleNamespace(avisos_de_membros=avisos)
+    guardado = {}
+
+    class Lista:
+        def __init__(self, pai, titulo, rotulo, filtros, itens, menu,
+                     varios=None, falar=None, botoes=()):
+            guardado.update(titulo=titulo, rotulo=rotulo,
+                            itens=itens(None))
+
+        def ShowModal(self):
+            return 0
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(det, "DialogoLista", Lista)
+    ctl.movimentacao()
+    assert pedido["conversa"] == "9@g.us"
+    assert abs((agora - pedido["desde"]) - 60 * 86400) < 5
+    textos = [t for t, _ in guardado["itens"]]
+    assert textos[0].endswith(": Bia saiu do grupo.")
+    assert textos[1].endswith(": Ana entrou no grupo.")
+    assert "últimos 60 dias" in guardado["rotulo"]
+
+
+def test_movimentacao_vazia_abre_a_lista_e_oferece_buscar_no_celular(
+        monkeypatch):
+    buscas = []
+    prov = types.SimpleNamespace(
+        buscar_movimentacao=lambda cid, dias: buscas.append((cid, dias)) or "")
+    ctl = _controle(prov, "grupo", {})
+    ctl.jan.banco = types.SimpleNamespace(avisos_de_membros=lambda *a: [])
+    guardado = {}
+
+    class Lista:
+        def __init__(self, pai, titulo, rotulo, filtros, itens, menu,
+                     varios=None, falar=None, botoes=()):
+            guardado["botoes"] = list(botoes)
+            guardado["itens"] = itens(None)
+
+        def ShowModal(self):
+            return 0
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(det, "DialogoLista", Lista)
+    monkeypatch.setattr(det.threading, "Thread", lambda target, **k:
+                        types.SimpleNamespace(start=target))
+    ctl.movimentacao()
+    assert guardado["itens"] == []
+    assert "Use Buscar no celular" in ctl.jan.fala.ditas[-1]
+    rotulos = [r.replace("&", "") for r, _ in guardado["botoes"]]
+    assert rotulos == ["Buscar no celular", "Atualizar a lista"]
+    guardado["botoes"][0][1]()                     # Buscar no celular
+    assert buscas == [("9@g.us", 60)]
+    assert "Buscando no celular" in ctl.jan.fala.ditas[-1]
+
+
+def test_movimentacao_sem_busca_no_servico_nao_mostra_os_botoes(monkeypatch):
+    ctl = _controle(types.SimpleNamespace(), "grupo", {})
+    ctl.jan.banco = types.SimpleNamespace(avisos_de_membros=lambda *a: [])
+    guardado = {}
+
+    class Lista:
+        def __init__(self, pai, titulo, rotulo, filtros, itens, menu,
+                     varios=None, falar=None, botoes=()):
+            guardado["botoes"] = list(botoes)
+
+        def ShowModal(self):
+            return 0
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(det, "DialogoLista", Lista)
+    ctl.movimentacao()
+    assert guardado["botoes"] == []
+
+
+# ------------------------------- aprovacao e historico na administracao
+def _administrar(dados):
+    ctl = _controle(types.SimpleNamespace(), "grupo", dados)
+    acoes = []
+    ctl.administrar = lambda acao, valor, pai=None: acoes.append((acao, valor))
+    base = {"nome": "Grupo", "descricao": "", "anuncio": False,
+            "trancado": False}
+    base.update(dados)
+    return det.DialogoAdministrar(None, ctl, base), acoes
+
+
+def test_administrar_mostra_aprovacao_e_historico_quando_o_servico_le():
+    dlg, acoes = _administrar({"ajustes": {
+        "aprovacao": True, "historico": "admin",
+        "no_historico": "member_share_group_history_mode"}})
+    assert dlg.aprovacao.GetValue() is True
+    assert dlg.historico.GetStringSelection() == "Só administradores" \
+        if hasattr(dlg.historico, "GetStringSelection") else True
+    dlg.aprovacao.SetValue(False)
+    dlg._acao("aprovacao", dlg.aprovacao.GetValue())
+    assert acoes[-1] == ("aprovacao", False)
+    dlg.historico.SetSelection(0)                  # Todos os membros
+    dlg._historico_escolhido()
+    assert acoes[-1] == ("historico", "todos")
+    # quem adiciona membros: o servico nao informou, entao ha o "Nao informado"
+    assert dlg._adicionadores == ["", "todos", "admin"]
+    dlg.quem_adiciona.SetSelection(2)              # Só administradores
+    dlg._adicionador_escolhido()
+    assert acoes[-1] == ("quem_adiciona", "admin")
+    dlg.quem_adiciona.SetSelection(0)              # Nao informado: nada
+    n = len(acoes)
+    dlg._adicionador_escolhido()
+    assert len(acoes) == n
+
+
+def test_historico_nao_informado_nao_manda_nada_ao_ficar_nele():
+    dlg, acoes = _administrar({"ajustes": {"aprovacao": False,
+                                           "historico": ""}})
+    assert dlg._historicos == ["", "todos", "admin"]
+    dlg.historico.SetSelection(0)                  # Nao informado
+    dlg._historico_escolhido()
+    assert acoes == []
+
+
+def test_administrar_sem_ajustes_nao_mostra_os_controles():
+    dlg, _ = _administrar({"ajustes": None})
+    assert dlg.aprovacao is None and dlg.historico is None
+    assert dlg.quem_adiciona is None

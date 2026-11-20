@@ -1724,7 +1724,10 @@ class MotorComVelocidade:
         pass
 
 
-def test_mais_rapido_e_mais_lento_respeitam_o_passo(j):
+def test_mais_rapido_e_mais_lento_respeitam_o_passo(j, monkeypatch):
+    # a fala sai 150 ms depois (o JAWS corta a que sai junto do atalho de menu)
+    monkeypatch.setattr(jm.wx, "CallLater", lambda ms, f, *a: f(*a),
+                        raising=False)
     ditas = []
     j.fala.falar = lambda t, interromper=False: ditas.append(t)
     assert j._velocidade() == 1.0
@@ -1876,6 +1879,42 @@ def test_chamada_recebida_abre_a_janela_toca_e_fala(chamadas):
     assert chamadas.falas[-1].startswith("Chamada de Ana")
     assert "toque" in chamadas.sons
     assert j.chamada is not None and j.chamada.entrante
+
+
+def test_sem_a_caixa_da_janela_o_toque_nao_abre_dialogo_e_diz_o_atalho(
+        chamadas):
+    j, ch = chamadas.j, chamadas.ch
+    j.cfg.set("chamada_janela_ao_tocar", False)
+    j.atalhos.definir_personalizados({"atender_global": "Ctrl+Alt+A"})
+    estado(j, ch.TOCANDO, entrante=True)
+    assert DialogoFalso.abertos == []              # nada rouba o foco
+    assert "toque" in chamadas.sons
+    assert chamadas.falas[-1].startswith("Ana está ligando para você.")
+    assert "Para atender" in chamadas.falas[-1]
+    assert "Enter atende" not in chamadas.falas[-1]
+    # chamada perdida sem janela: segue sem abrir nada
+    estado(j, ch.ENCERRADA, entrante=True, motivo=ch.PERDIDA)
+    assert DialogoFalso.abertos == []
+    # atendida (pelo atalho): a janela abre
+    estado(j, ch.TOCANDO, entrante=True, conversa="11")
+    estado(j, ch.CONECTANDO, entrante=True, conversa="11")
+    assert len(DialogoFalso.abertos) == 1
+
+
+def test_sem_atalho_de_atender_a_janela_abre_mesmo_desmarcada(chamadas):
+    j, ch = chamadas.j, chamadas.ch
+    j.cfg.set("chamada_janela_ao_tocar", False)
+    j.atalhos.definir_personalizados({})
+    estado(j, ch.TOCANDO, entrante=True)
+    assert len(DialogoFalso.abertos) == 1
+
+
+def test_chamada_feita_por_nos_abre_a_janela_mesmo_desmarcada(chamadas):
+    j, ch = chamadas.j, chamadas.ch
+    j.cfg.set("chamada_janela_ao_tocar", False)
+    j.atalhos.definir_personalizados({"atender_global": "Ctrl+Alt+A"})
+    estado(j, ch.CHAMANDO, entrante=False)
+    assert len(DialogoFalso.abertos) == 1
 
 
 def test_atender_pede_ao_provedor_com_os_dispositivos(chamadas):
@@ -2082,6 +2121,11 @@ def test_voz_tocada_passa_a_dizer_ouvida_na_lista_e_fica_guardada(
     durante = [t for t in j.lista_msgs.itens if "mensagem de voz" in t]
     assert "ouvida" not in durante[0] and j._texto_adiado
     j._ao_selecionar(None)                           # a selecao saiu
+    # com a lista ainda em foco nada e reescrito: no JAWS, SetString logo
+    # depois da seta fazia falar de novo a janela e a posicao do item
+    apos_seta = [t for t in j.lista_msgs.itens if "mensagem de voz" in t]
+    assert "ouvida" not in apos_seta[0] and j._texto_adiado
+    j._ao_sair_da_lista(None)                        # o foco saiu da lista
     depois = [t for t in j.lista_msgs.itens if "mensagem de voz" in t]
     assert "ouvida" in depois[0] and not j._texto_adiado
     guardada = j.banco.mensagem("t1", "10", "5")
@@ -3506,6 +3550,32 @@ def test_botao_de_contato_diz_iniciar_conversa_ou_que_nao_ha_conversa(j):
                if getattr(b, "visivel", False)]
     assert rotulos == ["Iniciar conversa com Ana, +5551",
                        "Contato sem conversa possível: Cao, 11 2222-3333"]
+
+
+def test_botoes_nao_sao_refeitos_a_cada_mensagem_com_o_mesmo_conjunto(j):
+    # descer entre mensagens sem botoes nao mexe nos botoes nem no Layout
+    # (no JAWS, isso fazia falar de novo a janela e a posicao do item)
+    _abrir_com_caixa(j)
+    j._botoes_chave = None
+    j._atualizar_botoes()
+    layouts = []
+    j.painel.Layout = lambda *a, **k: layouts.append(1)
+    x = j._mensagem_selecionada()
+    for ident in ("a1", "a2", "a3"):
+        y = m.Mensagem("t1", "10", ident, texto="oi")
+        j._mensagem_selecionada = lambda y=y: y
+        j._atualizar_botoes()
+        assert j._msg_das_acoes is y          # as acoes seguem a mensagem
+    assert layouts == []
+    assert x is not None
+
+
+def test_linha_de_botoes_reserva_a_altura_com_ou_sem_botoes(j):
+    # da mensagem de voz (com botoes) para a seguinte (sem) a lista nao pode
+    # mudar de tamanho: o JAWS falava de novo a janela e a posicao do item
+    # (a altura em si so se mede com o wx de verdade: ver o roteiro em
+    # docs/decisoes.md; aqui, que a linha unica existe)
+    assert j.linha_botoes is not None
 
 
 def test_encaminhar_envia_para_as_conversas_escolhidas(j, monkeypatch):
@@ -6286,7 +6356,7 @@ def test_grupo_de_suporte_entra_pela_conta_ou_abre_o_navegador(j, monkeypatch):
     j.contas.p.servico = "whatsapp"
     j.estados["t1"] = ev.CONECTADA
     j._entrar_no_grupo_de_suporte()
-    assert entradas == [(None, {"codigo": "JULThiZpj4iFiJGHLGwVVd"},
+    assert entradas == [(None, {"codigo": "Cl4ncLRvP9ZDXKTvQyP0Bb"},
                          j.contas.p)]
     assert abertos == [GRUPO_DE_SUPORTE]
 
@@ -10499,3 +10569,195 @@ def test_nova_enquete_avancada_so_com_a_caixa_experimental(j, monkeypatch):
     j._nova_enquete()
     assert vistos == [False, True]
     assert pedidos[-1][1] == {"avancada": {"quiz": 0}}
+
+
+# ------------------------------------------------ ritmo do encaminhamento
+def _dialogo_que_escolhe(monkeypatch, *rodadas):
+    """Um DialogoEncaminhar falso que escolhe, a cada abertura, a proxima
+    lista de destinos de `rodadas`."""
+    from telezapp.interface import encaminhar as je
+    abertas = []
+
+    class Dialogo:
+        def __init__(self, *a, **k):
+            abertas.append(1)
+
+        def ShowModal(self):
+            return jm.wx.ID_OK
+
+        def escolhidos(self):
+            return rodadas[min(len(abertas), len(rodadas)) - 1]
+
+        def Destroy(self):
+            pass
+    monkeypatch.setattr(je, "DialogoEncaminhar", Dialogo)
+    return abertas
+
+
+def _msgs_de_texto(n):
+    return [m.Mensagem("t1", "10", "e%d" % i, texto="oi %d" % i,
+                       data=AGORA + i) for i in range(n)]
+
+
+def _wa(n):
+    return [("w%d" % i, "10", "Pessoa %d" % i, "privada") for i in range(n)]
+
+
+def test_encaminhar_muitos_nao_e_recusado_vai_para_a_fila_e_sai_devagar(
+        j, monkeypatch):
+    _abrir_com_caixa(j)
+    _dialogo_que_escolhe(monkeypatch, _wa(5))
+    perguntas, agendados, ditas = [], [], []
+    monkeypatch.setattr(jm.wx, "MessageBox",
+                        lambda t, *a, **k: perguntas.append(t) or jm.wx.YES)
+    monkeypatch.setattr(jm.wx, "CallLater",
+                        lambda ms, f, *a: agendados.append((ms, f)))
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    antes = len(j.contas.p.pedidos)
+    j._encaminhar(_msgs_de_texto(6))              # 30 envios, 10 na fila
+    assert "30 envios" in perguntas[0] and "10 ficam numa fila" in perguntas[0]
+    assert len(j.contas.p.pedidos) == antes + 1   # so o primeiro saiu
+    assert j._encaminhando and len(j._fila_enc) == 29
+    enviados = 1
+    while agendados:
+        ms, f = agendados.pop()
+        # os 20 primeiros esperam de 2 a 5 s; os outros, de 10 a 20 s
+        assert (2000 <= ms <= 5000) if enviados < 20 else \
+            (10000 <= ms <= 20000)
+        f()
+        enviados += 1
+    assert enviados == 30
+    assert len(j.contas.p.pedidos) == antes + 30
+    assert not j._encaminhando and not j._fila_enc
+    assert any("Os primeiros 20 saíram. Faltam 10" in t for t in ditas)
+    assert any("concluído: 30 envios" in t for t in ditas)
+
+
+def test_encaminhar_e_cancelado_na_pergunta_nao_envia_nada(j, monkeypatch):
+    _abrir_com_caixa(j)
+    _dialogo_que_escolhe(monkeypatch, _wa(5))
+    monkeypatch.setattr(jm.wx, "MessageBox", lambda *a, **k: jm.wx.NO)
+    antes = len(j.contas.p.pedidos)
+    j._encaminhar(_msgs_de_texto(5))              # 25 envios
+    assert len(j.contas.p.pedidos) == antes and not j._fila_enc
+
+
+def test_ate_20_envios_saem_devagar_sem_perguntar(j, monkeypatch):
+    _abrir_com_caixa(j)
+    _dialogo_que_escolhe(monkeypatch, _wa(3))
+    agendados, ditas = [], []
+    monkeypatch.setattr(jm.wx, "CallLater",
+                        lambda ms, f, *a: agendados.append((ms, f)))
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    antes = len(j.contas.p.pedidos)
+    j._encaminhar(_msgs_de_texto(1))
+    assert len(j.contas.p.pedidos) == antes + 1
+    assert 2000 <= agendados[0][0] <= 5000
+    while agendados:
+        agendados.pop()[1]()
+    assert len(j.contas.p.pedidos) == antes + 3 and not j._encaminhando
+    assert any("concluído: 3 envios" in t for t in ditas)
+
+
+def test_outro_encaminhamento_durante_um_entra_no_fim_da_mesma_fila(
+        j, monkeypatch):
+    _abrir_com_caixa(j)
+    _dialogo_que_escolhe(monkeypatch, _wa(2))
+    agendados, ditas = [], []
+    monkeypatch.setattr(jm.wx, "CallLater",
+                        lambda ms, f, *a: agendados.append((ms, f)))
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    antes = len(j.contas.p.pedidos)
+    j._encaminhar(_msgs_de_texto(1))              # 2 envios: 1 sai, 1 espera
+    j._encaminhar(_msgs_de_texto(1))              # +2 na mesma fila
+    assert len(j.contas.p.pedidos) == antes + 1
+    assert len(j._fila_enc) == 3
+    assert any("acrescentados à fila" in t for t in ditas)
+    while agendados:
+        agendados.pop()[1]()
+    assert len(j.contas.p.pedidos) == antes + 4 and not j._encaminhando
+
+
+def test_fechar_com_fila_de_encaminhamento_pergunta_e_o_nao_segura(
+        j, monkeypatch):
+    perguntas = []
+    monkeypatch.setattr(jm.wx, "MessageBox",
+                        lambda t, *a, **k: perguntas.append(t) or jm.wx.NO)
+    j._fila_enc = [("whatsapp", lambda: ("ok", None))] * 4
+
+    class Evt:
+        vetado = False
+
+        def Veto(self):
+            self.vetado = True
+    e = Evt()
+    j.cfg.set("segundo_plano", False)
+    j._ao_fechar(e)
+    assert e.vetado and "4 envios na fila" in perguntas[0]
+
+
+# ----------------------------- voz longa: converter em segundo plano
+def test_gravacao_rapida_longa_e_preparada_fora_da_janela_e_sai_sozinha(
+        j, monkeypatch, tmp_path):
+    from telezapp.midia.gravador import MICROFONE
+    _preparar_gravacao_rapida(j, monkeypatch, tmp_path)
+    monkeypatch.setattr(GravadorFalso, "decorrido", 460.0)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    guardado = {}
+    monkeypatch.setattr(jm, "parar_em_segundo_plano",
+                        lambda g, depois: guardado.update(g=g, depois=depois))
+    j._gravar_rapido(MICROFONE)
+    j._gravar_rapido(MICROFONE)                    # para: converte fora
+    assert j._gravacao_rapida is None
+    assert any("Preparando a gravação de 7:40" in t for t in ditas)
+    assert not [p for p in j.contas.p.pedidos if p[0] == "arquivo"]
+    gravacao = guardado["g"].parar()               # o que a thread faria
+    guardado["depois"](gravacao, None)             # volta para a janela
+    pedido = [p for p in j.contas.p.pedidos if p[0] == "arquivo"][-1]
+    assert pedido[2] == m.VOZ
+
+
+def test_gravacao_rapida_longa_que_falha_ao_converter_avisa(
+        j, monkeypatch, tmp_path):
+    from telezapp.midia.gravador import MICROFONE, ErroGravacao
+    _preparar_gravacao_rapida(j, monkeypatch, tmp_path)
+    monkeypatch.setattr(GravadorFalso, "decorrido", 300.0)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    guardado = {}
+    monkeypatch.setattr(jm, "parar_em_segundo_plano",
+                        lambda g, depois: guardado.update(depois=depois))
+    j._gravar_rapido(MICROFONE)
+    j._gravar_rapido(MICROFONE)
+    guardado["depois"](None, ErroGravacao("Não consegui salvar a gravação."))
+    assert ditas[-1] == "Não consegui salvar a gravação."
+    assert not [p for p in j.contas.p.pedidos if p[0] == "arquivo"]
+
+
+def test_gravacao_rapida_longa_vai_para_a_conversa_onde_foi_parada(
+        j, monkeypatch, tmp_path):
+    from telezapp.midia.gravador import MICROFONE
+    _preparar_gravacao_rapida(j, monkeypatch, tmp_path)
+    monkeypatch.setattr(GravadorFalso, "decorrido", 200.0)
+    guardado = {}
+    monkeypatch.setattr(jm, "parar_em_segundo_plano",
+                        lambda g, depois: guardado.update(g=g, depois=depois))
+    j._gravar_rapido(MICROFONE)
+    parada_em = j.atual
+    j._gravar_rapido(MICROFONE)
+    j.atual = ("t1", "outra")                      # mudou enquanto convertia
+    abertas = []
+    j._abrir_conversa_de = lambda conv: abertas.append(conv)
+    guardado["depois"](guardado["g"].parar(), None)
+    assert abertas == [j.indice[parada_em]]
+
+
+def test_gravacao_curta_continua_saindo_na_hora(j, monkeypatch, tmp_path):
+    from telezapp.midia.gravador import MICROFONE
+    _preparar_gravacao_rapida(j, monkeypatch, tmp_path)           # 4 s
+    monkeypatch.setattr(jm, "parar_em_segundo_plano", lambda *a: (_ for _ in (
+    )).throw(AssertionError("nao devia ir para segundo plano")))
+    j._gravar_rapido(MICROFONE)
+    j._gravar_rapido(MICROFONE)
+    assert [p for p in j.contas.p.pedidos if p[0] == "arquivo"]

@@ -21,7 +21,8 @@ GRUPOS = {
         "calar_avisos_ao_gravar"},
     ("Mídias", "Chamadas de voz e vídeo"): {
         "chamada_eco", "chamada_ruido", "video_camera_ao_atender",
-        "chamada_retornar_sem_audio", "chamada_retorno"},
+        "chamada_retornar_sem_audio", "chamada_retorno",
+        "chamada_janela_ao_tocar", "avisar_chamadas_whatsapp"},
     ("Mídias", "Download de mídias"): {
         "midias_baixar", "midias_limite_auto_mb", "midias_passo_progresso",
         "midias_confirmar_mb", "barra_de_progresso"},

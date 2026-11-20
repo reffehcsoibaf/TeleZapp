@@ -294,6 +294,12 @@ class Provedor(ABC):
         de nao ter sido."""
         return "Não há mensagens mais antigas para buscar neste serviço."
 
+    def buscar_movimentacao(self, conversa_id, dias=60):
+        """Pede ao celular o historico do grupo ate `dias` dias atras para
+        achar quem entrou e saiu. "" se o pedido foi feito (o fim vem como
+        ev.Aviso) ou o motivo de nao ter sido."""
+        return "Este serviço não faz essa busca."
+
     def buscar_mensagens_que_faltam(self, conversa_id):
         """Pede ao celular as mensagens recentes da conversa que o TeleZapp
         pode nao ter recebido. Devolve "" se o pedido foi enviado (a resposta

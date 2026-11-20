@@ -100,6 +100,9 @@ def _chave_do_item(dado):
     return ident if ident is not None else id(dado)
 
 
+DIAS_DA_MOVIMENTACAO = 60
+
+
 class DialogoLista(wx.Dialog):
     """Lista com filtro opcional, menu de contexto por item e selecao
     multipla: Control Espaco liga o modo de selecao e marca o item; no modo,
@@ -109,11 +112,12 @@ class DialogoLista(wx.Dialog):
 
     def __init__(self, pai, titulo, rotulo_lista, filtros=(), ao_filtrar=None,
                  ao_menu=None, ao_menu_varios=None, falar=None,
-                 chave=_chave_do_item):
+                 chave=_chave_do_item, botoes=()):
         """filtros: [(chave, rotulo)]; ao_filtrar(chave) -> [(texto, dado)];
         ao_menu(dado) -> [(rotulo, funcao)] (o primeiro item roda no Enter);
         ao_menu_varios(dados) -> [(rotulo, funcao)] para os marcados;
-        falar(texto): o que dizer ao marcar (sem ele, nada e dito)."""
+        falar(texto): o que dizer ao marcar (sem ele, nada e dito).
+        botoes: [(rotulo, funcao)] botoes extras, antes do Fechar."""
         super().__init__(pai, title=titulo, size=(640, 520),
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.ao_filtrar, self.ao_menu = ao_filtrar, ao_menu
@@ -139,8 +143,16 @@ class DialogoLista(wx.Dialog):
         self.lista = wx.ListBox(self, style=wx.LB_SINGLE | wx.LB_HSCROLL,
                                 name=rotulo_lista)
         lay.Add(self.lista, 1, wx.EXPAND | wx.ALL, 10)
+        linha = wx.BoxSizer(wx.HORIZONTAL)
+        self.botoes = []
+        for rotulo, funcao in botoes:
+            b = wx.Button(self, wx.ID_ANY, rotulo)
+            b.Bind(wx.EVT_BUTTON, lambda e, f=funcao: f())
+            linha.Add(b, 0, wx.RIGHT, 8)
+            self.botoes.append(b)
         fechar = wx.Button(self, wx.ID_CANCEL, "&Fechar")
-        lay.Add(fechar, 0, wx.ALIGN_RIGHT | wx.RIGHT | wx.BOTTOM, 10)
+        linha.Add(fechar, 0)
+        lay.Add(linha, 0, wx.ALIGN_RIGHT | wx.RIGHT | wx.BOTTOM, 10)
         self.SetSizer(lay)
         self.SetEscapeId(wx.ID_CANCEL)
         self.lista.Bind(wx.EVT_CONTEXT_MENU, self._menu)
@@ -345,6 +357,52 @@ class DialogoAdministrar(wx.Dialog):
         self.trancado.Bind(wx.EVT_CHECKBOX, lambda e: self._acao(
             "trancado", self.trancado.GetValue()))
         lay.Add(self.trancado, 0, wx.LEFT | wx.RIGHT, 10)
+        ajustes = dados.get("ajustes")
+        self.aprovacao = self.historico = self.quem_adiciona = None
+        if ajustes is not None:
+            self.aprovacao = wx.CheckBox(
+                self, label="Quem entra pelo convite precisa da "
+                            "apro&vação de um administrador")
+            self.aprovacao.SetValue(bool(ajustes.get("aprovacao")))
+            self.aprovacao.Bind(wx.EVT_CHECKBOX, lambda e: self._acao(
+                "aprovacao", self.aprovacao.GetValue()))
+            lay.Add(self.aprovacao, 0, wx.ALL, 10)
+            # o rotulo vem ANTES do campo (a ordem que o leitor de tela segue)
+            self._historicos = []
+            opcoes = []
+            if not ajustes.get("historico"):
+                opcoes.append("Não informado pelo WhatsApp")
+                self._historicos.append("")
+            opcoes += ["Todos os membros", "Só administradores"]
+            self._historicos += ["todos", "admin"]
+            lay.Add(wx.StaticText(
+                self, label="Quem pode adi&cionar membros ao grupo"),
+                0, wx.LEFT | wx.RIGHT, 10)
+            self._adicionadores = []
+            opcoes_add = []
+            if not ajustes.get("adicionar"):
+                opcoes_add.append("Não informado pelo WhatsApp")
+                self._adicionadores.append("")
+            opcoes_add += ["Todos os membros", "Só administradores"]
+            self._adicionadores += ["todos", "admin"]
+            self.quem_adiciona = wx.Choice(
+                self, choices=opcoes_add, name="Quem adiciona membros")
+            self.quem_adiciona.SetSelection(self._adicionadores.index(
+                ajustes.get("adicionar") or ""))
+            self.quem_adiciona.Bind(wx.EVT_CHOICE,
+                                    self._adicionador_escolhido)
+            lay.Add(self.quem_adiciona, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM,
+                    10)
+            lay.Add(wx.StaticText(
+                self, label="Quem pode enviar o &histórico de mensagens a "
+                            "quem entra no grupo"),
+                0, wx.LEFT | wx.RIGHT, 10)
+            self.historico = wx.Choice(self, choices=opcoes,
+                                       name="Quem envia o histórico")
+            self.historico.SetSelection(
+                self._historicos.index(ajustes.get("historico") or ""))
+            self.historico.Bind(wx.EVT_CHOICE, self._historico_escolhido)
+            lay.Add(self.historico, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
         linha = wx.WrapSizer(wx.HORIZONTAL)
         botoes = [("&Adicionar participante...", self._adicionar),
                   ("&Link de convite e QR Code...",
@@ -370,6 +428,16 @@ class DialogoAdministrar(wx.Dialog):
         self.SetSizer(lay)
         self.SetEscapeId(wx.ID_CANCEL)
         self.CentreOnParent()
+
+    def _adicionador_escolhido(self, _e=None):
+        valor = self._adicionadores[max(self.quem_adiciona.GetSelection(), 0)]
+        if valor:                      # "Nao informado" nao muda nada
+            self._acao("quem_adiciona", valor)
+
+    def _historico_escolhido(self, _e=None):
+        valor = self._historicos[max(self.historico.GetSelection(), 0)]
+        if valor:                      # "Nao informado" nao muda nada
+            self._acao("historico", valor)
 
     def _acao(self, acao, valor=None):
         if acao == "nome" and not valor:
@@ -1448,11 +1516,79 @@ class ControleDetalhes:
                     partes.append("você")
                 return ", ".join(partes)
             return [(rotulo(p), p) for p in gente]
-        dlg = DialogoLista(self.dlg, "Membros de %s" % self.conv.nome,
-                           "Membros (Menu abre as ações; Control Espaço "
-                           "marca para copiar)", (), itens,
-                           self._menu_membro, None, self._falar)
+        dlg = DialogoLista(
+            self.dlg, "Membros de %s" % self.conv.nome,
+            "Membros (Menu abre as ações; Control Espaço marca para copiar)",
+            (), itens, self._menu_membro, None, self._falar,
+            botoes=[("&Movimentação dos últimos %d dias" % DIAS_DA_MOVIMENTACAO,
+                     lambda: self.movimentacao(dlg))])
         self._sub(dlg)
+
+    def _avisos_da_movimentacao(self):
+        """Os avisos guardados, do mais novo ao mais antigo, como itens da
+        lista."""
+        desde = time.time() - DIAS_DA_MOVIMENTACAO * 86400
+        avisos = self.jan.banco.avisos_de_membros(
+            self.conv.conta_id, self.conv.id, desde)
+        return [("%s: %s" % (time.strftime(
+            "%d/%m/%Y %H:%M", time.localtime(x.data)), x.texto), x)
+            for x in avisos]
+
+    def movimentacao(self, pai=None):
+        """Quem entrou, saiu, foi adicionado ou removido nos ultimos 60 dias,
+        do mais novo para o mais antigo. Sao os avisos que o programa guarda
+        na conversa do grupo: os que chegaram com ele aberto e os que o
+        celular informa no historico. O botao Buscar no celular pede ao
+        celular esse historico (os avisos mais antigos so existem la)."""
+        pai = pai or self.dlg
+        lista = {}
+        busca = getattr(self.prov, "buscar_movimentacao", None)
+        botoes = []
+        if busca is not None:
+            botoes.append(("&Buscar no celular",
+                           lambda: self._buscar_movimentacao(busca)))
+            botoes.append(("&Atualizar a lista",
+                           lambda: lista["dlg"].recarregar()))
+        itens = self._avisos_da_movimentacao()
+        rotulo = ("Movimentação dos últimos %d dias (do mais novo para o "
+                  "mais antigo; Control Espaço marca para copiar)" %
+                  DIAS_DA_MOVIMENTACAO)
+        if not itens:
+            self.jan.fala.falar(
+                "Nenhuma entrada ou saída de membros guardada nos últimos "
+                "%d dias. Use Buscar no celular." % DIAS_DA_MOVIMENTACAO
+                if botoes else
+                "Nenhuma entrada ou saída de membros guardada nos últimos "
+                "%d dias." % DIAS_DA_MOVIMENTACAO, interromper=True)
+        dlg = DialogoLista(
+            pai, "Movimentação dos membros de %s" % self.conv.nome, rotulo,
+            (), lambda _: self._avisos_da_movimentacao(), None, None,
+            self._falar, botoes=botoes)
+        lista["dlg"] = dlg
+        try:
+            dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+
+    def _buscar_movimentacao(self, busca):
+        """Pede ao celular o historico do grupo, fora da janela; o fim vem
+        como um aviso falado."""
+        self.jan.fala.falar(
+            "Buscando no celular os últimos %d dias. Pode demorar alguns "
+            "minutos; avisarei quando terminar. Depois, use Atualizar a "
+            "lista." % DIAS_DA_MOVIMENTACAO, interromper=True)
+
+        def trabalho():
+            try:
+                erro = busca(self.conv.id, DIAS_DA_MOVIMENTACAO)
+            except Exception:
+                log.error("busca da movimentação:\n%s",
+                          traceback.format_exc())
+                erro = "Não consegui pedir ao celular."
+            if erro:
+                wx.CallAfter(self.jan.fala.falar, erro, True)
+        threading.Thread(target=trabalho, daemon=True,
+                         name="busca-movimentacao").start()
 
     def _menu_membro(self, p):
         jan, conv = self.jan, self.conv

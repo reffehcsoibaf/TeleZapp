@@ -16,6 +16,8 @@ hiddenimports += collect_submodules("hachoir")
 hiddenimports += collect_submodules("telezapp")
 for pacote in ("neonize", "magic", "pyzipper", "accessible_output2", "cv2",
                "emoji", "av", "livekit", "truststore",
+               # fala pelo JAWS (objeto COM FreedomSci.JawsApi)
+               "comtypes",
                # Windows Hello da protecao ao entrar
                "winrt"):
     d, b, h = collect_all(pacote)

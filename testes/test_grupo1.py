@@ -38,6 +38,63 @@ def test_paginas_trazem_a_versao_e_o_rodape(tmp_path):
     assert paginas.gerar("guia.txt", str(tmp_path)) is None
 
 
+def test_pesquisa_no_guia_acha_por_todas_as_palavras_sem_acento_nem_caixa():
+    assuntos = [("Chamadas", "Atender pelo ATALHO global.\nOutra linha."),
+                ("Conta do WhatsApp", "Pareie com o celular… depois use."),
+                ("Segurança", "Cofre das chaves")]
+    assert paginas.pesquisar(assuntos, "") == [0, 1, 2]
+    assert paginas.pesquisar(assuntos, "atalho global") == [0]
+    assert paginas.pesquisar(assuntos, "global atalho") == [0]
+    assert paginas.pesquisar(assuntos, "seguranca") == [2]       # sem acento
+    assert paginas.pesquisar(assuntos, "SEGURANÇA") == [2]
+    assert paginas.pesquisar(assuntos, "whatsapp") == [1]        # no titulo
+    assert paginas.pesquisar(assuntos, "atalho cofre") == []
+    assert paginas.pesquisar(assuntos, "inexistente") == []
+
+
+def test_primeiro_trecho_aponta_para_o_texto_original():
+    texto = "Pareie… depois ATENÇÃO ao atalho"
+    i, f = paginas.primeiro_trecho(texto, "atencao")
+    assert texto[i:f] == "ATENÇÃO"
+    i, f = paginas.primeiro_trecho(texto, "xyz atalho")
+    assert texto[i:f] == "atalho"
+    assert paginas.primeiro_trecho(texto, "nada") is None
+    assert paginas.primeiro_trecho(texto, "") is None
+
+
+def test_pesquisa_no_guia_real_acha_atender_chamada():
+    assuntos = paginas.ler_assuntos()
+    achados = paginas.pesquisar(assuntos, "janela da chamada")
+    assert achados and all(0 <= n < len(assuntos) for n in achados)
+
+
+def test_dialogo_do_guia_filtra_pela_caixa_e_leva_ao_trecho(monkeypatch):
+    import wx
+    from telezapp.interface import guia
+    app = wx.GetApp() if hasattr(wx, "GetApp") else None
+    if hasattr(wx, "GetApp") and app is None:
+        app = wx.App(False)         # o wx de verdade; o falso nao precisa
+    d = guia.DialogoGuia(None)
+    total = len(d.assuntos)
+    assert len(d.lista.GetStrings()) == total
+    d.busca.SetValue("janela da chamada")
+    d._pesquisar()
+    n = len(d.lista.GetStrings())
+    assert 0 < n < total and "de %d" % total in d.rot_lista.GetLabel()
+    achado = d._assunto_escolhido()
+    texto = d.assuntos[achado][1]
+    i = d.texto.GetInsertionPoint()
+    assert texto[i:].lower().startswith("chamada")
+    d.busca.SetValue("zzzqqq")
+    d._pesquisar()
+    assert d.lista.GetStrings() == [] and d.texto.GetValue() == ""
+    assert "nenhum encontrado" in d.rot_lista.GetLabel()
+    d.busca.SetValue("")
+    d._pesquisar()
+    assert len(d.lista.GetStrings()) == total and d.rot_lista.GetLabel() \
+        == "Assuntos"
+
+
 def test_guia_em_assuntos_com_versao_e_sem_marcas():
     assuntos = paginas.ler_assuntos()
     titulos = [t for t, _ in assuntos]

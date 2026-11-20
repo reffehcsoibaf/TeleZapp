@@ -1,10 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Fábio Scheffer Moraes
-"""Fala direta pelo NVDA e sons curtos.
+"""Fala direta pelo NVDA ou pelo JAWS e sons curtos.
 
-Usa a DLL nvdaControllerClient que vem no pacote accessible-output2,
-carregada por ctypes (sem importar o pacote). Sem NVDA ou sem a DLL, a fala
-fica desligada e o motivo vai para o log.
+NVDA: a DLL nvdaControllerClient que vem no pacote accessible-output2,
+carregada por ctypes (sem importar o pacote).
+JAWS: o objeto COM FreedomSci.JawsApi, pelo comtypes. Só é criado se a janela
+do JAWS (classe JFWUI2; o título varia com a edição) existir, para não acordar o JAWS à toa.
+O leitor é escolhido a cada fala (a pessoa pode trocar de leitor com o app
+aberto). Sem nenhum dos dois, a fala fica desligada e o motivo vai para o log.
 """
 import atexit
 import ctypes
@@ -25,8 +28,11 @@ log = logging.getLogger("telezapp.fala")
 
 class Fala:
     def __init__(self):
-        self.lib = None
+        self.lib = None          # DLL do NVDA
         self.motivo = ""
+        self._jaws_local = threading.local()   # um objeto COM por thread
+        self._jaws_motivo = ""
+        self.leitor = ""         # "nvda" ou "jaws": o da ultima fala
         self._carregar()
 
     def _carregar(self):
@@ -49,9 +55,10 @@ class Fala:
             self.motivo = "erro ao carregar a DLL: %r" % e
         finally:
             if self.motivo:
-                log.info("fala direta indisponível: %s", self.motivo)
+                log.info("fala direta pelo NVDA indisponível: %s", self.motivo)
 
-    def ativa(self):
+    # ---- NVDA
+    def _nvda_ativo(self):
         if self.lib is None:
             return False
         try:
@@ -59,15 +66,71 @@ class Fala:
         except Exception:
             return False
 
-    def falar(self, texto, interromper=False):
-        if not texto or not self.ativa():
-            return False
+    # ---- JAWS
+    @staticmethod
+    def _jaws_rodando():
         try:
-            if interromper:
-                self.lib.nvdaController_cancelSpeech()
-            return self.lib.nvdaController_speakText(texto) == 0
+            return bool(ctypes.windll.user32.FindWindowW("JFWUI2", None))
+        except Exception:
+            return False
+
+    def _jaws(self):
+        """O objeto COM do JAWS desta thread, ou None."""
+        if not self._jaws_rodando():
+            return None
+        obj = getattr(self._jaws_local, "obj", None)
+        if obj is not None:
+            return obj
+        try:
+            import comtypes
+            import comtypes.client
+            try:
+                comtypes.CoInitialize()   # threads fora da principal
+            except OSError:
+                pass
+            obj = comtypes.client.CreateObject("FreedomSci.JawsApi",
+                                               dynamic=True)
+        except Exception as e:
+            motivo = "erro ao ligar ao JAWS: %r" % e
+            if motivo != self._jaws_motivo:   # so registra quando muda
+                self._jaws_motivo = motivo
+                log.info("fala pelo JAWS indisponível: %s", motivo)
+            return None
+        self._jaws_local.obj = obj
+        return obj
+
+    def _leitor_ativo(self):
+        """("nvda", None) ou ("jaws", objeto) ou (None, None)."""
+        if self._nvda_ativo():
+            return "nvda", None
+        obj = self._jaws()
+        if obj is not None:
+            return "jaws", obj
+        return None, None
+
+    def ativa(self):
+        return self._leitor_ativo()[0] is not None
+
+    def falar(self, texto, interromper=False):
+        if not texto:
+            return False
+        leitor, obj = self._leitor_ativo()
+        if leitor is None:
+            return False
+        if leitor != self.leitor:
+            self.leitor = leitor
+            log.info("fala pelo %s", leitor.upper())
+        try:
+            if leitor == "nvda":
+                if interromper:
+                    self.lib.nvdaController_cancelSpeech()
+                return self.lib.nvdaController_speakText(texto) == 0
+            # os espacos no comeco evitam que o JAWS corte o inicio da frase
+            return bool(obj.SayString("      %s" % texto, bool(interromper)))
         except Exception as e:
             log.warning("erro ao falar: %r", e)
+            if leitor == "jaws":
+                self._jaws_local.obj = None   # tenta ligar de novo na proxima
             return False
 
 

@@ -312,3 +312,31 @@ def test_qr_de_um_arquivo_com_acento(tmp_path):
     vazio = tmp_path / "branco.png"
     vazio.write_bytes(cv2.imencode(".png", imagem * 0 + 255)[1].tobytes())
     assert qr.ler_arquivo(str(vazio)) == ""
+
+
+CODIGO = "AbCdEfGhIjKlMnOpQrSt12"
+
+
+def test_link_whatsapp_chat_do_botao_da_pagina_de_convite_entra_no_grupo():
+    # a pagina chat.whatsapp.com/CODIGO abre whatsapp://chat?code=CODIGO
+    for url in ("whatsapp://chat?code=%s" % CODIGO,
+                "whatsapp://chat/?code=%s" % CODIGO,
+                "https://api.whatsapp.com/accept?code=%s" % CODIGO,
+                "https://chat.whatsapp.com/%s" % CODIGO):
+        info = le.interpretar(url)
+        assert info == {"servico": "whatsapp", "acao": "entrar",
+                        "convite": {"codigo": CODIGO}}, url
+
+
+def test_link_whatsapp_de_canal_pelo_aplicativo():
+    info = le.interpretar("whatsapp://channel/0029VaAbCdEfGh")
+    assert info["acao"] == "entrar"
+    assert info["convite"] == {"codigo": "0029VaAbCdEfGh", "modo": "canal"}
+
+
+def test_link_whatsapp_de_convite_invalido_segue_para_o_navegador():
+    assert le.interpretar("whatsapp://chat?code=curto") is None
+    assert le.interpretar("whatsapp://chat") is None
+    assert le.interpretar("whatsapp://channel") is None
+    assert le.interpretar("whatsapp://outra?code=%s" % CODIGO) is None
+    assert le.interpretar("https://api.whatsapp.com/accept") is None

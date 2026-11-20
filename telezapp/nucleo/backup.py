@@ -99,7 +99,8 @@ class Manifesto:
 # ------------------------------------------------------------- opcoes
 # Preferencias fora de config.OPCOES que tambem vao (a ordem dos provedores
 # de IA e os modelos; as chaves so em backup com senha, ver CHAVES_IA)
-EXTRAS = ("ia_ordem", "ia_modelos", "pacote_de_sons", "sons_desativados",
+EXTRAS = ("ia_ordem", "ia_modelos", "ia_url_personalizada",
+          "pacote_de_sons", "sons_desativados",
           "sons_de_conversa",
           "atalhos", "lista_conversas", "lista_mensagens", "aviso_nova",
           "participantes_silenciados", "filtros_personalizados")
@@ -174,6 +175,10 @@ def opcoes_validas(lidas, partes=None):
         boas["ia_modelos"] = {p: v for p, v in modelos.items()
                               if p in catalogo.PROVEDORES
                               and isinstance(v, str)}
+    url_ia = lidas.get("ia_url_personalizada")
+    if isinstance(url_ia, str):
+        from telezapp.nucleo.ia import provedores as _prov
+        boas["ia_url_personalizada"] = _prov.endereco_valido(url_ia)
     pacote = lidas.get("pacote_de_sons")
     if isinstance(pacote, str) and (pacote in ("padrao", "telezapp") or
                                     pacote.startswith("p:")):

@@ -39,6 +39,7 @@ from telezapp.nucleo import enviar_contatos as cartoes
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import grupo as ng
 from telezapp.nucleo import localizacao
+from telezapp.nucleo import uso
 from telezapp.provedores.base import APAGAR_PENDENTE
 from telezapp.nucleo import mencoes as nucleo_mencoes
 from telezapp.nucleo import modelos as m
@@ -144,6 +145,8 @@ NAO_PEDI_AS_ANTIGAS = "Não consegui pedir as mensagens ao celular."
 # a varredura para tras pede ate este numero de rodadas de ~50 mensagens, com
 # uma pausa entre elas para nao saturar o celular
 RODADAS_MAXIMAS = 60
+RODADAS_MOVIMENTACAO = 80    # ate ~4000 mensagens para tras
+SALTOS_DA_MOVIMENTACAO = 4   # recomecos depois de um fim antes do prazo
 ESPERA_ENTRE_RODADAS = 1.0
 # busca sozinha ao reconectar: quantas conversas e quantas rodadas no maximo
 LIMITE_AUTOMATICAS = 40
@@ -1377,6 +1380,44 @@ def props_do_aparelho(historico):
     return props
 
 
+# avisos de sistema do grupo que o celular manda no historico (stubType do
+# WebMessageInfo): 27 adicionou, 28 removeu, 31 entrou por convite, 32 saiu,
+# 140 entrou com o pedido aprovado
+STUBS_DE_MEMBROS = {27: "adicionou", 28: "removeu", 31: "convite",
+                    32: "saiu", 140: "aprovado"}
+
+
+def stubs_do_historico(dados):
+    """Contagem por tipo dos avisos de sistema dos grupos de um pacote de
+    historico, para o log (so numeros)."""
+    cont = {}
+    for c in dados.conversations:
+        if not c.ID.endswith("@g.us"):
+            continue
+        for h in c.messages:
+            t = int(h.message.messageStubType)
+            if t:
+                cont[t] = cont.get(t, 0) + 1
+    return cont
+
+
+def _usuario_do_jid(texto):
+    """So o numero ou o id de um endereco ("55..:3@s.whatsapp.net")."""
+    return (texto or "").split("@")[0].split(":")[0]
+
+
+def _jid_do_parametro(parametro):
+    """Os parametros do aviso vem como endereco ou como JSON com lid e pn."""
+    if parametro.startswith("{"):
+        try:
+            d = json.loads(parametro)
+            return d.get("pn") or d.get("phoneNumber") or d.get("lid") or \
+                d.get("id") or ""
+        except (ValueError, AttributeError):
+            return ""
+    return parametro
+
+
 def resumo_historico(dados):
     """Numeros do pacote de historico (sem conteudo), para o log."""
     convs = list(dados.conversations)
@@ -1481,6 +1522,7 @@ class ProvedorWhatsApp(Provedor):
         self._varreduras = {}   # conversa -> andamento da busca para tras
         self._ancoras_da_sincronia = {}   # conversa -> mais antiga entregue
         self._auto_fila = []    # buscas sozinhas esperando a vez
+        self._auto_resumo = None   # conversas/novas da rodada de buscas
         self._fila_anunciada = None   # mensagens na fila offline (aviso)
         self._recebidas_na_sincronia = 0
         self._trava = threading.RLock()
@@ -2178,6 +2220,7 @@ class ProvedorWhatsApp(Provedor):
                  if self._queda_desde - x[0] < 15})
             self._tempo_no_ar = (self._queda_desde - self._no_ar_desde
                                  if self._no_ar_desde else None)
+            uso.contar("causas_de_queda", self._causa_da_queda)
         self._avisar_sincronia_interrompida()
         self._estado(ev.DESCONECTADA, "reconectando")
 
@@ -2733,7 +2776,10 @@ class ProvedorWhatsApp(Provedor):
                                       alvo.GroupName.Name or "Grupo"))
             except Exception:
                 log.info("sem a lista de grupos da comunidade")
-        return {"subgrupos": subgrupos,
+        ajustes = None
+        if eu is not None and (eu.IsAdmin or eu.IsSuperAdmin):
+            ajustes = self.ajustes_do_grupo(conversa_id)
+        return {"subgrupos": subgrupos, "ajustes": ajustes,
             "nome": info.GroupName.Name, "descricao": info.GroupTopic.Topic,
             "id_descricao": info.GroupTopic.TopicID,
             "criado_em": float(info.GroupCreated or 0), "dono": dono,
@@ -3133,6 +3179,92 @@ class ProvedorWhatsApp(Provedor):
         self._fila.put(self._atualizar_nomes_de_grupos)
         return True, "Você entrou no grupo."
 
+    # ------------------------------ ajustes do grupo que o neonize nao tem
+    # No do WhatsApp para quem envia o historico aos novos membros; o nome e
+    # os valores seguem o member_add_mode ("admin_add"/"all_member_add"). O
+    # no que o grupo realmente traz e achado na leitura (qualquer no com
+    # "history" no nome) e o que a DLL devolve fica no registro.
+    NO_DO_HISTORICO = "member_share_group_history_mode"
+    VALORES_DO_HISTORICO = {"admin": "admin_share", "todos": "all_member_share"}
+
+    def _ajuste_da_dll(self, funcao, *args):
+        """Chama uma funcao de ajuste de grupo da DLL do TeleZapp (JSON de
+        volta). RuntimeError com o motivo se a DLL nao a tem."""
+        dll = getattr(self.cliente, "_NewClient__client", None)
+        f = getattr(dll, funcao, None)
+        liberar = getattr(dll, "FreeString", None)
+        if f is None or liberar is None:
+            raise RuntimeError("Esta versão do componente do WhatsApp não "
+                               "faz esse ajuste.")
+        f.argtypes = [ctypes.c_char_p] * (1 + len(args))
+        f.restype = ctypes.c_void_p
+        liberar.argtypes = [ctypes.c_void_p]
+        liberar.restype = None
+        ponteiro = f(self.cliente.uuid, *[str(a).encode() for a in args])
+        try:
+            bruto = ctypes.string_at(ponteiro).decode("utf-8", "replace")
+        finally:
+            liberar(ponteiro)
+        try:
+            return json.loads(bruto)
+        except ValueError:
+            raise RuntimeError("O WhatsApp devolveu uma resposta ilegível.")
+
+    @staticmethod
+    def ler_ajustes(filhos):
+        """De os nos do grupo (JSON da DLL) para {"aprovacao": bool,
+        "historico": "admin"|"todos"|"", "no_historico": tag ou "",
+        "adicionar": "admin"|"todos"|""} (quem pode adicionar membros)."""
+        aprovacao, historico, no_historico, adicionar = False, "", "", ""
+        for f in filhos or ():
+            tag = str(f.get("tag", ""))
+            if tag == "member_add_mode":
+                texto = str(f.get("texto", "")).lower()
+                adicionar = "admin" if "admin" in texto else \
+                    "todos" if "all" in texto else ""
+            elif tag == "membership_approval_mode":
+                aprovacao = True
+                for sub in f.get("sub") or ():
+                    if sub.get("tag") == "group_join" and \
+                            (sub.get("attrs") or {}).get("state") == "off":
+                        aprovacao = False
+            elif "history" in tag:
+                no_historico = tag
+                valor = " ".join([f.get("texto", "")] + [
+                    str(v) for v in (f.get("attrs") or {}).values()] + [
+                    sub.get("texto", "") for sub in f.get("sub") or ()
+                ]).lower()
+                if "admin" in valor:
+                    historico = "admin"
+                elif "all" in valor or "todos" in valor:
+                    historico = "todos"
+        return {"aprovacao": aprovacao, "historico": historico,
+                "no_historico": no_historico, "adicionar": adicionar}
+
+    def ajustes_do_grupo(self, conversa_id):
+        """A aprovacao de entrada por convite e quem envia o historico, como
+        ler_ajustes; None se a DLL nao le ou o WhatsApp recusou."""
+        if self.cliente is None or not self._conectada or \
+                not conversa_id.endswith("@g.us"):
+            return None
+        try:
+            r = self._ajuste_da_dll("GroupSettings", conversa_id)
+        except Exception as e:
+            log.info("ajustes do grupo: %s", e)
+            return None
+        if not r.get("ok"):
+            log.info("ajustes do grupo: o WhatsApp recusou a leitura (%s)",
+                     str(r.get("erro", ""))[:120])
+            return None
+        filhos = r.get("filhos") or []
+        ajustes = self.ler_ajustes(filhos)
+        log.info("ajustes do grupo: nós %s; aprovação=%s; histórico=%s (%s); "
+                 "adicionar=%s", ",".join(str(f.get("tag")) for f in filhos),
+                 ajustes["aprovacao"], ajustes["historico"] or "?",
+                 ajustes["no_historico"] or "sem nó",
+                 ajustes["adicionar"] or "?")
+        return ajustes
+
     def administrar_grupo(self, conversa_id, acao, valor=None):
         if self.cliente is None or not self._conectada:
             return False, "Sem conexão com o WhatsApp."
@@ -3159,6 +3291,40 @@ class ProvedorWhatsApp(Provedor):
                 self.cliente.set_group_locked(jid, bool(valor))
                 return True, ("Agora só administradores editam o grupo."
                               if valor else "Agora todos editam o grupo.")
+            if acao == "aprovacao":
+                self.cliente.set_group_join_approval_mode(jid, bool(valor))
+                return True, ("Agora quem entra pelo convite precisa da "
+                              "aprovação de um administrador."
+                              if valor else "Agora quem tem o link entra "
+                              "direto, sem aprovação.")
+            if acao == "quem_adiciona":
+                from neonize.utils.enum import GroupMemberAddMode
+                if valor not in ("admin", "todos"):
+                    return False, "Escolha quem pode adicionar membros."
+                self.cliente.set_group_member_add_mode(
+                    jid, GroupMemberAddMode.ADMIN_ADD if valor == "admin"
+                    else GroupMemberAddMode.ALL_MEMBER_ADD)
+                return True, ("Agora só administradores adicionam membros."
+                              if valor == "admin" else
+                              "Agora todos os membros podem adicionar "
+                              "membros.")
+            if acao == "historico":
+                if valor not in self.VALORES_DO_HISTORICO:
+                    return False, "Escolha quem envia o histórico."
+                r = self._ajuste_da_dll(
+                    "GroupSetNode", conversa_id, self.NO_DO_HISTORICO,
+                    self.VALORES_DO_HISTORICO[valor])
+                if not r.get("ok"):
+                    log.warning("histórico do grupo: o WhatsApp recusou: %s",
+                                str(r.get("erro", ""))[:160])
+                    return False, ("O WhatsApp não aceitou esse ajuste (%s)."
+                                   % (str(r.get("erro", ""))[:80]
+                                      or "sem motivo"))
+                return True, ("Agora só administradores enviam o histórico "
+                              "de mensagens a quem entra."
+                              if valor == "admin" else "Agora todos os "
+                              "membros podem enviar o histórico de "
+                              "mensagens a quem entra.")
             if acao in ("adicionar", "remover", "promover", "rebaixar"):
                 if acao == "adicionar" and "@" in str(valor):
                     alvo = _jid_obj(*jid_de_texto(valor))
@@ -4602,6 +4768,82 @@ class ProvedorWhatsApp(Provedor):
                 self._renomear_grupo(jid_texto(evento.JID), evento.Name.Name)
         except Exception:
             log.exception("erro ao tratar mudança no grupo")
+        try:
+            self._guardar_aviso_de_membros(evento)
+        except Exception:
+            log.exception("erro ao guardar o aviso de entrada ou saída")
+
+    def _guardar_aviso_de_membros(self, evento):
+        """Quem entrou, saiu, foi adicionado ou removido: vira um aviso na
+        lista de mensagens do grupo, como no Telegram (sem som nem fala)."""
+        entraram, sairam = list(evento.Join), list(evento.Leave)
+        if not entraram and not sairam:
+            return
+        cid = jid_texto(evento.JID)
+        with self._trava:
+            conv = self._conversas.get(cid)
+        if conv is None:
+            return
+        meus = set()
+        try:
+            eu = self.cliente.get_me()
+            meus = {x for x in (eu.JID.User, getattr(eu.LID, "User", ""))
+                    if x}
+        except Exception:
+            pass
+
+        def nome(jid):
+            if jid.User in meus:
+                return "Você"
+            achado = self.nome_de_participante(jid_texto(jid))
+            if achado:
+                return achado
+            alvo = self._numero_do_jid(jid)
+            if alvo.Server == "s.whatsapp.net" and alvo.User:
+                return "+" + alvo.User
+            return "Alguém"
+
+        def lista(jids):
+            nomes = [nome(j) for j in jids]
+            return nomes[0] if len(nomes) == 1 else \
+                ", ".join(nomes[:-1]) + " e " + nomes[-1]
+
+        quem = evento.Sender if evento.HasField("Sender") and \
+            evento.Sender.User else None
+        frases = []
+        for jids, entrou in ((entraram, True), (sairam, False)):
+            if not jids:
+                continue
+            por_conta = quem is None or all(j.User == quem.User
+                                            for j in jids)
+            if por_conta:
+                if entrou:
+                    razao = (evento.JoinReason or "").lower()
+                    por = " por um convite" if "invite" in razao or \
+                        "link" in razao else ""
+                    frases.append(("%s entrou no grupo%s." % (
+                        lista(jids), por), entrou, jids))
+                else:
+                    frases.append(("%s saiu do grupo." % lista(jids),
+                                   entrou, jids))
+            else:
+                frases.append(("%s %s %s %s." % (
+                    nome(quem), "adicionou" if entrou else "removeu",
+                    lista(jids), "ao grupo" if entrou else "do grupo"),
+                    entrou, jids))
+        data = float(evento.Timestamp or time.time())
+        for frase, entrou, jids in frases:
+            # id fixo: o mesmo aviso reenviado ao reconectar nao duplica
+            alvo = ",".join(sorted(j.User for j in jids))
+            msg = m.Mensagem(self.conta.id, cid, "aviso-%d-%s-%s" % (
+                int(data), "e" if entrou else "s", alvo), autor="",
+                data=data, tipo=m.AVISO_MEMBROS, texto=frase)
+            with self._trava:
+                conv.data = max(conv.data, msg.data)
+            self.banco.salvar_conversas([conv])
+            self.banco.salvar_mensagens([msg])
+            self.barramento.publicar(ev.MensagemNova(msg, conv,
+                                                     silenciosa=True))
 
     def _ao_entrou_no_grupo(self, cliente, evento):
         """O WhatsApp reenvia os dados do grupo (nome atual) ao entrar nele
@@ -7095,6 +7337,13 @@ class ProvedorWhatsApp(Provedor):
         try:
             log.info("pacote de histórico: %s", ", ".join(
                 "%s=%s" % kv for kv in resumo_historico(e.Data).items()))
+            avisos = stubs_do_historico(e.Data)
+            if avisos:
+                log.info("avisos de sistema nos grupos do pacote (tipo=vezes; "
+                         "membros: %s): %s", ",".join(
+                             str(t) for t in STUBS_DE_MEMBROS),
+                         ", ".join("%d=%d" % kv for kv in sorted(
+                             avisos.items())))
             if int(e.Data.syncType) == SYNC_SOB_DEMANDA:
                 self._historico_sob_demanda(e.Data)
                 return
@@ -7105,6 +7354,68 @@ class ProvedorWhatsApp(Provedor):
                 self.conta.id, pct))
         except Exception:
             log.exception("erro ao ler o pacote de histórico")
+
+    def _meus_usuarios(self):
+        try:
+            eu = self.cliente.get_me()
+            return {x for x in (eu.JID.User, getattr(eu.LID, "User", ""))
+                    if x}
+        except Exception:
+            return set()
+
+    def _aviso_do_historico(self, wmi, cid, meus, limite=0):
+        """Aviso de entrada ou saida de membros que veio no historico do
+        celular (mensagem de sistema do grupo), no mesmo formato e com o mesmo
+        id dos avisos ao vivo, para nao duplicar. None se nao e desse tipo."""
+        tipo = STUBS_DE_MEMBROS.get(int(wmi.messageStubType))
+        if tipo is None:
+            return None
+        data = segundos(wmi.messageTimestamp)
+        if not data or (limite and data < limite):
+            return None
+        autor = _jid_do_parametro(wmi.key.participant or wmi.participant or "")
+        alvos = [_jid_do_parametro(p) for p in wmi.messageStubParameters if p]
+        alvos = [a for a in alvos if _usuario_do_jid(a)]
+        if not alvos and tipo in ("saiu", "convite", "aprovado") and autor:
+            alvos = [autor]
+        if not alvos:
+            return None
+
+        def nome(jid):
+            usuario = _usuario_do_jid(jid)
+            if usuario in meus:
+                return "Você"
+            achado = self.nome_de_participante(
+                "%s@%s" % (usuario, jid.split("@")[1].split(":")[0])
+                if "@" in jid else jid)
+            if achado:
+                return achado
+            if "@" in jid and jid.split("@")[1].startswith("s.whatsapp"):
+                return "+" + usuario
+            return "Alguém"
+        nomes = [nome(a) for a in alvos]
+        quem = nomes[0] if len(nomes) == 1 else \
+            ", ".join(nomes[:-1]) + " e " + nomes[-1]
+        por_outro = bool(autor) and not all(
+            _usuario_do_jid(a) == _usuario_do_jid(autor) for a in alvos)
+        entrou = tipo in ("adicionou", "convite", "aprovado")
+        if tipo == "adicionou" and por_outro:
+            frase = "%s adicionou %s ao grupo." % (nome(autor), quem)
+        elif tipo == "removeu" and por_outro:
+            frase = "%s removeu %s do grupo." % (nome(autor), quem)
+        elif tipo == "convite":
+            frase = "%s entrou no grupo por um convite." % quem
+        elif tipo == "aprovado":
+            frase = "%s entrou no grupo com o pedido aprovado." % quem
+        elif entrou:
+            frase = "%s entrou no grupo." % quem
+        else:
+            frase = "%s saiu do grupo." % quem
+        ids = ",".join(sorted(_usuario_do_jid(a) for a in alvos))
+        return m.Mensagem(
+            self.conta.id, cid, "aviso-%d-%s-%s" % (
+                int(data), "e" if entrou else "s", ids),
+            autor="", data=data, tipo=m.AVISO_MEMBROS, texto=frase)
 
     def guardar_historico(self, dados):
         """Guarda conversas, nomes e mensagens de um pacote de historico."""
@@ -7119,6 +7430,7 @@ class ProvedorWhatsApp(Provedor):
                                     OPCOES_HISTORICO["recentes"])[1]
         limite = time.time() - dias * 86400 if dias else 0
         convs, msgs, fichas = [], [], []
+        meus = self._meus_usuarios()
         for c in dados.conversations:
             cid = self._normalizar_id(c.ID)
             if not cid or cid in IGNORAR_CONVERSAS or \
@@ -7130,6 +7442,12 @@ class ProvedorWhatsApp(Provedor):
             data = segundos(c.conversationTimestamp or c.lastMsgTimestamp)
             novas = []
             for h in c.messages:
+                if grupo:
+                    aviso = self._aviso_do_historico(h.message, cid, meus,
+                                                     limite)
+                    if aviso is not None:
+                        novas.append(aviso)
+                        continue
                 x, rem = converter_historico(
                     h.message, self.conta.id, cid,
                     self._apelidos.get(h.message.key.participant or
@@ -7238,6 +7556,30 @@ class ProvedorWhatsApp(Provedor):
             return "Já estou buscando as mensagens desta conversa."
         return ""
 
+    def buscar_movimentacao(self, conversa_id, dias=60):
+        """Varre o historico do grupo no celular, da mensagem mais nova que
+        temos para tras, ate `dias` dias, guardando os avisos de entrada e
+        saida de membros que vierem (as mensagens comuns tambem, se faltarem).
+        O fim vem como um aviso."""
+        pedir = getattr(self.cliente, "request_history_sync", None)
+        if self.cliente is None or not self._conectada:
+            return "A conta não está conectada."
+        if pedir is None:
+            return "Esta versão do componente do WhatsApp não faz essa busca."
+        if not (conversa_id or "").endswith("@g.us"):
+            return "Só os grupos têm movimentação de membros."
+        ancora = next((x for x in reversed(self.banco.mensagens(
+            self.conta.id, conversa_id, 40))
+            if x.tipo not in (m.AGUARDANDO, m.AVISO_MEMBROS)
+            and not x.id.startswith("local-")), None)
+        if ancora is None:
+            return "Não há mensagem no grupo para servir de referência."
+        if not self._iniciar_varredura(conversa_id, (
+                ancora.id, ancora.minha, ancora.remetente, ancora.data),
+                corte=time.time() - dias * 86400):
+            return "Já estou buscando as mensagens deste grupo."
+        return ""
+
     AVISO_MAIS_ANTIGAS = ("Abra o WhatsApp no celular para buscar mensagens "
                           "mais antigas.")
 
@@ -7265,7 +7607,7 @@ class ProvedorWhatsApp(Provedor):
             self.conta.id, conversa_id, novas, texto))
 
     def _iniciar_varredura(self, conversa_id, ancora, auto=False,
-                           antigas=False):
+                           antigas=False, corte=0):
         """Abre a varredura da conversa e pede a primeira rodada. False se
         ja ha uma em andamento nela."""
         with self._trava:
@@ -7273,7 +7615,7 @@ class ProvedorWhatsApp(Provedor):
                 return False
             self._varreduras[conversa_id] = dict(
                 rodadas=0, novas=0, consultadas=0, ancora_anterior="",
-                auto=auto, antigas=antigas,
+                auto=auto, antigas=antigas, corte=corte, avisos=0,
                 mais_antiga_local=self.banco.data_mais_antiga(
                     self.conta.id, conversa_id))
         self._pedir_rodada(conversa_id, ancora)
@@ -7307,20 +7649,55 @@ class ProvedorWhatsApp(Provedor):
                  "atrasadas", len(itens))
         with self._trava:
             self._auto_fila.extend(itens)
+            self._auto_resumo = dict(total=len(itens), buscadas=0, novas=0,
+                                     conversas=0)
+        self.barramento.publicar(ev.Aviso(
+            self.conta.id, "Buscando mensagens que faltam em %d %s. Aviso "
+            "quando terminar." % (len(itens), "conversa" if len(itens) == 1
+                                  else "conversas"), falar=False))
         self._fila.put(self._seguir_automaticas)
 
     def _seguir_automaticas(self):
         """Uma busca sozinha de cada vez, so quando nao ha outra andando."""
         while True:
             with self._trava:
-                ocupado = bool(self._varreduras)
-                if ocupado or not self._auto_fila or not self._conectada:
+                if bool(self._varreduras) or not self._conectada:
                     return
-                cid, ancora = self._auto_fila.pop(0)
+                acabou = not self._auto_fila
+                if not acabou:
+                    cid, ancora = self._auto_fila.pop(0)
+            if acabou:
+                self._fim_das_automaticas()
+                return
             if not self._ha_buraco_antes(cid, ancora):
                 continue
             if self._iniciar_varredura(cid, ancora, auto=True):
                 return
+
+    def _fim_das_automaticas(self):
+        """Todas as buscas sozinhas desta reconexao terminaram: diz o
+        resultado, para a pessoa saber que nao ha mais nada a caminho."""
+        with self._trava:
+            r = self._auto_resumo
+            self._auto_resumo = None
+        if not r:
+            return
+        n = r["total"]
+        conversas = "%d %s" % (n, "conversa" if n == 1 else "conversas")
+        if r["novas"]:
+            texto = ("Busca automática concluída em %s: encontrei %s, em %d "
+                     "%s." % (conversas, _achadas(r["novas"], False),
+                              r["conversas"], "conversa" if r["conversas"] == 1
+                              else "conversas"))
+        else:
+            texto = ("Busca automática concluída em %s: não faltava nenhuma "
+                     "mensagem." % conversas)
+        log.info("busca sozinha ao reconectar terminou: %d conversas, %d "
+                 "buscadas no celular, %d mensagens novas", n,
+                 r["buscadas"], r["novas"])
+        self.barramento.publicar(ev.Aviso(
+            self.conta.id, texto, falar=bool(config.Config().get(
+                "falar_fim_da_busca_sozinha"))))
 
     def _ha_buraco_antes(self, conversa_id, ancora):
         """Ha mensagem guardada antes da ancora e uma folga entre as duas?
@@ -7397,9 +7774,25 @@ class ProvedorWhatsApp(Provedor):
         with self._trava:
             varredura = self._varreduras.pop(conversa_id, None)
             tem_fila = bool(self._auto_fila)
+            if varredura and varredura.get("auto") and self._auto_resumo:
+                self._auto_resumo["buscadas"] += 1
+                self._auto_resumo["novas"] += varredura.get("novas", 0)
+                if varredura.get("novas"):
+                    self._auto_resumo["conversas"] += 1
         if tem_fila:
             self._fila.put(self._seguir_automaticas)
         return varredura
+
+    def _conferir_fim_das_automaticas(self):
+        """Chamada depois de fechar uma busca sozinha: se foi a ultima da
+        fila, anuncia o fim (depois do aviso daquela conversa)."""
+        with self._trava:
+            ultima = (self._auto_resumo is not None and
+                      not self._auto_fila and
+                      not any(v.get("auto")
+                              for v in self._varreduras.values()))
+        if ultima:
+            self._fim_das_automaticas()
 
     def _pedido_sem_resposta(self, conversa_id):
         """O celular nao respondeu ao pedido a tempo: diz isso em vez de
@@ -7415,6 +7808,7 @@ class ProvedorWhatsApp(Provedor):
                     "conversa=%s (rodadas feitas: %d)", conversa_id,
                     varredura["rodadas"] if varredura else 0)
         if varredura and varredura.get("auto"):
+            self._conferir_fim_das_automaticas()
             return                       # busca sozinha: fica so no log
         sessao_com_defeito = time.time() - self._celular_pediu_reenvio_em <= \
             ESPERA_DO_HISTORICO + 5
@@ -7457,6 +7851,7 @@ class ProvedorWhatsApp(Provedor):
                     self._fim_das_antigas(
                         cid, texto="O celular respondeu, mas não consegui "
                         "ler as mensagens.")
+            self._conferir_fim_das_automaticas()
             if esperando and not autos:
                 self.barramento.publicar(ev.Aviso(
                     self.conta.id, "O celular respondeu, mas não consegui "
@@ -7468,6 +7863,8 @@ class ProvedorWhatsApp(Provedor):
             if varredura is not None:
                 varredura["rodadas"] += 1
                 varredura["novas"] += novas
+                varredura["avisos"] = varredura.get("avisos", 0) + \
+                    resumo.get("avisos", 0)
                 varredura["consultadas"] += resumo["total"]
         if varredura is None:
             # parte atrasada de uma resposta, ou pedido sem varredura
@@ -7475,7 +7872,15 @@ class ProvedorWhatsApp(Provedor):
                 self.barramento.publicar(ev.Aviso(
                     self.conta.id, "Encontrei %s." % _achadas(novas, False)))
             return
+        if varredura.get("corte") and resumo["mais_antiga"]:
+            varredura["alcance"] = min(
+                varredura.get("alcance") or resumo["mais_antiga"],
+                resumo["mais_antiga"])
         motivo = self._motivo_de_parar(varredura, resumo, novas)
+        if varredura.get("corte") and motivo in (
+                "fim do histórico", "sem avanço") and \
+                self._saltar_na_movimentacao(cid, varredura):
+            return
         if not motivo:
             ancora = resumo["ancora"]
             relogio = threading.Timer(
@@ -7490,6 +7895,22 @@ class ProvedorWhatsApp(Provedor):
                  " [sozinha]" if varredura.get("auto") else "",
                  varredura["rodadas"], varredura["consultadas"],
                  varredura["novas"])
+        if varredura.get("corte"):
+            conv = self._conversas.get(cid)
+            texto = "Movimentação dos membros%s: %s (conferi %d mensagens do " \
+                "celular)." % (
+                    " de %s" % conv.nome if conv is not None and conv.nome
+                    else "",
+                    "encontrei %d aviso%s de entrada ou saída" % (
+                        varredura["avisos"],
+                        "" if varredura["avisos"] == 1 else "s")
+                    if varredura["avisos"] else
+                    "não encontrei avisos novos", varredura["consultadas"])
+            if motivo == "limite":
+                texto += (" A busca parou no limite de %d rodadas, sem chegar "
+                          "aos %d dias." % (RODADAS_MOVIMENTACAO, 60))
+            self.barramento.publicar(ev.Aviso(self.conta.id, texto))
+            return
         if varredura.get("antigas"):
             self._fim_das_antigas(
                 cid, varredura["novas"], "" if varredura["novas"] else
@@ -7503,6 +7924,7 @@ class ProvedorWhatsApp(Provedor):
                         _achadas(varredura["novas"], False),
                         conv.nome if conv is not None and conv.nome
                         else "uma conversa")))
+            self._conferir_fim_das_automaticas()
             return
         if varredura["novas"]:
             texto = "Encontrei %s (conferi %d mensagens do celular)." % (
@@ -7515,11 +7937,50 @@ class ProvedorWhatsApp(Provedor):
                       "para continuar." % RODADAS_MAXIMAS)
         self.barramento.publicar(ev.Aviso(self.conta.id, texto))
 
+    def _saltar_na_movimentacao(self, cid, varredura):
+        """O celular encerrou a resposta antes do prazo (o ultimo pacote traz
+        so o aviso de criptografia do inicio da conversa, ou nada). Antes de
+        desistir, recomeca de uma mensagem nossa mais antiga que o ponto
+        alcancado: se o celular tiver mais para tras, a busca segue. True se
+        pediu de novo."""
+        if varredura.get("saltos", 0) >= SALTOS_DA_MOVIMENTACAO:
+            return False
+        alcance = varredura.get("alcance") or 0
+        if not alcance or alcance <= varredura["corte"]:
+            return False
+        ant = self.banco.mensagem_anterior_a(self.conta.id, cid, alcance)
+        if ant is None or ant.id == varredura.get("ancora_anterior"):
+            return False
+        varredura["saltos"] = varredura.get("saltos", 0) + 1
+        log.info("movimentação: o celular encerrou o histórico antes do "
+                 "prazo; recomeçando de uma mensagem guardada mais antiga "
+                 "(salto %d)", varredura["saltos"])
+        ancora = (ant.id, ant.minha, ant.remetente, ant.data)
+        varredura["alcance"] = ant.data
+        relogio = threading.Timer(
+            ESPERA_ENTRE_RODADAS, lambda: self._fila.put(
+                lambda: self._pedir_rodada(cid, ancora)))
+        relogio.daemon = True
+        relogio.start()
+        return True
+
     @staticmethod
     def _motivo_de_parar(varredura, resumo, novas):
         """"" se a varredura deve pedir mais uma rodada; senao por que parou."""
         if varredura.get("antigas"):
             return "uma rodada a cada Home"
+        if varredura.get("corte"):
+            ancora = resumo["ancora"]
+            if ancora is None or not resumo["total"]:
+                return "fim do histórico"
+            if ancora[0] == varredura["ancora_anterior"]:
+                return "sem avanço"
+            if resumo["mais_antiga"] and \
+                    resumo["mais_antiga"] < varredura["corte"]:
+                return "chegou ao prazo"
+            if varredura["rodadas"] >= RODADAS_MOVIMENTACAO:
+                return "limite"
+            return ""
         ancora = resumo["ancora"]
         if ancora is None or not resumo["total"]:
             return "fim do histórico"
@@ -7547,6 +8008,8 @@ class ProvedorWhatsApp(Provedor):
         (novas, resumo): o resumo diz a conversa, quantas mensagens vieram e
         qual a mais antiga (a ancora da proxima rodada)."""
         novas, por_conversa = 0, {}
+        meus = self._meus_usuarios()
+        avisos = 0
         total = ja_tinha = sem_conteudo = 0
         conversa, antiga = "", None
         for c in dados.conversations:
@@ -7557,6 +8020,26 @@ class ProvedorWhatsApp(Provedor):
             msgs = []
             for h in c.messages:
                 total += 1
+                if cid.endswith("@g.us"):
+                    aviso = self._aviso_do_historico(h.message, cid, meus)
+                    if aviso is not None:
+                        # guardado sem contar entre as mensagens novas
+                        if self.banco.mensagem(self.conta.id, cid,
+                                               aviso.id) is None:
+                            msgs.append(aviso)
+                            avisos += 1
+                        if (self._varreduras.get(cid) or {}).get("corte") \
+                                and h.message.key.ID and (
+                                    antiga is None or aviso.data < antiga[3]):
+                            # na busca da movimentacao o aviso tambem serve
+                            # de ancora: pode haver trechos so de avisos
+                            antiga = (h.message.key.ID,
+                                      bool(h.message.key.fromMe),
+                                      _sem_aparelho(
+                                          h.message.key.participant or
+                                          h.message.participant or ""),
+                                      aviso.data)
+                        continue
                 x, rem = converter_historico(
                     h.message, self.conta.id, cid,
                     self._apelidos.get(h.message.key.participant or
@@ -7594,7 +8077,8 @@ class ProvedorWhatsApp(Provedor):
                  "sem conteúdo)", novas, len(por_conversa), total, ja_tinha,
                  sem_conteudo)
         return novas, dict(conversa=conversa, total=total, ancora=antiga,
-                           mais_antiga=antiga[3] if antiga else 0)
+                           mais_antiga=antiga[3] if antiga else 0,
+                           avisos=avisos)
 
     def _normalizar_id(self, texto):
         usuario, servidor = jid_de_texto(texto)
