@@ -15,9 +15,15 @@ def rotulo_do_pedido(p):
     partes = [p.get("nome") or p.get("telefone") or "Pessoa sem nome"]
     if p.get("telefone") and p["telefone"] != partes[0]:
         partes.append(p["telefone"])
-    if p.get("quando"):
-        partes.append("pediu em " + time.strftime(
-            "%d/%m/%Y %H:%M", time.localtime(p["quando"])))
+    quando = float(p.get("quando") or 0)
+    if quando > 1e11:           # veio em milissegundos
+        quando /= 1000
+    if quando > 0:
+        try:
+            partes.append("pediu em " + time.strftime(
+                "%d/%m/%Y %H:%M", time.localtime(quando)))
+        except (OSError, OverflowError, ValueError):
+            pass                # data fora do possivel: lista sem a data
     return ", ".join(partes)
 
 

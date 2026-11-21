@@ -51,6 +51,7 @@ from telezapp.interface.busca_canais import DialogoBuscaDeCanais
 from telezapp.interface.busca_global import DialogoBuscaGlobal
 from telezapp.nucleo import busca as busca_nucleo
 from telezapp.nucleo import filtros_personalizados as filtros_nucleo
+from telezapp.nucleo import pastas as pastas_nucleo
 from telezapp.nucleo import busca_global as busca_global_nucleo
 from telezapp.interface import dispositivos as ui_dispositivos
 from telezapp.midia import armazem
@@ -554,6 +555,12 @@ class Janela(wx.Frame):
         self.filtro_tipo = self._filtro_tipo_salvo(cfg)
         self.filtro_conta = cfg.get("filtro_conta") or m.CONTA_TODAS
         self._opcoes_conta = []       # (valor, rotulo) da caixa de contas
+        # terceira caixa: pastas do Telegram / listas do WhatsApp da conta
+        # unica escolhida (nucleo/pastas.py)
+        self.filtro_pasta = ""
+        self._opcoes_pasta = []       # (valor, rotulo) da caixa de pastas
+        self._pastas_ids = {}         # pasta -> ids das conversas
+        self._conta_pasta = None      # conta a que a caixa se refere
         # filtros personalizados (nucleo/filtros_personalizados.py)
         self.filtros_pers = filtros_nucleo.normalizar(
             cfg.get("filtros_personalizados"))
@@ -770,6 +777,7 @@ class Janela(wx.Frame):
              "Ir para o filtro de &serviço ou conta\tAlt+4")
         item(m_ir, "ir_filtro_tipo",
              "Ir para o f&iltro de tipo de conversa\tAlt+5")
+        item(m_ir, "ir_pasta", "Ir para a caixa de pastas ou &listas\tAlt+6")
         m_tipos = wx.Menu()
         for valor, rotulo in m.FILTROS_TIPO:
             item(m_tipos, "tipo_" + valor, rotulo)
@@ -820,6 +828,7 @@ class Janela(wx.Frame):
 
         m_msg = wx.Menu()
         item(m_msg, "ver_enquete", "Ver e votar na enquete...")
+        item(m_msg, "comentarios", "Ver os comentários do post...")
         item(m_msg, "enviar_msg", "Enviar a mensagem digitada\tCtrl+Enter")
         item(m_msg, "enviar_local", "Enviar a minha &localização...")
         item(m_msg, "enviar_contatos", "Enviar con&tatos...")
@@ -1073,6 +1082,7 @@ class Janela(wx.Frame):
             "reconectar": lambda e: self._reconectar(),
             "ir_filtro_conta": lambda e: self._ir_filtro_conta(),
             "ir_filtro_tipo": lambda e: self._ir_filtro_tipo(),
+            "ir_pasta": lambda e: self._ir_pasta(),
             "buscar_conv": lambda e: self._ir_para(self.campo_busca, ""),
             "busca_criterios": lambda e: self._busca_por_criterios(),
             "busca_global": lambda e: self._busca_global(),
@@ -1146,6 +1156,7 @@ class Janela(wx.Frame):
             "atualizar": lambda e: self._atualizar_conversas(),
             "responder": lambda e: self._responder(),
             "responder_particular": lambda e: self._responder_em_particular(),
+            "comentarios": lambda e: self._ver_comentarios(),
             "copiar": lambda e: self._copiar(),
             "copiar_conteudo": lambda e: self._copiar_o_conteudo(),
             "copiar_ia": lambda e: self._copiar_texto_ia(),
@@ -1570,6 +1581,10 @@ class Janela(wx.Frame):
             painel, choices=[r for _, r in self._tipos_atuais],
             name="Tipo de conversa")
         self.cx_tipo.SetSelection(self._indice_tipo())
+        self.rot_cx_pasta = wx.StaticText(painel, label="Pasta")
+        self.cx_pasta = wx.Choice(painel, name="Pasta")
+        self.rot_cx_pasta.Show(False)
+        self.cx_pasta.Show(False)
         rot_cx_filtro = wx.StaticText(painel, label="Filtro")
         self.cx_filtro = wx.Choice(painel, name="Filtro")
         self._rot_filtros = (rot_cx_conta, rot_cx_tipo, rot_cx_filtro)
@@ -1590,6 +1605,7 @@ class Janela(wx.Frame):
         self.botao_sair.Bind(wx.EVT_BUTTON, seguro(lambda e: self._sair()))
         self.cx_conta.Bind(wx.EVT_CHOICE, seguro(self._ao_filtro_conta))
         self.cx_tipo.Bind(wx.EVT_CHOICE, seguro(self._ao_filtro_tipo))
+        self.cx_pasta.Bind(wx.EVT_CHOICE, seguro(self._ao_filtro_pasta))
         self.cx_filtro.Bind(wx.EVT_CHOICE, seguro(self._ao_filtro_pers))
         rot_conv = wx.StaticText(painel, label="Conversas")
         self.lista_conv = ListaDeTextos(painel, name="Conversas")
@@ -1657,6 +1673,7 @@ class Janela(wx.Frame):
         self._controles_atalho = [
             (rot_cx_conta, "Serviço ou conta", "ir_filtro_conta", ""),
             (rot_cx_tipo, "Tipo de conversa", "ir_filtro_tipo", ""),
+            (self.rot_cx_pasta, "Pasta", "ir_pasta", ""),
             (rot_cx_filtro, "Filtro", "ir_filtro_conta", ""),
             (rot_busca, "Buscar conversa", "buscar_conv", ""),
             (self.botao_busca, "Busca por critérios", "busca_criterios", ""),
@@ -1675,6 +1692,8 @@ class Janela(wx.Frame):
         esq.Add(self.cx_conta, 0, wx.EXPAND | wx.BOTTOM, 6)
         esq.Add(rot_cx_tipo, 0, wx.BOTTOM, 2)
         esq.Add(self.cx_tipo, 0, wx.EXPAND | wx.BOTTOM, 6)
+        esq.Add(self.rot_cx_pasta, 0, wx.BOTTOM, 2)
+        esq.Add(self.cx_pasta, 0, wx.EXPAND | wx.BOTTOM, 6)
         esq.Add(rot_cx_filtro, 0, wx.BOTTOM, 2)
         esq.Add(self.cx_filtro, 0, wx.EXPAND | wx.BOTTOM, 6)
         esq.Add(rot_busca, 0, wx.BOTTOM, 2)
@@ -2010,6 +2029,7 @@ class Janela(wx.Frame):
         log.info("fala direta pelo NVDA: %s", self.fala.ativa())
         self._apagar_expiradas()
         wx.CallLater(5000, self._conferir_agendadas)
+        wx.CallLater(30000, self._conferir_pedidos_de_entrada)
         threading.Thread(target=self._conferir_copia_ao_abrir, daemon=True,
                          name="conferir-copia").start()
         saude_dados.ao_falhar = lambda onde, detalhe: wx.CallAfter(
@@ -2668,7 +2688,8 @@ class Janela(wx.Frame):
         prefixo = conv.id + "#"
         return sorted((c for c in self.indice.values()
                        if c.conta_id == conv.conta_id
-                       and c.id.startswith(prefixo)),
+                       and c.id.startswith(prefixo)
+                       and not c.id[len(prefixo):].startswith("c")),
                       key=lambda c: (not c.fixada, -c.data))
 
     def _escolher_topico(self, conv):
@@ -2691,6 +2712,7 @@ class Janela(wx.Frame):
 
     def _ordenar(self):
         self._atualizar_caixa_conta()
+        self._atualizar_caixa_pasta()
         # o grupo com topicos mostra os nao lidas de todos. Uma passada so:
         # procurar os topicos de cada conversa entre todas (_topicos_de) era
         # quadratico e, chamado a cada mensagem, travava a janela com
@@ -4464,6 +4486,88 @@ class Janela(wx.Frame):
         self.cx_conta.Set([r for _, r in opcoes])
         self.cx_conta.SetSelection(valores.index(self.filtro_conta))
 
+    # ------------------------------------------- pastas e listas
+    def _atualizar_caixa_pasta(self):
+        """A terceira caixa: so aparece quando o filtro de contas aponta para
+        uma conta so (conta escolhida, ou servico com uma unica conta) e ela
+        tem pastas (Telegram) ou listas (WhatsApp)."""
+        cid, pastas, servico = None, [], ""
+        motivo = ("Os filtros personalizados estão ativados; a caixa de "
+                  "pastas e listas não está na tela.")
+        if self.contas is not None:
+            ligado = bool(self.cfg.get("listas_do_whatsapp"))
+            for d in self.cfg.contas():
+                outro = self.contas.provedor(d["id"]) \
+                    if d["servico"] == "whatsapp" else None
+                if outro is not None and hasattr(outro, "ativar_listas"):
+                    outro.ativar_listas(ligado)
+        if not self._filtros_em_uso() and self.contas is not None:
+            contas = [(d["id"], d["servico"]) for d in self.cfg.contas()]
+            cid = pastas_nucleo.conta_unica(self.filtro_conta, contas)
+            prov = self.contas.provedor(cid) if cid else None
+            servico = dict(contas).get(cid, "")
+            if cid is None:
+                motivo = ("A caixa de pastas e listas só aparece com uma "
+                          "conta escolhida, ou um serviço que tenha uma só "
+                          "conta. Escolha uma na caixa de serviço ou conta.")
+            elif servico == "whatsapp" and                     not self.cfg.get("listas_do_whatsapp"):
+                motivo = ("As listas do WhatsApp estão desligadas. Ligue em "
+                          "Configurações, Interface.")
+            else:
+                motivo = ("Esta conta do %s não tem %s." % (
+                    "WhatsApp" if servico == "whatsapp" else "Telegram",
+                    "listas" if servico == "whatsapp" else "pastas"))
+            if prov is not None:
+                pastas = prov.pastas() if hasattr(prov, "pastas") else []
+        self._motivo_sem_pasta = motivo
+        if not pastas:
+            cid = None
+        self._conta_pasta = cid
+        self._pastas_ids = {i: c for i, _n, c in pastas}
+        opcoes = [(pastas_nucleo.TODAS, pastas_nucleo.ROTULO_TODAS.get(
+            servico, "Todas"))] + [(i, n) for i, n, _c in pastas]             if pastas else []
+        valores = [v for v, _ in opcoes]
+        salvo = (self.cfg.get("filtro_pasta") or {}).get(cid, "")             if cid else ""
+        self.filtro_pasta = salvo if salvo in valores else ""
+        rotulo = pastas_nucleo.ROTULOS.get(servico, "Pasta")
+        if opcoes != self._opcoes_pasta:
+            self._opcoes_pasta = opcoes
+            self.cx_pasta.Set([r for _, r in opcoes])
+        if opcoes:
+            self.cx_pasta.SetSelection(valores.index(self.filtro_pasta))
+        if self.rot_cx_pasta.GetLabel() != rotulo:
+            self.rot_cx_pasta.SetLabel(rotulo)
+            self.cx_pasta.SetName(rotulo)
+        if self.cx_pasta.IsShown() != bool(opcoes):
+            self.rot_cx_pasta.Show(bool(opcoes))
+            self.cx_pasta.Show(bool(opcoes))
+            self.painel.Layout()
+
+    @seguro
+    def _ir_pasta(self):
+        """Alt+6: leva o foco a caixa de pastas (Telegram) ou listas
+        (WhatsApp); sem a caixa na tela, diz por que."""
+        self._atualizar_caixa_pasta()
+        if self.cx_pasta.IsShown():
+            self._ir_para(self.cx_pasta, "")
+        else:
+            bipe("erro")
+            self.fala.falar(self._motivo_sem_pasta, interromper=True)
+
+    def _ao_filtro_pasta(self, evento=None):
+        i = self.cx_pasta.GetSelection()
+        if 0 <= i < len(self._opcoes_pasta) and self._conta_pasta:
+            self._limpar_busca()
+            self.filtro_pasta = self._opcoes_pasta[i][0]
+            salvas = dict(self.cfg.get("filtro_pasta") or {})
+            salvas[self._conta_pasta] = self.filtro_pasta
+            self.cfg.set("filtro_pasta", salvas)
+            self._aplicar_filtros(falar=False)
+            if self.cfg.get("falar_quantas_no_filtro"):
+                self.fala.falar("%s, %s" % (
+                    self._opcoes_pasta[i][1], self._resumo_filtro()),
+                    interromper=True)
+
     # ------------------------------------------- filtros personalizados
     def _filtros_em_uso(self):
         """Caixa de ativar marcada e pelo menos um filtro criado."""
@@ -4484,8 +4588,13 @@ class Janela(wx.Frame):
         if self._filtro_pers_vale():
             return filtros_nucleo.passa(c, self._filtro_pers_atual(),
                                         self.busca, favoritas)
-        return m.passa_filtro(c, self.filtro_tipo, self.filtro_conta,
-                              self.busca, favoritas)
+        if not m.passa_filtro(c, self.filtro_tipo, self.filtro_conta,
+                              self.busca, favoritas):
+            return False
+        if self.filtro_pasta and c.conta_id == self._conta_pasta:
+            return pastas_nucleo.passa(c.id, self.filtro_pasta,
+                                       self._pastas_ids)
+        return True
 
     def _precisa_das_favoritas(self):
         if self._filtro_pers_vale():
@@ -4513,6 +4622,7 @@ class Janela(wx.Frame):
         for parte in (rot_filtro, self.cx_filtro):
             parte.Show(em_uso and len(lista) > 1)
         self.painel.Layout()
+        self._atualizar_caixa_pasta()
 
     def _ao_filtro_pers(self, evento=None):
         i = self.cx_filtro.GetSelection()
@@ -7048,6 +7158,8 @@ class Janela(wx.Frame):
         antes = self.atual
         volta = self._busca_global_volta
         self._busca_global_volta = None
+        volta_ao_canal = getattr(self, "_comentarios_volta", None)
+        self._comentarios_volta = None
         self.atual = None
         self.presenca = self.digitando = None
         pa = self.contas.provedor(antes[0]) if antes else None
@@ -7064,6 +7176,9 @@ class Janela(wx.Frame):
         self.lista_conv.SetFocus()
         if volta and volta["chave"] == antes:
             wx.CallAfter(self._busca_global, volta["estado"])
+        elif volta_ao_canal and volta_ao_canal["chave"] == antes and \
+                volta_ao_canal["canal"] is not None:
+            wx.CallAfter(self._abrir_conversa_de, volta_ao_canal["canal"])
 
     def _somente_leitura(self):
         """A conversa aberta nao aceita mensagens da conta? Se sim, avisa."""
@@ -7704,6 +7819,74 @@ class Janela(wx.Frame):
         finally:
             if repetir:
                 wx.CallLater(15000, self._conferir_agendadas)
+
+    def _conferir_pedidos_de_entrada(self):
+        """Avisa de pedidos de entrada esperando nos grupos do WhatsApp que a
+        pessoa administra. Na primeira vez (ao abrir) diz o que ja esperava;
+        depois, so os pedidos novos. A consulta roda fora da interface."""
+        try:
+            minutos = int(self.cfg.get("pedidos_de_entrada_intervalo") or 15)
+        except (TypeError, ValueError):
+            minutos = 15
+        wx.CallLater(max(1, minutos) * 60 * 1000,
+                     self._conferir_pedidos_de_entrada)
+        if not self.cfg.get("avisar_pedidos_de_entrada"):
+            self._pedidos_vistos = None      # ligar de novo recomeca
+            return
+        if getattr(self, "_conferindo_pedidos", False):
+            return
+        contas = []
+        for dados in self.cfg.contas():
+            prov = self.contas.provedor(dados["id"]) if self.contas else None
+            if prov is not None and self.estados.get(dados["id"]) == \
+                    ev.CONECTADA and dados.get("servico") == "whatsapp":
+                contas.append((dados["id"], dados.get("nome") or "", prov))
+        if not contas:
+            return
+        primeira = getattr(self, "_pedidos_vistos", None) is None
+        vistos = self._pedidos_vistos = (
+            {} if primeira else self._pedidos_vistos)
+        self._conferindo_pedidos = True
+
+        def trabalho():
+            novos = []        # (nome do grupo, quantos novos)
+            total = 0
+            try:
+                for cid, _nome, prov in contas:
+                    for gid, nome in prov.grupos_que_administro():
+                        ok, lista = prov.pedidos_de_entrada(gid)
+                        if not ok:
+                            continue
+                        ids = {p["id"] for p in lista}
+                        antes = vistos.get((cid, gid), set())
+                        vistos[(cid, gid)] = ids
+                        total += len(ids)
+                        n = len(ids - antes)
+                        if n:
+                            novos.append((nome, n, len(ids)))
+                        time.sleep(0.5)
+            except Exception:
+                log.exception("conferir pedidos de entrada")
+            finally:
+                wx.CallAfter(self._pedidos_conferidos, novos, primeira)
+        threading.Thread(target=trabalho, daemon=True,
+                         name="conferir-pedidos").start()
+
+    def _pedidos_conferidos(self, novos, primeira):
+        self._conferindo_pedidos = False
+        if not novos:
+            return
+        log.info("pedidos de entrada: %s", novos)
+        partes = ["%s: %d" % (nome, n if not primeira else tot)
+                  for nome, n, tot in novos]
+        total = sum((tot if primeira else n) for _nome, n, tot in novos)
+        texto = ("%d pedido%s de entrada esperando. %s." % (
+            total, "" if total == 1 else "s", "; ".join(partes))
+            if primeira else
+            "%d pedido%s novo%s de entrada. %s." % (
+                total, "" if total == 1 else "s", "" if total == 1 else "s",
+                "; ".join(partes)))
+        self.fala.falar(texto, interromper=False)
 
     def _perguntar_atrasadas(self, prov, atrasadas):
         """Sim envia agora, Nao descarta, Cancelar deixa na lista para ver
@@ -9469,6 +9652,51 @@ class Janela(wx.Frame):
                     and prov.pessoa_da_mensagem(x) is not None
                     and not x.id.startswith("local-"))
 
+    def _pode_ver_comentarios(self, x):
+        """Post de canal do Telegram que aceita comentarios?"""
+        prov = self.contas.provedor(x.conta_id) if self.contas else None
+        return bool(getattr(prov, "PODE_COMENTAR", False)
+                    and m.extras_de(x)["comentavel"])
+
+    @seguro
+    def _ver_comentarios(self):
+        """Abre, como uma conversa, os comentarios do post selecionado de um
+        canal do Telegram. Esc volta ao canal."""
+        x = self._mensagem_selecionada()
+        if x is None:
+            self.fala.falar("Selecione um post de canal.", interromper=True)
+            return
+        if not self._pode_ver_comentarios(x):
+            self.fala.falar("Esta mensagem não tem comentários.",
+                            interromper=True)
+            return
+        prov = self.contas.provedor(x.conta_id)
+        canal = self.indice.get((x.conta_id, x.conversa_id))
+        resumo = " ".join(m.conteudo(x).split())[:50]
+        self.fala.falar("Abrindo os comentários...", interromper=True)
+
+        def trabalho():
+            try:
+                ok, texto, conv = prov.comentarios_de(
+                    x.conversa_id, x.id, resumo)
+            except Exception:
+                log.exception("comentarios do post")
+                ok, texto, conv = False, "Não consegui abrir os " \
+                    "comentários.", None
+            wx.CallAfter(self._abrir_comentarios, ok, texto, conv, canal)
+        threading.Thread(target=trabalho, daemon=True,
+                         name="comentarios").start()
+
+    def _abrir_comentarios(self, ok, texto, conv, canal):
+        if not ok or conv is None:
+            bipe("erro")
+            self.fala.falar(texto, interromper=True)
+            return
+        self.indice[conv.chave] = conv
+        self._abrir_conversa_de(conv)
+        # Esc nos comentarios volta ao canal, nao a lista de conversas
+        self._comentarios_volta = {"chave": conv.chave, "canal": canal}
+
     def _responder_em_particular(self, x=None):
         """Abre a conversa particular com quem enviou a mensagem do grupo e
         deixa a resposta pronta, citando essa mensagem."""
@@ -11080,6 +11308,8 @@ class Janela(wx.Frame):
         if self._pode_responder_em_particular(sel):
             opcoes.append(("Responder em particular",
                            self._responder_em_particular))
+        if self._pode_ver_comentarios(sel):
+            opcoes.append(("Ver os comentários do post", self._ver_comentarios))
         opcoes += [(rotulo, lambda t=tipo, v=valor: self._copiar_conteudo(
             sel, t, v)) for tipo, rotulo, valor in m.conteudos_copiaveis(
                 sel, MAX_BOTOES_LINK)]

@@ -2659,3 +2659,89 @@ def test_privacidade_manter_arquivadas_do_telegram_le_e_grava(ambiente):
     assert asyncio.run(p._ler_privacidade())["keeparchived"] == "keep"
     asyncio.run(p._gravar_privacidade("keeparchived", "unarchive"))
     assert not cliente.gravadas[-1].keep_archived_unmuted
+
+
+def test_pastas_do_telegram_viram_conversas_por_pasta():
+    from telethon.tl import types as tipos
+    pf = tipos.DialogFilter(
+        id=4, title=tipos.TextWithEntities(text="Trabalho", entities=[]),
+        pinned_peers=[], include_peers=[tipos.InputPeerUser(55, 1)],
+        exclude_peers=[], groups=True)
+    padrao = tipos.DialogFilterDefault()
+
+    async def cliente(req):
+        return types.SimpleNamespace(filters=[padrao, pf])
+    prov = tg.ProvedorTelegram.__new__(tg.ProvedorTelegram)
+    prov.cliente = cliente
+    dialogos = [
+        {"id": "55", "usuario": True, "contato": True, "bot": False,
+         "grupo": False, "canal": False, "silenciada": False,
+         "nao_lida": False, "arquivada": False},
+        {"id": "-100", "usuario": False, "contato": False, "bot": False,
+         "grupo": True, "canal": False, "silenciada": False,
+         "nao_lida": False, "arquivada": False},
+        {"id": "77", "usuario": True, "contato": True, "bot": False,
+         "grupo": False, "canal": False, "silenciada": False,
+         "nao_lida": False, "arquivada": False}]
+    asyncio.run(prov._atualizar_pastas(dialogos))
+    assert prov.pastas() == [("4", "Trabalho", {"55", "-100"})]
+
+
+def test_mudar_pasta_do_telegram_inclui_e_tira_a_conversa():
+    from telethon.tl import types as tipos
+    pf = tipos.DialogFilter(
+        id=4, title=tipos.TextWithEntities(text="Trabalho", entities=[]),
+        pinned_peers=[], include_peers=[], exclude_peers=[], groups=True)
+    enviados = []
+
+    async def cliente(req):
+        if type(req).__name__ == "GetDialogFiltersRequest":
+            return types.SimpleNamespace(filters=[pf])
+        enviados.append(req)
+    prov = tg.ProvedorTelegram.__new__(tg.ProvedorTelegram)
+    prov.cliente = cliente
+    prov._pastas = [("4", "Trabalho", set())]
+    peer = tipos.InputPeerUser(55, 1)
+    ok, _t = asyncio.run(prov._definir_pasta(peer, "55", "4", True))
+    assert ok and enviados[-1].filter.include_peers == [peer]
+    assert prov.pastas()[0][2] == {"55"}
+    ok, _t = asyncio.run(prov._definir_pasta(peer, "55", "4", False))
+    assert ok and enviados[-1].filter.include_peers == []
+    assert enviados[-1].filter.exclude_peers == [peer]   # pasta por regra
+    assert prov.pastas()[0][2] == set()
+
+
+def test_comentarios_do_post_abrem_conversa_no_grupo_de_discussao():
+    from telethon.tl import types as tipos
+    topo = types.SimpleNamespace(
+        id=900, peer_id=tipos.PeerChannel(777),
+        replies=types.SimpleNamespace(replies=3))
+    pedidos = []
+
+    class Cliente:
+        async def __call__(self, req):
+            pedidos.append(type(req).__name__)
+            return types.SimpleNamespace(messages=[topo])
+
+        async def get_input_entity(self, peer):
+            return tipos.InputPeerChannel(777, 5)
+    prov = tg.ProvedorTelegram.__new__(tg.ProvedorTelegram)
+    prov.cliente = Cliente()
+    prov.conta = types.SimpleNamespace(id="t1")
+    prov.servico = "telegram"
+    prov._conversas, prov._entidades = {}, {"-100": "canal"}
+    ok, texto, conv = asyncio.run(prov._comentarios_de("-100", 42, "Olá"))
+    assert ok and conv.id == "-100#c42" and conv.nome == "Comentários de Olá"
+    assert prov._topo_dos_comentarios == {"-100#c42": 900}
+    assert prov._entidades["-100#c42"].channel_id == 777
+    assert prov._resposta_em("-100#c42", "") == 900     # comentario novo
+    assert prov._resposta_em("-100#c42", "950") == 950  # resposta a outro
+
+
+def test_post_de_canal_com_comentarios_guarda_a_contagem():
+    msg = mensagem(7, "Post", replies=types.SimpleNamespace(
+        comments=True, replies=4))
+    x = tg.converter(msg, "t1", "-100")
+    extras = m.extras_de(x)
+    assert extras["comentavel"] and extras["comentarios"] == 4
+    assert "(4 comentários)" in m.formatar(x, 1)

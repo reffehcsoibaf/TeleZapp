@@ -1007,6 +1007,9 @@ class ControleDetalhes:
                                if d.get("silenciado") else "&Silenciar o canal",
                                self.silenciar_canal))
                 botoes.append(("&Deixar de seguir", self.deixar_de_seguir))
+        if self._pastas_da_conversa() is not None:
+            botoes.append(("Li&stas..." if self.conv.servico == "whatsapp"
+                           else "Pa&stas...", self.pastas_da_conversa))
         botoes.append(("S&om desta conversa...", self.som_da_conversa))
         botoes.append(("Mensagens fa&voritas", self.favoritas))
         botoes.append(("Mensagens fi&xadas", self.fixadas))
@@ -1027,6 +1030,61 @@ class ControleDetalhes:
                          self._botoes())
         threading.Thread(target=self._carregar, daemon=True,
                          name="detalhes").start()
+
+    def _pastas_da_conversa(self):
+        """[(id, nome, tem)] das pastas ou listas em que a conversa pode
+        entrar, ou None se a conta nao deixa mudar (ou nao tem pastas)."""
+        prov = self.prov
+        if prov is None or not getattr(
+                prov, "pode_editar_pastas", lambda: False)() or \
+                self.conv.tipo == "status":
+            return None
+        pastas = prov.pastas()
+        if not pastas:
+            return None
+        return [(i, n, self.conv.id in c) for i, n, c in pastas]
+
+    def pastas_da_conversa(self):
+        from telezapp.interface.pastas import DialogoPastas
+        itens = self._pastas_da_conversa()
+        if not itens:
+            return
+        lista = self.conv.servico == "whatsapp"
+        dlg = DialogoPastas(self.dlg, self.conv.nome, itens, lista)
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            mudancas = dlg.mudancas()
+        finally:
+            dlg.Destroy()
+        if not mudancas:
+            return
+        jan, conv, prov = self.jan, self.conv, self.prov
+        jan.fala.falar("Atualizando.", interromper=True)
+
+        def trabalho():
+            falhas, feitas = [], 0
+            for pid, nome, incluir in mudancas:
+                try:
+                    ok, texto = prov.definir_pasta(conv.id, pid, incluir)
+                except Exception:
+                    ok, texto = False, "Não consegui."
+                if ok:
+                    feitas += 1
+                else:
+                    falhas.append("%s: %s" % (nome, texto))
+            resumo = ("%d mudança%s feita%s." % (
+                feitas, "" if feitas == 1 else "s",
+                "" if feitas == 1 else "s")) if feitas else ""
+            if falhas:
+                resumo = (resumo + " " if resumo else "") + " ".join(falhas)
+            wx.CallAfter(depois, resumo)
+
+        def depois(resumo):
+            jan.fala.falar(resumo, interromper=True)
+            jan._aplicar_filtros(falar=False)
+        threading.Thread(target=trabalho, daemon=True,
+                         name="mudar-pastas").start()
 
     def som_da_conversa(self):
         dlg = DialogoSomDaConversa(self.dlg, self.jan, self.conv)

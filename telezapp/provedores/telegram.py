@@ -18,6 +18,7 @@ from telezapp import NOME, VERSAO, config
 from telezapp.midia import armazem
 from telezapp.nucleo import eventos as ev
 from telezapp.nucleo import mencoes as nucleo_mencoes
+from telezapp.nucleo import pastas as pastas_nucleo
 from telezapp.nucleo import modelos as m
 from telezapp.nucleo import localizacao, ponte_web_app, previa_links, robos
 from telezapp.nucleo.ia import catalogo
@@ -658,6 +659,9 @@ def converter(msg, conta_id, conversa_id, lidas_ate=0, nome_padrao=""):
         nome_arquivo=nome_arquivo, tamanho=tamanho, estado=estado,
         resposta_a=str(resposta_a) if resposta_a else "")
     nova.expira = m.expira_em(nova.data, prazo_da_mensagem(msg))
+    respostas = getattr(msg, "replies", None)
+    comentavel = respostas is not None and \
+        getattr(respostas, "comments", False) is True
     links, botoes, mencoes = extras_do_telegram(msg)
     m.guardar_extras(nova, links, botoes, mencoes,
                      acoes=entradas_do_telegram(links) + (
@@ -667,6 +671,10 @@ def converter(msg, conta_id, conversa_id, lidas_ate=0, nome_padrao=""):
     enquete = enquete_do_telegram(msg)
     if enquete:
         m.atualizar_extras(nova, enquete=enquete)
+    if comentavel:
+        # post de canal com comentarios (o canal tem grupo de discussao)
+        m.atualizar_extras(nova, comentavel=True, comentarios=int(
+            getattr(respostas, "replies", 0) or 0))
     if getattr(msg, "pinned", False) is True:
         m.atualizar_extras(nova, fixada=True)
     # o Telegram marca as mensagens que citam esta conta (@ ou nome)
@@ -1405,6 +1413,7 @@ class ProvedorTelegram(Provedor):
         # pasta de arquivadas (1): sao duas buscas. Quem diz se esta arquivada
         # e a propria conversa, nao a busca que a trouxe.
         vistas = set()
+        dialogos = []                  # o que as pastas precisam saber
         for pasta in (0, 1):
             async for d in self.cliente.iter_dialogs(
                     limit=LIMITE_CONVERSAS, folder=pasta):
@@ -1412,6 +1421,7 @@ class ProvedorTelegram(Provedor):
                 if cid in vistas:
                     continue
                 vistas.add(cid)
+                dialogos.append(self._dados_para_pastas(d, cid))
                 self._entidades[cid] = d.input_entity
                 c = m.Conversa(
                     conta_id=self.conta.id, id=cid,
@@ -1451,10 +1461,136 @@ class ProvedorTelegram(Provedor):
         self.banco.salvar_conversas(lista)
         log.info("conversas: %d em %.2fs", len(lista),
                  time.perf_counter() - inicio)
+        await self._atualizar_pastas(dialogos)
         lista += [c for c in self._conversas.values() if c.tipo == "status"]
         self.barramento.publicar(ev.ConversasAtualizadas(self.conta.id, lista))
         self._publicar_chats_de_voz()
         await self._atualizar_historias()
+
+    # ------------------------------------------------------------ pastas
+    def _dados_para_pastas(self, d, cid):
+        ent = getattr(d, "entity", None)
+        usuario = bool(getattr(d, "is_user", False))
+        return {"id": cid, "usuario": usuario,
+                "contato": bool(getattr(ent, "contact", False)),
+                "bot": bool(getattr(ent, "bot", False)) and usuario,
+                "grupo": bool(getattr(d, "is_group", False)),
+                "canal": bool(getattr(d, "is_channel", False)) and not
+                bool(getattr(d, "is_group", False)),
+                "silenciada": silencio_do_dialogo(d) != 0.0,
+                "nao_lida": bool(d.unread_count) or bool(
+                    getattr(d.dialog, "unread_mark", False)),
+                "arquivada": getattr(d, "folder_id", None) == 1}
+
+    def pastas(self):
+        return list(getattr(self, "_pastas", []))
+
+    def pode_editar_pastas(self):
+        return True
+
+    def definir_pasta(self, conversa_id, pasta_id, incluir):
+        entidade = self._entidades.get(conversa_id)
+        if entidade is None:
+            return False, "Não achei esta conversa no Telegram."
+        try:
+            return self._executar(self._definir_pasta(
+                entidade, conversa_id, str(pasta_id), bool(incluir)))
+        except Exception as e:
+            log.warning("pasta do Telegram não mudou: %s: %s",
+                        type(e).__name__, str(e)[:120])
+            return False, "O Telegram não aceitou a mudança da pasta."
+
+    async def _definir_pasta(self, entidade, cid, pasta_id, incluir):
+        from telethon import utils
+        from telethon.tl import types as tipos
+        from telethon.tl.functions.messages import (
+            GetDialogFiltersRequest, UpdateDialogFilterRequest)
+        resposta = await self.cliente(GetDialogFiltersRequest())
+        f = next((x for x in getattr(resposta, "filters", resposta)
+                  if isinstance(x, tipos.DialogFilter)
+                  and str(x.id) == pasta_id), None)
+        if f is None:
+            return False, ("Não achei a pasta (pastas compartilhadas não "
+                           "podem ser mudadas aqui).")
+
+        def sem(lista):
+            return [p for p in lista
+                    if str(utils.get_peer_id(p)) != str(cid)]
+        f.exclude_peers = sem(f.exclude_peers)
+        if incluir:
+            if not any(str(utils.get_peer_id(p)) == str(cid)
+                       for p in f.include_peers):
+                f.include_peers = list(f.include_peers) + [entidade]
+        else:
+            f.include_peers = sem(f.include_peers)
+            f.pinned_peers = sem(f.pinned_peers)
+            if any(getattr(f, k, False) for k in (
+                    "contacts", "non_contacts", "groups", "broadcasts",
+                    "bots")):
+                # a pasta pega a conversa por regra: tira por exclusao
+                f.exclude_peers = list(f.exclude_peers) + [entidade]
+        await self.cliente(UpdateDialogFilterRequest(id=f.id, filter=f))
+        novas = []
+        for i, nome, conjunto in getattr(self, "_pastas", []):
+            if i == pasta_id:
+                conjunto = set(conjunto)
+                (conjunto.add if incluir else conjunto.discard)(str(cid))
+            novas.append((i, nome, conjunto))
+        self._pastas = novas
+        log.info("pasta do Telegram %s: conversa %s", pasta_id,
+                 "incluída" if incluir else "tirada")
+        return True, "Conversa %s a pasta." % (
+            "colocada na" if incluir else "tirada da")
+
+    async def _atualizar_pastas(self, dialogos):
+        """Le as pastas da conta e guarda, de cada uma, as conversas que ela
+        mostra. Falha aqui nao atrapalha a lista de conversas."""
+        try:
+            from telethon import utils
+            from telethon.tl import types as tipos
+            from telethon.tl.functions.messages import GetDialogFiltersRequest
+            resposta = await self.cliente(GetDialogFiltersRequest())
+            filtros = getattr(resposta, "filters", resposta)
+
+            def ids(pessoas):
+                saida = []
+                for p in pessoas or ():
+                    try:
+                        saida.append(str(utils.get_peer_id(p)))
+                    except Exception:
+                        pass
+                return saida
+
+            pastas = []
+            for f in filtros:
+                if not isinstance(f, (tipos.DialogFilter,
+                                      tipos.DialogFilterChatlist)):
+                    continue            # "todas as conversas" nao e pasta
+                titulo = getattr(f, "title", "")
+                titulo = getattr(titulo, "text", titulo)
+                dados = {
+                    "id": str(f.id), "nome": titulo or "Pasta sem nome",
+                    "incluir": ids(getattr(f, "include_peers", ())) +
+                    ids(getattr(f, "pinned_peers", ())),
+                    "excluir": ids(getattr(f, "exclude_peers", ()))}
+                for campo, chave in (
+                        ("contacts", "contatos"),
+                        ("non_contacts", "nao_contatos"),
+                        ("groups", "grupos"), ("broadcasts", "canais"),
+                        ("bots", "bots"),
+                        ("exclude_muted", "sem_silenciadas"),
+                        ("exclude_read", "sem_lidas"),
+                        ("exclude_archived", "sem_arquivadas")):
+                    dados[chave] = bool(getattr(f, campo, False))
+                p = pastas_nucleo.pasta_de_dados(dados)
+                pastas.append((p["id"], p["nome"],
+                               pastas_nucleo.membros(p, dialogos)))
+            if pastas != getattr(self, "_pastas", None):
+                log.info("pastas do Telegram: %s", [
+                    (n, len(c)) for _i, n, c in pastas])
+            self._pastas = pastas
+        except Exception:
+            log.exception("não consegui ler as pastas do Telegram")
 
     PODE_TEMPORARIAS = True
 
@@ -2868,12 +3004,53 @@ class ProvedorTelegram(Provedor):
         self._entidades[cid] = self._entidades.get(str(chat))
         return conv
 
-    @staticmethod
-    def _resposta_em(conversa_id, resposta_a):
+    PODE_COMENTAR = True
+
+    def comentarios_de(self, conversa_id, post_id, resumo=""):
+        """Abre os comentarios de um post de canal: (True, "", Conversa) ou
+        (False, texto, None). Os comentarios moram no grupo de discussao do
+        canal, numa conversa propria (`canal#c<post>`, escondida da lista
+        como as de topicos) que le e responde a mensagem do post la."""
+        try:
+            return self._executar(self._comentarios_de(
+                str(conversa_id), int(post_id), resumo))
+        except Exception as e:
+            log.warning("comentários não abertos: %s: %s",
+                        type(e).__name__, str(e)[:120])
+            return False, "Este post não aceita comentários.", None
+
+    async def _comentarios_de(self, canal, post, resumo):
+        from telethon.tl import functions
+        ent = await self._entidade(canal)
+        r = await self.cliente(functions.messages.GetDiscussionMessageRequest(
+            peer=ent, msg_id=post))
+        if not r.messages:
+            return False, "Este post não tem grupo de comentários.", None
+        topo = r.messages[0]
+        grupo = await self.cliente.get_input_entity(topo.peer_id)
+        cid = "%s%sc%d" % (canal, SEPARADOR_TOPICO, post)
+        nome = ("Comentários de %s" % resumo) if resumo \
+            else "Comentários do post"
+        conv = m.Conversa(self.conta.id, cid, nome, self.servico, "grupo")
+        self._conversas[cid] = conv
+        self._entidades[cid] = grupo
+        if not hasattr(self, "_topo_dos_comentarios"):
+            self._topo_dos_comentarios = {}
+        self._topo_dos_comentarios[cid] = int(topo.id)
+        log.info("comentários do post %d: %d no grupo de discussão", post,
+                 int(getattr(getattr(topo, "replies", None), "replies", 0)
+                     or 0))
+        return True, "", conv
+
+    def _resposta_em(self, conversa_id, resposta_a):
         """A que mensagem a nova responde: a escolhida ou, na conversa de um
-        topico (fora o Geral), o proprio topico, que e onde ela vai cair."""
+        topico (fora o Geral), o proprio topico, que e onde ela vai cair; nos
+        comentarios de um post, a mensagem do post no grupo de discussao."""
         if resposta_a:
             return int(resposta_a)
+        topo = getattr(self, "_topo_dos_comentarios", {}).get(conversa_id)
+        if topo:
+            return topo
         topico = separar_topico(conversa_id)[1]
         return topico if topico > TOPICO_GERAL else None
 
@@ -2908,7 +3085,11 @@ class ProvedorTelegram(Provedor):
         nome = conv.nome if conv else ""
         msgs = []
         topico = separar_topico(conversa_id)[1]
-        if topico > TOPICO_GERAL:
+        topo = getattr(self, "_topo_dos_comentarios", {}).get(conversa_id)
+        if topo:
+            fonte = self.cliente.iter_messages(ent, limit=limite,
+                                               reply_to=topo)
+        elif topico > TOPICO_GERAL:
             fonte = self.cliente.iter_messages(ent, limit=limite,
                                                reply_to=topico)
         else:
@@ -3192,7 +3373,11 @@ class ProvedorTelegram(Provedor):
             lidas_ate = conv.lidas_ate if conv else 0
             nome = conv.nome if conv else ""
             topico = separar_topico(conversa_id)[1]
-            if topico > TOPICO_GERAL:
+            topo = getattr(self, "_topo_dos_comentarios", {}).get(conversa_id)
+            if topo:
+                fonte = self.cliente.iter_messages(
+                    ent, limit=limite, offset_id=ancora, reply_to=topo)
+            elif topico > TOPICO_GERAL:
                 fonte = self.cliente.iter_messages(
                     ent, limit=limite, offset_id=ancora, reply_to=topico)
             else:
@@ -3559,6 +3744,8 @@ class ProvedorTelegram(Provedor):
         if conversa_id.startswith(PREFIXO_STATUS):
             await self._ver_historias(conversa_id)
             return
+        if conversa_id in getattr(self, "_topo_dos_comentarios", {}):
+            return              # comentarios: nao ha o que marcar como lido
         ent = await self._entidade(conversa_id)
         topico = separar_topico(conversa_id)[1]
         conv = self._conversas.get(conversa_id)

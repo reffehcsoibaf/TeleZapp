@@ -260,3 +260,16 @@ def test_so_conta_como_enviado_com_o_ok_do_worker(monkeypatch, resposta,
         assert uso._enviar({"versao": "x"}) is esperado
     finally:
         s.shutdown()
+
+
+def test_espera_da_autenticacao_sai_do_tempo_de_abertura(monkeypatch):
+    import logging
+    import telezapp.__main__ as principal
+    from telezapp.nucleo import uso
+    monkeypatch.setattr(principal, "_INICIO", 100.0)
+    monkeypatch.setattr(uso, "INICIO", 1000.0)
+    log = logging.getLogger("teste")
+    principal._descontar_a_espera(log, 0.05)       # sem protecao: nada
+    assert principal._INICIO == 100.0 and uso.INICIO == 1000.0
+    principal._descontar_a_espera(log, 3.0)        # Hello levou 3 s
+    assert principal._INICIO == 103.0 and uso.INICIO == 1003.0

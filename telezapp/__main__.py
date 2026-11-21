@@ -24,6 +24,23 @@ def etapa(log, nome):
              time.monotonic() - _INICIO)
 
 
+def _descontar_a_espera(log, segundos):
+    """O tempo que a pessoa levou para provar quem e (Windows Hello ou PIN)
+    nao e demora do programa: sai da conta da abertura, tanto das etapas do
+    log quanto do tempo enviado nas informacoes de uso."""
+    global _INICIO
+    if segundos < 0.2:
+        return                  # sem protecao ao entrar: nada a descontar
+    _INICIO += segundos
+    try:
+        from telezapp.nucleo import uso
+        uso.INICIO += segundos
+    except Exception:
+        pass
+    log.info("abertura: a proteção ao entrar levou %.1f s (não conta no "
+             "tempo de abertura)", segundos)
+
+
 STD_ERROR_HANDLE = -12
 
 
@@ -364,8 +381,11 @@ def main():
     # seguranca ao entrar: antes de abrir o banco e as contas
     try:
         from telezapp.interface import seguranca as ui_seg
-        if not ui_seg.verificar_ao_abrir(config.Config(),
-                                         config.pasta_dados()):
+        inicio_da_prova = time.monotonic()
+        autenticou = ui_seg.verificar_ao_abrir(config.Config(),
+                                               config.pasta_dados())
+        _descontar_a_espera(log, time.monotonic() - inicio_da_prova)
+        if not autenticou:
             log.info("abertura: sem autenticação; saindo")
             if marca:
                 try:

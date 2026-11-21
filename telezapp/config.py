@@ -378,6 +378,15 @@ OPCOES = (
           "aparelhos continuam tocando. Vale para as chamadas que chegarem "
           "depois de desmarcar.", servico="whatsapp,telegram",
           grupo="Chamadas de voz e vídeo"),
+    Opcao("listas_do_whatsapp", "Listas do WhatsApp como filtro",
+          "Interface", True,
+          "Com uma só conta do WhatsApp escolhida na caixa de contas, mostra "
+          "a caixa Lista para ver só as conversas de uma das suas listas, e "
+          "o botão Listas, nos detalhes da conversa, para pôr ou tirar a "
+          "conversa de uma lista. Na primeira vez, o TeleZapp baixa as "
+          "listas do celular (o que pode repetir avisos antigos de "
+          "conversas arquivadas ou fixadas). Desmarcada, a caixa e o botão "
+          "somem e o TeleZapp não baixa nada.", servico="whatsapp"),
     Opcao("chat_de_voz_telegram",
           "Chat de voz de grupo e lives de canal do Telegram",
           CATEGORIA_EXPERIMENTAL, False,
@@ -771,6 +780,21 @@ OPCOES = (
           "Faz o TeleZapp aparecer entre as opções do Windows para abrir links "
           "tg:// e whatsapp://. Quem abre continua sendo o programa que você "
           "escolheu: troque em Configurações do Windows, Aplicativos padrão."),
+    Opcao("avisar_pedidos_de_entrada",
+          "Avisar pedidos de entrada nos meus grupos", "Mensagens", False,
+          "Nos grupos do WhatsApp em que você é administrador e que exigem "
+          "aprovação, o TeleZapp olha se há pedidos de entrada esperando: "
+          "ao abrir e, depois, de tempos em tempos (veja o intervalo "
+          "abaixo). Ao abrir, fala quantos pedidos esperam e em quais "
+          "grupos; depois, só fala quando chegar pedido novo. A janela dos "
+          "pedidos continua em Detalhes do grupo. Desmarcada, o TeleZapp não "
+          "consulta nada."),
+    Opcao("pedidos_de_entrada_intervalo",
+          "Intervalo da consulta de pedidos de entrada", "Mensagens", 15,
+          "De quanto em quanto tempo consultar os pedidos, enquanto o "
+          "TeleZapp estiver aberto.",
+          escolhas=((5, "5 minutos"), (15, "15 minutos"), (30, "30 minutos"),
+                    (60, "1 hora"))),
     Opcao("avisar_disco_externo",
           "Avisar quando os dados estão em disco externo", "Sistema", True,
           "Se a pasta de dados do TeleZapp está em um pendrive, disco "
@@ -1580,6 +1604,7 @@ PADROES.update({
     "telegram_api_hash": "",
     "filtro_conversas": "todas",   # tipo escolhido na janela principal
     "filtro_conta": "todas",       # servico ou conta escolhido nela
+    "filtro_pasta": {},            # conta -> pasta (ou lista) escolhida
     # o que o aviso falado de mensagem nova diz (nucleo/aviso_de_nova.py)
     "aviso_nova": {"ordem": ["inicio", "conversa", "servico", "conta",
                              "autor", "hora", "conteudo"],

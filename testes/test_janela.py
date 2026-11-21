@@ -2969,6 +2969,7 @@ def test_menu_unico_com_submenus_na_ordem_pedida(j):
         "Ir para a lista de conversas", "Ir para a lista de mensagens",
         "Ir para o campo editável", "Ir para o filtro de serviço ou conta",
         "Ir para o filtro de tipo de conversa",
+        "Ir para a caixa de pastas ou listas",
         "Ir para a mensagem respondida",
         "Próxima menção ou resposta a mim",
         "Menção ou resposta a mim anterior",
@@ -10761,3 +10762,24 @@ def test_gravacao_curta_continua_saindo_na_hora(j, monkeypatch, tmp_path):
     j._gravar_rapido(MICROFONE)
     j._gravar_rapido(MICROFONE)
     assert [p for p in j.contas.p.pedidos if p[0] == "arquivo"]
+
+
+def test_terceira_caixa_so_com_uma_conta_do_servico():
+    from telezapp.nucleo import pastas as pn
+    contas = [("t1", "telegram"), ("t2", "telegram"), ("w1", "whatsapp")]
+    assert pn.conta_unica("telegram", contas) is None
+    assert pn.conta_unica("conta:t2", contas) == "t2"
+    assert pn.conta_unica("whatsapp", contas) == "w1"
+
+
+def test_alt6_diz_por_que_a_caixa_de_pastas_nao_esta_disponivel(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.filtro_conta = "todas"
+    j._ir_pasta()
+    assert "uma conta escolhida" in ditas[-1]
+    j._aplicar_filtros_personalizados({"ativo": True, "lista": [
+        {"id": "a", "nome": "Grupos", "contas": [], "tipos": ["grupos"]}]})
+    j._ir_pasta()
+    assert "personalizados" in ditas[-1]
+    assert j.cx_pasta.visivel is False

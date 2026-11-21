@@ -2675,9 +2675,30 @@ class ProvedorWhatsApp(Provedor):
                 break
             if not achou:
                 log.info("recado do contato: o WhatsApp não devolveu a pessoa")
+            if "recado" not in dados:
+                self._recado_pelo_lid(jid, dados)
         except Exception:
             log.info("sem o recado do contato", exc_info=True)
         return dados
+
+    def _recado_pelo_lid(self, jid, dados):
+        """O recado veio em branco pelo telefone: o WhatsApp guarda a pessoa
+        tambem pelo endereco LID, entao pergunta de novo por ele. Registra o
+        que veio, para saber se isso explica os recados que faltam."""
+        if jid.Server != "s.whatsapp.net":
+            return
+        lid = self._lid_do_pn(jid)
+        if lid is None or not lid.User:
+            log.info("recado do contato: sem endereço LID para tentar de novo")
+            return
+        for u in self.cliente.get_user_info(lid):
+            bruto = u.UserInfo.Status or ""
+            recado = recado_visivel(bruto)
+            log.info("recado do contato pelo LID: %d caracteres (%d "
+                     "visíveis)", len(bruto), len(recado))
+            if recado:
+                dados["recado"] = recado
+            break
 
     def completar_nome(self, conversa_id):
         """Conversa so com o telefone: procura o nome na rede (agenda e
@@ -3933,9 +3954,17 @@ class ProvedorWhatsApp(Provedor):
     def _ao_mutacao_de_estado(self, cliente, evento):
         """Todo aviso de mutacao do estado do aplicativo; so interessa o
         ajuste de manter arquivadas (no WhatsApp o campo diz se a conversa
-        DESARQUIVA ao chegar mensagem: manter e o contrario)."""
+        DESARQUIVA ao chegar mensagem: manter e o contrario) e as listas
+        (etiquetas: label_edit cria, muda e apaga; label_jid poe e tira
+        conversas)."""
         try:
             indice = list(evento.Index)
+            if indice and indice[0] in ("label_edit", "label_jid"):
+                self._ao_mutacao_de_lista(evento, indice)
+                return
+            if indice and indice[0] == "contact":
+                self._ao_mutacao_de_contato(evento, indice)
+                return
             if str(evento.Name) != "regular_low" or \
                     indice != [self.INDICE_MANTER_ARQUIVADAS]:
                 return
@@ -3951,6 +3980,260 @@ class ProvedorWhatsApp(Provedor):
                      " (baixando a coleção)" if evento.FromFullSync else "")
         except Exception:
             log.exception("erro ao tratar o aviso do estado do aplicativo")
+
+    def _ao_mutacao_de_contato(self, evento, indice):
+        """O celular salvou, renomeou ou apagou um contato: o nome da
+        conversa muda na hora, sem esperar a proxima leitura da agenda. O
+        nome dado aqui no TeleZapp (Contatos) continua valendo mais. Num
+        download completo (varios de uma vez) a agenda e lida do armazem, nao
+        daqui."""
+        if evento.FromFullSync or len(indice) < 2:
+            return
+        acao = evento.Action.contactAction
+        enderecos = {indice[1], acao.lidJID, acao.pnJID} - {""}
+        for e in list(enderecos):
+            try:
+                usuario, servidor = jid_de_texto(e)
+                outro = self._numero_do_jid(_jid_obj(usuario, servidor))                     if servidor == "lid" else self._lid_do_pn(
+                        _jid_obj(usuario, servidor))
+                if outro is not None and outro.User:
+                    enderecos.add(jid_texto(outro))
+            except Exception:
+                pass
+        nome = "" if evento.Remove else (acao.fullName or acao.firstName)
+        if nome and parece_codigo(nome):
+            nome = ""
+        alteradas = []
+        with self._trava:
+            for e in enderecos:
+                conv = self._conversas.get(e)
+                if conv is None or conv.tipo != "privada" or                         self.banco.nome_de_contato(self.conta.id, e):
+                    continue
+                usuario, servidor = jid_de_texto(e)
+                novo = nome or self._nome_contato(_jid_obj(usuario, servidor))
+                if novo and novo != conv.nome:
+                    conv.nome = novo
+                    alteradas.append(conv)
+        if alteradas:
+            self.banco.salvar_conversas(alteradas)
+            self._publicar_conversas()
+            log.info("nome de contato mudou no celular (%d conversa%s)",
+                     len(alteradas), "" if len(alteradas) == 1 else "s")
+
+    # ------------------------------------------------------------ listas
+    # As listas do WhatsApp sao etiquetas do estado do aplicativo: label_edit
+    # [id] traz nome, tipo (5 = lista criada pela pessoa) e se foi apagada;
+    # label_jid [id, conversa] diz se a conversa esta na lista. O neonize so
+    # entrega o que muda; a lista inteira vem de um download completo, feito
+    # uma vez por conta (e guardado em arquivo) quando a opcao esta ligada.
+    TIPO_LISTA_DA_PESSOA = 5
+
+    def _arquivo_listas(self):
+        return os.path.join(self.pasta_sessoes, "%s-listas.json"
+                            % self.conta.id)
+
+    def _carregar_listas(self):
+        if getattr(self, "_listas", None) is not None:
+            return
+        self._listas, self._listas_conversas = {}, {}
+        self._listas_baixadas = False
+        try:
+            with open(self._arquivo_listas(), encoding="utf-8") as f:
+                dado = json.load(f)
+            self._listas = {str(k): v for k, v in dado["listas"].items()}
+            self._listas_conversas = {
+                str(k): set(v) for k, v in dado["conversas"].items()}
+            # versao 2: arquivos anteriores podem estar incompletos
+            self._listas_baixadas = bool(dado.get("baixadas")) and \
+                dado.get("versao") == 2
+        except (OSError, ValueError, KeyError, AttributeError):
+            pass
+
+    def _guardar_listas(self):
+        try:
+            with open(self._arquivo_listas(), "w", encoding="utf-8") as f:
+                json.dump({"versao": 2, "listas": self._listas, "baixadas":
+                           self._listas_baixadas,
+                           "conversas": {k: sorted(v) for k, v in
+                                         self._listas_conversas.items()}}, f)
+        except OSError:
+            log.warning("não guardei as listas do WhatsApp")
+
+    def _ao_mutacao_de_lista(self, evento, indice):
+        self._carregar_listas()
+        id_ = str(indice[1]) if len(indice) > 1 else ""
+        if not id_:
+            return
+        if indice[0] == "label_edit":
+            a = evento.Action.labelEditAction
+            if evento.Remove or a.deleted:
+                self._listas.pop(id_, None)
+                self._listas_conversas.pop(id_, None)
+            else:
+                self._listas[id_] = {"nome": a.name, "tipo": int(a.type),
+                                     "ordem": int(a.orderIndex)}
+        elif len(indice) > 2:
+            conversas = self._listas_conversas.setdefault(id_, set())
+            if evento.Remove or not \
+                    evento.Action.labelAssociationAction.labeled:
+                conversas.discard(indice[2])
+            else:
+                conversas.add(indice[2])
+        if not evento.FromFullSync:
+            self._guardar_listas()
+        if getattr(self, "_listas_registradas", 0) < 12:
+            self._listas_registradas = getattr(
+                self, "_listas_registradas", 0) + 1
+            log.info("lista do WhatsApp: %s %s%s (coleção %s)", indice[0],
+                     "***" if indice[0] == "label_jid" else indice[1:],
+                     " (download completo)" if evento.FromFullSync else "",
+                     evento.Name)
+
+    def ativar_listas(self, ligado):
+        """Liga ou desliga o uso das listas. Ligado e conectado, baixa o
+        estado completo uma vez por conta (em outra thread)."""
+        self._listas_ativas = bool(ligado)
+        if not ligado or not self._conectada or self.cliente is None:
+            return
+        self._carregar_listas()
+        if self._listas_baixadas or getattr(self, "_baixando_listas", False):
+            return
+        self._baixando_listas = True
+
+        def baixar():
+            try:
+                # as etiquetas vem na colecao "regular"; a regular_low deste
+                # celular nao fecha o hash e nao e necessaria aqui
+                self.cliente.fetch_app_state("regular", full_sync=True)
+                time.sleep(2)           # os avisos chegam em outra thread
+                self._listas_baixadas = True
+                self._guardar_listas()
+                log.info("listas do WhatsApp: %s", [
+                    (d.get("nome"), d.get("tipo"), self._resumo_de_enderecos(
+                        self._listas_conversas.get(i, ())))
+                    for i, d in sorted((self._listas or {}).items())])
+            except Exception as e:
+                # nao tenta de novo ate a proxima sessao
+                self._listas_baixadas = True
+                log.warning("não baixei as listas do WhatsApp: %s: %s",
+                            type(e).__name__, str(e)[:200])
+            finally:
+                self._baixando_listas = False
+        threading.Thread(target=baixar, daemon=True,
+                         name="baixar-listas").start()
+
+    def _listas_da_pessoa(self):
+        return sorted(
+            ((i, d) for i, d in (self._listas or {}).items()
+             if d.get("tipo") == self.TIPO_LISTA_DA_PESSOA and d.get("nome")),
+            key=lambda x: (x[1].get("ordem", 0), x[1]["nome"].lower()))
+
+    @staticmethod
+    def _resumo_de_enderecos(enderecos):
+        """Quantos enderecos de cada tipo (s.whatsapp.net, lid, g.us)."""
+        contagem = {}
+        for e in enderecos:
+            servidor = e.split("@", 1)[-1]
+            contagem[servidor] = contagem.get(servidor, 0) + 1
+        return contagem
+
+    def _com_o_outro_endereco(self, enderecos):
+        """A conversa pode estar guardada aqui pelo telefone ou pelo endereco
+        LID, e a lista pode dizer o outro: leva os dois."""
+        mapa = getattr(self, "_enderecos_alternativos", None)
+        if mapa is None:
+            mapa = self._enderecos_alternativos = {}
+        saida = set(enderecos)
+        for e in enderecos:
+            if e not in mapa:
+                alt = ""
+                try:
+                    usuario, servidor = jid_de_texto(e)
+                    if servidor == "lid":
+                        pn = self._pn_do_lid(_jid_obj(usuario, servidor))
+                        alt = jid_texto(pn) if pn is not None else ""
+                    elif servidor == "s.whatsapp.net":
+                        lid = self._lid_do_pn(_jid_obj(usuario, servidor))
+                        alt = jid_texto(lid) if lid is not None else ""
+                except Exception:
+                    alt = ""
+                if alt or self._conectada:
+                    mapa[e] = alt         # sem conexao, tenta de novo depois
+            if mapa.get(e):
+                saida.add(mapa[e])
+        return saida
+
+    def pode_editar_pastas(self):
+        return bool(getattr(self, "_listas_ativas", False))
+
+    def definir_pasta(self, conversa_id, pasta_id, incluir):
+        """Poe ou tira a conversa de uma lista: o aviso de estado label_jid
+        [lista, conversa], colecao regular, versao 3, como o celular. Sem
+        teste no celular ate o responsavel conferir."""
+        if self.cliente is None or not self._conectada:
+            return False, "Sem conexão com o WhatsApp."
+        self._carregar_listas()
+        pasta_id = str(pasta_id)
+        usuario, servidor = jid_de_texto(conversa_id)
+        formas = {conversa_id}
+        if servidor == "s.whatsapp.net":
+            lid = self._lid_do_pn(_jid_obj(usuario, servidor))
+            if lid is not None and lid.User:
+                formas.add("%s@%s" % (lid.User, lid.Server))
+        elif servidor == "lid":
+            pn = self._pn_do_lid(_jid_obj(usuario, servidor))
+            if pn is not None and pn.User:
+                formas.add("%s@%s" % (pn.User, pn.Server))
+        # a forma que as listas ja usam para esta conversa (o iPhone guarda
+        # a pessoa pelo LID); sem rastro, o LID se conhecido, senao o numero
+        usadas = {e for v in self._listas_conversas.values() for e in v
+                  if e in formas}
+        if incluir:
+            alvo = usadas or {next((f for f in sorted(formas)
+                                    if f.endswith("@lid")),
+                                   conversa_id)}
+        else:
+            alvo = (self._listas_conversas.get(pasta_id, set()) & formas) \
+                or usadas or {conversa_id}
+        try:
+            from neonize.proto.Neonize_pb2 import MutationInfo, PatchInfo
+            from neonize.proto.waSyncAction.WAWebProtobufSyncAction_pb2 import (
+                LabelAssociationAction, SyncActionValue)
+            valor = SyncActionValue(
+                labelAssociationAction=LabelAssociationAction(
+                    labeled=bool(incluir)))
+            patch = PatchInfo(
+                Timestamp=time.time_ns(), Type=PatchInfo.REGULAR,
+                Mutations=[MutationInfo(
+                    Index=["label_jid", pasta_id, e], Version=3, Value=valor)
+                    for e in sorted(alvo)])
+            self._mandar_estado(patch)
+        except ColecaoFora:
+            return False, ("O WhatsApp não aceitou agora: o estado das "
+                           "listas está fora de sincronia.")
+        except Exception as e:
+            log.warning("lista do WhatsApp não mudou: %s: %s",
+                        type(e).__name__, str(e)[:120])
+            return False, "O WhatsApp não aceitou a mudança da lista."
+        conjunto = self._listas_conversas.setdefault(pasta_id, set())
+        if incluir:
+            conjunto |= alvo
+        else:
+            conjunto -= formas
+        self._guardar_listas()
+        log.info("lista do WhatsApp %s: conversa %s (%s)", pasta_id,
+                 "incluída" if incluir else "tirada",
+                 ", ".join(sorted({a.split("@")[1] for a in alvo})))
+        return True, "Conversa %s a lista." % (
+            "colocada na" if incluir else "tirada da")
+
+    def pastas(self):
+        if not getattr(self, "_listas_ativas", False):
+            return []
+        self._carregar_listas()
+        return [(i, d["nome"], self._com_o_outro_endereco(
+                    self._listas_conversas.get(i, ())))
+                for i, d in self._listas_da_pessoa()]
 
     def _manter_arquivadas(self):
         """"keep"/"unarchive" para a caixa da privacidade, ou None. Sem ter

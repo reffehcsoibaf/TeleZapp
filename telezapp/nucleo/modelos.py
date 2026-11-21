@@ -220,6 +220,8 @@ def extras_de(msg):
             "ouvida": bool(dados.get("ouvida")),
             "favorita": bool(dados.get("favorita")),
             "fixada": bool(dados.get("fixada")),
+            "comentavel": bool(dados.get("comentavel")),
+            "comentarios": int(dados.get("comentarios") or 0),
             "fixada_ate": dados.get("fixada_ate") or 0,
             "fixada_em": dados.get("fixada_em") or 0,
             "reacoes": list(dados.get("reacoes") or []),
@@ -246,6 +248,10 @@ def guardar_extras(msg, links=(), botoes=(), mencoes=(), acoes=(),
         dados["enquete"] = dict(extras_de(msg)["enquete"])
     if extras_de(msg)["citou_voce"]:
         dados["citou_voce"] = True
+    if extras_de(msg)["comentavel"]:
+        dados["comentavel"] = True
+        if extras_de(msg)["comentarios"]:
+            dados["comentarios"] = extras_de(msg)["comentarios"]
     if links:
         dados["links"] = [list(x) for x in links]
     if botoes:
@@ -931,6 +937,10 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None,
             texto = _juntar(texto, "(favorita)")
         if fixada_agora(m):
             texto = _juntar(texto, "(fixada)")
+        n_coment = extras_de(m)["comentarios"]
+        if n_coment:
+            texto = _juntar(texto, "(%d comentário%s)" % (
+                n_coment, "" if n_coment == 1 else "s"))
         if getattr(m, "expira", 0):
             texto = _juntar(texto, "(temporária)")
         return texto
