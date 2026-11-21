@@ -1560,16 +1560,21 @@ def test_gravar_envia_nota_de_voz_sem_legenda(j, tmp_path, monkeypatch):
     vistos = {}
 
     def falso(pai, nova, titulo, instrucao, fala, microfone=None,
-              ao_terminar=None, ocultar=None):
+              ao_terminar=None, ocultar=None, falar_preparando=True,
+              ao_tempo=None):
         vistos["gravador"] = nova()
         vistos["microfone"] = microfone
         vistos["titulo"] = titulo
         vistos["ocultar"] = ocultar
+        vistos["falar_preparando"] = falar_preparando
+        vistos["ao_tempo"] = ao_tempo
         ao_terminar(Gravacao(str(ogg), 3.0, -6.0))
     monkeypatch.setattr(jm.dialogos, "gravar_voz", falso)
     j.caixa.SetValue("rascunho que fica")
     j._gravar(MICROFONE)
     assert vistos["gravador"].origem == MICROFONE
+    assert vistos["falar_preparando"] is True
+    assert callable(vistos["ao_tempo"])    # avisa o titulo da janela principal
     assert vistos["microfone"] is None      # sem caixa de microfone
     assert vistos["gravador"].pasta == config.pasta_temporaria()
     pedido = [p for p in j.contas.p.pedidos if p[0] == "arquivo"][-1]
@@ -1603,6 +1608,46 @@ def test_janela_do_som_respeita_a_opcao_do_microfone(j, monkeypatch):
     j.cfg.set("gravar_som_com_microfone", False)
     j._gravar(SOM_INTERNO)
     assert vistos == [False]
+
+
+def test_janela_de_gravacao_segue_a_opcao_de_falar_preparando(
+        j, monkeypatch):
+    from telezapp.midia.gravador import MICROFONE
+    _abrir_com_caixa(j)
+    vistos = []
+    monkeypatch.setattr(
+        jm.dialogos, "gravar_voz",
+        lambda pai, nova, *a, falar_preparando=True, **k:
+            vistos.append(falar_preparando))
+    j._gravar(MICROFONE)
+    j.cfg.set("falar_voz_preparando", False)
+    j._gravar(MICROFONE)
+    assert vistos == [True, False]
+
+
+def test_anuncio_de_voz_enviada_pode_ser_desligado(j, tmp_path):
+    from telezapp.midia import envio
+    _abrir_com_caixa(j)
+    arquivo = tmp_path / "voz.ogg"
+    arquivo.write_bytes(b"OggS" + b"x" * 170)
+    voz = envio.Anexo(str(arquivo), m.VOZ, "voz.ogg",
+                      "audio/ogg; codecs=opus", arquivo.stat().st_size,
+                      segundos=3)
+    foto = envio.Anexo(str(arquivo), m.FOTO, "foto.jpg", "image/jpeg", 10)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+
+    j._enviar_anexo(voz)
+    assert any("Enviando mensagem de voz" in t for t in ditas)
+    ditas.clear()
+
+    j.cfg.set("falar_voz_enviada", False)
+    j._enviar_anexo(voz)
+    assert not [t for t in ditas if "Enviando mensagem de voz" in t]
+    ditas.clear()
+
+    j._enviar_anexo(foto)                 # outros anexos continuam falando
+    assert any("Enviando foto" in t for t in ditas)
 
 
 def test_midia_como_resposta_cita_a_mensagem(j, tmp_path):
@@ -5530,15 +5575,61 @@ def test_gravar_por_atalho_toca_o_som_de_gravando_e_o_de_parada(
 
 
 def test_slots_de_atalho_das_funcoes_novas(j):
-    for chave in ("gravar_pausa", "gravar_descartar", "abrir_atalhos",
+    for chave in ("gravar_pausa", "gravar_descartar", "gravar_tempo",
+                  "abrir_atalhos",
                   "enviar_msg", "ver_enquete", "nova_enquete",
                   "esconder_janela", "mostrar_janela", "ortografia",
                   "gravar_mic", "gravar_som"):
         assert chave in j.atalhos.acoes, chave
     # as novas nascem sem atalho, prontas para receber um
     assert j.atalhos.efetivo("gravar_pausa") == ""
+    assert j.atalhos.efetivo("gravar_tempo") == ""
     j._aplicar_opcao("atalhos", {"gravar_pausa": "Ctrl+Alt+P"})
     assert j.itens["gravar_pausa"].rotulo.endswith("	Ctrl+Alt+P")
+
+
+def test_atalho_de_tempo_sem_gravacao_avisa(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._falar_tempo_da_gravacao()
+    assert ditas == ["Nenhuma gravação de áudio em andamento."]
+
+
+def test_atalho_de_tempo_da_gravacao_rapida(j, monkeypatch, tmp_path):
+    from telezapp.midia.gravador import MICROFONE
+    _preparar_gravacao_rapida(j, monkeypatch, tmp_path)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._gravar_rapido(MICROFONE)
+    g = GravadorFalso.criados[0]
+    g.decorrido = 75.0
+    j._falar_tempo_da_gravacao()
+    assert ditas[-1] == "Gravando há 1:15."
+    g.pausado = True
+    j._falar_tempo_da_gravacao()
+    assert ditas[-1] == "Gravação pausada em 1:15."
+
+
+def test_atalho_de_tempo_da_gravacao_em_janela(j):
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+
+    class DlgFalso:
+        def tempo_de_gravacao(self):
+            return 42.0, False
+
+    j._dlg_gravacao = DlgFalso()
+    j._falar_tempo_da_gravacao()
+    assert ditas[-1] == "Gravando há 0:42."
+
+    class Fechada:
+        def tempo_de_gravacao(self):
+            raise RuntimeError("janela fechada")
+
+    j._dlg_gravacao = Fechada()
+    ditas.clear()
+    j._falar_tempo_da_gravacao()
+    assert ditas == ["Nenhuma gravação de áudio em andamento."]
 
 
 def test_pausar_e_descartar_a_gravacao_por_atalho(j, monkeypatch, tmp_path):
@@ -7913,6 +8004,49 @@ def test_ocultar_e_mostrar_a_janela_oculta(j):
     assert [n for n, _ in j._ocultas_vivas()] == ["Janela da chamada"]
     j._mostrar_oculta()
     assert chamada.visivel and j._ocultas_vivas() == []
+
+
+def test_titulo_da_janela_principal_com_gravacao_oculta(j):
+    """O tempo entra como extra: o nome da conversa/status fica intacto."""
+    class GravacaoOcultavel:
+        def __init__(self):
+            self.visivel = True
+
+        def IsShown(self):
+            return self.visivel
+
+        def Show(self, v=True):
+            self.visivel = v
+
+        def Hide(self):
+            self.visivel = False
+
+        def Raise(self):
+            pass
+
+        def SetFocus(self):
+            pass
+
+        def tempo_de_gravacao(self):
+            return 12.7, False
+
+    dlg = GravacaoOcultavel()
+    j._dlg_gravacao = dlg
+    j.atual = ("t1", "10")
+    j._atualizar_titulo()
+    assert j.GetTitle() == "TeleZapp: Ana"
+
+    j._ao_tempo_da_gravacao((12.7, False))   # janela ainda na tela
+    assert j.GetTitle() == "TeleZapp: Ana"
+    j._ocultar_janela(dlg, "Janela da gravação")
+    assert j.GetTitle() == "TeleZapp: Ana - gravando 12 segundos"
+    j._ao_tempo_da_gravacao((13.9, True))
+    assert j.GetTitle() == "TeleZapp: Ana - pausado 13 segundos"
+
+    j._reexibir(dlg)
+    assert j.GetTitle() == "TeleZapp: Ana"
+    j._ao_tempo_da_gravacao(None)
+    assert j.GetTitle() == "TeleZapp: Ana"
 
 
 def test_gravacao_vai_para_a_conversa_em_que_comecou(j, tmp_path):
@@ -10717,6 +10851,23 @@ def test_gravacao_rapida_longa_e_preparada_fora_da_janela_e_sai_sozinha(
     guardado["depois"](gravacao, None)             # volta para a janela
     pedido = [p for p in j.contas.p.pedidos if p[0] == "arquivo"][-1]
     assert pedido[2] == m.VOZ
+
+
+def test_gravacao_rapida_longa_pode_ser_preparada_em_silencio(
+        j, monkeypatch, tmp_path):
+    from telezapp.midia.gravador import MICROFONE
+    _preparar_gravacao_rapida(j, monkeypatch, tmp_path)
+    monkeypatch.setattr(GravadorFalso, "decorrido", 460.0)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    guardado = {}
+    monkeypatch.setattr(jm, "parar_em_segundo_plano",
+                        lambda g, depois: guardado.update(g=g, depois=depois))
+    j.cfg.set("falar_voz_preparando", False)
+    j._gravar_rapido(MICROFONE)
+    j._gravar_rapido(MICROFONE)
+    assert not [t for t in ditas if "Preparando a gravação" in t]
+    assert guardado                       # a conversao em segundo plano segue
 
 
 def test_gravacao_rapida_longa_que_falha_ao_converter_avisa(
