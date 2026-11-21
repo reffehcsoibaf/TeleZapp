@@ -149,6 +149,27 @@ O TeleZapp sugere um nome com o que você marcou, e você pode escrever outro. S
 
 Com os filtros ativados e pelo menos um criado, as caixas de serviço, conta e tipo de conversa saem da tela principal. Com mais de um filtro, aparece a caixa Filtro (Alt+4) para trocar entre eles. As conversas trancadas não entram nos filtros: continuam aparecendo só com o código secreto.
 
+# Pastas do Telegram e listas do WhatsApp
+Na tela principal, depois da caixa de tipo de conversa, aparece uma terceira caixa: Pasta, para as pastas do Telegram, ou Lista, para as listas do WhatsApp. Ela mostra "Todas as pastas" (ou "Todas as listas") e, depois, uma por pasta ou lista, na ordem do serviço. Escolher uma delas mostra só as conversas dela, e a caixa de tipo de conversa continua valendo junto: por exemplo, a pasta Trabalho e só as não lidas.
+
+A caixa só aparece quando a caixa de serviço ou conta (Alt+4) aponta para uma conta só: uma conta escolhida, ou "Telegram" ou "WhatsApp" quando há apenas uma conta daquele serviço. Com "Todas as contas", ou com mais de uma conta do mesmo serviço, ela some, para não misturar pastas de contas diferentes. Ela também some se a conta não tem pastas ou listas e quando os filtros personalizados estão ativados.
+
+Alt+6 leva o foco à caixa. Se ela não estiver na tela, o TeleZapp toca o som de erro e diz por quê. A pasta ou lista escolhida fica guardada para cada conta.
+
+No WhatsApp, a opção "Listas do WhatsApp como filtro", em Configurações, Interface, liga o recurso (vem ligada). Na primeira vez, o TeleZapp baixa as suas listas do celular. Desmarcada, a caixa e o botão somem e nada é baixado. Só entram as listas que você criou.
+
+Para colocar ou tirar uma conversa de uma pasta ou lista, abra os Detalhes da conversa e use o botão Pastas (Telegram) ou Listas (WhatsApp). Abre uma lista de caixas de marcar: marcada quer dizer que a conversa está naquela pasta. Marque ou desmarque com a barra de espaço e aperte Aplicar. A mudança vale também no celular e nos outros aplicativos da conta. No Telegram, as pastas compartilhadas não podem ser mudadas por aqui.
+
+# Comentários em posts de canais do Telegram
+Os posts de canal que aceitam comentários dizem na linha, por exemplo, "(4 comentários)". Com o post selecionado, abra o menu de contexto (tecla Aplicativos ou Shift+F10) e escolha "Ver os comentários do post"; o mesmo item está no menu Mensagem, sem atalho de teclado.
+
+Os comentários abrem como uma conversa, com o nome "Comentários de" e o começo do texto do post. Você lê como em qualquer conversa. Para comentar, escreva na caixa de sempre e envie. Para responder a um comentário, use Responder nele. Esc volta ao canal.
+
+Os seus comentários aparecem na hora. Comentários novos de outras pessoas só aparecem quando você abre os comentários de novo. Canais sem grupo de discussão não têm o item.
+
+# Aviso de pedidos de entrada nos grupos
+Nos grupos do WhatsApp em que você é administrador e que exigem aprovação, a opção "Avisar pedidos de entrada nos meus grupos", em Configurações, Mensagens (desligada), faz o TeleZapp olhar se há pedidos esperando. Ao abrir, ele fala quantos pedidos esperam e em quais grupos; depois, a cada 5, 15, 30 ou 60 minutos (o intervalo também está em Configurações, Mensagens), fala só quando chega pedido novo. A janela dos pedidos continua nos Detalhes do grupo, no botão Pedidos de entrada: marque vários com Ctrl+Espaço e use Aprovar ou Recusar.
+
 # Selecionar várias conversas ou mensagens
 Ctrl+Espaço, na lista de conversas ou na de mensagens, liga o modo de seleção e já marca o item em foco.
 

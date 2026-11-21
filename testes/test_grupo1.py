@@ -205,7 +205,8 @@ def test_extras_na_mensagem_e_migracao_do_banco(tmp_path):
                               "ouvida": False, "fixada": False, "fixada_ate": 0,
                               "fixada_em": 0,
                               "favorita": False, "reacoes": [], "enquete": {},
-                              "citou_voce": False, "previa": {}, "ia": {}}
+                              "citou_voce": False, "previa": {}, "ia": {},
+                              "comentavel": False, "comentarios": 0}
     m.guardar_extras(x, links=[("https://a.com", "clique aqui")],
                      botoes=[("Abrir", "https://b.com")],
                      mencoes=[{"nome": "Ana", "id": "5"}])

@@ -1553,3 +1553,33 @@ Ele estranhou eu ter deixado itens para depois sem motivo técnico; não havia. 
   nós atendemos; na de saída, o "a outra pessoa atendeu") e
   `t_som_apos_atender_s`. Nos relatos: mediana 0,3 s (iPhone) e 0,4 s
   (Android) depois de atender; o pior Android (10,9 s) é a troca de relay.
+
+## Pastas do Telegram como terceira caixa (20/11/2026)
+- Aprovada ao vivo pelo responsável. A caixa Pasta vem depois de Tipo de
+  conversa e só aparece quando o filtro de contas aponta para uma conta só
+  (conta escolhida ou serviço com uma única conta) e ela tem pastas; some com
+  os filtros personalizados. Escolha guardada por conta (`filtro_pasta`).
+- Listas do WhatsApp (mesma caixa, rótulo "Lista") continuam pendentes: falta
+  expor na DLL os eventos de etiqueta e confirmar o formato com listas reais.
+
+## Listas do WhatsApp na terceira caixa (20/11/2026)
+- Confirmadas ao vivo: as listas e as conversas de cada uma batem com o
+  celular. Vêm do evento de mutação do estado (`label_edit`/`label_jid`,
+  coleção `regular`), sem mudar a DLL. Opção experimental
+  `listas_do_whatsapp` (desligada por padrão): o download completo pode
+  repetir avisos antigos. A conversa vale pelo telefone e pelo endereço
+  `@lid` (a lista pode usar o outro). `regular_low` não é baixada (não fecha
+  o hash neste celular). Só listas criadas pela pessoa (tipo 5).
+
+## Pôr e tirar conversa de pasta ou lista (20/11/2026)
+- Botão Pastas... (Telegram) / Listas... (WhatsApp) nos Detalhes da
+  conversa. WhatsApp CONFIRMADO ao vivo: o aviso `label_jid` (coleção
+  `regular`, versão 3) refletiu na hora no celular, ao contrário do ajuste
+  "manter arquivadas", que o iPhone ignorou. Telegram: edita a pasta
+  (`UpdateDialogFilterRequest`); pasta por regra tira por exclusão,
+  compartilhada não é editável. A opção `listas_do_whatsapp` segue
+  experimental e desligada por padrão.
+- Botão Pastas... do Telegram também APROVADO ao vivo (20/11/2026).
+- Listas do WhatsApp deixam de ser experimentais (20/11/2026, a pedido do
+  responsável após ver funcionando): opção `listas_do_whatsapp` em Interface,
+  ligada por padrão. Desmarcada, caixa e botão somem e nada é baixado.

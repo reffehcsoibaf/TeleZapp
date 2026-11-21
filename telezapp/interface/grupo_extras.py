@@ -27,11 +27,16 @@ class DialogoPedidos(wx.Dialog):
         lay = wx.BoxSizer(wx.VERTICAL)
         self.resumo = wx.StaticText(self, label="Carregando os pedidos...")
         lay.Add(self.resumo, 0, wx.ALL, 10)
-        rotulo = "Pedidos (Ctrl ou Shift marcam mais de um)"
+        rotulo = "Pedidos (Control Espaço marca mais de um)"
         lay.Add(wx.StaticText(self, label=rotulo), 0, wx.LEFT | wx.RIGHT, 10)
-        self.lista = wx.ListBox(self, style=wx.LB_EXTENDED | wx.LB_HSCROLL,
-                                name=rotulo)
+        # lista simples como as demais do app (a de selecao estendida nao
+        # era lida pelo leitor de tela); marcar varios = Control Espaco
+        self.lista = wx.ListBox(self, name=rotulo)
         lay.Add(self.lista, 1, wx.EXPAND | wx.ALL, 10)
+        from telezapp.interface.marcas import Marcas
+        self.marcas = Marcas(self.lista, lambda t: self.fala.falar(
+            t, interromper=True), chave=lambda p: p["id"], dono=self)
+        self.Bind(wx.EVT_CHAR_HOOK, self._tecla)
         linha = wx.WrapSizer(wx.HORIZONTAL)
         for rotulo, funcao in (("&Aprovar", lambda: self.responder(True)),
                                ("&Recusar", lambda: self.responder(False)),
@@ -68,13 +73,17 @@ class DialogoPedidos(wx.Dialog):
             return
         if not ok:
             self.pedidos = []
+            self.marcas.desfazer(falar=False)
             self.lista.Set(["Nenhum pedido."])
             self.resumo.SetLabel(dado)
             self.fala.falar(dado, interromper=True)
             return
         self.pedidos = dado
-        self.lista.Set([ng.rotulo_do_pedido(p) for p in dado]
-                       or ["Nenhum pedido."])
+        self.marcas.esquecer([m for m in self.marcas.marcados.values()
+                              if m["id"] not in {p["id"] for p in dado}])
+        self.lista.Set(self.marcas.rotulos(
+            [ng.rotulo_do_pedido(p) for p in dado], dado)
+            or ["Nenhum pedido."])
         texto = ng.resumo_dos_pedidos(len(dado))
         self.resumo.SetLabel(texto)
         self.fala.falar(texto, interromper=True)
@@ -82,13 +91,13 @@ class DialogoPedidos(wx.Dialog):
             self.lista.SetSelection(0)
             self.lista.SetFocus()
 
+    def _tecla(self, evt):
+        if not self.marcas.tecla(evt):
+            evt.Skip()
+
     def escolhidos(self):
-        if hasattr(self.lista, "GetSelections"):
-            marcados = list(self.lista.GetSelections())
-        else:
-            marcados = [self.lista.GetSelection()]
-        return [self.pedidos[i] for i in marcados
-                if 0 <= i < len(self.pedidos)]
+        """Os marcados ou, sem marcas, o pedido em foco."""
+        return self.marcas.escolhidos() if self.pedidos else []
 
     def responder(self, aprovar):
         if self.ocupado:

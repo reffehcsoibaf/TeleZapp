@@ -469,6 +469,21 @@ class Provedor(ABC):
         """[(conversa_id, nome)] dos grupos em que a conta e administradora."""
         return []
 
+    def pastas(self):
+        """[(id, nome, {ids das conversas})] das pastas (Telegram) ou listas
+        (WhatsApp) da conta, na ordem do servico. So le o que ja esta na
+        memoria; sem rede."""
+        return []
+
+    def pode_editar_pastas(self):
+        """A conta deixa pôr e tirar uma conversa de uma pasta ou lista?"""
+        return False
+
+    def definir_pasta(self, conversa_id, pasta_id, incluir):
+        """Poe (incluir) ou tira a conversa da pasta. (ok, texto). Pode
+        esperar a rede."""
+        return False, "Esta conta não tem pastas."
+
     def grupos_da_conta(self):
         """[(conversa_id, nome)] de todos os grupos de que a conta participa,
         tenham ou nao conversa guardada aqui. Pode esperar a rede."""

@@ -5488,3 +5488,110 @@ def test_movimentacao_salta_para_uma_mensagem_guardada_mais_antiga(amb):
     v.update(alcance=agora - 9 * 86400, saltos=wa.SALTOS_DA_MOVIMENTACAO)
     assert not amb.p._saltar_na_movimentacao("123@g.us", v)
     amb.p._varreduras.pop("123@g.us")
+
+
+def test_listas_do_whatsapp_vem_das_etiquetas_do_estado(tmp_path):
+    import types
+    from telezapp.provedores import whatsapp as wa
+    prov = wa.ProvedorWhatsApp.__new__(wa.ProvedorWhatsApp)
+    prov.pasta_sessoes = str(tmp_path)
+    prov.conta = types.SimpleNamespace(id="w1")
+    prov._conectada = False
+    prov.cliente = None
+
+    def evento(indice, remove=False, completo=False, **acao):
+        edicao = types.SimpleNamespace(
+            name=acao.get("name", ""), type=acao.get("type", 5),
+            orderIndex=acao.get("ordem", 0), deleted=acao.get("deleted", False))
+        assoc = types.SimpleNamespace(labeled=acao.get("labeled", True))
+        return types.SimpleNamespace(
+            Index=indice, Remove=remove, FromFullSync=completo,
+            Name="regular", Action=types.SimpleNamespace(
+                labelEditAction=edicao, labelAssociationAction=assoc))
+
+    prov.ativar_listas(True)
+    assert prov.pastas() == []
+    for e in (evento(["label_edit", "3"], name="Clientes", ordem=2),
+              evento(["label_edit", "4"], name="Familia", ordem=1),
+              evento(["label_edit", "9"], name="Favoritos", type=3),
+              evento(["label_jid", "3", "55@s.whatsapp.net"]),
+              evento(["label_jid", "3", "66@g.us"]),
+              evento(["label_jid", "3", "66@g.us"], labeled=False)):
+        prov._ao_mutacao_de_estado(None, e)
+    assert prov.pastas() == [("4", "Familia", set()),
+                             ("3", "Clientes", {"55@s.whatsapp.net"})]
+    prov._ao_mutacao_de_estado(None, evento(["label_edit", "4"], remove=True))
+    assert [p[1] for p in prov.pastas()] == ["Clientes"]
+    # sobrevive a reabrir: o arquivo guarda
+    outro = wa.ProvedorWhatsApp.__new__(wa.ProvedorWhatsApp)
+    outro.pasta_sessoes, outro.conta = prov.pasta_sessoes, prov.conta
+    outro._conectada, outro.cliente = False, None
+    outro.ativar_listas(True)
+    assert outro.pastas() == [("3", "Clientes", {"55@s.whatsapp.net"})]
+
+
+def _prov_de_contatos(conversas, agenda=None):
+    import threading
+    import types
+    from telezapp.provedores import whatsapp as wa
+    prov = wa.ProvedorWhatsApp.__new__(wa.ProvedorWhatsApp)
+    prov.conta = types.SimpleNamespace(id="w1")
+    prov._trava = threading.RLock()
+    prov._conversas = {c.id: c for c in conversas}
+    prov._apelidos = {}
+    prov._lid_para_numero = {}
+    prov._conectada = False
+    prov.cliente = None
+    salvas, publicadas = [], []
+    prov.banco = types.SimpleNamespace(
+        nome_de_contato=lambda conta, *ids: next(
+            ((agenda or {})[i] for i in ids if i in (agenda or {})), ""),
+        salvar_conversas=lambda lista: salvas.extend(lista))
+    prov._publicar_conversas = lambda: publicadas.append(1)
+    prov._contatos = lambda: types.SimpleNamespace(
+        get_contact=lambda jid: types.SimpleNamespace(
+            FullName="", FirstName="", PushName="", BusinessName=""))
+    return prov, salvas, publicadas
+
+
+def _evento_de_contato(jid, nome="", remover=False, completo=False):
+    import types
+    return types.SimpleNamespace(
+        Index=["contact", jid], Remove=remover, FromFullSync=completo,
+        Name="critical_unblock_low", Action=types.SimpleNamespace(
+            contactAction=types.SimpleNamespace(
+                fullName=nome, firstName="", lidJID="", pnJID="")))
+
+
+def test_contato_renomeado_no_celular_muda_o_nome_da_conversa():
+    from telezapp.nucleo import modelos as m
+    conv = m.Conversa("w1", "5551@s.whatsapp.net", "+5551", "whatsapp",
+                      "privada")
+    prov, salvas, publicadas = _prov_de_contatos([conv])
+    prov._ao_mutacao_de_estado(None, _evento_de_contato(
+        "5551@s.whatsapp.net", "Maria Silva"))
+    assert conv.nome == "Maria Silva" and salvas == [conv] and publicadas
+
+
+def test_nome_dado_no_telezapp_vale_mais_que_o_do_celular():
+    from telezapp.nucleo import modelos as m
+    conv = m.Conversa("w1", "5551@s.whatsapp.net", "Mari", "whatsapp",
+                      "privada")
+    prov, salvas, publicadas = _prov_de_contatos(
+        [conv], agenda={"5551@s.whatsapp.net": "Mari"})
+    prov._ao_mutacao_de_estado(None, _evento_de_contato(
+        "5551@s.whatsapp.net", "Maria Silva"))
+    assert conv.nome == "Mari" and not publicadas
+
+
+def test_contato_apagado_volta_ao_telefone_e_download_completo_nao_mexe():
+    from telezapp.nucleo import modelos as m
+    conv = m.Conversa("w1", "5551@s.whatsapp.net", "Maria", "whatsapp",
+                      "privada")
+    prov, salvas, publicadas = _prov_de_contatos([conv])
+    prov._ao_mutacao_de_estado(None, _evento_de_contato(
+        "5551@s.whatsapp.net", "Outra", completo=True))
+    assert conv.nome == "Maria" and not publicadas
+    prov._ao_mutacao_de_estado(None, _evento_de_contato(
+        "5551@s.whatsapp.net", remover=True))
+    assert conv.nome == "+5551" and publicadas
