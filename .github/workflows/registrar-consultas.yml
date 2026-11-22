@@ -1,0 +1,34 @@
+name: Registrar consultas diarias
+
+# Todo dia le os totais de downloads de cada versao do TeleZapp
+# (consulta.txt = copias abertas por dia) e grava no Supabase.
+on:
+  schedule:
+    - cron: "50 2 * * *"   # 23h50 em Brasilia
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  registrar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ler totais e gravar no Supabase
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          CONSULTAS_TOKEN: ${{ secrets.CONSULTAS_TOKEN }}
+        run: |
+          set -euo pipefail
+          dados=$(gh api --paginate "repos/${{ github.repository }}/releases?per_page=100" \
+            --jq '[.[] | {versao: .tag_name,
+                          consulta: ([.assets[]|select(.name=="consulta.txt")|.download_count]|add // 0),
+                          zip: ([.assets[]|select(.name=="TeleZapp.zip")|.download_count]|add // 0),
+                          exe: ([.assets[]|select(.name=="TeleZapp.exe")|.download_count]|add // 0)}]' \
+            | jq -s 'add')
+          corpo=$(jq -n --arg t "$CONSULTAS_TOKEN" --argjson d "$dados" '{p_token:$t, p_dados:$d}')
+          curl --fail-with-body -sS -X POST "$SUPABASE_URL/rest/v1/rpc/telezapp_registrar" \
+            -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -H "Content-Type: application/json" -d "$corpo"
