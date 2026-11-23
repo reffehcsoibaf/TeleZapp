@@ -1583,3 +1583,43 @@ Ele estranhou eu ter deixado itens para depois sem motivo técnico; não havia. 
 - Listas do WhatsApp deixam de ser experimentais (20/11/2026, a pedido do
   responsável após ver funcionando): opção `listas_do_whatsapp` em Interface,
   ligada por padrão. Desmarcada, caixa e botão somem e nada é baixado.
+
+## Aviso de pedidos de entrada em janela (21/11/2026)
+- O aviso deixou de ser só fala: abre a janela "Pedidos de entrada
+  esperando" (Sim abre a janela de aprovar e recusar de cada grupo; Não
+  deixa para depois). Aparece ao vivo e o foco não cai nos botões de aprovar
+  ou recusar. Escolha do responsável, mesmo sendo modal.
+- O aviso chega até 15 minutos depois do pedido (consulta periódica): a
+  whatsmeow não tem evento de pedido novo. Mantido assim por ora, a avaliar
+  nos próximos pedidos. Alternativas: evento novo na DLL, ou intervalos de
+  1 e 2 minutos consultando só grupos com aprovação.
+
+## Convite de canal do Telegram dava AttributeError (22/11/2026)
+- `tg://join?invite=...` de canal que o Telegram deixa espiar sem entrar
+  (`ChatInvitePeek`, sem `title`) fazia a prévia falhar com "Não consegui
+  consultar o convite (AttributeError)". A leitura da resposta ficou
+  tolerante e o log passa a trazer o texto do erro (sem o código do convite).
+  CONFIRMADO ao vivo pelo responsável, rodando do código; falta publicar.
+
+## Página do projeto também no Worker (22/11/2026)
+- A pasta `site/` sai também pelo Worker `telezapp` (`[assets]` em
+  `relatos/wrangler.toml`): a raiz abre a página; `/relato`, `/uso` e `/admin`
+  seguem no `worker.js`. O GitHub Pages continua no ar. Publicado e
+  CONFIRMADO ao vivo pelo responsável.
+
+## Código de pareamento sem conexão (23/11/2026)
+- O WhatsApp só manda QR Code por uns 2 min e 40 s (60 s o primeiro, 20 s
+  cada um dos cinco seguintes) e depois fecha o websocket. Quem pedia o
+  código depois disso (leitor de tela, computador lento, como num Windows ARM
+  emulado) recebia 15 vezes `PairPhoneError('websocket not connected')` e a
+  janela só dizia "PairPhoneError".
+- Agora, com a conexão fechada, a janela refaz o pareamento
+  (`reiniciar_pareamento`) e pede o código sozinha ao chegar o primeiro QR
+  novo (até 2 reconexões); o aviso de erro traz o texto do erro. O número com
+  `00` na frente já era normalizado na janela. Sem teste ao vivo; sem commit.
+- QR Code que vence (23/11/2026): o provedor marca um prazo depois de cada QR
+  (60 s o primeiro, 20 s os seguintes, mais 8 s de margem). Se o próximo não
+  vem, o WhatsApp já fechou a conexão: a janela refaz o pareamento e traz um
+  QR novo sozinha (até 5 vezes, sem contar como recusa). Com um código já
+  gerado não mexe; na tela do número refaz em silêncio. O prazo cai ao
+  conectar. Sem teste ao vivo; sem commit.

@@ -7,6 +7,20 @@ Antes de escrever aqui, confira a versão em vigor: `git fetch --tags` e
 `gh release list -L 3` (a Latest é a publicada). O que veio depois dela vai em
 "Próxima versão (ainda sem número)".
 
+## 2026.11.23.0
+
+Aviso de pedidos de entrada em janela (`avisar_pedidos_de_entrada`): `Janela._pedidos_conferidos` deixou de falar e abre `grupo_extras.DialogoAvisoPedidos` (no molde de `atualizacao.DialogoAtualizacao`: texto somente leitura com o foco, Tab para Sim e Não, Esc = Não; foco nunca em botão de aprovar ou recusar). Sim abre `DialogoPedidos` de cada grupo com pedido; Não deixa para Detalhes do grupo. O texto vem de `texto_do_aviso_de_pedidos` (pura, testada). Traz a janela para a frente se estiver minimizada ou escondida e não abre um segundo aviso por cima. O atraso de até 15 min (consulta periódica) foi aceito; a whatsmeow não tem evento de pedido novo.
+
+Pareamento do WhatsApp (relato de 23/11, Windows ARM no Parallels, com leitor de tela): o whatsmeow manda QR Code por 60 s + 5 x 20 s e fecha o websocket sem avisar; quem pedia o código depois disso recebia 15 vezes `PairPhoneError('websocket not connected')` e a janela só mostrava o nome da classe. `_gerar_codigo` agora desiste na 2a tentativa com `sem_conexao` e publica `PareamentoFalhou("sem_conexao")`; `_ev_pareamento_falhou` refaz o pareamento (`reiniciar_pareamento`, até 2 vezes, sem contar como recusa) e `_ev_qr` pede o código de novo, sozinho, no primeiro QR novo (`DialogoPareamento.retomar_codigo`). O erro final traz o texto da biblioteca (`motivo_do_codigo`). Os `00` do número já eram tratados por `normalizar_telefone`.
+
+QR Code que vence: `_ao_qr` arma um prazo (`_armar_prazo_do_qr`: 60 s o primeiro, 20 s os seguintes, mais 8 s de margem; cancelado ao conectar e em `parar`); se o próximo não vem, `_qr_venceu` publica `PareamentoFalhou("qr_expirou")` e a janela refaz o pareamento até 5 vezes. Com código já gerado não mexe; na tela do número refaz em silêncio.
+
+Convite de canal do Telegram (`tg://join?invite=...`): `ProvedorTelegram._previa` lia `r.title` de toda resposta de `CheckChatInviteRequest`, e `ChatInvitePeek` (canal que se espia sem entrar) só traz `chat`: dava "Não consegui consultar o convite (AttributeError)". A leitura ficou tolerante (título, membros, canal) e a falha passa a registrar o texto do erro (sem o código do convite). Testes em `test_provedor_telegram.py`.
+
+Gravar o som do computador (`FonteSomInterno`): se `recorder().__enter__()` falha, tenta outras combinações de canais e de tamanho de bloco (taxa fixa em 48 kHz) e registra o erro de cada tentativa (`RuntimeError` sem texto no relato de 22/11). Sem teste ao vivo.
+
+Página do projeto também no Worker `telezapp` (`relatos/wrangler.toml`, `[assets]` apontando para `../site`; `/relato`, `/uso` e `/admin` seguem no `worker.js`). Já publicada; não depende da versão do programa.
+
 ## 2026.11.20.1
 
 Pedidos de entrada em grupo (WhatsApp) apareciam vazios para o leitor de tela (relato de 20/11): `ng.rotulo_do_pedido` quebrava com `OSError: Invalid argument` em `time.localtime` quando o `TimeAt` vinha fora do intervalo (em milissegundos); o erro estava em `telezapp.log` e a lista nunca era preenchida. Agora o horário em milissegundos vira segundos e uma data impossível é omitida (a linha sai com nome e telefone). A lista de `DialogoPedidos` passou de `LB_EXTENDED` para `ListBox` simples com `Marcas` (Ctrl+Espaço marca vários, Ctrl+A todos, Esc desfaz), como as outras listas do app.

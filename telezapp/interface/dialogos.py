@@ -1103,6 +1103,8 @@ class DialogoPareamento(wx.Dialog):
         self.reiniciar = reiniciar or (lambda: None)
         self.codigo_gerado = False   # um codigo ja foi pedido nesta conexao
         self.falhas = 0
+        self.reconexoes = 0    # vezes que a conexao refeita por falta dela
+        self.renovacoes = 0    # vezes que o QR venceu e veio outro
         self.qr_atual = ""
         self.tela_cheia = None
         self.janela_codigo = None
@@ -1233,6 +1235,14 @@ class DialogoPareamento(wx.Dialog):
         if self.janela_codigo:
             self.janela_codigo.Destroy()
             self.janela_codigo = None
+
+    def retomar_codigo(self):
+        """O pedido do codigo sai de novo sozinho (a conexao foi refeita):
+        a janela volta ao estado de quem acabou de apertar Gerar codigo."""
+        self.codigo_gerado = True
+        self.botao_gerar.Disable()
+        self.codigo.SetValue("Gerando o código...")
+        self.falar("Conexão refeita. Gerando o código.")
 
     def _gerar(self):
         from telezapp.nucleo.modelos import normalizar_telefone

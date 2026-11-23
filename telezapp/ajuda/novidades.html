@@ -13,6 +13,15 @@
 </header>
 <main>
 <section>
+<h2>Versão 2026.11.23.0</h2>
+<ul>
+<li>WhatsApp, aviso de pedidos de entrada: agora é uma janela, no lugar da fala. Quando há pedidos esperando nos grupos em que você é administrador, o TeleZapp abre uma janela com o total e os grupos, e a traz para a frente mesmo que estivesse minimizado. O texto é só de leitura e já vem com o foco; use Tab para chegar aos botões Sim (ver os pedidos agora, para aprovar ou recusar) e Não (deixar para depois: os pedidos continuam em Detalhes do grupo, Pedidos de entrada). Esc equivale a Não. Nenhum botão de aprovar ou recusar recebe o foco sozinho, para você não tocar neles sem querer.</li>
+<li>WhatsApp, conectar a conta: se a janela de pareamento demorava mais de uns 2 minutos e meio, o WhatsApp encerrava a conexão e o pedido do código por número dava o erro "PairPhoneError", sem como se recuperar. Agora o TeleZapp percebe, refaz a conexão e gera o código sozinho, e a janela fala o que está fazendo. O QR Code também é refeito sozinho quando vence, e um QR novo aparece. Se o WhatsApp recusar de verdade, o aviso passa a dizer o motivo, em vez de só o nome do erro.</li>
+<li>Telegram, convite de canal: o link de convite de alguns canais (os que abrem uma página com o botão "Join channel") dava o aviso "Não consegui consultar o convite (AttributeError)". Foi corrigido: o TeleZapp mostra o nome do canal e pergunta se você quer entrar.</li>
+<li>Gravar o som do computador: quando a captura não abre, o TeleZapp tenta outras configurações de áudio antes de dizer que não conseguiu, e o motivo do erro passa a ficar registrado nos logs. Pode não resolver todos os casos; se acontecer com você, mande um relato por Ajuda, Feedback com os logs.</li>
+</ul>
+</section>
+<section>
 <h2>Versão 2026.11.20.1</h2>
 <ul>
 <li>Pastas do Telegram e listas do WhatsApp: aparece uma terceira caixa na tela principal, depois do tipo de conversa, para ver só as conversas de uma pasta (Telegram) ou de uma lista (WhatsApp). Ela só aparece quando a caixa de serviço ou conta aponta para uma conta só: uma conta escolhida, ou "Telegram" ou "WhatsApp" quando há uma única conta daquele serviço. Com mais de uma conta do mesmo serviço, escolha a conta. O atalho Alt+6 leva a ela e, se ela não estiver na tela, o TeleZapp diz por quê. No WhatsApp, a opção "Listas do WhatsApp como filtro", em Configurações, Interface, liga e desliga o recurso.</li>

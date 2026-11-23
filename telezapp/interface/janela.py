@@ -660,6 +660,10 @@ class Janela(wx.Frame):
         self._envio_falado = {}       # idem: ultimo marco falado
         self.estados = {}             # conta_id -> estado
         self.pareamentos = {}         # conta_id -> DialogoPareamento
+        # telefone do ultimo codigo pedido e o que refazer sozinho quando a
+        # conexao fechou antes do pedido (conta_id -> telefone)
+        self._telefone_do_codigo = {}
+        self._regerar_codigo = {}
         self.pareamento_recusado = set()
         self._migrar_estilo_antigo(cfg)
         self._proximo_chave = None    # audio que toca em sequencia
@@ -2325,6 +2329,7 @@ class Janela(wx.Frame):
             return dlg
 
         def gerar(telefone):
+            self._telefone_do_codigo[conta_id] = telefone
             p = self.contas.provedor(conta_id)
             if p is not None:
                 p.pedir_codigo_pareamento(telefone)
@@ -2350,7 +2355,16 @@ class Janela(wx.Frame):
     def _ev_qr(self, e):
         if e.conta_id in self.pareamento_recusado:
             return
-        self._abrir_pareamento(e.conta_id).mostrar_qr(e.codigo)
+        dlg = self._abrir_pareamento(e.conta_id)
+        dlg.mostrar_qr(e.codigo)
+        telefone = self._regerar_codigo.pop(e.conta_id, None)
+        if telefone:
+            # a conexao foi refeita por falta dela: o QR novo mostra que
+            # voltou, e o codigo que a pessoa tinha pedido sai agora
+            p = self.contas.provedor(e.conta_id)
+            if p is not None:
+                dlg.retomar_codigo()
+                p.pedir_codigo_pareamento(telefone)
 
     def _reiniciar_pareamento(self, conta_id):
         """Recomeca a conexao do WhatsApp que esta pareando (fora da janela,
@@ -2367,6 +2381,39 @@ class Janela(wx.Frame):
     def _ev_pareamento_falhou(self, e):
         dlg = self.pareamentos.get(e.conta_id)
         if dlg is None:
+            return
+        if e.metodo == "qr_expirou":
+            # o WhatsApp parou de mandar QR: pede outro, sem contar como
+            # recusa. Com um codigo ja gerado nao mexe (e o que a pessoa
+            # esta digitando no celular).
+            if dlg.codigo_gerado:
+                return
+            dlg.renovacoes = getattr(dlg, "renovacoes", 0) + 1
+            na_tela_do_qr = getattr(dlg, "pagina", "") == "qr"
+            if dlg.renovacoes > 5:
+                if na_tela_do_qr:
+                    dlg.avisar("O QR Code venceu várias vezes. Feche esta "
+                               "janela e tente de novo quando puder "
+                               "escanear.")
+                return
+            if na_tela_do_qr:
+                dlg.avisar("O QR Code venceu. Estou pedindo um novo: aguarde "
+                           "alguns segundos.")
+            self._reiniciar_pareamento(e.conta_id)
+            return
+        if e.metodo == "sem_conexao":
+            # nao e o WhatsApp recusando: a conexao fechou sozinha (o QR so
+            # dura uns 2 min e 40 s). Refaz e gera o codigo na sequencia.
+            dlg.reconexoes = getattr(dlg, "reconexoes", 0) + 1
+            if dlg.reconexoes > 2:
+                dlg.avisar("Não consegui reconectar ao WhatsApp. Confira a "
+                           "internet, feche esta janela e tente de novo.")
+                return
+            self._regerar_codigo[e.conta_id] =                 self._telefone_do_codigo.get(e.conta_id, "")
+            dlg.avisar("A conexão com o WhatsApp tinha fechado, porque o "
+                       "tempo de espera acabou. Estou reconectando e gero o "
+                       "código sozinho: aguarde alguns segundos.")
+            self._reiniciar_pareamento(e.conta_id)
             return
         dlg.falhas += 1
         bipe("erro")
@@ -7863,7 +7910,7 @@ class Janela(wx.Frame):
                         total += len(ids)
                         n = len(ids - antes)
                         if n:
-                            novos.append((nome, n, len(ids)))
+                            novos.append((nome, n, len(ids), prov, gid))
                         time.sleep(0.5)
             except Exception:
                 log.exception("conferir pedidos de entrada")
@@ -7876,17 +7923,38 @@ class Janela(wx.Frame):
         self._conferindo_pedidos = False
         if not novos:
             return
-        log.info("pedidos de entrada: %s", novos)
-        partes = ["%s: %d" % (nome, n if not primeira else tot)
-                  for nome, n, tot in novos]
-        total = sum((tot if primeira else n) for _nome, n, tot in novos)
-        texto = ("%d pedido%s de entrada esperando. %s." % (
-            total, "" if total == 1 else "s", "; ".join(partes))
-            if primeira else
-            "%d pedido%s novo%s de entrada. %s." % (
-                total, "" if total == 1 else "s", "" if total == 1 else "s",
-                "; ".join(partes)))
-        self.fala.falar(texto, interromper=False)
+        log.info("pedidos de entrada: %s", [x[:3] for x in novos])
+        from telezapp.interface.grupo_extras import (
+            DialogoAvisoPedidos, texto_do_aviso_de_pedidos)
+        texto = texto_do_aviso_de_pedidos(
+            [(nome, n, tot) for nome, n, tot, _p, _g in novos], primeira)
+        # janela de proposito intrusiva: quem administra o grupo precisa
+        # decidir (ou adiar de caso pensado), nao so ouvir de passagem
+        if getattr(self, "_aviso_de_pedidos_aberto", False):
+            return
+        self._aviso_de_pedidos_aberto = True
+        try:
+            if self.IsIconized() or not self.IsShown():
+                self.Show()
+                self.Iconize(False)
+            self.Raise()
+            aviso = DialogoAvisoPedidos(self, texto)
+            try:
+                aviso.ShowModal()
+                ver = aviso.ver
+            finally:
+                aviso.Destroy()
+            if not ver:
+                return
+            from telezapp.interface.grupo_extras import DialogoPedidos
+            for nome, _n, _tot, prov, gid in novos:
+                dlg = DialogoPedidos(self, prov, gid, nome, self.fala)
+                try:
+                    dlg.ShowModal()
+                finally:
+                    dlg.Destroy()
+        finally:
+            self._aviso_de_pedidos_aberto = False
 
     def _perguntar_atrasadas(self, prov, atrasadas):
         """Sim envia agora, Nao descarta, Cancelar deixa na lista para ver

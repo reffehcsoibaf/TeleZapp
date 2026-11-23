@@ -386,3 +386,25 @@ def test_administrar_sem_ajustes_nao_mostra_os_controles():
     dlg, _ = _administrar({"ajustes": None})
     assert dlg.aprovacao is None and dlg.historico is None
     assert dlg.quem_adiciona is None
+
+
+# ------------------------------------------------ aviso de pedidos novos
+def test_texto_do_aviso_de_pedidos():
+    t = ge.texto_do_aviso_de_pedidos([("Grupo A", 1, 3), ("Grupo B", 2, 2)],
+                                     primeira=False)
+    assert t.startswith("3 pedidos novos de entrada nos seus grupos.")
+    assert "Grupo A: 1" in t and "Grupo B: 2" in t
+    assert "Tab para chegar aos botões Sim e Não" in t
+    t = ge.texto_do_aviso_de_pedidos([("Grupo A", 1, 3)], primeira=True)
+    assert t.startswith("3 pedidos de entrada esperando a sua aprovação.")
+    assert "Grupo A: 3" in t
+    t = ge.texto_do_aviso_de_pedidos([("Grupo A", 1, 1)], primeira=False)
+    assert t.startswith("1 pedido novo de entrada")
+
+
+def test_janela_do_aviso_de_pedidos_comeca_no_texto_somente_leitura():
+    dlg = ge.DialogoAvisoPedidos(None, "texto")
+    assert dlg.ver is False
+    assert dlg.texto.valor == "texto"
+    dlg._fechar(True)
+    assert dlg.ver is True

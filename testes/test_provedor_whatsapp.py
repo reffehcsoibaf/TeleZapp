@@ -5595,3 +5595,72 @@ def test_contato_apagado_volta_ao_telefone_e_download_completo_nao_mexe():
     prov._ao_mutacao_de_estado(None, _evento_de_contato(
         "5551@s.whatsapp.net", remover=True))
     assert conv.nome == "+5551" and publicadas
+
+
+def test_codigo_sem_conexao_pede_para_refazer_a_conexao_sem_esperar_5_vezes(
+        amb, monkeypatch):
+    def sem_conexao(telefone, push, nome, tipo):
+        amb.c.pareamentos.append(telefone)
+        raise RuntimeError("websocket not connected")
+    amb.c.PairPhone = sem_conexao
+    monkeypatch.setattr(wa.time, "sleep", lambda s: None)
+    amb.p.pedir_codigo_pareamento("+351 91 727 1530")
+    falha = esperar(amb.fila, ev.PareamentoFalhou)
+    assert falha.metodo == "sem_conexao"
+    assert amb.c.pareamentos == ["351917271530"] * 2   # nao insiste 5 vezes
+
+
+def test_motivo_do_codigo_traz_o_texto_do_erro():
+    assert wa.sem_conexao(RuntimeError("websocket not connected"))
+    assert not wa.sem_conexao(RuntimeError("rate limited"))
+    t = wa.motivo_do_codigo(RuntimeError("rate limited"))
+    assert "RuntimeError: rate limited" in t and "QR Code" in t
+    assert "()" not in wa.motivo_do_codigo(RuntimeError())
+
+
+class _RelogioFalso:
+    feitos = []
+
+    def __init__(self, espera, funcao):
+        self.espera, self.funcao = espera, funcao
+        self.cancelado = False
+        self.daemon = False
+        _RelogioFalso.feitos.append(self)
+
+    def start(self):
+        pass
+
+    def cancel(self):
+        self.cancelado = True
+
+
+def test_qr_que_vence_sem_outro_pede_para_refazer_a_conexao(amb, monkeypatch):
+    """O WhatsApp manda 6 QR Codes (60 s o primeiro, 20 s os outros) e fecha a
+    conexao sem avisar: o prazo do QR avisa a janela para pedir outro."""
+    _RelogioFalso.feitos = []
+    monkeypatch.setattr(wa.threading, "Timer", _RelogioFalso)
+    amb.c.event.funcao_qr(amb.c, b"2@um")
+    esperar(amb.fila, ev.QrPareamento)
+    primeiro = _RelogioFalso.feitos[-1]
+    assert primeiro.espera == wa.PRAZO_DO_PRIMEIRO_QR + wa.MARGEM_DO_QR
+    amb.c.event.funcao_qr(amb.c, b"2@dois")
+    esperar(amb.fila, ev.QrPareamento)
+    segundo = _RelogioFalso.feitos[-1]
+    assert primeiro.cancelado and not segundo.cancelado
+    assert segundo.espera == wa.PRAZO_DO_QR + wa.MARGEM_DO_QR
+    segundo.funcao()                    # o QR seguinte nao veio
+    assert esperar(amb.fila, ev.PareamentoFalhou).metodo == "qr_expirou"
+
+
+def test_conectar_cancela_o_prazo_do_qr_e_o_prazo_vencido_depois_nao_avisa(
+        amb, monkeypatch):
+    _RelogioFalso.feitos = []
+    monkeypatch.setattr(wa.threading, "Timer", _RelogioFalso)
+    amb.c.event.funcao_qr(amb.c, b"2@um")
+    esperar(amb.fila, ev.QrPareamento)
+    relogio = _RelogioFalso.feitos[-1]
+    amb.f["Connected"](amb.c, N.Connected())
+    assert relogio.cancelado
+    relogio.funcao()                    # tarde demais: ja conectou
+    assert amb.fila.empty() or not any(
+        isinstance(x, ev.PareamentoFalhou) for x in list(amb.fila.queue))

@@ -202,6 +202,29 @@ OPCOES_HISTORICO = {
 }
 
 
+# o WhatsApp manda o 1o QR com 60 s de validade e os outros com 20 s
+PRAZO_DO_PRIMEIRO_QR = 60.0
+PRAZO_DO_QR = 20.0
+MARGEM_DO_QR = 8.0
+
+
+def sem_conexao(erro):
+    """O pedido de codigo de pareamento chegou com a conexao ja fechada: o
+    WhatsApp para de mandar QR Code e fecha o websocket uns 2 min e 40 s
+    depois de abrir (60 s o primeiro QR e 20 s cada um dos outros cinco)."""
+    return "not connected" in str(erro).lower()
+
+
+def motivo_do_codigo(erro):
+    """O que dizer quando o WhatsApp nao gerou o codigo de pareamento. O texto
+    do erro vem da biblioteca (em ingles) e diz o que houve; ele entra na
+    frase para a pessoa e para o relato, sem so o nome da classe."""
+    texto = " ".join(str(erro).split())[:160]
+    nome = type(erro).__name__
+    return ("O WhatsApp não gerou o código (%s%s). Confira o número ou use o "
+            "QR Code." % (nome, ": " + texto if texto else ""))
+
+
 @contextlib.contextmanager
 def arquitetura_do_processo():
     """O neonize escolhe a DLL pelo platform.machine(), que no Python 3.12+
@@ -1459,6 +1482,8 @@ class ProvedorWhatsApp(Provedor):
         self.historico = historico
         self._desligada = False     # desconectada pelo celular
         self._pareando = False      # QR ou codigo em andamento
+        self._qrs_vistos = 0        # QR Codes desta conexao (o 1o dura 60 s)
+        self._prazo_do_qr = None    # relogio: o QR seguinte nao veio
         self._chamadas = {}         # id da chamada -> dados (so aviso)
         self._ofertas_velhas = set()  # chamadas que ja nao estao tocando
         self._chamadas_ocultas = set()   # ignoradas (opcao de avisar desligada)
@@ -1760,6 +1785,7 @@ class ProvedorWhatsApp(Provedor):
 
     def parar(self):
         self._parar.set()
+        self._cancelar_prazo_do_qr()
         if self._voz is not None:
             self._voz.parar()
         if self._ouvinte is not None:
@@ -1832,7 +1858,34 @@ class ProvedorWhatsApp(Provedor):
         self._pareando = True
         codigo = dados.decode() if isinstance(dados, bytes) else str(dados)
         log.info("QR Code de pareamento recebido")
+        self._qrs_vistos += 1
+        self._armar_prazo_do_qr()
         self.barramento.publicar(ev.QrPareamento(self.conta.id, codigo))
+
+    def _armar_prazo_do_qr(self):
+        """O WhatsApp troca o QR a cada 20 s (o primeiro vale 60 s) e, depois
+        do sexto, fecha a conexao sem avisar. Se o QR seguinte nao vier, o
+        pareamento venceu: a janela refaz a conexao e traz um QR novo."""
+        self._cancelar_prazo_do_qr()
+        espera = (PRAZO_DO_PRIMEIRO_QR if self._qrs_vistos <= 1
+                  else PRAZO_DO_QR) + MARGEM_DO_QR
+        relogio = threading.Timer(espera, self._qr_venceu)
+        relogio.daemon = True
+        self._prazo_do_qr = relogio
+        relogio.start()
+
+    def _cancelar_prazo_do_qr(self):
+        relogio, self._prazo_do_qr = self._prazo_do_qr, None
+        if relogio is not None:
+            relogio.cancel()
+
+    def _qr_venceu(self):
+        if self._parar.is_set() or self._desligada or not self._pareando                 or getattr(self, "_conectada", False):
+            return
+        log.info("o QR Code venceu (o WhatsApp não mandou outro); pedindo "
+                 "para refazer")
+        self.barramento.publicar(ev.PareamentoFalhou(self.conta.id,
+                                                     "qr_expirou"))
 
     def pedir_codigo_pareamento(self, telefone):
         """Gera o codigo de 8 caracteres para o numero (so digitos, com o
@@ -1860,10 +1913,17 @@ class ProvedorWhatsApp(Provedor):
                 ultimo = e
                 log.warning("pareamento por código, tentativa %d: %r",
                             tentativa, e)
+                if sem_conexao(e) and tentativa >= 2:
+                    # a conexao fechou (o tempo do QR acabou): repetir nao
+                    # adianta; a janela refaz a conexao e pede de novo
+                    log.warning("pareamento por código: conexão fechada; "
+                                "pedindo para refazer")
+                    self.barramento.publicar(ev.PareamentoFalhou(
+                        self.conta.id, "sem_conexao"))
+                    return
                 time.sleep(3)
         self.barramento.publicar(ev.CodigoPareamento(
-            self.conta.id, erro="O WhatsApp não gerou o código (%s). "
-            "Confira o número ou use o QR Code." % type(ultimo).__name__))
+            self.conta.id, erro=motivo_do_codigo(ultimo)))
 
     def _ao_parear(self, cliente, e):
         if e.Error:
@@ -1886,6 +1946,7 @@ class ProvedorWhatsApp(Provedor):
         self._no_ar_desde = agora
         self._conectada = True
         self._pareando = False
+        self._cancelar_prazo_do_qr()
         self._disponivel = False
         self._fila.put(self._limpar_status_antigos)
         # as mensagens que chegaram com o app fechado vem agora: sem avisos

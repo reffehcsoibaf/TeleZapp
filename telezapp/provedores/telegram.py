@@ -2062,13 +2062,28 @@ class ProvedorTelegram(Provedor):
             if acao.get("modo") == "convite":
                 r = await self.cliente(functions.messages.CheckChatInviteRequest(
                     acao["codigo"]))
+                tipo_da_resposta = type(r).__name__
                 if isinstance(r, T.ChatInviteAlready):
-                    return {"nome": nome_de(r.chat), "membros": 0,
-                            "descricao": "", "ja_participa": True}
-                return {"nome": r.title,
-                        "membros": int(r.participants_count or 0),
+                    return {"nome": nome_de(getattr(r, "chat", None)),
+                            "membros": 0, "descricao": "",
+                            "ja_participa": True}
+                # ChatInvite traz o titulo; ChatInvitePeek (canal que da para
+                # espiar sem entrar) traz so o `chat`: nada daqui pode
+                # supor um campo que a resposta nao tenha
+                nome = getattr(r, "title", None) or \
+                    nome_de(getattr(r, "chat", None)) or "este grupo ou canal"
+                membros = getattr(r, "participants_count", None)
+                if membros is None:
+                    membros = getattr(getattr(r, "chat", None),
+                                      "participants_count", 0)
+                return {"nome": nome, "membros": int(membros or 0),
                         "descricao": getattr(r, "about", "") or "",
-                        "ja_participa": False}
+                        "ja_participa": False,
+                        "tipo": "canal" if getattr(r, "broadcast", False)
+                        or (tipo_da_resposta == "ChatInvitePeek"
+                            and getattr(getattr(r, "chat", None),
+                                        "broadcast", False))
+                        else ""}
             ent = await self.cliente.get_entity(acao["usuario"])
             if isinstance(ent, T.User):
                 # nao e grupo nem canal: a janela abre a conversa (e, num
@@ -2079,7 +2094,12 @@ class ProvedorTelegram(Provedor):
                 getattr(ent, "participants_count", 0) or 0), "descricao": "",
                 "ja_participa": bool(not getattr(ent, "left", True))}
         except Exception as e:
-            log.info("prévia do convite falhou: %s", type(e).__name__)
+            # o texto do erro diz qual campo faltou (um AttributeError so com
+            # o tipo nao dizia nada); o codigo do convite nao entra no log
+            log.warning("prévia do convite falhou: %s: %s (modo %s)",
+                        type(e).__name__, e, acao.get("modo"),
+                        exc_info=isinstance(e, (AttributeError, TypeError,
+                                                 KeyError)))
             return {"erro": motivo_do_convite(e)}
 
     def entrar_no_grupo(self, msg, acao):
