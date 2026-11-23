@@ -2745,3 +2745,55 @@ def test_post_de_canal_com_comentarios_guarda_a_contagem():
     extras = m.extras_de(x)
     assert extras["comentavel"] and extras["comentarios"] == 4
     assert "(4 comentários)" in m.formatar(x, 1)
+
+
+# ------------------------------------- prévia do convite (CheckChatInvite)
+def _previa_com(resposta):
+    async def cliente(req):
+        return resposta
+    prov = tg.ProvedorTelegram.__new__(tg.ProvedorTelegram)
+    prov.cliente = cliente
+    return asyncio.run(prov._previa({"modo": "convite", "codigo": "ABCDEFGHIJ"}))
+
+
+def test_previa_do_convite_de_canal_e_de_grupo():
+    from telethon.tl import types as tipos
+    r = _previa_com(tipos.ChatInvite(
+        title="Canal X", photo=tipos.PhotoEmpty(id=0), participants_count=42,
+        color=0, broadcast=True, about="sobre"))
+    assert r == {"nome": "Canal X", "membros": 42, "descricao": "sobre",
+                 "ja_participa": False, "tipo": "canal"}
+    r = _previa_com(tipos.ChatInvite(
+        title="Grupo Y", photo=tipos.PhotoEmpty(id=0), participants_count=None,
+        color=0, megagroup=True))
+    assert r["nome"] == "Grupo Y" and r["membros"] == 0 and not r["tipo"]
+
+
+def test_previa_do_convite_de_canal_que_se_espia_sem_entrar():
+    """ChatInvitePeek nao tem `title`: antes dava AttributeError e a janela
+    dizia 'Não consegui consultar o convite (AttributeError)'."""
+    from telethon.tl import types as tipos
+    chat = tipos.Channel(id=1, title="Canal Z", photo=tipos.ChatPhotoEmpty(),
+                         date=datetime.datetime.now(datetime.timezone.utc),
+                         broadcast=True, participants_count=7)
+    r = _previa_com(tipos.ChatInvitePeek(chat=chat, expires=0))
+    assert r["nome"] == "Canal Z" and r["membros"] == 7
+    assert r["tipo"] == "canal" and r["ja_participa"] is False
+
+
+def test_previa_do_convite_ja_participa():
+    from telethon.tl import types as tipos
+    chat = types.SimpleNamespace(title="Turma")
+    r = _previa_com(tipos.ChatInviteAlready(chat=chat))
+    assert r["ja_participa"] is True and r["nome"] == "Turma"
+
+
+def test_previa_com_erro_inesperado_registra_o_texto(caplog):
+    async def cliente(req):
+        raise AttributeError("'X' object has no attribute 'y'")
+    prov = tg.ProvedorTelegram.__new__(tg.ProvedorTelegram)
+    prov.cliente = cliente
+    r = asyncio.run(prov._previa({"modo": "convite", "codigo": "ABCDEFGHIJ"}))
+    assert "AttributeError" in r["erro"]
+    assert "no attribute 'y'" in caplog.text
+    assert "ABCDEFGHIJ" not in caplog.text

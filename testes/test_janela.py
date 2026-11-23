@@ -10783,3 +10783,123 @@ def test_alt6_diz_por_que_a_caixa_de_pastas_nao_esta_disponivel(j):
     j._ir_pasta()
     assert "personalizados" in ditas[-1]
     assert j.cx_pasta.visivel is False
+
+
+def test_codigo_sem_conexao_refaz_a_conexao_e_gera_sozinho(j, monkeypatch):
+    """O WhatsApp so mantem o QR por uns 2 min e 40 s e depois fecha a
+    conexao: quem pede o codigo depois disso recebia 'websocket not connected'.
+    Agora a janela refaz a conexao e pede o codigo de novo no primeiro QR."""
+    class Sincrono:
+        def __init__(self, target=None, args=(), **k):
+            self.target = target
+
+        def start(self):
+            if "_tocar" not in getattr(self.target, "__name__", ""):
+                self.target()
+    monkeypatch.setattr(jm.threading, "Thread", Sincrono)
+    j.adicionar_conta("whatsapp")
+    dlg = j.pareamentos["w-nova"]
+    dlg._ir_para("codigo")
+    dlg.telefone.SetValue("+351 91 727 1530")
+    dlg._gerar()
+    assert j.contas.p.pedidos[-1] == ("codigo", "+351917271530")
+    ditas = []
+    dlg.falar = j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.b.publicar(ev.PareamentoFalhou("w-nova", "sem_conexao"))
+    assert j.contas.reiniciadas == ["w-nova"]
+    assert any("tinha fechado" in t for t in ditas)
+    assert dlg.falhas == 0                    # nao conta como recusa
+    assert dlg.botao_gerar.IsEnabled()
+    antes = len(j.contas.p.pedidos)
+    j.b.publicar(ev.QrPareamento("w-nova", "2@novo"))   # a conexao voltou
+    assert j.contas.p.pedidos[antes:] == [("codigo", "+351917271530")]
+    assert not dlg.botao_gerar.IsEnabled()
+    assert dlg.codigo.GetValue() == "Gerando o código..."
+    assert any("Conexão refeita" in t for t in ditas)
+    # um QR seguinte nao pede o codigo outra vez
+    j.b.publicar(ev.QrPareamento("w-nova", "2@outro"))
+    assert len(j.contas.p.pedidos) == antes + 1
+
+
+def test_codigo_sem_conexao_desiste_depois_de_duas_reconexoes(j, monkeypatch):
+    class Sincrono:
+        def __init__(self, target=None, args=(), **k):
+            self.target = target
+
+        def start(self):
+            if "_tocar" not in getattr(self.target, "__name__", ""):
+                self.target()
+    monkeypatch.setattr(jm.threading, "Thread", Sincrono)
+    j.adicionar_conta("whatsapp")
+    dlg = j.pareamentos["w-nova"]
+    dlg._ir_para("codigo")
+    dlg.telefone.SetValue("+351 91 727 1530")
+    dlg._gerar()
+    ditas = []
+    dlg.falar = j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    for _ in range(3):
+        j.b.publicar(ev.PareamentoFalhou("w-nova", "sem_conexao"))
+    assert len(j.contas.reiniciadas) == 2
+    assert "Não consegui reconectar" in ditas[-1]
+
+
+def test_qr_vencido_pede_outro_sem_contar_como_recusa(j, monkeypatch):
+    class Sincrono:
+        def __init__(self, target=None, args=(), **k):
+            self.target = target
+
+        def start(self):
+            if "_tocar" not in getattr(self.target, "__name__", ""):
+                self.target()
+    monkeypatch.setattr(jm.threading, "Thread", Sincrono)
+    j.adicionar_conta("whatsapp")
+    dlg = j.pareamentos["w-nova"]
+    dlg._ir_para("qr")
+    ditas = []
+    dlg.falar = j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.b.publicar(ev.PareamentoFalhou("w-nova", "qr_expirou"))
+    assert j.contas.reiniciadas == ["w-nova"] and dlg.falhas == 0
+    assert any("QR Code venceu" in t for t in ditas)
+    for _ in range(4):
+        j.b.publicar(ev.PareamentoFalhou("w-nova", "qr_expirou"))
+    assert len(j.contas.reiniciadas) == 5
+    j.b.publicar(ev.PareamentoFalhou("w-nova", "qr_expirou"))   # a sexta
+    assert len(j.contas.reiniciadas) == 5
+    assert "venceu várias vezes" in ditas[-1]
+
+
+def test_qr_vencido_com_codigo_ja_gerado_nao_mexe_na_conexao(j, monkeypatch):
+    class Sincrono:
+        def __init__(self, target=None, args=(), **k):
+            self.target = target
+
+        def start(self):
+            if "_tocar" not in getattr(self.target, "__name__", ""):
+                self.target()
+    monkeypatch.setattr(jm.threading, "Thread", Sincrono)
+    j.adicionar_conta("whatsapp")
+    dlg = j.pareamentos["w-nova"]
+    dlg._ir_para("codigo")
+    dlg.telefone.SetValue("+55 51 99999 8888")
+    dlg._gerar()
+    j.b.publicar(ev.PareamentoFalhou("w-nova", "qr_expirou"))
+    assert not hasattr(j.contas, "reiniciadas")
+
+
+def test_qr_vencido_na_tela_do_codigo_refaz_em_silencio(j, monkeypatch):
+    class Sincrono:
+        def __init__(self, target=None, args=(), **k):
+            self.target = target
+
+        def start(self):
+            if "_tocar" not in getattr(self.target, "__name__", ""):
+                self.target()
+    monkeypatch.setattr(jm.threading, "Thread", Sincrono)
+    j.adicionar_conta("whatsapp")
+    dlg = j.pareamentos["w-nova"]
+    dlg._ir_para("codigo")
+    ditas = []
+    dlg.falar = j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.b.publicar(ev.PareamentoFalhou("w-nova", "qr_expirou"))
+    assert j.contas.reiniciadas == ["w-nova"]
+    assert not ditas                    # nao interrompe quem esta digitando

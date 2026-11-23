@@ -203,8 +203,10 @@ class Presenca:
 @dataclass
 class PareamentoFalhou:
     """WhatsApp: o celular nao aceitou o codigo (`metodo` "codigo") ou o
-    WhatsApp recusou o pareamento pelo QR Code ("qr"). A conexao precisa
-    recomecar para valer de novo."""
+    WhatsApp recusou o pareamento pelo QR Code ("qr"), ou a conexao ja tinha
+    fechado quando a pessoa pediu o codigo ("sem_conexao": o WhatsApp so
+    manda QR Code por uns 2 min e 40 s) ou o QR Code venceu sem outro vir
+    ("qr_expirou"). A conexao precisa recomecar para valer de novo."""
     conta_id: str
     metodo: str
 

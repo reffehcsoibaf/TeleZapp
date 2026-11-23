@@ -233,3 +233,59 @@ class DialogoConvite(wx.Dialog):
         self._mostrar_qr()
         self._copiar(dado)
         self.fala.falar("Link trocado e copiado.", interromper=True)
+
+
+def texto_do_aviso_de_pedidos(avisos, primeira):
+    """O que a janela de aviso mostra. `avisos` = [(grupo, novos, total)].
+    Pura, para poder ser testada."""
+    total = sum((tot if primeira else n) for _g, n, tot in avisos)
+    plural = "" if total == 1 else "s"
+    if primeira:
+        linhas = ["%d pedido%s de entrada esperando a sua aprovação." % (
+            total, plural), ""]
+    else:
+        linhas = ["%d pedido%s novo%s de entrada nos seus grupos." % (
+            total, plural, plural), ""]
+    for grupo, n, tot in avisos:
+        linhas.append("%s: %d" % (grupo, tot if primeira else n))
+    linhas += ["", "Deseja ver os pedidos agora e aprovar ou recusar? Use "
+               "Tab para chegar aos botões Sim e Não. Em Não, os pedidos "
+               "continuam esperando em Detalhes do grupo, Pedidos de "
+               "entrada."]
+    return "\n".join(linhas)
+
+
+class DialogoAvisoPedidos(wx.Dialog):
+    """Aviso de pedidos de entrada, no molde da janela de versao nova: o texto,
+    somente leitura e com o foco, e depois do texto o Tab para os botoes Sim e
+    Nao (nenhum botao de aprovar ou recusar recebe o foco). `ver` fica True
+    em Sim."""
+
+    def __init__(self, pai, texto):
+        super().__init__(pai, title="Pedidos de entrada esperando",
+                         size=(560, 360),
+                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+        self.ver = False
+        rotulo = "Pedidos de entrada esperando"
+        lay = wx.BoxSizer(wx.VERTICAL)
+        lay.Add(wx.StaticText(self, label=rotulo), 0, wx.ALL, 8)
+        self.texto = wx.TextCtrl(self, value=texto, name=rotulo,
+                                 style=wx.TE_MULTILINE | wx.TE_READONLY)
+        lay.Add(self.texto, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
+        linha = wx.BoxSizer(wx.HORIZONTAL)
+        self.sim = wx.Button(self, wx.ID_YES, "&Sim")
+        self.nao = wx.Button(self, wx.ID_NO, "&Não")
+        self.sim.Bind(wx.EVT_BUTTON, lambda e: self._fechar(True))
+        self.nao.Bind(wx.EVT_BUTTON, lambda e: self._fechar(False))
+        linha.Add(self.sim, 0, wx.RIGHT, 8)
+        linha.Add(self.nao)
+        lay.Add(linha, 0, wx.ALL | wx.ALIGN_RIGHT, 8)
+        self.SetSizer(lay)
+        self.SetEscapeId(wx.ID_NO)
+        self.texto.SetInsertionPoint(0)
+        self.texto.SetFocus()
+        self.CentreOnParent()
+
+    def _fechar(self, ver):
+        self.ver = ver
+        self.EndModal(wx.ID_OK)

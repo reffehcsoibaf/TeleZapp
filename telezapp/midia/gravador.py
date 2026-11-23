@@ -165,13 +165,34 @@ class FonteSomInterno:
         self.taxa = TAXA
         self.canais = 2 if estereo else 1
         self._bloco = int(TAXA * BLOCO_S)
-        try:
-            self._gravador = captura.recorder(samplerate=TAXA, channels=2,
-                                              blocksize=self._bloco)
-            self._gravador.__enter__()
-        except Exception as e:
-            raise ErroGravacao("Não consegui capturar o som do computador "
-                               "(%s)." % type(e).__name__)
+        # A abertura falhou em alguns computadores (RuntimeError, sem o motivo
+        # no log). Tenta o formato de sempre e, se falhar, outras combinacoes
+        # de canais e de tamanho de bloco, guardando o erro de cada uma. A
+        # taxa fica em 48 kHz: o resto da gravacao conta com ela.
+        canais_da_saida = getattr(captura, "channels", None)
+        tentativas = [(2, self._bloco), (2, None), (canais_da_saida, None),
+                      (1, None)]
+        vistas, ultimo = [], None
+        for canais, bloco in tentativas:
+            if not canais or (canais, bloco) in vistas:
+                continue
+            vistas.append((canais, bloco))
+            try:
+                self._gravador = captura.recorder(
+                    samplerate=TAXA, channels=canais, blocksize=bloco)
+                self._gravador.__enter__()
+                if len(vistas) > 1:
+                    log.info("captura do som do computador aberta com %d "
+                             "canais e bloco %s em %r", canais, bloco,
+                             saida.name)
+                return
+            except Exception as e:
+                ultimo = e
+                log.warning("captura do som do computador em %r falhou "
+                            "(%d canais, bloco %s): %s: %s", saida.name,
+                            canais, bloco, type(e).__name__, e)
+        raise ErroGravacao("Não consegui capturar o som do computador "
+                           "(%s)." % type(ultimo).__name__)
 
     def ler(self):
         dados = self._gravador.record(numframes=self._bloco)

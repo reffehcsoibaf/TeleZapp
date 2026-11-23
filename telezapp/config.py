@@ -785,9 +785,10 @@ OPCOES = (
           "Nos grupos do WhatsApp em que você é administrador e que exigem "
           "aprovação, o TeleZapp olha se há pedidos de entrada esperando: "
           "ao abrir e, depois, de tempos em tempos (veja o intervalo "
-          "abaixo). Ao abrir, fala quantos pedidos esperam e em quais "
-          "grupos; depois, só fala quando chegar pedido novo. A janela dos "
-          "pedidos continua em Detalhes do grupo. Desmarcada, o TeleZapp não "
+          "abaixo). Ao abrir, mostra uma janela de aviso com quantos pedidos "
+          "esperam e em quais grupos; depois, só quando chegar pedido novo. "
+          "A janela pergunta se você quer ver os pedidos agora; a lista "
+          "continua em Detalhes do grupo. Desmarcada, o TeleZapp não "
           "consulta nada."),
     Opcao("pedidos_de_entrada_intervalo",
           "Intervalo da consulta de pedidos de entrada", "Mensagens", 15,

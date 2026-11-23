@@ -43,6 +43,15 @@ dia no mesmo KV (`u:<dia>:<id>`, 180 dias). Para ler o resumo:
 `https://<endereço do Worker>/admin/uso?t=<ADMIN_TOKEN>` (`&dias=30` para mudar
 o período). A tela traz também as chamadas (até 10 por aparelho por dia, as com problema na frente; serve para comparar grupos, não como taxa de falha). Depois de mudar o `worker.js`, `npx wrangler deploy` outra vez.
 
+## Página do projeto (`/`)
+
+O Worker também serve a página do projeto: a mesma pasta `../site` que vai
+para o GitHub Pages (`wrangler.toml`, seção `[assets]`). A raiz do endereço do
+Worker abre a `index.html`; `/relato`, `/uso` e `/admin` seguem no
+`worker.js`. Para atualizar a página, edite `site/index.html` e publique de
+novo (`publicar-worker.cmd`); o GitHub Pages continua sendo atualizado pelo
+fluxo de sempre, ao subir a mudança na branch `main`.
+
 ## O que ele faz e não faz
 
 - Só aceita envios vindos de `https://reffehcsoibaf.github.io` e, no máximo,
