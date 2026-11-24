@@ -1176,6 +1176,36 @@ def test_estrutura_interativa_descreve_botoes_sem_imagem_nem_texto_longo():
     assert wa.estrutura_interativa(E.Message(conversation="oi")) is None
 
 
+def test_acoes_interativas_mostram_o_nome_e_so_as_chaves_dos_parametros():
+    nf = E.InteractiveMessage.NativeFlowMessage(buttons=[
+        E.InteractiveMessage.NativeFlowMessage.NativeFlowButton(
+            name="galaxy_message",
+            buttonParamsJSON='{"flow_token":"segredo-123","flow_id":"99",'
+                             '"flow_cta":"Iniciar atendimento"}'),
+        E.InteractiveMessage.NativeFlowMessage.NativeFlowButton(
+            name="Nome com Texto Livre", buttonParamsJSON="isto nao e json")])
+    msg = E.Message(interactiveMessage=E.InteractiveMessage(nativeFlowMessage=nf))
+    acoes = wa.acoes_interativas(msg)
+    assert acoes[0] == {"acao": "galaxy_message",
+                        "chaves": ["flow_cta", "flow_id", "flow_token"]}
+    assert acoes[1]["acao"] == "<texto 20>"
+    assert acoes[1]["chaves"] == ["<json invalido>"]
+    texto = str(acoes)
+    for proibido in ("segredo-123", "Iniciar atendimento", "99"):
+        assert proibido not in texto
+
+
+def test_acoes_interativas_da_resposta_a_um_formulario():
+    resp = E.InteractiveResponseMessage(
+        nativeFlowResponseMessage=E.InteractiveResponseMessage.
+        NativeFlowResponseMessage(name="galaxy_message",
+                                  paramsJSON='{"flow_token":"x","nome":"Ana"}'))
+    acoes = wa.acoes_interativas(E.Message(interactiveResponseMessage=resp))
+    assert acoes == [{"resposta": "galaxy_message",
+                      "chaves": ["flow_token", "nome"]}]
+    assert wa.acoes_interativas(E.Message(conversation="oi")) == []
+
+
 def test_album_foto_dentro_de_associated_child_aparece_e_cabecalho_some():
     foto = E.Message(imageMessage=E.ImageMessage(caption="da viagem",
                                                   fileLength=10))

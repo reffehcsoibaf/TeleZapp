@@ -7,6 +7,10 @@ Antes de escrever aqui, confira a versão em vigor: `git fetch --tags` e
 `gh release list -L 3` (a Latest é a publicada). O que veio depois dela vai em
 "Próxima versão (ainda sem número)".
 
+## Próxima versão (ainda sem número)
+
+Registro das ações dos botões de mensagens de empresa: `whatsapp.acoes_interativas` devolve, para cada botão de fluxo (`nativeFlowMessage`) e para a resposta a ele (`nativeFlowResponseMessage`), o nome da ação (`galaxy_message`, `cta_url`...; texto livre vira só o tamanho) e as chaves dos parâmetros, nunca os valores; `converter` e a conversão do histórico gravam "ações da mensagem interativa" no log. Motivo: relato de 24/11 (versão 23.1) em que o botão que abre uma página dentro do WhatsApp (suspeita: `galaxy_message`, formulário do WhatsApp Flows) não aparece no TeleZapp, e o log atual só mostra o tamanho do nome (14). Com os nomes, um teste com um atendimento real mostra qual ação é e se dá para mostrar o botão. Testes em `test_provedor_whatsapp.py`.
+
 ## 2026.11.23.1
 
 Chamada recebida que não acaba (log do Igor, 23/11: uma oferta do WhatsApp Web, `platform=web`, ficou 6823 s tocando sem `terminate`; `_ao_receber` recusa toda chamada nova com `ocupado = bool(self.ligacoes)` e dez ofertas foram recusadas como "outra aberta"). Três camadas: (1) `Janela._vigiar_toque` (a cada 5 s, a partir de `TOCANDO`) recusa a chamada recebida que passa de `nucleo.chamadas.SEGUNDOS_TOCANDO_SEM_INTERACAO` (90 s) sem tecla, Tab ou clique na janela (`DialogoChamada.ao_interagir`; `EVT_CHAR_HOOK`, `EVT_CHILD_FOCUS`, `EVT_LEFT_DOWN`) e, se o provedor não publicar `ENCERRADA` em `ESPERA_DO_FIM_FORCADO_MS` (4 s), encerra a `Chamada` localmente; (2) `ChamadasWhatsapp._descartar_toques_parados` e `ChamadasTelegram._descartar_toques_parados` rodam no início de `_ao_receber`: ligação entrante em `TOCANDO` com 90 s ou mais (`_Ligacao.criada_em`, `Chamada.criada_em`) é recusada na rede (se der) e tirada de `ligacoes`/`chamadas` como `PERDIDA`; (3) `deve_recusar_por_inatividade` é a regra pura, testável. A causa de o aviso de fim não chegar segue sem prova.
