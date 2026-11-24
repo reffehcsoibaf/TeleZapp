@@ -1195,6 +1195,22 @@ def test_acoes_interativas_mostram_o_nome_e_so_as_chaves_dos_parametros():
         assert proibido not in texto
 
 
+def test_botao_de_formulario_do_whatsapp_vira_acao_com_o_rotulo_do_flow():
+    nf = E.InteractiveMessage.NativeFlowMessage(buttons=[
+        E.InteractiveMessage.NativeFlowMessage.NativeFlowButton(
+            name="galaxy_message",
+            buttonParamsJSON='{"flow_token":"t","flow_id":"123",'
+                             '"flow_cta":"Iniciar atendimento"}')])
+    msg = E.Message(interactiveMessage=E.InteractiveMessage(
+        body=E.InteractiveMessage.Body(text="Clique abaixo"),
+        nativeFlowMessage=nf))
+    acoes = wa.acoes_do_whatsapp(msg)
+    assert acoes == [{"tipo": "formulario", "indice": 0,
+                      "rotulo": "Iniciar atendimento", "id": "123"}]
+    assert wa.rotulos_dos_botoes(msg)[0] == ["Iniciar atendimento"]         if hasattr(wa, "rotulos_dos_botoes") else True
+    assert wa.NOMES_ACOES_INTERATIVAS["galaxy_message"] ==         "formulário do WhatsApp"
+
+
 def test_acoes_interativas_da_resposta_a_um_formulario():
     resp = E.InteractiveResponseMessage(
         nativeFlowResponseMessage=E.InteractiveResponseMessage.

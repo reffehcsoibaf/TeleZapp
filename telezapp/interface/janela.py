@@ -8292,6 +8292,15 @@ class Janela(wx.Frame):
         if tipo == "robo_copiar":
             self._copiar_texto(acao.get("texto", ""))
             return
+        if tipo == "formulario":
+            bipe("erro")
+            self.fala.falar(
+                "Este botão abre um formulário do WhatsApp, que o TeleZapp "
+                "ainda não consegue abrir. Abra esta conversa no celular "
+                "para preencher. Também dá para digitar MENU ou pedir para "
+                "falar com um atendente, se a empresa oferecer.",
+                interromper=True)
+            return
         if tipo == "robo_indisponivel":
             bipe("erro")
             self.fala.falar("O TeleZapp não faz isso. Use o aplicativo "

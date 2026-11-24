@@ -530,7 +530,8 @@ def rotulos_dos_botoes(interna):
         if inter is not None and inter.HasField("nativeFlowMessage"):
             for b in inter.nativeFlowMessage.buttons:
                 dados = json.loads(b.buttonParamsJSON or "{}")
-                botoes.append(dados.get("display_text") or "")
+                botoes.append(dados.get("display_text") or
+                              dados.get("flow_cta") or "")
         if interna.HasField("listMessage"):
             for sec in interna.listMessage.sections:
                 opcoes += [r.title for r in sec.rows]
@@ -593,6 +594,7 @@ def _texto_estruturado(interna, presentes):
 
 
 NOMES_ACOES_INTERATIVAS = {
+    "galaxy_message": "formulário do WhatsApp",
     "payment_info": "solicitação de pagamento",
     "review_and_pay": "solicitação de pagamento",
     "order_details": "detalhes do pedido",
@@ -717,6 +719,10 @@ def botoes_do_whatsapp(interna):
     return botoes
 
 
+# nome da acao do botao que abre um formulario (Flow) dentro do WhatsApp
+ACAO_DE_FORMULARIO = "galaxy_message"
+
+
 def acoes_do_whatsapp(interna):
     """Botoes de resposta e opcoes de lista que o toque pode acionar:
     [{'tipo', 'rotulo', 'id', 'indice', 'descricao'}]. Tipos: modelo
@@ -750,6 +756,15 @@ def acoes_do_whatsapp(interna):
             inter = interna.interactiveMessage
         if inter is not None and inter.HasField("nativeFlowMessage"):
             for i, b in enumerate(inter.nativeFlowMessage.buttons):
+                if b.name == ACAO_DE_FORMULARIO:
+                    # formulario do WhatsApp (Flow): o rotulo vem em flow_cta
+                    dados = json.loads(b.buttonParamsJSON or "{}")
+                    acoes.append({
+                        "tipo": "formulario", "indice": i,
+                        "rotulo": dados.get("flow_cta") or
+                        dados.get("display_text") or "Abrir o formulário",
+                        "id": str(dados.get("flow_id") or "")})
+                    continue
                 if b.name != "quick_reply":
                     continue
                 dados = json.loads(b.buttonParamsJSON or "{}")
