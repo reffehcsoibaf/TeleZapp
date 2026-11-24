@@ -1,0 +1,47 @@
+name: Testes no macOS (experimento)
+
+# Experimento: ver quanto do TeleZapp ja roda no Mac. Roda os testes
+# automaticos (wx simulado, sem janela) no macOS Apple Silicon e Intel.
+# Nao publica nada e nao testa a experiencia com o VoiceOver: isso fica com
+# quem tem um Mac. Manual (Actions > Run workflow) ou ao mexer neste arquivo.
+on:
+  workflow_dispatch:
+  push:
+    paths: [".github/workflows/testes-macos.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  testes:
+    name: macOS ${{ matrix.rotulo }}
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rotulo: Apple Silicon
+            runner: macos-latest
+          - rotulo: Intel
+            runner: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Instalar as dependencias (sem as exclusivas do Windows)
+        run: |
+          python -m pip install --upgrade pip
+          grep -viE '^(winrt|comtypes)' requirements.txt > requisitos-mac.txt
+          echo "--- instalando:"; cat requisitos-mac.txt
+          # um pacote por vez, para ver qual deles nao existe para o Mac
+          while read -r pacote; do
+            [ -z "$pacote" ] && continue
+            if pip install "$pacote"; then echo "OK   $pacote"; else echo "FALHOU $pacote"; fi
+          done < requisitos-mac.txt
+          pip install pytest
+      - name: Rodar os testes
+        env:
+          PYTHONUTF8: "1"
+        run: python -m pytest testes -q -p no:cacheprovider --tb=short -rfE 2>&1 | tail -150
