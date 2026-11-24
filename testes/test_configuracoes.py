@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Modelo da janela de configuracoes (sem wx)."""
+import sys
+
 import pytest
 
 from telezapp import config
@@ -241,6 +243,8 @@ def test_atalhos_lista_filtra_pela_busca(mod):
     assert [a.chave for a, _ in mod.atalhos_lista("")] == ["a", "b"]
 
 
+@pytest.mark.skipif(sys.platform == "darwin",
+                    reason="esta lista inclui opcoes que so existem no Windows")
 def test_interface_e_mensagens_reunem_as_categorias_antigas(mod):
     cats = categorias()
     assert "Avisos" not in cats and "Leitura" not in cats

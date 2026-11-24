@@ -7853,6 +7853,8 @@ def test_exclusoes_no_celular_viram_um_aviso_so(j, monkeypatch):
         "A conversa com Ana foi apagada")
 
 
+@pytest.mark.skipif(sys.platform == "darwin",
+                    reason="esta lista inclui opcoes que so existem no Windows")
 def test_opcoes_que_so_valem_ao_reabrir_e_item_reiniciar(j):
     from telezapp import config as cfgmod
     assert cfgmod.precisa_reabrir("prioridade_abertura")
