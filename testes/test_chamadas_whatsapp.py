@@ -1097,7 +1097,7 @@ def test_recusa_431_de_grupo_com_a_caixa_diz_que_so_entra_por_voz(
     ponte.fila.put({"ev": "end", "call": "R5", "reason": "server:431"})
     assert esperar(lambda: bus.estados()[-1][0] == ch.ENCERRADA)
     erro = bus.eventos[-1].erro
-    assert "só entra em chamadas em grupo por voz" in erro
+    assert "só entra em chamadas em grupo comuns por voz" in erro
 
 
 def test_recusa_do_servidor_numa_chamada_comum_continua_generica(mundo_grupo):

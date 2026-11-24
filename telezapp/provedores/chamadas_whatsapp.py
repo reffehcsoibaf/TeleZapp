@@ -1007,15 +1007,16 @@ class ChamadasWhatsApp:
                 lig.era_grupo or lig.call_id in self._vistos_de_grupo):
             motivo = ch.FALHA
             erro = ("O WhatsApp recusou a entrada nesta chamada em grupo "
-                    "(%s). O TeleZapp só entra em chamadas em grupo por "
-                    "voz, sem vídeo." % razao
+                    "(%s). O TeleZapp só entra em chamadas em grupo "
+                    "comuns por voz, sem vídeo." % razao
                     if self.grupo_ligado() else
                     "Esta era uma chamada em grupo, e o WhatsApp recusa o "
                     "atendimento como chamada comum (%s). Para tentar "
                     "entrar, marque Chamadas em grupo do WhatsApp e Entrar "
                     "em chamadas em grupo que já começaram, em "
-                    "Configurações, Recursos experimentais. Vídeo em grupo "
-                    "o TeleZapp ainda não faz." % razao)
+                    "Configurações, Recursos experimentais. O vídeo só existe "
+                    "nas chamadas por link; nas chamadas em grupo comuns "
+                    "o TeleZapp só usa voz." % razao)
         elif razao.startswith("server"):
             motivo, erro = ch.FALHA, ("O WhatsApp recusou a chamada (%s)."
                                       % razao)
