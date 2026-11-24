@@ -4780,6 +4780,37 @@ def test_confirmar_telefone_so_diz_que_nao_existe_se_nenhuma_forma_existe():
     assert id_ == "" and "não está registrado no WhatsApp" in motivo
 
 
+def _prov_com_lid(pn_do_lid):
+    """is_on_whatsapp que responde com endereco LID (as duas formas existem)
+    e get_pn_from_lid simulado."""
+    p = object.__new__(wa.ProvedorWhatsApp)
+    p._conectada = True
+
+    def is_on_whatsapp(*numeros):
+        return [N.IsOnWhatsAppResponse(Query=q, IsIn=True,
+                                       JID=jid("2000111222333", "lid"))
+                for q in numeros]
+    p.cliente = types.SimpleNamespace(is_on_whatsapp=is_on_whatsapp,
+                                      get_pn_from_lid=pn_do_lid)
+    return p
+
+
+def test_confirmar_telefone_com_resposta_lid_usa_o_telefone_do_mapa_do_lid():
+    # o numero digitado tem 13 digitos, mas a conta registrada e a de 12
+    p = _prov_com_lid(lambda lid: jid("556182921123"))
+    assert p.confirmar_telefone("+5561982921123") == (
+        "556182921123@s.whatsapp.net", "")
+
+
+def test_confirmar_telefone_com_lid_sem_mapa_vale_o_digitado():
+    def sem_mapa(lid):
+        raise RuntimeError("sem mapa")
+    p = _prov_com_lid(sem_mapa)
+    assert p.confirmar_telefone("+5561982921123")[0] ==         "5561982921123@s.whatsapp.net"
+    p = _prov_com_lid(lambda lid: jid("2000111222333", "lid"))   # nao e telefone
+    assert p.confirmar_telefone("+5561982921123")[0] ==         "5561982921123@s.whatsapp.net"
+
+
 def test_confirmar_telefone_com_erro_na_rede_vale_o_digitado():
     p, _ = _prov_com_consulta([], erro=RuntimeError("rede"))
     assert p.confirmar_telefone("+5562983220258") == (

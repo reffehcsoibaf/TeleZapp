@@ -4510,10 +4510,25 @@ class ProvedorWhatsApp(Provedor):
                 # telefone: nesse caso vale o telefone consultado (23/11: o
                 # TeleZapp abriu a conversa como "+<LID de 15 digitos>")
                 if getattr(r.JID, "Server", "s.whatsapp.net")                         != "s.whatsapp.net" and consulta:
-                    registrados[consulta] = consulta
-                    log.info("a consulta do telefone voltou com endereço "
-                             "interno (%s, %d dígitos); vale o telefone "
-                             "consultado", r.JID.Server, len(r.JID.User))
+                    # o LID nao diz qual forma (com ou sem o 9) esta
+                    # registrada: o mapa LID -> telefone do WhatsApp diz
+                    # (24/11: o TeleZapp abriu a conversa com os 13 digitos
+                    # e o envio foi recusado, a conta era a de 12)
+                    pn = self._pn_do_lid(r.JID)
+                    real = getattr(pn, "User", "") if pn is not None and                         getattr(pn, "Server", "") == "s.whatsapp.net" else ""
+                    if real.isdigit():
+                        registrados[consulta] = real
+                        log.info("a consulta do telefone (%d dígitos) voltou "
+                                 "com endereço interno; o telefone "
+                                 "registrado tem %d dígitos", len(consulta),
+                                 len(real))
+                    else:
+                        registrados[consulta] = consulta
+                        log.info("a consulta do telefone voltou com endereço "
+                                 "interno (%s, %d dígitos) sem telefone "
+                                 "correspondente; vale o telefone consultado "
+                                 "(%d dígitos)", r.JID.Server,
+                                 len(r.JID.User), len(consulta))
                 else:
                     registrados[consulta] = r.JID.User
         for f in formas:                      # a digitada vale primeiro

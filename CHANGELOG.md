@@ -7,6 +7,10 @@ Antes de escrever aqui, confira a versão em vigor: `git fetch --tags` e
 `gh release list -L 3` (a Latest é a publicada). O que veio depois dela vai em
 "Próxima versão (ainda sem número)".
 
+## Próxima versão (ainda sem número)
+
+Telefone do Brasil com e sem o 9 quando o WhatsApp responde com endereço LID (24/11, link de resposta da página de relatos: o número digitado tinha 13 dígitos, a conta registrada tinha 12, e o envio foi recusado): em `confirmar_telefone`, a resposta com LID passava a valer o telefone consultado, e a forma digitada vencia sempre. Agora a resposta com LID pergunta ao mapa LID -> telefone do WhatsApp (`_pn_do_lid`) qual telefone está registrado e usa esse; sem mapa, vale o digitado como antes. O log diz quantos dígitos tinha a consulta e o telefone registrado. Testes em `test_provedor_whatsapp.py`. Uma conversa de 13 dígitos que já foi criada antes da correção continua existindo e precisa ser apagada.
+
 ## 2026.11.23.1
 
 Chamada recebida que não acaba (log do Igor, 23/11: uma oferta do WhatsApp Web, `platform=web`, ficou 6823 s tocando sem `terminate`; `_ao_receber` recusa toda chamada nova com `ocupado = bool(self.ligacoes)` e dez ofertas foram recusadas como "outra aberta"). Três camadas: (1) `Janela._vigiar_toque` (a cada 5 s, a partir de `TOCANDO`) recusa a chamada recebida que passa de `nucleo.chamadas.SEGUNDOS_TOCANDO_SEM_INTERACAO` (90 s) sem tecla, Tab ou clique na janela (`DialogoChamada.ao_interagir`; `EVT_CHAR_HOOK`, `EVT_CHILD_FOCUS`, `EVT_LEFT_DOWN`) e, se o provedor não publicar `ENCERRADA` em `ESPERA_DO_FIM_FORCADO_MS` (4 s), encerra a `Chamada` localmente; (2) `ChamadasWhatsapp._descartar_toques_parados` e `ChamadasTelegram._descartar_toques_parados` rodam no início de `_ao_receber`: ligação entrante em `TOCANDO` com 90 s ou mais (`_Ligacao.criada_em`, `Chamada.criada_em`) é recusada na rede (se der) e tirada de `ligacoes`/`chamadas` como `PERDIDA`; (3) `deve_recusar_por_inatividade` é a regra pura, testável. A causa de o aviso de fim não chegar segue sem prova.
