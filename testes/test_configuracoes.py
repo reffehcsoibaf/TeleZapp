@@ -396,6 +396,7 @@ def test_chamada_do_telegram_recebida_e_ignorada_com_o_aviso_desligado(
         chamadas={}, _video_pedido={},
         _nova=lambda *a, **k: nova.append(a),
         atualizar_dispositivos=lambda: None,
+        _descartar_toques_parados=lambda: asyncio.sleep(0),
         nome_de=lambda cid: asyncio.sleep(0, "Ana"))
     upd = types.SimpleNamespace(chat_id=7)
     asyncio.run(ct.ChamadasTelegram._ao_receber(fake, None, upd))

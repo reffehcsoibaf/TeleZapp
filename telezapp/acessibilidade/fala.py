@@ -303,13 +303,35 @@ def acao_do_som(tipo, valor=None):
     if valor == "desligado":
         return "nenhum", ""
     if valor == BIP:
-        return "padrao", ""
+        fixo = _som_fixo_da_casa(tipo)
+        return ("arquivo", fixo) if fixo else ("padrao", "")
     caminho = caminho_do_som(valor)
     if caminho and os.path.isfile(caminho):
         return "arquivo", caminho
     if not valor and tipo in HERDA:
         return acao_do_som(HERDA[tipo])        # acompanha o outro evento
+    fixo = _som_fixo_da_casa(tipo)
+    if fixo:
+        return "arquivo", fixo
     return "padrao", ""       # sem som escolhido ou arquivo que sumiu
+
+
+# Eventos que, sem som escolhido (o pacote Padrao: bips do sistema), tocam o
+# arquivo estereo que vem com o programa em vez do bip mono: o toque grave de
+# fim de lista soa melhor assim (pedido dele, 23/11).
+EVENTOS_COM_SOM_FIXO = ("limite_da_lista",)
+
+
+def _som_fixo_da_casa(tipo):
+    """O arquivo da casa para o evento, ou "" se ele nao tem um som fixo."""
+    if tipo not in EVENTOS_COM_SOM_FIXO:
+        return ""
+    try:
+        from telezapp.nucleo import pacotes_de_som
+        caminho = os.path.join(pacotes_de_som.PASTA_TELEZAPP, tipo + ".ogg")
+    except Exception:
+        return ""
+    return caminho if os.path.isfile(caminho) else ""
 
 
 def bipe(tipo="nova", valor=None, servico=""):
@@ -345,6 +367,9 @@ def _tocar_arquivo(tipo, caminho):
             _, dados, taxa = guardado
         else:
             dados, taxa = _ler_som(caminho, LIMITE_SEGUNDOS_ARQUIVO)
+            if tipo in EVENTOS_COM_SOM_FIXO:     # curto: fica na memoria
+                _pre_carregados[caminho] = (os.path.getmtime(caminho),
+                                            dados, taxa)
         # o fluxo dos avisos fica aberto: tocar so troca as amostras (abrir o
         # dispositivo a cada som era o que atrasava a reproducao)
         _tocar_pelo_fluxo(dados, taxa, _indice_dos_avisos())

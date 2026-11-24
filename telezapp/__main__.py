@@ -448,6 +448,11 @@ def main():
                                        prioridade.abertura, args=(False,))
         temporizador.daemon = True
         temporizador.start()
+    try:
+        from telezapp.nucleo import instalacao as _instalacao
+        _instalacao.renovar_registro()   # versao no "Aplicativos instalados"
+    except Exception:
+        log.exception("registro do desinstalador")
     if cfg.get("abrir_links_no_telezapp"):
         from telezapp.nucleo import protocolos
         if not protocolos.registrar():

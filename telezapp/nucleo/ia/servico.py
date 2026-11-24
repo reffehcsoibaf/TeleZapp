@@ -77,7 +77,7 @@ def _mime(caminho, dados, genero):
             "pdf": "application/pdf"}[genero]
 
 
-def carregar_midia(caminho, genero, mime=None):
+def carregar_midia(caminho, genero, mime=None, provedor=""):
     """Midia pronta para enviar. ErroIA se o arquivo nao serve."""
     if genero not in cat.GENEROS:
         raise ErroIA("genero", "Tipo de arquivo desconhecido.")
@@ -88,11 +88,15 @@ def carregar_midia(caminho, genero, mime=None):
                                 "mídia antes.")
     if tamanho == 0:
         raise ErroIA("arquivo", "O arquivo está vazio.")
-    if tamanho > cat.LIMITE_BYTES[genero]:
+    limite = cat.limite_bytes(genero, provedor)
+    if tamanho > limite:
         raise ErroIA("grande", "O arquivo tem %.1f MB e o limite para "
-                               "enviar ao provedor é %d MB." % (
+                               "enviar a %s é %d MB." % (
                                    tamanho / 1048576,
-                                   cat.LIMITE_BYTES[genero] // 1048576))
+                                   cat.PROVEDORES[provedor].nome
+                                   if provedor in cat.PROVEDORES
+                                   else "este provedor",
+                                   limite // 1048576))
     with open(caminho, "rb") as f:
         dados = f.read()
     return Midia(genero, mime or _mime(caminho, dados, genero), dados,
@@ -205,7 +209,7 @@ def executar(genero, caminho, provedor, chave, modelo, perfil="medio",
         instrucoes = prompts.instrucoes("video", perfil, quadros=quadros)
         pergunta = prompts.primeira_pergunta("video", quadros)
     else:
-        midia = carregar_midia(caminho, genero, mime)
+        midia = carregar_midia(caminho, genero, mime, provedor)
         instrucoes = prompts.instrucoes(genero, perfil)
         pergunta = prompts.primeira_pergunta(genero)
     modelos = [modelo] if isinstance(modelo, str) else list(modelo)
@@ -288,7 +292,7 @@ def executar_meta(genero, caminho, perfil, meta, mime=None):
         instrucoes = prompts.instrucoes("video", perfil, quadros=quadros)
         pergunta = prompts.primeira_pergunta("video", quadros)
     else:
-        midia = carregar_midia(caminho, genero, mime)
+        midia = carregar_midia(caminho, genero, mime, "meta")
         instrucoes = prompts.instrucoes(genero, perfil)
         pergunta = prompts.primeira_pergunta(genero)
     texto = meta(midia, instrucoes, pergunta)

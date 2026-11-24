@@ -484,3 +484,12 @@ def test_mensagem_individual_e_o_nome_na_tela_de_sons_e_no_filtro():
     assert ("pessoais", "Individuais") in m.FILTROS_TIPO   # a chave nao mudou
     assert not any("pessoal" in r or "pessoais" in r.lower()
                    for r in rotulos.values())
+
+
+def test_limite_da_lista_sem_som_escolhido_toca_o_arquivo_estereo_da_casa():
+    from telezapp.acessibilidade import fala
+    acao, caminho = fala.acao_do_som("limite_da_lista", fala.BIP)
+    assert acao == "arquivo" and caminho.endswith("limite_da_lista.ogg")
+    # desligado continua desligado; outros eventos seguem no bip
+    assert fala.acao_do_som("limite_da_lista", "desligado")[0] == "nenhum"
+    assert fala.acao_do_som("enviada", fala.BIP)[0] == "padrao"

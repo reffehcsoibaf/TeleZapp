@@ -4505,7 +4505,17 @@ class ProvedorWhatsApp(Provedor):
         registrados = {}
         for r in respostas:
             if r.IsIn and r.JID.User:
-                registrados[re.sub(r"\D", "", r.Query)] = r.JID.User
+                consulta = re.sub(r"\D", "", r.Query)
+                # a resposta pode trazer o endereco interno (LID), que nao e
+                # telefone: nesse caso vale o telefone consultado (23/11: o
+                # TeleZapp abriu a conversa como "+<LID de 15 digitos>")
+                if getattr(r.JID, "Server", "s.whatsapp.net")                         != "s.whatsapp.net" and consulta:
+                    registrados[consulta] = consulta
+                    log.info("a consulta do telefone voltou com endereço "
+                             "interno (%s, %d dígitos); vale o telefone "
+                             "consultado", r.JID.Server, len(r.JID.User))
+                else:
+                    registrados[consulta] = r.JID.User
         for f in formas:                      # a digitada vale primeiro
             if f in registrados:
                 if f != digitos:

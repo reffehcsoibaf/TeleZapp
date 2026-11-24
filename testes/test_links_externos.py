@@ -340,3 +340,16 @@ def test_link_whatsapp_de_convite_invalido_segue_para_o_navegador():
     assert le.interpretar("whatsapp://channel") is None
     assert le.interpretar("whatsapp://outra?code=%s" % CODIGO) is None
     assert le.interpretar("https://api.whatsapp.com/accept") is None
+
+
+@pytest.mark.parametrize("url", [
+    "tg://resolve?phone=5517988221151", "tg://resolve?phone=%2B5517988221151"])
+def test_telefone_do_telegram_pelo_resolve(url):
+    r = le.interpretar(url)
+    assert r["servico"] == "telegram" and r["acao"] == "telefone"
+    assert r["telefone"] == "5517988221151"
+
+
+def test_resolve_com_usuario_continua_sendo_usuario_e_telefone_curto_nao_vale():
+    assert le.interpretar("tg://resolve?domain=fulano_x")["acao"] == "usuario"
+    assert le.interpretar("tg://resolve?phone=123") is None

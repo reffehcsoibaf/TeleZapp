@@ -1360,3 +1360,38 @@ def test_atual_acaba_e_a_segunda_passa_a_tocar_como_comum(mundo):
     assert esperar(lambda: list(v.ligacoes) == [CID2])
     assert esperar(lambda: bus.estados()[-1] == (ch.TOCANDO, ""))
     assert not v._espera
+
+
+def test_oferta_parada_ha_mais_de_90_s_nao_prende_a_linha(monkeypatch):
+    """Log do Igor (23/11): oferta sem aviso de fim ficou 1h54 e as chamadas
+    novas eram recusadas como 'outra aberta'."""
+    import time as _t
+    from telezapp.provedores import chamadas_whatsapp as cw
+    from telezapp.nucleo import chamadas as ch
+    ligacoes = {}
+
+    class Ponte:
+        desligadas = []
+
+        def desligar(self, call_id):
+            self.desligadas.append(call_id)
+            return True
+
+    class Falso:
+        pass
+    f = Falso()
+    f.ponte = Ponte()
+    f.ligacoes = ligacoes
+    import threading
+    f._trava = threading.RLock()
+    mudancas = []
+    f._mudar = lambda cid, estado, motivo="", erro="": (
+        mudancas.append((cid, estado, motivo)), ligacoes.pop(cid, None))
+    velha = cw._Ligacao(ch.Chamada("c", "a", "A", True, ch.TOCANDO), "VELHA")
+    velha.criada_em = _t.monotonic() - 100
+    nova = cw._Ligacao(ch.Chamada("c", "b", "B", True, ch.TOCANDO), "NOVA")
+    ligacoes["a"], ligacoes["b"] = velha, nova
+    cw.ChamadasWhatsApp._descartar_toques_parados(f)
+    assert mudancas == [("a", ch.ENCERRADA, ch.PERDIDA)]
+    assert Ponte.desligadas == ["VELHA"]
+    assert "b" in ligacoes

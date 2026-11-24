@@ -45,6 +45,41 @@ function esc(t) {
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// O contato do relato vem como "WhatsApp: +5521977425383", "Telegram: @fulano",
+// "Telegram: +5521977425383" ou "E-mail: a@b.com" (relatos antigos podem ter
+// texto livre). Devolve {href, texto} para um link clicavel, ou null. So
+// aceita formas estritas: nada do que a pessoa escreveu vai solto no endereco.
+function linkDoContato(contato) {
+  const t = String(contato || "").trim();
+  const m = /^(whatsapp|telegram|e-?mail)\s*:\s*(.+)$/i.exec(t);
+  const via = m ? m[1].toLowerCase().replace("-", "") : "";
+  const valor = (m ? m[2] : t).trim();
+  const digitos = valor.replace(/\D/g, "");
+  const ehTelefone = /^\+?[\d\s().-]{8,}$/.test(valor) && digitos.length >= 8 &&
+    digitos.length <= 15;
+  if (via === "email" || (!via && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(valor))) {
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(valor)) return null;
+    return { href: "mailto:" + encodeURIComponent(valor).replace(/%40/g, "@"),
+             texto: "Escrever um e-mail" };
+  }
+  if ((via === "whatsapp" || !via) && ehTelefone) {
+    return { href: "whatsapp://send?phone=" + digitos,
+             texto: "Abrir a conversa no TeleZapp (WhatsApp)" };
+  }
+  if (via === "telegram") {
+    if (ehTelefone) {
+      return { href: "tg://resolve?phone=" + digitos,
+               texto: "Abrir a conversa no TeleZapp (Telegram)" };
+    }
+    const u = valor.replace(/^@/, "");
+    if (/^[A-Za-z0-9_]{5,32}$/.test(u)) {
+      return { href: "tg://resolve?domain=" + u,
+               texto: "Abrir a conversa no TeleZapp (Telegram)" };
+    }
+  }
+  return null;
+}
+
 async function resumo(texto) {
   const dados = new TextEncoder().encode(texto);
   const h = await crypto.subtle.digest("SHA-256", dados);
@@ -468,7 +503,10 @@ async function admin(req, env, url) {
     `<h1>${esc(TIPOS[r.tipo])}</h1><dl>` +
     `<dt>Recebido</dt><dd>${esc(r.recebido)}</dd>` +
     `<dt>Nome</dt><dd>${esc(r.nome)}</dd>` +
-    `<dt>Contato</dt><dd>${esc(r.contato)}</dd>` +
+    `<dt>Contato</dt><dd>${esc(r.contato)}${(() => {
+      const l = linkDoContato(r.contato);
+      return l ? ` <a href="${esc(l.href)}">${esc(l.texto)}</a>` : "";
+    })()}</dd>` +
     `<dt>Versão do TeleZapp</dt><dd>${esc(r.versao)}</dd>` +
     `<dt>Quando aconteceu</dt><dd>${esc(r.quando)}</dd>` +
     `<dt>Descrição</dt><dd style="white-space:pre-wrap">${esc(r.descricao)}</dd>` +

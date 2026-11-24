@@ -505,6 +505,7 @@ class _Ligacao:
     def __init__(self, chamada, call_id=""):
         self.chamada = chamada          # ch.Chamada
         self.call_id = call_id
+        self.criada_em = time.monotonic()
         self.intencao = ""              # motivo se fomos nos a encerrar
         self.rejeitada = False          # a DLL disse "rejected"
         self.mic = self.saida = ""
@@ -845,6 +846,7 @@ class ChamadasWhatsApp:
         if not cid:
             cid = self.conversa_do_peer(peer)
             grupo = False          # sem saber o grupo, toca como antes
+        self._descartar_toques_parados()
         with self._trava:
             ocupado = bool(self.ligacoes)
             pode_esperar = (ocupado and bool(cid) and not grupo
@@ -867,6 +869,30 @@ class ChamadasWhatsApp:
         with self._trava:
             self.ligacoes[cid] = _Ligacao(c, call_id)
         self._publicar(c)
+
+    def _descartar_toques_parados(self):
+        """Chamada recebida que toca ha mais que o limite sem ninguem atender
+        e sem aviso de fim (o terminate se perdeu) nao pode prender a linha:
+        sem isto, toda chamada nova era recusada como "outra aberta" (log do
+        Igor, 23/11: uma oferta ficou 1h54 e 10 chamadas foram recusadas).
+        Recusa a velha no servidor, se der, e a tira da lista."""
+        agora = time.monotonic()
+        with self._trava:
+            velhas = [(cid, lig.call_id) for cid, lig in self.ligacoes.items()
+                      if lig.chamada.entrante
+                      and lig.chamada.estado == ch.TOCANDO
+                      and agora - lig.criada_em
+                      >= ch.SEGUNDOS_TOCANDO_SEM_INTERACAO]
+        for cid, call_id in velhas:
+            log.warning("chamada %s tocava ha mais de %d s sem aviso de fim: "
+                        "descartada para liberar a linha", call_id,
+                        ch.SEGUNDOS_TOCANDO_SEM_INTERACAO)
+            try:
+                if call_id:
+                    self.ponte.desligar(call_id)
+            except Exception:
+                log.exception("recusa da chamada parada")
+            self._mudar(cid, ch.ENCERRADA, ch.PERDIDA)
 
     # ------------------------------------------ segunda chamada (experimental)
     def _espera_ligada(self):

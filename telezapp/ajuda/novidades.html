@@ -13,6 +13,18 @@
 </header>
 <main>
 <section>
+<h2>Versão 2026.11.23.1</h2>
+<ul>
+<li>Chamadas recebidas que ficavam tocando para sempre: às vezes o WhatsApp ou o Telegram não avisava que quem ligou já tinha desistido, ou que a chamada foi atendida em outro aparelho. A janela da chamada ficava aberta e o TeleZapp recusava as chamadas seguintes, como se você já estivesse numa. Agora, uma chamada recebida que toca por 90 segundos sem você mexer na janela é recusada e a janela se fecha sozinha, e uma chamada nova toca normalmente mesmo que a anterior tenha ficado presa. Mexer na janela (teclas, Tab, clique) recomeça a contagem.</li>
+<li>Calar os avisos de mensagens durante uma chamada: nova caixa em Configurações, Mídias, Chamadas de voz e vídeo (desligada). Ligada, enquanto você está numa chamada o TeleZapp não toca os sons nem fala os avisos de mensagens novas, reações, votos de enquete e mensagens editadas ou apagadas. Serve, por exemplo, para a outra pessoa não ouvir os bips quando você compartilha o som do computador. As mensagens continuam na lista, e o toque e os sons da própria chamada seguem normais. Isto vale só para os sons do TeleZapp; os de outros programas abertos no computador precisam ser silenciados neles.</li>
+<li>Inteligência artificial, áudios maiores: o limite de 14 MB valia para todos os provedores, mas só o Gemini precisa dele. Agora um áudio de até 20 MB vai ao bot do Telegram e à Meta AI, e de até 24 MB ao OpenAI, à Groq e ao Mistral. O Gemini continua com 14 MB. Se um provedor não aceita o arquivo, o TeleZapp tenta o próximo da sua lista, e a mensagem de erro diz de qual provedor é o limite.</li>
+<li>Som de início e fim de lista: com o pacote de sons "Padrão: bips do sistema", o aviso de que a seta chegou ao início ou ao fim de uma lista agora é o som em estéreo que vem com o programa, no lugar do bip simples. Se você tinha desligado esse som ou escolhido outro, nada muda.</li>
+<li>WhatsApp, conversa pelo número de telefone: ao abrir uma conversa digitando ou colando um número, a conversa podia aparecer com um número comprido que não era o telefone da pessoa. Agora o TeleZapp usa o telefone que você digitou.</li>
+<li>Telegram, link de telefone: o TeleZapp passa a abrir links tg://resolve?phone=NÚMERO e mostra a conversa com a pessoa, se ela estiver nos seus contatos do Telegram.</li>
+<li>Aplicativos instalados do Windows: a lista de programas e o desinstalador mostravam a versão de quando o TeleZapp foi instalado, mesmo depois de atualizar pela janela do programa. Agora mostram a versão que está em uso.</li>
+</ul>
+</section>
+<section>
 <h2>Versão 2026.11.23.0</h2>
 <ul>
 <li>WhatsApp, aviso de pedidos de entrada: agora é uma janela, no lugar da fala. Quando há pedidos esperando nos grupos em que você é administrador, o TeleZapp abre uma janela com o total e os grupos, e a traz para a frente mesmo que estivesse minimizado. O texto é só de leitura e já vem com o foco; use Tab para chegar aos botões Sim (ver os pedidos agora, para aprovar ou recusar) e Não (deixar para depois: os pedidos continuam em Detalhes do grupo, Pedidos de entrada). Esc equivale a Não. Nenhum botão de aprovar ou recusar recebe o foco sozinho, para você não tocar neles sem querer.</li>

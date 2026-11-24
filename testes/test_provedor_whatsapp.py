@@ -5664,3 +5664,17 @@ def test_conectar_cancela_o_prazo_do_qr_e_o_prazo_vencido_depois_nao_avisa(
     relogio.funcao()                    # tarde demais: ja conectou
     assert amb.fila.empty() or not any(
         isinstance(x, ev.PareamentoFalhou) for x in list(amb.fila.queue))
+
+
+def test_confirmar_telefone_nao_usa_o_lid_como_se_fosse_telefone():
+    """23/11: a resposta trouxe o endereco interno (LID, 15 digitos) e o
+    TeleZapp abriu a conversa como "+<LID>". Vale o telefone consultado."""
+    p = object.__new__(wa.ProvedorWhatsApp)
+    p._conectada = True
+
+    def is_on_whatsapp(*numeros):
+        lid = types.SimpleNamespace(User="123931415584828", Server="lid")
+        return [types.SimpleNamespace(Query=numeros[0], IsIn=True, JID=lid)]
+    p.cliente = types.SimpleNamespace(is_on_whatsapp=is_on_whatsapp)
+    assert p.confirmar_telefone("+5517988221151") == (
+        "5517988221151@s.whatsapp.net", "")

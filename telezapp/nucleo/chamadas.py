@@ -42,6 +42,21 @@ CONECTADO, CONVIDADO, TOCANDO_PARA = "connected", "invited", "ringing"
 TELA, SOM_PC = "tela", "som_pc"
 
 
+# Chamada recebida que fica tocando sem ninguem mexer na janela (atendida ou
+# ignorada no celular e o aviso de fim nao chegou): recusa e fecha, para nao
+# travar as chamadas seguintes.
+SEGUNDOS_TOCANDO_SEM_INTERACAO = 90
+# Depois de pedir a recusa, se o provedor nao avisar o fim, fecha a chamada na janela
+ESPERA_DO_FIM_FORCADO_MS = 4000
+
+
+def deve_recusar_por_inatividade(estado, entrante, parado_s,
+                                 limite=SEGUNDOS_TOCANDO_SEM_INTERACAO):
+    """True se a chamada recebida segue tocando e ninguem mexeu na janela
+    por `limite` segundos. Chamada conectada nunca expira por isso."""
+    return bool(entrante and estado == TOCANDO and parado_s >= limite)
+
+
 def rotulo_participante(nome, estado):
     """A linha da lista de quem esta na chamada em grupo."""
     nome = nome or "Participante"

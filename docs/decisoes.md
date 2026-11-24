@@ -1623,3 +1623,18 @@ Ele estranhou eu ter deixado itens para depois sem motivo técnico; não havia. 
   QR novo sozinha (até 5 vezes, sem contar como recusa). Com um código já
   gerado não mexe; na tela do número refaz em silêncio. O prazo cai ao
   conectar. Sem teste ao vivo; sem commit.
+
+## Pareamento do WhatsApp no ARM: confirmado (23/11/2026)
+- Um usuário com Windows ARM no Parallels (Mac) conectou a conta do WhatsApp
+  com a 2026.11.23.0, depois de meses sem conseguir. A causa era o tempo da
+  janela de pareamento (o WhatsApp fecha a conexão uns 2 min e 40 s depois do
+  primeiro QR) e não o ARM nem a DLL, que já carregava com o desvio de
+  arquitetura da 28.0. CONFIRMADO ao vivo pelo usuário.
+
+## Versão 2026.11.23.1 (23/11/2026): chamada presa, avisos em chamada, áudios maiores
+- Chamada recebida que não acabava (relato com logs, 23/11): o aviso de fim não chegou e a oferta prendeu a linha por quase 2 h, com 10 chamadas recusadas como "outra aberta". Decidido tratar o sintoma em três camadas (vigia de 90 s na janela, descarte no provedor do WhatsApp e do Telegram); a causa do aviso perdido não foi provada. Sem teste ao vivo.
+- Calar avisos em chamada: só os sons do TeleZapp (os de outros mensageiros ficam fora do alcance dele). Desligada por padrão, porque quem usa leitor de tela pode querer ouvir o aviso.
+- Limite de áudio da IA por provedor: 14 MB só no Gemini; bots e Meta AI 20 MB; OpenAI, Groq e Mistral 24 MB (os valores da OpenAI e da Groq vêm do que se sabe dos provedores; não conferidos ao vivo).
+- Som de limite de lista no pacote Padrão: o arquivo estéreo da casa no lugar do bip mono (pedido dele, ao comparar com o SchefferMail).
+- Conversa por telefone no WhatsApp: título com número de 15 dígitos (provável LID tratado como telefone) corrigido em `confirmar_telefone`; ele já tinha visto o mesmo na sexta ou no sábado (20 ou 21/11) e não enviou a mensagem. Sem reprodução.
+- Telegram por telefone: `tg://resolve?phone=` abre só quem está nos contatos; não se importa contato para achar a pessoa.

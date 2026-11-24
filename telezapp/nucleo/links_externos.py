@@ -7,7 +7,8 @@ e destes servicos (ou que o TeleZapp nao sabe abrir): esse segue para o
 navegador. Chaves:
   servico   "telegram" ou "whatsapp"
   acao      "entrar" (grupo ou canal por convite), "usuario" (Telegram: uma
-            pessoa, robo, grupo ou canal pelo @), "telefone" (WhatsApp) ou
+            pessoa, robo, grupo ou canal pelo @), "telefone" (WhatsApp, ou Telegram por
+            tg://resolve?phone=) ou
             "chamada" (WhatsApp: entrar numa chamada por link)
   convite   "entrar": a acao no formato de nucleo.grupo e do provedor
   usuario, start, startapp, app, texto   "usuario"; start e startapp ficam
@@ -79,15 +80,19 @@ def _telegram_tg(host, q):
     if host == "join":
         return _convite_telegram(_um(q, "invite"))
     if host == "resolve":
+        if not _um(q, "domain") and _um(q, "phone"):
+            # tg://resolve?phone=: a pessoa pelo telefone (so acha quem esta
+            # nos contatos da conta)
+            return _telefone(_um(q, "phone"), q, "telegram")
         return _usuario(_um(q, "domain"), q, _um(q, "appname") or "")
     return None
 
 
-def _telefone(numero, q):
+def _telefone(numero, q, servico="whatsapp"):
     digitos = re.sub(r"\D", "", numero or "")
     if not 8 <= len(digitos) <= 15:
         return None
-    return {"servico": "whatsapp", "acao": "telefone", "telefone": digitos,
+    return {"servico": servico, "acao": "telefone", "telefone": digitos,
             "texto": _um(q, "text") or ""}
 
 

@@ -179,6 +179,9 @@ class DialogoChamada(wx.Dialog):
         self.escolha_mic.Bind(wx.EVT_CHOICE, self._dispositivo)
         self.escolha_saida.Bind(wx.EVT_CHOICE, self._dispositivo)
         self.Bind(wx.EVT_CHAR_HOOK, self._tecla)
+        self.Bind(wx.EVT_CHILD_FOCUS, lambda e: (self._interagiu(),
+                                                 e.Skip()))
+        self.Bind(wx.EVT_LEFT_DOWN, lambda e: (self._interagiu(), e.Skip()))
         self.Bind(wx.EVT_CLOSE, self._ao_fechar)
         self._estado_mostrado = None
         self.mostrar()
@@ -303,7 +306,15 @@ class DialogoChamada(wx.Dialog):
     def _dispositivo(self, _e=None):
         self.acoes["trocar"](*self.dispositivos_escolhidos())
 
+    def _interagiu(self):
+        """Alguem mexeu na janela (tecla, Tab, clique): a janela principal
+        reinicia a contagem dos 90 s do toque sem interacao."""
+        cb = getattr(self, "ao_interagir", None)
+        if cb is not None:
+            cb()
+
     def _tecla(self, evt):
+        self._interagiu()
         if evt.GetKeyCode() == wx.WXK_ESCAPE and not (
                 evt.AltDown() or evt.ControlDown() or evt.ShiftDown()):
             self._escape()
