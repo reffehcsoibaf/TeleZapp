@@ -7,6 +7,24 @@ Antes de escrever aqui, confira a versão em vigor: `git fetch --tags` e
 `gh release list -L 3` (a Latest é a publicada). O que veio depois dela vai em
 "Próxima versão (ainda sem número)".
 
+## 2026.11.23.1
+
+Chamada recebida que não acaba (log do Igor, 23/11: uma oferta do WhatsApp Web, `platform=web`, ficou 6823 s tocando sem `terminate`; `_ao_receber` recusa toda chamada nova com `ocupado = bool(self.ligacoes)` e dez ofertas foram recusadas como "outra aberta"). Três camadas: (1) `Janela._vigiar_toque` (a cada 5 s, a partir de `TOCANDO`) recusa a chamada recebida que passa de `nucleo.chamadas.SEGUNDOS_TOCANDO_SEM_INTERACAO` (90 s) sem tecla, Tab ou clique na janela (`DialogoChamada.ao_interagir`; `EVT_CHAR_HOOK`, `EVT_CHILD_FOCUS`, `EVT_LEFT_DOWN`) e, se o provedor não publicar `ENCERRADA` em `ESPERA_DO_FIM_FORCADO_MS` (4 s), encerra a `Chamada` localmente; (2) `ChamadasWhatsapp._descartar_toques_parados` e `ChamadasTelegram._descartar_toques_parados` rodam no início de `_ao_receber`: ligação entrante em `TOCANDO` com 90 s ou mais (`_Ligacao.criada_em`, `Chamada.criada_em`) é recusada na rede (se der) e tirada de `ligacoes`/`chamadas` como `PERDIDA`; (3) `deve_recusar_por_inatividade` é a regra pura, testável. A causa de o aviso de fim não chegar segue sem prova.
+
+Opção `calar_avisos_em_chamada` (Mídias, Chamadas de voz e vídeo, desligada): `Janela._avisos_calados` passa a valer também com `Chamada.estado` em `CONECTANDO` ou `EM_CHAMADA`, no molde de `calar_avisos_ao_gravar`. Só os sons e falas do TeleZapp; o toque e os sons da chamada não passam por `_avisos_calados`.
+
+IA, limite de tamanho por provedor: `catalogo.limite_bytes(genero, provedor)` e `LIMITE_AUDIO_POR_PROVEDOR` (openai, groq e mistral 24 MB; `meta` 20 MB, que vale para os bots do Telegram, cuja API só baixa até 20 MB, e para a Meta AI); o Gemini segue em 14 MB (base64 +33% num pedido de 20 MB). `servico.carregar_midia(..., provedor)`; `executar_meta` usa `"meta"`. Antes `executar_meta` também parava em 14 MB, por isso o bot do Telegram, mesmo em primeiro lugar, recusava áudio de 17 MB. A mensagem de erro cita o provedor.
+
+Som de limite de lista: no pacote Padrão (valor `BIP`), `fala.acao_do_som` devolve o arquivo da casa `telezapp/sons/limite_da_lista.ogg` (estéreo, o mesmo do SchefferMail) para os eventos de `EVENTOS_COM_SOM_FIXO`; `desligado` e arquivos escolhidos seguem valendo; o arquivo fica na memória depois da primeira vez (`_tocar_arquivo`), fora do pré-carregamento para não criar thread em `definir_sons`.
+
+Conversa aberta por telefone (WhatsApp): `confirmar_telefone` usava `r.JID.User` da resposta de `is_on_whatsapp` e acrescentava `@s.whatsapp.net` sem olhar `r.JID.Server`; uma resposta com LID (15 dígitos) virava a conversa "+<LID>". Agora, com servidor diferente de `s.whatsapp.net`, vale o telefone consultado, e o log registra "a consulta do telefone voltou com endereço interno". Hipótese pelo formato do título; não reproduzido.
+
+Links `tg://resolve?phone=`: `links_externos._telegram_tg` devolve `acao "telefone"` com `servico "telegram"` (`_telefone(numero, q, servico)`); `_abrir_link_de_telefone` fala o aviso do serviço certo. `Provedor.resolver_destinatario` do Telegram só acha quem está nos contatos (`get_entity`).
+
+Desinstalador do Windows com a versão errada: `instalacao._registrar` grava `DisplayVersion` só na instalação, e `atualizador.aplicar` troca os arquivos sem mexer no registro (a 23.0 aparecia como 2026.11.18.0). `instalacao.renovar_registro` (instalado, chave existente) põe `DisplayVersion`, `InstallLocation`, `DisplayIcon` e `UninstallString` em dia; roda em `__main__` depois de mostrar a janela. O registro só muda na primeira abertura depois da atualização.
+
+Relatos (`relatos/worker.js`, já publicado): a página de cada relato ganhou o link do contato (`linkDoContato`: `whatsapp://send?phone=`, `tg://resolve?domain=` ou `phone=`, `mailto:`), só a partir de formatos estritos. Não depende da versão do programa.
+
 ## 2026.11.23.0
 
 Aviso de pedidos de entrada em janela (`avisar_pedidos_de_entrada`): `Janela._pedidos_conferidos` deixou de falar e abre `grupo_extras.DialogoAvisoPedidos` (no molde de `atualizacao.DialogoAtualizacao`: texto somente leitura com o foco, Tab para Sim e Não, Esc = Não; foco nunca em botão de aprovar ou recusar). Sim abre `DialogoPedidos` de cada grupo com pedido; Não deixa para Detalhes do grupo. O texto vem de `texto_do_aviso_de_pedidos` (pura, testada). Traz a janela para a frente se estiver minimizada ou escondida e não abre um segundo aviso por cima. O atraso de até 15 min (consulta periódica) foi aceito; a whatsmeow não tem evento de pedido novo.

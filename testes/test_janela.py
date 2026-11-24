@@ -10903,3 +10903,32 @@ def test_qr_vencido_na_tela_do_codigo_refaz_em_silencio(j, monkeypatch):
     j.b.publicar(ev.PareamentoFalhou("w-nova", "qr_expirou"))
     assert j.contas.reiniciadas == ["w-nova"]
     assert not ditas                    # nao interrompe quem esta digitando
+
+
+def test_em_chamada_cala_aviso_de_mensagem_nova_so_com_a_opcao(j, monkeypatch):
+    from telezapp.nucleo import chamadas as ch_
+    j._fechar_conversa()
+    conv = j.indice[("t1", "20")]
+    sons, ditas = [], []
+    monkeypatch.setattr(jm, "bipe", lambda n, **k: sons.append(n))
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.cfg.set("falar_novas_outras_conversas", True)
+    j.IsActive = lambda: True
+    j.chamada = ch_.Chamada("t1", "20", "Ana", True, ch_.EM_CHAMADA)
+    j.cfg.set("calar_avisos_em_chamada", False)       # padrao: nao cala
+    a = msg("21", "chamada, opcao desligada", conversa="20")
+    a.minha = False
+    j._ev_nova(ev.MensagemNova(a, conv))
+    assert sons and ditas
+    sons.clear()
+    ditas.clear()
+    j.cfg.set("calar_avisos_em_chamada", True)
+    b = msg("22", "em chamada, opcao ligada", conversa="20")
+    b.minha = False
+    j._ev_nova(ev.MensagemNova(b, conv))
+    assert sons == [] and ditas == []
+    j.chamada.estado = ch_.TOCANDO                    # tocando: ainda avisa
+    c = msg("23", "tocando", conversa="20")
+    c.minha = False
+    j._ev_nova(ev.MensagemNova(c, conv))
+    assert sons and ditas

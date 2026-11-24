@@ -434,6 +434,7 @@ class ChamadasTelegram:
     def _nova(self, chat_id, nome, entrante, estado, video=False):
         c = ch.Chamada(self.conta_id, str(chat_id), nome, entrante, estado,
                        video=video)
+        c.criada_em = time.monotonic()
         self.chamadas[chat_id] = c
         self._publicar(c)
         return c
@@ -1027,8 +1028,28 @@ class ChamadasTelegram:
         await self.atender(chat_id, microfone, saida, camera)
 
     # --------------------------------------------- eventos do motor
+    async def _descartar_toques_parados(self):
+        """Chamada recebida que toca ha 90 s ou mais sem ninguem atender e sem
+        aviso de fim nao pode prender a linha (no WhatsApp, em 23/11, uma
+        oferta assim fez 10 chamadas serem recusadas como "outra aberta")."""
+        agora = time.monotonic()
+        velhas = [cid for cid, c in list(self.chamadas.items())
+                  if c.entrante and c.estado == ch.TOCANDO
+                  and agora - getattr(c, "criada_em", agora)
+                  >= ch.SEGUNDOS_TOCANDO_SEM_INTERACAO]
+        for cid in velhas:
+            log.warning("chamada %s tocava há mais de %d s sem aviso de fim: "
+                        "descartada para liberar a linha", cid,
+                        ch.SEGUNDOS_TOCANDO_SEM_INTERACAO)
+            try:
+                await self.app.leave_call(cid)
+            except Exception:
+                pass
+            self._mudar(cid, ch.ENCERRADA, ch.PERDIDA)
+
     async def _ao_receber(self, _cliente, update):
         chat_id = update.chat_id
+        await self._descartar_toques_parados()
         if self.chamadas and not _chat_de_voz_em_uso(self) and                 not self._espera and chat_id not in self.chamadas and                 config.Config().get("chamada_em_espera"):
             await self._receber_em_espera(chat_id)
             return

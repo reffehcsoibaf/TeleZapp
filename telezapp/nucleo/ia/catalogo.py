@@ -82,6 +82,24 @@ PERFIS = (("curto", "Curto: um parágrafo"),
 LIMITE_BYTES = {"audio": 14 * 1024 * 1024, "imagem": 14 * 1024 * 1024,
                 "figurinha": 14 * 1024 * 1024, "video": 14 * 1024 * 1024,
                 "pdf": 14 * 1024 * 1024}
+# Audio: o Gemini recebe o arquivo embutido em base64 (+33%) num pedido de ate
+# 20 MB, dai os 14 MB; OpenAI, Groq e Mistral recebem o arquivo cru em
+# multipart (a OpenAI e a Groq aceitam 25 MB), entao vai ate 24 MB.
+LIMITE_AUDIO_POR_PROVEDOR = {"openai": 24 * 1024 * 1024,
+                             "groq": 24 * 1024 * 1024,
+                             "mistral": 24 * 1024 * 1024,
+                             # bots do Telegram (a API de bots so baixa ate
+                             # 20 MB) e Meta AI
+                             "meta": 20 * 1024 * 1024}
+
+
+def limite_bytes(genero, provedor=""):
+    """O maior arquivo desse tipo que o provedor recebe."""
+    if genero == "audio" and provedor in LIMITE_AUDIO_POR_PROVEDOR:
+        return LIMITE_AUDIO_POR_PROVEDOR[provedor]
+    return LIMITE_BYTES[genero]
+
+
 # Maior resposta guardada e orcamento pedido ao provedor
 MAX_CARACTERES = {"audio": 50_000, "imagem": 12_000, "figurinha": 12_000,
                   "video": 12_000, "pdf": 100_000, "texto": 20_000}

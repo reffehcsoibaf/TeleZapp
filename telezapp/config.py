@@ -983,6 +983,17 @@ OPCOES = (
           "continuam na lista. Chamadas e os sons da própria gravação "
           "seguem normais.",
           grupo="Gravação"),
+    Opcao("calar_avisos_em_chamada",
+          "Calar os avisos de mensagens durante uma chamada",
+          "Mídias", False,
+          "Enquanto você está numa chamada (conectando ou conversando), o "
+          "TeleZapp não toca os sons nem fala os avisos de mensagens novas, "
+          "reações, votos de enquete e mensagens editadas ou apagadas. Serve "
+          "para a outra pessoa não ouvir os bips quando você compartilha o "
+          "som do computador. Os avisos que chegam nesse tempo não são "
+          "repetidos depois; as mensagens continuam na lista. O toque e os "
+          "sons da própria chamada seguem normais.",
+          grupo="Chamadas de voz e vídeo"),
     Opcao("volume_gravacao", "Volume da gravação, em porcentagem",
           "Mídias", 100,
           "Aumenta ou diminui o volume do que é gravado: microfone, som do "

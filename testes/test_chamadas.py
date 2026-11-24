@@ -918,3 +918,39 @@ def test_telegram_segunda_chamada_com_a_opcao_desligada_segue_recusada(
     rodar(cena())
     assert ("leave", 20, None) in MotorFalso.app.chamadas
     assert not espera_de(s)
+
+
+def test_toque_sem_interacao_recusa_so_depois_de_90_segundos():
+    f = ch.deve_recusar_por_inatividade
+    assert not f(ch.TOCANDO, True, 89)
+    assert f(ch.TOCANDO, True, 90)
+    # conectada, ou feita por mim, nunca expira por inatividade
+    assert not f(ch.EM_CHAMADA, True, 600)
+    assert not f(ch.CHAMANDO, False, 600)
+    assert not f(ch.CONECTANDO, True, 600)
+
+
+def test_telegram_toque_parado_ha_mais_de_90_s_nao_prende_a_linha():
+    import time as _t
+    c1 = ch.Chamada("t", "1", "A", True, ch.TOCANDO)
+    c1.criada_em = _t.monotonic() - 100
+    c2 = ch.Chamada("t", "2", "B", True, ch.TOCANDO)
+    c2.criada_em = _t.monotonic()
+    em_chamada = ch.Chamada("t", "3", "C", True, ch.EM_CHAMADA)
+    em_chamada.criada_em = _t.monotonic() - 1000
+    saiu, mudou = [], []
+
+    class App:
+        async def leave_call(self, cid):
+            saiu.append(cid)
+
+    class Falso:
+        app = App()
+        chamadas = {1: c1, 2: c2, 3: em_chamada}
+
+        def _mudar(self, cid, estado, motivo="", erro=""):
+            mudou.append((cid, estado, motivo))
+            self.chamadas.pop(cid, None)
+    asyncio.run(ct.ChamadasTelegram._descartar_toques_parados(Falso()))
+    assert saiu == [1] and mudou == [(1, ch.ENCERRADA, ch.PERDIDA)]
+    assert set(Falso.chamadas) == {2, 3}

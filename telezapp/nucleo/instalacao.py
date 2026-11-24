@@ -254,6 +254,35 @@ def _registrar(destino):
         winreg.SetValueEx(k, "NoRepair", 0, winreg.REG_DWORD, 1)
 
 
+def renovar_registro(programa=None):
+    """Instalado: poe em dia no "Aplicativos instalados" do Windows a versao
+    (e a pasta) do programa que esta rodando. O instalador grava o registro uma
+    vez; a atualizacao pela janela so troca os arquivos, e o desinstalador
+    seguia mostrando a versao de quando se instalou. True se mudou algo."""
+    if sys.platform != "win32" or modo(programa) != "instalado":
+        return False
+    import winreg
+    programa = programa or pasta_do_programa()
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, CHAVE_DESINSTALAR, 0,
+                            winreg.KEY_QUERY_VALUE | winreg.KEY_SET_VALUE) as k:
+            atual = winreg.QueryValueEx(k, "DisplayVersion")[0]
+            local = winreg.QueryValueEx(k, "InstallLocation")[0]
+            if atual == VERSAO and _igual(local, programa):
+                return False
+            exe = os.path.join(programa, EXE)
+            for nome, valor in (("DisplayVersion", VERSAO),
+                                ("InstallLocation", programa),
+                                ("DisplayIcon", exe),
+                                ("UninstallString",
+                                 '"%s" --desinstalar' % exe)):
+                winreg.SetValueEx(k, nome, 0, winreg.REG_SZ, valor)
+    except OSError:
+        return False        # nao ha registro (portatil) ou nao deu para gravar
+    log.info("registro do desinstalador posto em dia: versão %s", VERSAO)
+    return True
+
+
 def _desregistrar():
     import winreg
     try:

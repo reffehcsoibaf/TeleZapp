@@ -669,6 +669,7 @@ class Janela(wx.Frame):
         self._proximo_chave = None    # audio que toca em sequencia
         self._seq_tocados = 0         # audios da sequencia atual, apos o 1o
         self.chamada = None           # nucleo.chamadas.Chamada em curso
+        self._toque_ultima_interacao = time.monotonic()
         self.dlg_chamada = None       # DialogoChamada aberto
         self.em_andamento = {}        # (conta, grupo) -> id da chamada em
         #                               grupo do WhatsApp que ainda dura
@@ -5128,10 +5129,15 @@ class Janela(wx.Frame):
         self.SetStatusText(aviso[:150])
 
     def _avisos_calados(self):
-        """Gravando voz com a opcao ligada: os avisos de mensagens, reacoes
-        e votos nao tocam nem falam (e nao sao repostos depois), para nao
-        entrar na gravacao. Chamada e retorno da propria gravacao seguem."""
-        return bool(self.cfg.get("calar_avisos_ao_gravar")) and             gravando_agora()
+        """Gravando voz, ou em chamada, com a opcao ligada: os avisos de
+        mensagens, reacoes e votos nao tocam nem falam (e nao sao repostos
+        depois), para nao entrar na gravacao nem no som compartilhado da
+        chamada. Chamada e retorno da propria gravacao seguem."""
+        if bool(self.cfg.get("calar_avisos_ao_gravar")) and                 gravando_agora():
+            return True
+        c = self.chamada
+        return bool(self.cfg.get("calar_avisos_em_chamada") and c is not None
+                    and c.estado in (ch.CONECTANDO, ch.EM_CHAMADA))
 
     def _servico_da_conta(self, conta_id):
         """whatsapp ou telegram (para o som de cada servico); "" se nao sei."""
@@ -5615,6 +5621,8 @@ class Janela(wx.Frame):
         if not mudou:
             return
         log.info("chamada: %s %s", c.estado, c.motivo)
+        if c.estado == ch.TOCANDO:
+            self._vigiar_toque(c)
         # com a janela em segundo plano o Windows poderia atrasar o som
         prioridade.chamada_em_curso(c.ativa)
         a = ch.apresentar(c)
@@ -5719,6 +5727,7 @@ class Janela(wx.Frame):
             saidas_pc=p.saidas_do_computador() if com_som_pc else (),
             saida_pc=self.cfg.get("chamada_saida_pc") or "",
             tela_com_som=bool(self.cfg.get("chamada_tela_com_som")))
+        self.dlg_chamada.ao_interagir = self._chamada_interagiu
         self.dlg_chamada.Show()
         if hasattr(self.dlg_chamada, "Raise"):
             self.dlg_chamada.Raise()
@@ -5737,6 +5746,48 @@ class Janela(wx.Frame):
 
     def _chamada_fechada(self):
         self.dlg_chamada = None
+
+    # ---- toque que nao acaba (atendida ou ignorada no celular)
+    def _chamada_interagiu(self):
+        self._toque_ultima_interacao = time.monotonic()
+
+    def _vigiar_toque(self, c):
+        """Chamada recebida tocando: a cada 5 s confere se passaram 90 s sem
+        ninguem mexer na janela. Se sim, recusa; se o provedor nao avisar o
+        fim, fecha a chamada aqui mesmo, para o WhatsApp voltar a receber."""
+        self._toque_ultima_interacao = time.monotonic()
+
+        def conferir():
+            if self.chamada is not c or c.estado != ch.TOCANDO:
+                return
+            parado = time.monotonic() - self._toque_ultima_interacao
+            if not ch.deve_recusar_por_inatividade(
+                    c.estado, c.entrante, parado):
+                wx.CallLater(5000, conferir)
+                return
+            log.info("chamada tocando ha %d s sem interacao: recusando",
+                     int(parado))
+            try:
+                p = self._provedor_de_chamada(c.conta_id)
+                if p is not None:
+                    p.encerrar_chamada(c.conversa_id)
+            except Exception:
+                log.exception("recusa por inatividade falhou")
+            wx.CallLater(ch.ESPERA_DO_FIM_FORCADO_MS, forcar)
+
+        def forcar():
+            if self.chamada is not c or c.estado == ch.ENCERRADA:
+                return
+            log.info("chamada sem aviso de fim apos recusar: fechando aqui")
+            c.aplicar(ch.ENCERRADA, ch.RECUSADA)
+            self.chamada = None
+            prioridade.chamada_em_curso(False)
+            self.SetStatusText("")
+            if self.dlg_chamada is not None and self.dlg_chamada.chamada is c:
+                self.dlg_chamada.fechar()
+            self.fala.falar("Chamada recusada por falta de resposta.",
+                            interromper=True)
+        wx.CallLater(5000, conferir)
 
     # ---------------------- chamadas em grupo do WhatsApp (experimental)
     def _chamada_em_grupo_disponivel(self, conv):
@@ -11257,8 +11308,11 @@ class Janela(wx.Frame):
         achado = self._resolver_destino(conta_id, "+" + info["telefone"], nm)
         if achado is None:
             bipe("erro")
-            self.fala.falar("Este número não está no WhatsApp.",
-                            interromper=True)
+            self.fala.falar(
+                "Este número não está no WhatsApp."
+                if info["servico"] == "whatsapp" else
+                "Não achei este número no Telegram. Só acho números que "
+                "estão nos seus contatos.", interromper=True)
             return
         self._abrir_conversa_do_link(conta_id, achado[0], achado[1],
                                      info["texto"])

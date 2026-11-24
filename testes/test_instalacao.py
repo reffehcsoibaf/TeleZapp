@@ -386,3 +386,36 @@ def test_extrair_pacote_informa_o_avanco(mundo, tmp_path):
             as pasta:
         assert os.path.isfile(os.path.join(pasta, "TeleZapp.exe"))
     assert vistos == sorted(vistos) and vistos[-1] == 100
+
+
+def test_renovar_registro_poe_a_versao_atual_no_desinstalador(
+        tmp_path, monkeypatch):
+    """Atualizar pela janela troca os arquivos mas o desinstalador seguia
+    mostrando a versao de quando se instalou (2026.11.18.0 com a 23.0)."""
+    import sys
+    import types
+    from telezapp.nucleo import instalacao as ins
+    gravado = {"DisplayVersion": "2026.11.18.0",
+               "InstallLocation": str(tmp_path)}
+
+    class Chave:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+    fake = types.SimpleNamespace(
+        HKEY_CURRENT_USER=1, KEY_QUERY_VALUE=1, KEY_SET_VALUE=2, REG_SZ=1,
+        OpenKey=lambda *a, **k: Chave(),
+        QueryValueEx=lambda k, nome: (gravado[nome], 1),
+        SetValueEx=lambda k, nome, r, t, v: gravado.__setitem__(nome, v))
+    monkeypatch.setitem(sys.modules, "winreg", fake)
+    monkeypatch.setattr(ins.sys, "platform", "win32")
+    (tmp_path / "instalado.txt").write_text("x")
+    assert ins.renovar_registro(str(tmp_path)) is True
+    assert gravado["DisplayVersion"] == ins.VERSAO
+    assert gravado["UninstallString"].endswith("--desinstalar")
+    assert ins.renovar_registro(str(tmp_path)) is False     # ja em dia
+    portatil = tmp_path / "portatil"
+    portatil.mkdir()
+    assert ins.renovar_registro(str(portatil)) is False     # nao instalado
