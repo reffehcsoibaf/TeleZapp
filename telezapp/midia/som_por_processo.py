@@ -23,8 +23,12 @@ import sys
 import threading
 import time
 import uuid
-from ctypes import (POINTER, Structure, WINFUNCTYPE, byref, c_int, c_int64,
+from ctypes import (POINTER, Structure, byref, c_int, c_int64,
                     c_long, c_uint32, c_uint64, c_ulong, c_void_p, wintypes)
+try:
+    from ctypes import WINFUNCTYPE
+except ImportError:         # fora do Windows: o som por processo e do Windows
+    from ctypes import CFUNCTYPE as WINFUNCTYPE   # so para importar
 
 import numpy as np
 

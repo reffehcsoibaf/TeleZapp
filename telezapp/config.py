@@ -35,8 +35,8 @@ def pasta_dados():
             sys.executable)), "dados")
         if os.path.isdir(portatil):
             return portatil
-    base = os.environ.get("APPDATA") or os.path.expanduser("~")
-    return os.path.join(base, NOME)
+    from telezapp.nucleo import plataforma
+    return os.path.join(plataforma.pasta_base_dos_dados(), NOME)
 
 
 def pasta(*partes):

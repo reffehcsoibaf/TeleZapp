@@ -165,11 +165,51 @@ def _link_recebido(argumentos):
 
 
 def caixa_de_erro(texto):
+    if sys.platform == "darwin":
+        try:
+            import subprocess
+            subprocess.run(["osascript", "-e", 'display alert "TeleZapp" '
+                            'message %s as critical' % json_texto(texto)],
+                           timeout=120)
+        except Exception:
+            print(texto, file=sys.stderr)
+        return
     try:
         import ctypes
         ctypes.windll.user32.MessageBoxW(None, texto, "TeleZapp", 0x10)
     except Exception:
         print(texto, file=sys.stderr)
+
+
+def json_texto(texto):
+    """O texto entre aspas, como o AppleScript entende."""
+    return '"%s"' % texto.replace("\\", "\\\\").replace('"', '\\"')
+
+
+_JANELA_DO_MAC = []     # a janela, para o app receber links (MacOpenURL)
+
+
+def criar_app_wx():
+    """O wx.App. No Mac, links tg:// e whatsapp:// chegam por MacOpenURL e
+    arquivos soltos no icone por MacOpenFiles."""
+    import wx
+    if sys.platform != "darwin":
+        return wx.App(False)
+
+    class AppMac(wx.App):
+        def MacOpenURL(self, url):
+            from telezapp.nucleo import links_recebidos
+            links_recebidos.guardar(url)
+            if _JANELA_DO_MAC:
+                janela = _JANELA_DO_MAC[0]
+                wx.CallAfter(janela._mostrar_da_bandeja)
+                wx.CallAfter(janela.abrir_links_recebidos)
+
+        def MacReopenApp(self):
+            # clique no icone do Dock com a janela escondida
+            if _JANELA_DO_MAC:
+                wx.CallAfter(_JANELA_DO_MAC[0]._mostrar_da_bandeja)
+    return AppMac(False)
 
 
 def _vigiar_aviso(sinal, janela, instancia):
@@ -220,6 +260,15 @@ def esperar_processo(argumentos, segundos=60):
         return
     try:
         pid = int(argumentos[argumentos.index("--esperar-pid") + 1])
+        if sys.platform == "darwin":
+            fim = time.monotonic() + segundos
+            while time.monotonic() < fim:
+                try:
+                    os.kill(pid, 0)
+                except OSError:
+                    return                      # ja terminou
+                time.sleep(0.2)
+            return
         import ctypes
         k32 = ctypes.windll.kernel32
         k32.OpenProcess.restype = ctypes.c_void_p
@@ -312,7 +361,7 @@ def main():
         return 1
 
     etapa(log, "componentes carregados")
-    app = wx.App(False)
+    app = criar_app_wx()
     etapa(log, "aplicativo wx criado")
     try:
         from telezapp.interface import limite_de_lista
@@ -339,8 +388,9 @@ def main():
             log.info("abertura: a tela de boas-vindas não foi seguida; "
                      "saindo")
             return 0
-    unico = wx.SingleInstanceChecker("TeleZapp-" + os.environ.get(
-        "USERNAME", ""), config.pasta())
+    unico = wx.SingleInstanceChecker("TeleZapp-" + (
+        os.environ.get("USERNAME") or os.environ.get("USER") or ""),
+        config.pasta())
     if unico.IsAnotherRunning():
         # a outra abertura pode estar escondida na bandeja: pede a ela que
         # mostre a janela, em vez de dizer que ja esta aberto
@@ -413,6 +463,7 @@ def main():
         barramento = Barramento(wx.CallAfter)
         janela = Janela(cfg, banco, barramento)
         janela.vigiar_o_fim = _vigiar_o_fim
+        _JANELA_DO_MAC[:] = [janela]
         etapa(log, "janela criada")
         janela.contas = Contas(cfg, banco, barramento, janela.pedir,
                                janela.obter_credenciais_telegram)

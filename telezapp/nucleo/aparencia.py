@@ -8,6 +8,7 @@ diz ao abrir: com um leitor de tela ligado, o modo para leitor de tela.
 """
 import ctypes
 import logging
+import sys
 
 log = logging.getLogger("telezapp.aparencia")
 
@@ -21,7 +22,14 @@ SPI_GETSCREENREADER = 0x0046
 
 def leitor_de_tela_ligado():
     """O Windows avisa que ha um leitor de tela em uso? (O NVDA, o JAWS e o
-    Narrador ligam esse aviso.) Fora do Windows ou com erro: False."""
+    Narrador ligam esse aviso.) No Mac, pergunta se o VoiceOver esta ligado.
+    Fora disso ou com erro: False."""
+    if sys.platform == "darwin":
+        try:
+            from AppKit import NSWorkspace
+            return bool(NSWorkspace.sharedWorkspace().isVoiceOverEnabled())
+        except Exception:
+            return False
     try:
         valor = ctypes.c_int(0)
         if not ctypes.windll.user32.SystemParametersInfoW(

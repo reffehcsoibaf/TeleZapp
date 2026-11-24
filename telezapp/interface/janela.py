@@ -30,7 +30,7 @@ from telezapp.interface import salvar as ui_salvar
 from telezapp.nucleo import agendamento as ag_nucleo
 from telezapp.nucleo import copia_oficial, localizacao, saude_dados, silenciados
 from telezapp.nucleo import links_externos, links_recebidos, resumo_midias
-from telezapp.nucleo import uso
+from telezapp.nucleo import plataforma, uso
 from telezapp.nucleo import uso_chamadas
 from telezapp.nucleo import ritmo_de_envio as ritmo
 from telezapp.nucleo.links_externos import motivo_de_nao_achar
@@ -11915,6 +11915,10 @@ class Janela(wx.Frame):
                 tempo = (int(segundos), bool(pausada))
             except (TypeError, ValueError):
                 tempo = None
+        if self._gravacao_rapida is not None:
+            return          # o tempo da gravacao por atalho tem a vez
+        if tempo == self._tempo_gravacao_titulo:
+            return          # nada mudou: nao refaz o titulo a cada meio segundo
         self._tempo_gravacao_titulo = tempo
         self._atualizar_titulo()
 
@@ -13148,9 +13152,9 @@ class Janela(wx.Frame):
             wx.MessageBox("O arquivo %s não foi encontrado." % nome, NOME,
                           wx.OK | wx.ICON_WARNING, self)
             return
-        if os.name == "nt":
-            os.startfile(caminho)
-        else:
+        try:
+            plataforma.abrir(caminho)
+        except OSError:
             self.fala.falar(caminho)
 
     def _abrir_na_internet(self, endereco):
@@ -13228,9 +13232,9 @@ class Janela(wx.Frame):
 
     def _abrir_pasta(self, nome):
         pasta = config.pasta(nome)
-        if os.name == "nt":
-            subprocess.Popen(["explorer", pasta])
-        else:
+        try:
+            plataforma.abrir_pasta(pasta)
+        except OSError:
             self.fala.falar(pasta)
 
     # ============================================================ backup
@@ -13750,7 +13754,7 @@ class Janela(wx.Frame):
         bipe("tarefa_pronta")
         from telezapp.interface.atualizacao import DialogoAtualizacao
         pode = bool(getattr(sys, "frozen", False) and lanc.url_zip
-                    and lanc.url_hash)
+                    and lanc.url_hash and not plataforma.MAC)
         dlg = DialogoAtualizacao(self, lanc, VERSAO, pode,
                                  config.pasta_dados())
         try:

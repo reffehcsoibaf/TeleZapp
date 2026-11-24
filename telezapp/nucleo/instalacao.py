@@ -41,7 +41,10 @@ class ErroInstalacao(Exception):
 
 # ------------------------------------------------------------------- modo
 def pasta_do_programa():
-    """A pasta do executavel; None se rodando pelo Python."""
+    """A pasta do executavel; None se rodando pelo Python (ou no Mac, onde o
+    aplicativo e um pacote .app e o instalador do Windows nao se aplica)."""
+    if sys.platform == "darwin":
+        return None
     if getattr(sys, "frozen", False):
         return os.path.dirname(os.path.abspath(sys.executable))
     return None

@@ -17,7 +17,7 @@ from telezapp.acessibilidade.fala import bipe
 from telezapp.interface import dialogos
 from telezapp.nucleo import detalhes as det
 from telezapp.nucleo import modelos as m
-from telezapp.nucleo import pacotes_de_som
+from telezapp.nucleo import pacotes_de_som, plataforma
 from telezapp.nucleo import silenciados
 
 log = logging.getLogger("telezapp.detalhes")
@@ -1800,11 +1800,8 @@ class ControleDetalhes:
         """Baixa a foto do grupo ou do contato e abre no programa de imagens
         do Windows."""
         def abrir(caminho):
-            if os.name != "nt":
-                self.jan.fala.falar(caminho)
-                return
             try:
-                os.startfile(caminho)
+                plataforma.abrir(caminho)
             except OSError:
                 log.error("foto de perfil:\n%s", traceback.format_exc())
                 self.jan.fala.falar("Não consegui abrir a foto.",

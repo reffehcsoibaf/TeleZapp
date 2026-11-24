@@ -19,6 +19,7 @@ segundo, no maximo 640x360, 400 kb/s, uma thread so: mais threads seguram uns
 dez quadros e dao um segundo de atraso).
 """
 import logging
+import sys
 import threading
 import time
 from fractions import Fraction
@@ -160,12 +161,41 @@ class Camera:
 
 
 # ------------------------------------------------------------------ tela
+def _listar_telas_wx():
+    """As telas pelo wx (Mac): o mesmo formato de listar_telas."""
+    try:
+        import wx
+        telas = []
+        for i in range(wx.Display.GetCount()):
+            g = wx.Display(i).GetGeometry()
+            telas.append((wx.Display(i).IsPrimary(), g.x, g.y, g.width,
+                          g.height))
+    except Exception:
+        log.exception("erro ao listar as telas")
+        return []
+    telas.sort(key=lambda t: (not t[0], t[1], t[2]))
+    saida = []
+    for n, (principal, x, y, l, a) in enumerate(telas, 1):
+        saida.append(("Tela %d%s, %d por %d" % (
+            n, " (principal)" if principal else "", l, a), (x, y, l, a)))
+    if len(telas) > 1:
+        x0 = min(t[1] for t in telas)
+        y0 = min(t[2] for t in telas)
+        x1 = max(t[1] + t[3] for t in telas)
+        y1 = max(t[2] + t[4] for t in telas)
+        saida.append(("Todas as telas juntas, %d por %d" % (x1 - x0, y1 - y0),
+                      (x0, y0, x1 - x0, y1 - y0)))
+    return saida
+
+
 def listar_telas():
     """[(nome, (x, y, largura, altura))] das telas do Windows: cada uma e,
     havendo mais de uma, tambem todas juntas. Vazio se nao deu para listar."""
     import ctypes
     from ctypes import wintypes
     telas = []
+    if sys.platform != "win32":
+        return _listar_telas_wx()
 
     class Info(ctypes.Structure):
         _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),

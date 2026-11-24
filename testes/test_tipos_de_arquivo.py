@@ -2,8 +2,13 @@
 """O libmagic nao acha o banco de tipos numa pasta com letra acentuada."""
 import os
 import shutil
+import sys
 
 import pytest
+
+if sys.platform != "win32":
+    pytest.skip("o conserto do caminho do libmagic e so do Windows",
+                allow_module_level=True)
 
 magic = pytest.importorskip("magic")
 from magic import magic as mg  # noqa: E402

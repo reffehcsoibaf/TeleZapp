@@ -36,8 +36,36 @@ def _winreg():
     return winreg
 
 
+ROTULO_MAC = "com.telezapp.abrir-ao-entrar"
+
+
+def _plist_mac():
+    return os.path.join(os.path.expanduser("~"), "Library", "LaunchAgents",
+                        ROTULO_MAC + ".plist")
+
+
+def _argumentos_mac():
+    """O que o Mac executa ao entrar: o proprio aplicativo (ou o Python com
+    o codigo, fora do pacote .app)."""
+    if getattr(sys, "frozen", False):
+        return [os.path.abspath(sys.executable), ARGUMENTO]
+    return [sys.executable, "-m", "telezapp", ARGUMENTO]
+
+
+def _gravar_plist_mac():
+    import plistlib
+    destino = _plist_mac()
+    os.makedirs(os.path.dirname(destino), exist_ok=True)
+    with open(destino, "wb") as f:
+        plistlib.dump({"Label": ROTULO_MAC,
+                       "ProgramArguments": _argumentos_mac(),
+                       "RunAtLoad": True}, f)
+
+
 def ativado(chave=CHAVE):
     """True se ha uma entrada do TeleZapp na inicializacao."""
+    if sys.platform == "darwin":
+        return os.path.isfile(_plist_mac())
     reg = _winreg()
     if reg is None:
         return False
@@ -50,7 +78,19 @@ def ativado(chave=CHAVE):
 
 
 def definir(ligado, chave=CHAVE, linha=None):
-    """Liga ou desliga. Devolve False se o Windows recusou."""
+    """Liga ou desliga. Devolve False se o sistema recusou."""
+    if sys.platform == "darwin":
+        try:
+            if ligado:
+                _gravar_plist_mac()
+            else:
+                try:
+                    os.remove(_plist_mac())
+                except FileNotFoundError:
+                    pass
+            return True
+        except OSError:
+            return False
     reg = _winreg()
     if reg is None:
         return False
@@ -72,6 +112,10 @@ def definir(ligado, chave=CHAVE, linha=None):
 
 
 def linha_atual(chave=CHAVE):
+    if sys.platform == "darwin":
+        if not ativado():
+            return ""
+        return subprocess.list2cmdline(_argumentos_mac())
     reg = _winreg()
     if reg is None:
         return ""

@@ -11,6 +11,7 @@ import ctypes
 import json
 import logging
 import os
+import sys
 from ctypes import wintypes
 
 from telezapp.nucleo.ia import catalogo as cat
@@ -24,6 +25,12 @@ class _Bolha(ctypes.Structure):
 
 
 def _dpapi(dados, proteger):
+    if sys.platform == "darwin":
+        from telezapp.nucleo import segredo
+        resultado = segredo.cifrar(dados) if proteger else             segredo.decifrar(dados)
+        if resultado is None:
+            raise OSError("o Chaveiro do Mac recusou")
+        return resultado
     if os.name != "nt":
         return base64.b64encode(dados) if proteger else base64.b64decode(
             dados)

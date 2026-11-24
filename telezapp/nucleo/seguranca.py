@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import secrets
+import sys
 import time
 
 log = logging.getLogger("telezapp.seguranca")
@@ -74,7 +75,11 @@ def _blob(dados):
 
 def _dpapi(dados, cifrar):
     """CryptProtectData / CryptUnprotectData da conta atual do Windows.
-    None se falhar (outro computador, outra conta, ou fora do Windows)."""
+    No Mac, o Chaveiro (nucleo/segredo.py). None se falhar (outro computador,
+    outra conta, ou em outro sistema)."""
+    if sys.platform == "darwin":
+        from telezapp.nucleo import segredo
+        return segredo.cifrar(dados) if cifrar else segredo.decifrar(dados)
     if os.name != "nt":
         return None
     try:

@@ -16,6 +16,7 @@ def _sem_som_e_sem_fala(monkeypatch):
     e a fala direta do NVDA sao reais neste computador)."""
     from telezapp.acessibilidade import fala
     monkeypatch.setattr(fala, "winsound", None)
+    monkeypatch.setattr(fala, "SONS_PELO_FLUXO", False)
     monkeypatch.setattr(fala.Fala, "ativa", lambda self: False)
     monkeypatch.setattr(fala.Fala, "falar", lambda self, *a, **k: False)
 

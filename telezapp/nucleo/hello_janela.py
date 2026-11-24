@@ -12,7 +12,11 @@ diz se ja respondeu, e quem chama (uma janela com temporizador) consulta.
 import ctypes
 import logging
 import uuid
-from ctypes import POINTER, WINFUNCTYPE, byref, c_long, c_uint, c_void_p
+from ctypes import POINTER, byref, c_long, c_uint, c_void_p
+try:
+    from ctypes import WINFUNCTYPE
+except ImportError:         # fora do Windows (o Mac nao tem Windows Hello)
+    from ctypes import CFUNCTYPE as WINFUNCTYPE   # so para importar
 
 log = logging.getLogger("telezapp.seguranca")
 

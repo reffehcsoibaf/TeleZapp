@@ -14,7 +14,10 @@ livekit>=1.1,<2
 emoji>=2.14
 opencv-python-headless>=5.0
 truststore>=0.10
-winrt-runtime>=3.2
-winrt-Windows.Foundation>=3.2
-winrt-Windows.Security.Credentials.UI>=3.2
-comtypes>=1.4
+winrt-runtime>=3.2; sys_platform == "win32"
+winrt-Windows.Foundation>=3.2; sys_platform == "win32"
+winrt-Windows.Security.Credentials.UI>=3.2; sys_platform == "win32"
+comtypes>=1.4; sys_platform == "win32"
+# Mac: fala pelo VoiceOver e Chaveiro
+pyobjc-framework-Cocoa>=10; sys_platform == "darwin"
+keyring>=25; sys_platform == "darwin"

@@ -120,8 +120,8 @@ def salvar_copia(pai, msg, caminho, fala=None):
 
 def ver_na_pasta(caminho):
     """Abre a pasta do arquivo no Explorador, com ele selecionado."""
-    if os.name == "nt":
-        subprocess.Popen(["explorer", "/select,", os.path.normpath(caminho)])
+    from telezapp.nucleo import plataforma
+    plataforma.mostrar_na_pasta(caminho)
 
 
 def _janela(pai, titulo, descricao_, botoes_extra=(), corpo=None,
@@ -202,8 +202,8 @@ def _texto(pai, msg, caminho, texto):
 
 
 def _abrir_no_windows(caminho):
-    if os.name == "nt":
-        os.startfile(caminho)
+    from telezapp.nucleo import plataforma
+    plataforma.abrir(caminho)
 
 
 def _documento(pai, msg, caminho, texto, fala=None):

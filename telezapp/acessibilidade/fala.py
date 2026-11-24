@@ -15,6 +15,7 @@ import importlib.util
 import logging
 import os
 import struct
+import sys
 import threading
 import time
 
@@ -22,6 +23,9 @@ try:
     import winsound
 except ImportError:  # fora do Windows (testes)
     winsound = None
+
+# No Mac nao ha winsound: os avisos sinteticos saem pelo fluxo de audio
+SONS_PELO_FLUXO = sys.platform == "darwin"
 
 log = logging.getLogger("telezapp.fala")
 
@@ -36,6 +40,8 @@ class Fala:
         self._carregar()
 
     def _carregar(self):
+        if sys.platform == "darwin":
+            return            # no Mac a fala e do VoiceOver (_voiceover)
         try:
             spec = importlib.util.find_spec("accessible_output2")
             if spec is None or not spec.origin:
@@ -99,8 +105,60 @@ class Fala:
         self._jaws_local.obj = obj
         return obj
 
+    # ---- VoiceOver (Mac)
+    def _voiceover(self):
+        """O VoiceOver esta ligado? Pergunta ao sistema a cada fala (a pessoa
+        liga e desliga com o app aberto). Sem o pyobjc, nao ha como falar."""
+        if sys.platform != "darwin":
+            return False
+        try:
+            from AppKit import NSWorkspace
+            return bool(NSWorkspace.sharedWorkspace().isVoiceOverEnabled())
+        except Exception as e:
+            motivo = "VoiceOver indisponível: %r" % e
+            if motivo != self._jaws_motivo:
+                self._jaws_motivo = motivo
+                log.info("fala pelo VoiceOver: %s", motivo)
+            return False
+
+    @staticmethod
+    def _anunciar_no_voiceover(texto, interromper):
+        """Pede ao VoiceOver que fale `texto` (anuncio de acessibilidade).
+        Prioridade alta interrompe o que ele esta dizendo; media entra na
+        fila. Precisa rodar na thread principal do aplicativo."""
+        from AppKit import NSApp
+        from AppKit import (NSAccessibilityAnnouncementKey,
+                            NSAccessibilityPriorityKey,
+                            NSAccessibilityPriorityHigh,
+                            NSAccessibilityPriorityMedium,
+                            NSAccessibilityPostNotificationWithUserInfo,
+                            NSAccessibilityAnnouncementRequestedNotification)
+        app = NSApp()
+        alvo = app.keyWindow() or app.mainWindow() or app
+        NSAccessibilityPostNotificationWithUserInfo(
+            alvo, NSAccessibilityAnnouncementRequestedNotification,
+            {NSAccessibilityAnnouncementKey: texto,
+             NSAccessibilityPriorityKey: NSAccessibilityPriorityHigh
+             if interromper else NSAccessibilityPriorityMedium})
+
+    def _falar_no_voiceover(self, texto, interromper):
+        try:
+            if threading.current_thread() is threading.main_thread():
+                self._anunciar_no_voiceover(texto, interromper)
+            else:
+                from PyObjCTools import AppHelper
+                AppHelper.callAfter(self._anunciar_no_voiceover, texto,
+                                    interromper)
+            return True
+        except Exception as e:
+            log.warning("erro ao falar pelo VoiceOver: %r", e)
+            return False
+
     def _leitor_ativo(self):
-        """("nvda", None) ou ("jaws", objeto) ou (None, None)."""
+        """("nvda", None) ou ("jaws", objeto) ou ("voiceover", None) ou
+        (None, None)."""
+        if sys.platform == "darwin":
+            return ("voiceover", None) if self._voiceover() else (None, None)
         if self._nvda_ativo():
             return "nvda", None
         obj = self._jaws()
@@ -121,6 +179,8 @@ class Fala:
             self.leitor = leitor
             log.info("fala pelo %s", leitor.upper())
         try:
+            if leitor == "voiceover":
+                return self._falar_no_voiceover(texto, interromper)
             if leitor == "nvda":
                 if interromper:
                     self.lib.nvdaController_cancelSpeech()
@@ -227,6 +287,11 @@ def _tocar_tom(tom):
         log.warning("não consegui tocar o tom de chamada no dispositivo "
                     "escolhido (%r); usando o padrão do Windows", e)
     if winsound is None:
+        if SONS_PELO_FLUXO:
+            try:
+                _tocar_pelo_fluxo(_onda(((freqs, ms),)), TAXA_SINTETICA, None)
+            except Exception as e:
+                log.warning("não consegui tocar o tom de chamada (%r)", e)
         return
     try:
         winsound.Beep(freqs[0], ms)       # o Beep so faz uma frequencia
@@ -352,7 +417,7 @@ def bipe(tipo="nova", valor=None, servico=""):
         threading.Thread(target=_tocar_arquivo, args=(tipo, caminho),
                          daemon=True).start()
         return
-    if winsound is None and _indice_dos_avisos() is None:
+    if winsound is None and _indice_dos_avisos() is None and             not SONS_PELO_FLUXO:
         return
     threading.Thread(target=_tocar, args=(tom_padrao(tipo),),
                      daemon=True).start()
@@ -376,7 +441,7 @@ def _tocar_arquivo(tipo, caminho):
     except Exception as e:
         log.warning("não consegui tocar o som escolhido (%r); usando o "
                     "padrão", e)
-        if winsound is not None:
+        if winsound is not None or SONS_PELO_FLUXO:
             _tocar(tom_padrao(tipo))
 
 
@@ -449,6 +514,11 @@ def _tocar(tipo):
         log.warning("não consegui tocar o aviso no dispositivo escolhido "
                     "(%r); usando o padrão do Windows", e)
     if winsound is None:
+        if SONS_PELO_FLUXO:       # Mac: toca pelo dispositivo padrao
+            try:
+                _tocar_pelo_fluxo(_onda(notas), TAXA_SINTETICA, None)
+            except Exception as e:
+                log.warning("não consegui tocar o aviso (%r)", e)
         return
     try:
         for freq, ms in notas:
