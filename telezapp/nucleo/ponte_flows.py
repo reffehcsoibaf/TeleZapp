@@ -165,6 +165,24 @@ def _em_base64(valor):
     return base64.b64encode(texto.encode("utf-8")).decode("ascii")
 
 
+URL_DA_CONSULTA_HTTP = "https://graph.whatsapp.com/graphql/catalog"
+
+
+def corpo_da_consulta_http(token, biz_jid, flow_id, idioma="pt_BR"):
+    """O corpo JSON que o WhatsApp Web manda por HTTPS para buscar os dados
+    do formulario (inclusive a chave publica da empresa)."""
+    return {"access_token": token, "doc_id": CONSULTA_DOS_DADOS,
+            "variables": variaveis_da_consulta(biz_jid, flow_id),
+            "lang": idioma}
+
+
+def formulario_consulta_a_empresa(params):
+    """O formulario troca dados com a empresa a cada tela (precisa da chave
+    publica dela)? Os parametros do botao dizem: `data_api_version`."""
+    meta = params.get("flow_metadata") or {}
+    return meta.get("data_api_version") is not None or         meta.get("data_api_protocol") is not None
+
+
 def chave_publica_dos_dados(dados):
     """A chave publica do endpoint do formulario na resposta da consulta MEX
     (`xwa_extensions_get_flow_data`), ou ''."""

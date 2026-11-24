@@ -6686,23 +6686,15 @@ class ProvedorWhatsApp(Provedor):
             raise RuntimeError("Não consegui baixar o formulário do "
                                "WhatsApp.")
         usuario, servidor = jid_de_texto(msg.conversa_id)
-        chave = ""
-        for jid in ("%s@s.whatsapp.net" % usuario, "%s@c.us" % usuario):
-            try:
-                dados = self._mex(pf.CONSULTA_DOS_DADOS,
-                                  pf.variaveis_da_consulta(jid, flow_id),
-                                  espera_ms=15000)
-            except Exception as e:
-                log.info("formulário: consulta dos dados com %s: %s",
-                         jid.split("@")[1], type(e).__name__)
-                continue
-            chave = pf.chave_publica_dos_dados(dados)
-            log.info("formulário: consulta dos dados voltou %s (chave "
-                     "pública: %s)", json.dumps(pf.formato(dados),
-                                                ensure_ascii=False)[:300],
-                     "sim" if chave else "não")
-            if chave:
-                break
+        chave = self._chave_do_formulario(usuario, flow_id)
+        if not chave and pf.formulario_consulta_a_empresa(params):
+            # a pagina criptografa os pedidos a empresa com a chave dela: sem
+            # a chave real o formulario so mostraria "Ocorreu um erro"
+            raise RuntimeError(
+                "Este formulário consulta a empresa a cada tela e precisa de "
+                "um token do aplicativo, que não está configurado. Em "
+                "Configurações, Recursos experimentais, há o campo do token. "
+                "Por enquanto, preencha o formulário no celular.")
         nome = ""
         conversa = self._conversas.get(msg.conversa_id)
         if conversa is not None:
@@ -6717,6 +6709,40 @@ class ProvedorWhatsApp(Provedor):
         return pf.dados_do_formulario(
             params, flow_json, chave_publica=chave, biz_jid=biz_jid,
             nome_da_empresa=nome)
+
+    def _chave_do_formulario(self, usuario, flow_id):
+        """A chave publica da empresa (base64 do PEM) pela consulta HTTPS do
+        WhatsApp Web, com o token que a pessoa configurou. '' se nao ha token
+        ou a consulta falha: formularios sem troca com a empresa nao
+        precisam dela."""
+        import urllib.error
+        import urllib.request
+        from telezapp import VERSAO
+        from telezapp.nucleo import ponte_flows as pf
+        token = (config.Config().get("whatsapp_formularios_token") or
+                 "").strip()
+        if not token:
+            return ""
+        corpo = json.dumps(pf.corpo_da_consulta_http(
+            token, "%s@c.us" % usuario, flow_id)).encode("utf-8")
+        pedido = urllib.request.Request(
+            pf.URL_DA_CONSULTA_HTTP, data=corpo, method="POST", headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "TeleZapp/" + VERSAO})
+        try:
+            with urllib.request.urlopen(pedido, timeout=20) as r:
+                dados = json.loads(r.read().decode("utf-8")).get("data")
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            # o token nunca vai ao registro
+            log.info("formulário: a consulta da chave falhou (%s)",
+                     type(e).__name__)
+            return ""
+        chave = pf.chave_publica_dos_dados(dados or {})
+        log.info("formulário: consulta da chave voltou %s (chave: %s)",
+                 json.dumps(pf.formato(dados), ensure_ascii=False)[:200],
+                 "sim" if chave else "não")
+        return chave
 
     def responder_formulario(self, msg, acao, payload):
         """Manda a empresa o que o formulario concluido entregou."""
