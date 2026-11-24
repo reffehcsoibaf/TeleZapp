@@ -336,7 +336,8 @@ def apresentar(c):
     """O que mostrar e falar para o estado atual da chamada `c`."""
     quem = _quem(c.nome)
     if c.estado == TOCANDO:
-        de = "Chamada de vídeo de %s" if c.video else (
+        de = ("Chamada de vídeo em grupo: %s" if c.grupo else
+              "Chamada de vídeo de %s") if c.video else (
             "Chamada em grupo: %s" if c.grupo else "Chamada de %s")
         return Apresentacao(
             de % quem,

@@ -5423,7 +5423,7 @@ class Janela(wx.Frame):
                 self._entrar_chat_de_voz(conv)
                 return
             if self._chamada_em_grupo_disponivel(conv):
-                self._ligar_para_grupo(conv)
+                self._ligar_para_grupo(conv, video)
                 return
             bipe("erro")
             self.fala.falar("Só dá para ligar para uma conversa com uma "
@@ -5841,8 +5841,9 @@ class Janela(wx.Frame):
         self.painel.Layout()
 
     @seguro
-    def _ligar_para_grupo(self, conv):
-        """Liga para o grupo ou, se ha chamada em andamento, entra nela."""
+    def _ligar_para_grupo(self, conv, video=False):
+        """Liga para o grupo ou, se ha chamada em andamento, entra nela. Com
+        `video` (e a caixa do video em grupo), a chamada leva a camera."""
         if self.estados.get(conv.conta_id) != ev.CONECTADA:
             bipe("erro")
             self.fala.falar("A conta não está conectada. Nada foi ligado.",
@@ -5850,16 +5851,32 @@ class Janela(wx.Frame):
             return
         p = self._provedor_de_chamada(conv.conta_id)
         mic, saida = self._dispositivos_da_chamada()
+        video_em_grupo = bool(getattr(p, "suporta_video_em_grupo", False))
+        if video and not video_em_grupo:
+            bipe("erro")
+            self.fala.falar(
+                "Vídeo em chamada em grupo está desligado. Marque Vídeo nas "
+                "chamadas em grupo do WhatsApp em Configurações, Recursos "
+                "experimentais.", interromper=True)
+            return
+        camera = (self.cfg.get("chamada_camera") or "")             if video_em_grupo else None
+        if video_em_grupo:
+            self._registrar_destino_de_video(p)
         em_andamento = self._chamada_em_andamento_de(conv)
         if em_andamento:
             log.info("entrando na chamada em grupo em andamento (%s)",
                      conv.conta_id)
             self.fala.falar("Entrando na chamada em grupo de %s. %s" % (
                 conv.nome, "Recurso experimental."), interromper=True)
-            p.entrar_chamada_em_andamento(conv.id, em_andamento, mic, saida)
+            p.entrar_chamada_em_andamento(conv.id, em_andamento, mic, saida,
+                                          camera if video else None)
             return
-        log.info("ligando para um grupo (%s)", conv.conta_id)
-        p.ligar(conv.id, mic, saida)
+        log.info("ligando para um grupo (%s)%s", conv.conta_id,
+                 " com vídeo" if video else "")
+        if video:
+            p.ligar(conv.id, mic, saida, video=True, camera=camera)
+        else:
+            p.ligar(conv.id, mic, saida)
 
     # ---------------------- chamadas por link do WhatsApp (experimental)
     def _contas_de_chamada_por_link(self):

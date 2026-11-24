@@ -437,6 +437,18 @@ OPCOES = (
           "toca como antes, sem ser reconhecida como de grupo. Se o "
           "desempenho não for satisfatório, o recurso pode sair do TeleZapp "
           "nas próximas versões.", servico="whatsapp"),
+    Opcao("chamada_grupo_video_whatsapp",
+          "Vídeo nas chamadas em grupo do WhatsApp",
+          CATEGORIA_EXPERIMENTAL, False,
+          "Experimental. Deixa ligar e entrar com vídeo nas chamadas em grupo "
+          "comuns (Chamadas, Ligar com vídeo, numa conversa de grupo; e ao "
+          "atender o convite de uma chamada de vídeo em grupo): a câmera "
+          "funciona como numa chamada de vídeo, e o vídeo de cada pessoa "
+          "chega numa imagem só, em grade. Precisa das caixas das chamadas "
+          "em grupo e de entrar em chamadas que já começaram marcadas. As "
+          "chamadas por link já levam vídeo sem esta caixa. Se o "
+          "desempenho não for satisfatório, o recurso pode sair do "
+          "TeleZapp nas próximas versões.", servico="whatsapp"),
     Opcao("chamada_em_andamento_whatsapp",
           "Entrar em chamadas em grupo do WhatsApp que já começaram",
           CATEGORIA_EXPERIMENTAL, False,
