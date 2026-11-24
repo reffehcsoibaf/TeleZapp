@@ -128,6 +128,8 @@ class Corretor:
             verificar = getattr(self._mac, "checkSpellingOfString_startingAt_language_wrap_"
                                 "inSpellDocumentWithTag_wordCount_")
             r = verificar(texto, inicio, self._lingua_mac, False, 0, None)
+            if isinstance(r, tuple):         # (intervalo, palavras)
+                r = r[0]
             local, tamanho = r.location, r.length
             if tamanho == 0 or local >= total16:
                 break

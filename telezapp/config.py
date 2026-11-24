@@ -1639,6 +1639,43 @@ PADROES.update({
 })
 
 
+# --------------------------------------------------------------------- Mac
+# Opcoes que so fazem sentido no Windows somem das configuracoes no Mac, e o
+# texto das demais troca "Windows" pelo nome do sistema. Os padroes (acima)
+# continuam valendo para as chaves escondidas.
+OPCOES_SO_DO_WINDOWS = ("seguranca_usar_hello", "abrir_links_no_telezapp",
+                        "prioridade_abertura")
+
+
+def _opcoes_para_o_mac(opcoes):
+    import dataclasses
+    import re
+    trocas = (("Configurações do Windows, Hora e idioma, Idioma e região",
+               "Ajustes do Sistema, Geral, Idioma e região"),
+              ("Configurações do Windows, Aplicativos padrão",
+               "Ajustes do Sistema"),
+              ("Windows Hello", "Touch ID"),
+              ("barra de tarefas", "Dock"),
+              ("Gerenciador de Tarefas", "Monitor de Atividade"))
+    saida = []
+    for o in opcoes:
+        if o.chave in OPCOES_SO_DO_WINDOWS:
+            continue
+        rotulo, descricao = o.rotulo, o.descricao
+        for velho, novo in trocas:
+            rotulo = rotulo.replace(velho, novo)
+            descricao = descricao.replace(velho, novo)
+        rotulo = re.sub(r"\bWindows\b", "Mac", rotulo)
+        descricao = re.sub(r"\bWindows\b", "Mac", descricao)
+        saida.append(dataclasses.replace(o, rotulo=rotulo,
+                                         descricao=descricao))
+    return tuple(saida)
+
+
+if sys.platform == "darwin":
+    OPCOES = _opcoes_para_o_mac(OPCOES)
+
+
 class Config:
     """Configuracoes em config.json, gravadas de forma atomica."""
 

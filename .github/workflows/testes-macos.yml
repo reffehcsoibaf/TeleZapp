@@ -6,6 +6,11 @@ name: TeleZapp para Mac
 # A experiencia com o VoiceOver, o audio e as chamadas so quem tem um Mac vê.
 on:
   workflow_dispatch:
+    inputs:
+      publicar:
+        description: "Publicar os .zip como pre-lancamento para os testadores"
+        type: boolean
+        default: false
   push:
     branches: [mac, experimento-macos]
 
@@ -81,3 +86,25 @@ jobs:
             saida/
           if-no-files-found: warn
           retention-days: 30
+
+  publicar:
+    name: Publicar para os testadores
+    needs: mac
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publicar }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: TeleZapp-mac-*
+          path: baixados
+          merge-multiple: true
+      - name: Criar o pre-lancamento
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          versao=$(python3 -c "import re;print(re.search(r'VERSAO = \"([^\"]+)\"',open('telezapp/__init__.py').read()).group(1))")
+          tag="mac-teste-${versao}-${{ github.run_number }}"
+          gh release create "$tag" --prerelease --target "${{ github.sha }}"             --title "TeleZapp para Mac, versão de teste $versao (${{ github.run_number }})"             --notes-file docs/mac-como-testar.md             baixados/TeleZapp-mac-apple-silicon.zip baixados/TeleZapp-mac-intel.zip
