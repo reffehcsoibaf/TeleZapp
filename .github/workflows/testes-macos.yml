@@ -30,6 +30,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Biblioteca do sistema que o neonize pede (libmagic)
+        run: brew install libmagic
       - name: Instalar as dependencias (sem as exclusivas do Windows)
         run: |
           python -m pip install --upgrade pip
