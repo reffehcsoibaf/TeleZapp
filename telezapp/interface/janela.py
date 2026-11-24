@@ -11915,10 +11915,6 @@ class Janela(wx.Frame):
                 tempo = (int(segundos), bool(pausada))
             except (TypeError, ValueError):
                 tempo = None
-        if self._gravacao_rapida is not None:
-            return          # o tempo da gravacao por atalho tem a vez
-        if tempo == self._tempo_gravacao_titulo:
-            return          # nada mudou: nao refaz o titulo a cada meio segundo
         self._tempo_gravacao_titulo = tempo
         self._atualizar_titulo()
 
