@@ -86,9 +86,9 @@ class JanelaFormulario(wx.Frame):
         if not self:
             return
         try:
-            ok, saida = self.web.RunScript(ponte.script_de_resposta(corpo))
-            log.info("formulário: respondi (%s%s)", "ok" if ok else "FALHOU",
-                     (": " + str(saida)[:120]) if saida else "")
+            # nunca RunScript (sincrono) aqui: dentro do tratador de
+            # mensagens da pagina ele trava a janela
+            self.web.RunScriptAsync(ponte.script_de_resposta(corpo))
         except Exception:
             log.exception("formulário: não consegui responder à página")
 
@@ -112,8 +112,11 @@ class JanelaFormulario(wx.Frame):
 
     # ------------------------------------------------- o que a ponte usa
     def carregada(self):
-        self.responder({"eventName": "update_theme",
-                        "payload": {"theme": "light"}})
+        # o WhatsApp Web manda o tema duas vezes: ao criar o quadro e de novo
+        # quando a pagina diz que carregou
+        for _ in range(2):
+            self.responder({"eventName": "update_theme",
+                            "payload": {"theme": "light"}})
 
     def dados(self):
         return self._dados

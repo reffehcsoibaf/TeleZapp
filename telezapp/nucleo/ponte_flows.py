@@ -37,9 +37,10 @@ EV_NAVEGACAO_EXTERNA = "WAFlowsExternalNavigation"
 EV_TROCA_DE_DADOS = "WAExtensionsDataChannelExchange"
 
 # O script injetado no inicio da pagina: a pagina chama window.parent
-# .postMessage; como a pagina esta sozinha na janela, window.parent e a propria
-# janela, entao basta trocar window.postMessage. `__tzFlows(dados)` entrega uma
-# resposta da forma que o WhatsApp Web entrega (evento message da origem dele).
+# .postMessage; como ela abre sozinha na janela, `window.parent` e `window.top`
+# passam a ser um quadro invisivel (mesma origem) cujo postMessage entrega tudo
+# ao TeleZapp. `__tzFlows(texto)` entrega uma resposta como o WhatsApp Web faz:
+# o texto JSON num evento message vindo de https://web.whatsapp.com.
 SCRIPT_DA_PONTE = """
 (function () {
   var enviar = function (m) {
@@ -48,16 +49,32 @@ SCRIPT_DA_PONTE = """
       window.%(manipulador)s.postMessage(texto);
     } catch (e) {}
   };
-  var original = window.postMessage.bind(window);
-  window.postMessage = function (m) {
-    var d = m;
-    if (typeof d === "string") { try { d = JSON.parse(d); } catch (e) {} }
-    if (d && typeof d === "object" && (d.eventName || d.type)) {
-      enviar(d);
-      return;
-    }
-    return original.apply(window, arguments);
+  // a pagina foi feita para ficar num quadro: window.parent e uma janela
+  // diferente da dela, e as respostas chegam com essa janela como origem do
+  // evento. Um quadro invisivel (mesma origem) faz o papel do aplicativo.
+  var pai = null;
+  var janelaDoPai = function () {
+    if (pai) { return pai; }
+    var q = document.createElement("iframe");
+    q.setAttribute("aria-hidden", "true");
+    q.tabIndex = -1;
+    q.style.cssText = "position:absolute;width:0;height:0;border:0;" +
+                      "visibility:hidden";
+    (document.documentElement || document.body).appendChild(q);
+    pai = q.contentWindow;
+    pai.postMessage = function (m) {
+      var d = m;
+      if (typeof d === "string") { try { d = JSON.parse(d); } catch (e) {} }
+      if (d && typeof d === "object") { enviar(d); }
+    };
+    return pai;
   };
+  try {
+    Object.defineProperty(window, "parent", {configurable: true,
+                                              get: janelaDoPai});
+    Object.defineProperty(window, "top", {configurable: true,
+                                          get: janelaDoPai});
+  } catch (e) {}
   // erros e avisos da pagina vao ao registro (so para achar o que falta)
   var avisar = function (nivel, args) {
     try {
@@ -79,17 +96,10 @@ SCRIPT_DA_PONTE = """
     avisar("rejeicao", [e.reason]);
   });
   window.__tzRecebidas = 0;
-  [8000, 25000].forEach(function (ms) {
-    setTimeout(function () {
-      avisar("estado", ["recebidas=" + window.__tzRecebidas,
-        "pronto=" + document.readyState,
-        "texto=" + (document.body ? document.body.innerText.slice(0, 160) : "")]);
-    }, ms);
-  });
   window.__tzFlows = function (dados) {
     window.__tzRecebidas++;
     window.dispatchEvent(new MessageEvent("message", {
-      data: dados, origin: "%(origem)s", source: window}));
+      data: dados, origin: "%(origem)s", source: janelaDoPai()}));
   };
 })();
 """ % {"manipulador": NOME_DO_MANIPULADOR, "origem": ORIGEM_DO_APLICATIVO}
@@ -97,7 +107,8 @@ SCRIPT_DA_PONTE = """
 
 def script_de_resposta(corpo):
     """O JavaScript que entrega `corpo` (dict) a pagina."""
-    return "window.__tzFlows(%s);" % json.dumps(corpo)
+    # o WhatsApp Web entrega a resposta como texto JSON (nao como objeto)
+    return "window.__tzFlows(%s);" % json.dumps(json.dumps(corpo))
 
 
 def ler_mensagem(texto):
@@ -165,6 +176,22 @@ def chave_publica_dos_dados(dados):
         return ""
 
 
+_CHAVE_DE_RESERVA = []
+
+
+def chave_de_reserva():
+    """Uma chave publica valida (base64 do PEM, como a pagina espera) para
+    quando a consulta do WhatsApp nao devolve a da empresa. Basta para os
+    formularios sem troca de dados com a empresa: a pagina so confere o
+    formato. Gerada uma vez por abertura do programa."""
+    if not _CHAVE_DE_RESERVA:
+        from Cryptodome.PublicKey import RSA
+        pem = RSA.generate(2048).publickey().export_key().decode("ascii")
+        _CHAVE_DE_RESERVA.append(base64.b64encode(
+            pem.encode("ascii")).decode("ascii"))
+    return _CHAVE_DE_RESERVA[0]
+
+
 def variaveis_da_consulta(biz_jid, flow_id):
     return {"request": {"extensions": {"biz_jid": biz_jid,
                                        "flow_id": str(flow_id)}}}
@@ -178,7 +205,7 @@ def dados_do_formulario(params, flow_json, chave_publica="", biz_jid="",
     texto_do_json = flow_json if isinstance(flow_json, str) else json.dumps(
         flow_json, ensure_ascii=False, separators=(",", ":"))
     return {
-        "public_key": chave_publica or "",
+        "public_key": chave_publica or chave_de_reserva(),
         "biz_jid": biz_jid,
         "flow_token": params.get("flow_token", ""),
         "extension_status": "PUBLISHED" if params.get(
@@ -201,7 +228,8 @@ def dados_do_formulario(params, flow_json, chave_publica="", biz_jid="",
         "is_flow_interactive": True,
         "response_viewer": "CONSUMER",
         "www_proxy_secret": meta.get("www_proxy_secret", ""),
-        "flow_token_signature": meta.get("flow_token_signature"),
+        # o WhatsApp Web manda null aqui mesmo quando o botao traz assinatura
+        "flow_token_signature": None,
     }
 
 

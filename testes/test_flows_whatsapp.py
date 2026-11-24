@@ -24,6 +24,11 @@ def test_dados_do_formulario_juntam_botao_json_e_chave():
     assert d["extension_id"] == "999" and d["flow_token"] == "ficha-123"
     assert d["public_key"] == "CHAVE" and d["business_name"] == "Sicoob"
     assert d["flow_action"] == "navigate"
+    # sem chave da empresa, vale uma de reserva no formato que a pagina quer
+    import base64
+    reserva = pf.dados_do_formulario(PARAMS, "{}")["public_key"]
+    assert base64.b64decode(reserva).startswith(b"-----BEGIN PUBLIC KEY-----")
+    assert len(reserva) > 500
     import base64
     assert json.loads(base64.b64decode(d["flow_action_payload"])) == {
         "screen": "RECOMMEND"}               # em base64, como o WhatsApp Web
@@ -31,7 +36,7 @@ def test_dados_do_formulario_juntam_botao_json_e_chave():
     assert d["entry_point_conversation_initiated"] == -1
     assert json.loads(d["flow_json"])["version"] == "7.3"
     assert d["www_proxy_secret"] == "segredo"
-    assert d["flow_token_signature"] == "assinatura"
+    assert d["flow_token_signature"] is None      # como o WhatsApp Web
     assert d["extension_status"] == "PUBLISHED" and d["is_flow_interactive"]
     # os mesmos campos que o WhatsApp Web entrega
     assert set(d) >= {"public_key", "biz_jid", "flow_token", "qpl_message_id",
@@ -85,6 +90,8 @@ def test_formato_nunca_guarda_o_que_foi_preenchido():
 def test_script_de_resposta_entrega_um_texto_json():
     js = pf.script_de_resposta({"responseData": None, "callbackID": "c1"})
     assert js.startswith("window.__tzFlows(") and "callbackID" in js
+    # como o WhatsApp Web: o texto JSON entre aspas, nao um objeto
+    assert js.startswith('window.__tzFlows("')
     assert pf.ler_mensagem("não é json") is None
     assert pf.ler_mensagem('{"eventName": "x"}') == {"eventName": "x"}
 
@@ -172,6 +179,7 @@ class RespostaHttp(io.BytesIO):
 def _provedor_de_formulario(monkeypatch, mex=None, json_do_fluxo=None,
                             erro_http=None):
     p = object.__new__(wa.ProvedorWhatsApp)
+    p.cliente, p._conectada = None, False      # sem mapa de LID
     p._conversas = {"5561@s.whatsapp.net": m.Conversa(
         "w1", "5561@s.whatsapp.net", "Sicoob", "whatsapp")}
     visto = {"urls": [], "mex": []}
@@ -217,7 +225,8 @@ def test_buscar_formulario_sem_a_consulta_ainda_abre_formularios_estaticos(
                      id="m1", texto="x")
     d = p.buscar_formulario(msg, {"tipo": "formulario", "id": "999",
                                   "params": json.dumps(PARAMS)})
-    assert d["public_key"] == "" and len(visto["mex"]) == 2   # as duas formas
+    assert len(visto["mex"]) == 2                   # as duas formas
+    assert d["public_key"] == pf.chave_de_reserva()  # a de reserva
     assert json.loads(d["flow_json"])["version"] == "7.3"
 
 

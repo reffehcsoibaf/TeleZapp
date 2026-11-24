@@ -6679,7 +6679,8 @@ class ProvedorWhatsApp(Provedor):
                 "Accept": "application/json"})
         try:
             with urllib.request.urlopen(pedido, timeout=20) as r:
-                flow_json = json.loads(r.read().decode("utf-8"))
+                flow_json = r.read().decode("utf-8")
+            json.loads(flow_json)            # so confere que e um JSON
         except (urllib.error.URLError, OSError, ValueError) as e:
             log.info("formulário: não baixei o JSON (%s)", type(e).__name__)
             raise RuntimeError("Não consegui baixar o formulário do "
@@ -6706,9 +6707,16 @@ class ProvedorWhatsApp(Provedor):
         conversa = self._conversas.get(msg.conversa_id)
         if conversa is not None:
             nome = conversa.nome or ""
+        biz_jid = "%s@s.whatsapp.net" % usuario
+        if servidor == "s.whatsapp.net":
+            lid = self._lid_do_pn(_jid_obj(usuario, servidor))
+            if lid is not None and getattr(lid, "User", ""):
+                biz_jid = "%s@lid" % lid.User   # a pagina usa o LID
+        elif servidor == "lid":
+            biz_jid = "%s@lid" % usuario
         return pf.dados_do_formulario(
-            params, flow_json, chave_publica=chave,
-            biz_jid="%s@s.whatsapp.net" % usuario, nome_da_empresa=nome)
+            params, flow_json, chave_publica=chave, biz_jid=biz_jid,
+            nome_da_empresa=nome)
 
     def responder_formulario(self, msg, acao, payload):
         """Manda a empresa o que o formulario concluido entregou."""
