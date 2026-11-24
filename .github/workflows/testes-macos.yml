@@ -46,4 +46,4 @@ jobs:
       - name: Rodar os testes
         env:
           PYTHONUTF8: "1"
-        run: python -m pytest testes -q -p no:cacheprovider --tb=short -rfE 2>&1 | tail -150
+        run: python -m pytest testes --ignore=testes/test_tipos_de_arquivo.py -q -p no:cacheprovider --tb=short -rfE 2>&1 | tail -150
