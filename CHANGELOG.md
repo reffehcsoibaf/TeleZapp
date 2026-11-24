@@ -7,6 +7,10 @@ Antes de escrever aqui, confira a versão em vigor: `git fetch --tags` e
 `gh release list -L 3` (a Latest é a publicada). O que veio depois dela vai em
 "Próxima versão (ainda sem número)".
 
+## Próxima versão (ainda sem número)
+
+Chamada em grupo recusada pelo WhatsApp (relato de 24/11, versão 23.1): o convite de uma chamada em grupo de vídeo tocava como chamada comum quando a caixa das chamadas em grupo está desligada; ao atender, o servidor respondia `server:431` e a pessoa via só "O WhatsApp recusou a chamada". Agora `ChamadasWhatsApp._ao_convite_de_grupo` guarda os convites vistos mesmo sem a caixa (`_vistos_de_grupo`), `_ao_receber` marca `_Ligacao.era_grupo` e, sem a caixa, avisa ao tocar (`TEXTO_GRUPO_SEM_A_CAIXA`); `_ao_terminar` explica a recusa `server:*` de uma chamada que era de grupo (sem a caixa: como ligar as caixas, vídeo em grupo não existe; com a caixa: só entra por voz). Chamada comum continua com a frase de antes. Testes em `test_chamadas_whatsapp.py`.
+
 ## 2026.11.23.1
 
 Chamada recebida que não acaba (log do Igor, 23/11: uma oferta do WhatsApp Web, `platform=web`, ficou 6823 s tocando sem `terminate`; `_ao_receber` recusa toda chamada nova com `ocupado = bool(self.ligacoes)` e dez ofertas foram recusadas como "outra aberta"). Três camadas: (1) `Janela._vigiar_toque` (a cada 5 s, a partir de `TOCANDO`) recusa a chamada recebida que passa de `nucleo.chamadas.SEGUNDOS_TOCANDO_SEM_INTERACAO` (90 s) sem tecla, Tab ou clique na janela (`DialogoChamada.ao_interagir`; `EVT_CHAR_HOOK`, `EVT_CHILD_FOCUS`, `EVT_LEFT_DOWN`) e, se o provedor não publicar `ENCERRADA` em `ESPERA_DO_FIM_FORCADO_MS` (4 s), encerra a `Chamada` localmente; (2) `ChamadasWhatsapp._descartar_toques_parados` e `ChamadasTelegram._descartar_toques_parados` rodam no início de `_ao_receber`: ligação entrante em `TOCANDO` com 90 s ou mais (`_Ligacao.criada_em`, `Chamada.criada_em`) é recusada na rede (se der) e tirada de `ligacoes`/`chamadas` como `PERDIDA`; (3) `deve_recusar_por_inatividade` é a regra pura, testável. A causa de o aviso de fim não chegar segue sem prova.

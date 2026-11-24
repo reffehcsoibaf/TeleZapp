@@ -1061,6 +1061,55 @@ def test_chamada_em_grupo_que_chega_sem_a_caixa_toca_como_antes(mundo_grupo):
     assert e.grupo is False and e.nome == "Ana"
 
 
+def _oferta_de_grupo_recusada(v, ponte, bus, com_a_caixa):
+    """Convite de grupo, toque como chamada comum (o `incoming` nao diz que
+    e de grupo, como no log de 24/11), atendida e recusada com 431."""
+    v.grupo_ligado = lambda: com_a_caixa
+    ponte.fila.put({"ev": "offer", "call": "R5", "group": GRUPO_CID,
+                    "creator": "1@lid", "video": True})
+    ponte.fila.put({"ev": "incoming", "call": "R5", "peer": "1@lid",
+                    "video": True})
+    assert esperar(lambda: bus.estados())
+    return [x.texto for x in bus.eventos if isinstance(x, ev.Aviso)]
+
+
+def test_convite_de_grupo_sem_a_caixa_avisa_ao_tocar_e_explica_a_recusa(
+        mundo_grupo):
+    v, ponte, bus, _ = mundo_grupo
+    avisos = _oferta_de_grupo_recusada(v, ponte, bus, False)
+    assert any("Esta chamada é de um grupo" in a for a in avisos)
+    v.atender(CID)
+    ponte.fila.put({"ev": "end", "call": "R5", "reason": "server:431"})
+    assert esperar(lambda: bus.estados()[-1][0] == ch.ENCERRADA)
+    final = bus.eventos[-1]
+    assert final.motivo == ch.FALHA
+    assert "chamada em grupo" in final.erro and "431" in final.erro
+    assert "Recursos experimentais" in final.erro
+
+
+def test_recusa_431_de_grupo_com_a_caixa_diz_que_so_entra_por_voz(
+        mundo_grupo):
+    v, ponte, bus, _ = mundo_grupo
+    avisos = _oferta_de_grupo_recusada(v, ponte, bus, True)
+    assert not any("Esta chamada é de um grupo" in a for a in avisos)
+    cid = next(iter(v.ligacoes))
+    v.atender(cid)
+    ponte.fila.put({"ev": "end", "call": "R5", "reason": "server:431"})
+    assert esperar(lambda: bus.estados()[-1][0] == ch.ENCERRADA)
+    erro = bus.eventos[-1].erro
+    assert "só entra em chamadas em grupo por voz" in erro
+
+
+def test_recusa_do_servidor_numa_chamada_comum_continua_generica(mundo_grupo):
+    v, ponte, bus, _ = mundo_grupo
+    ponte.fila.put({"ev": "incoming", "call": "R6", "peer": "1@lid"})
+    assert esperar(lambda: bus.estados())
+    v.atender(CID)
+    ponte.fila.put({"ev": "end", "call": "R6", "reason": "server:431"})
+    assert esperar(lambda: bus.estados()[-1][0] == ch.ENCERRADA)
+    assert bus.eventos[-1].erro == "O WhatsApp recusou a chamada (server:431)."
+
+
 def test_convite_de_grupo_guarda_e_avisa_que_da_para_entrar(mundo_grupo):
     v, ponte, bus, _ = mundo_grupo
     ponte.fila.put({"ev": "offer", "call": "R7", "group": GRUPO_CID,
