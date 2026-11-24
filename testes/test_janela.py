@@ -6980,6 +6980,20 @@ def test_comandos_do_robo_listam_e_enviam(j):
     assert enviados == ["/start"]
 
 
+def test_botao_de_formulario_com_a_caixa_experimental_abre_o_formulario(j):
+    x = msg("7", "Clique abaixo")
+    abertos, ditas = [], []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._abrir_formulario = lambda m_, a, p: abertos.append(a["rotulo"])
+    acao = {"tipo": "formulario", "rotulo": "Iniciar atendimento", "id": "1"}
+    j.cfg.set("whatsapp_formularios", False)
+    j._tocar_acao(x, acao)
+    assert abertos == [] and "formulário do WhatsApp" in ditas[-1]
+    j.cfg.set("whatsapp_formularios", True)
+    j._tocar_acao(x, acao)
+    assert abertos == ["Iniciar atendimento"]
+
+
 def test_botao_de_formulario_explica_que_so_abre_no_celular(j):
     x = msg("7", "Clique abaixo")
     ditas = []

@@ -8292,6 +8292,9 @@ class Janela(wx.Frame):
         if tipo == "robo_copiar":
             self._copiar_texto(acao.get("texto", ""))
             return
+        if tipo == "formulario" and self.cfg.get("whatsapp_formularios"):
+            self._abrir_formulario(x, acao, prov)
+            return
         if tipo == "formulario":
             bipe("erro")
             self.fala.falar(
@@ -8322,6 +8325,44 @@ class Janela(wx.Frame):
             self._acoes_enviadas.pop()
             bipe("erro")
             self.fala.falar("Este serviço ainda não responde a botões.")
+
+    @seguro
+    def _abrir_formulario(self, x, acao, prov):
+        """Abre o formulario de uma empresa do WhatsApp (experimental): busca
+        os dados fora da janela e depois abre a janela do formulario."""
+        from telezapp.interface import formulario_whatsapp as fw
+        if not fw.disponivel():
+            bipe("erro")
+            self.fala.falar("Os formulários precisam do WebView2 do "
+                            "Windows, que não está disponível.",
+                            interromper=True)
+            return
+        self.fala.falar("Abrindo o formulário. Recurso experimental.",
+                        interromper=True)
+
+        def trabalho():
+            try:
+                dados = prov.buscar_formulario(x, acao)
+            except Exception as e:
+                texto = str(e) if isinstance(e, RuntimeError) else                     "Não consegui abrir o formulário."
+                log.info("formulário: %s", type(e).__name__)
+                wx.CallAfter(lambda: (bipe("erro"), self.fala.falar(
+                    texto, interromper=True)))
+                return
+            wx.CallAfter(self._mostrar_formulario, x, acao, prov, dados)
+        threading.Thread(target=trabalho, daemon=True,
+                         name="formulario-dados").start()
+
+    @seguro
+    def _mostrar_formulario(self, x, acao, prov, dados):
+        from telezapp.interface import formulario_whatsapp as fw
+        janela = fw.JanelaFormulario(
+            self, acao.get("rotulo") or "Formulário", dados,
+            ao_completar=lambda payload: prov.responder_formulario(
+                x, acao, payload),
+            abrir_link=self._abrir_na_internet, falar=self.fala.falar)
+        janela.Show()
+        janela.Raise()
 
     @staticmethod
     def _acao_de_localizacao(x):

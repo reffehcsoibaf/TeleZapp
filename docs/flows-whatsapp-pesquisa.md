@@ -47,3 +47,12 @@ Estado no TeleZapp (branch `log-acoes-interativas`): o botão aparece como açã
 
 - Nada disso foi testado com formulário preenchido: os formulários pedem dados pessoais (CPF/CNPJ), e a pesquisa parou na primeira tela.
 - Registrar nas respostas só nomes e formatos; nunca guardar valores de formulários.
+
+## Atualização (24/11, noite): o que a implementação descobriu
+
+- O quadro do WhatsApp Web não tem parâmetros: `https://flows.whatsapp.net/flows-v2/wa-web/`. A página recusa ser exibida em quadro de outro domínio (ícone de página quebrada), mas abre como página principal.
+- Os dados do formulário não vêm de uma só fonte: o JSON é `GET https://web.whatsapp.com/flows/json/<flow_id>` (público, sem cookie); a chave pública do endpoint vem da consulta MEX `xwa_extensions_get_flow_data` (id `40083220921276114`, variável `{request: {extensions: {biz_jid, flow_id}}}`, resposta `extensions_flow_data[0].extensions.metadata.endpoint_public_key.key`); o resto está nos parâmetros do botão (`flow_token`, `flow_id`, `flow_cta`, `flow_action`, `flow_action_payload`, `flow_metadata` com `www_proxy_secret` e `flow_token_signature`, `mode`).
+- `responseData` de `WAExtensionsGetFlowData`, valores que o WhatsApp Web usa: `response_viewer` "CONSUMER", `biz_platform` 4, `entry_point_conversation_initiated` -1, `flow_entry_point` 0, `extension_status` "PUBLISHED", `is_template` false, `is_flow_interactive` true, `biz_logo` uma URL de imagem, `flow_action_payload` **em base64**.
+- Eventos da ponte (`WAFlowsWebBridgeEventNames`): `WAExtensionsGetFlowData`, `WAExtensionsComplete`, `WAExtensionsGetClientAbProps`, `WAExtensionsNavigate`, `WAExtensionsClose`, `WAFlowsExternalNavigation`, `WAFlowsOpenURL`, `WAExtensionsConfigureNavBar`, `WAExtensionsVibrate`, `WAExtensionsSetDraggable`, `WAFlowsShowOverlay`, `WAFlowsShowNativeInputDialogComponent`, `WAQPLLogger.*`, `WAMLogger`, `WAExtensionsSpamReport`, `WAExtensionsReportItem`, `WAExtensionsLearnMore`...
+- O pedido de dados repete 3 vezes e depois vem `GetClientAbProps`; `DataChannelExchange` com `data: {}` na primeira tela foi respondido com nulo no WhatsApp Web (formulário estático).
+- O formato do que `WAExtensionsComplete` entrega e como vira a resposta à empresa ainda não foi visto: exigiria concluir um formulário (dados pessoais). O TeleZapp registra o formato (sem valores) na primeira vez.

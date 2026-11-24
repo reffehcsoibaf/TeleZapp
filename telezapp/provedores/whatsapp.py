@@ -763,7 +763,8 @@ def acoes_do_whatsapp(interna):
                         "tipo": "formulario", "indice": i,
                         "rotulo": dados.get("flow_cta") or
                         dados.get("display_text") or "Abrir o formulário",
-                        "id": str(dados.get("flow_id") or "")})
+                        "id": str(dados.get("flow_id") or ""),
+                        "params": b.buttonParamsJSON or ""})
                     continue
                 if b.name != "quick_reply":
                     continue
@@ -6657,6 +6658,68 @@ class ProvedorWhatsApp(Provedor):
             msg.conversa_id, acao.get("rotulo", ""), msg.id,
             lambda: self._variantes_da_acao(msg, acao), descricao))
 
+    # ------------------------------------------- formularios (Flow)
+    def buscar_formulario(self, msg, acao):
+        """O `responseData` que a pagina do formulario pede (ver
+        nucleo/ponte_flows): o JSON do formulario (publico, pelo id), e a
+        chave publica do endpoint pela consulta MEX do WhatsApp, que pode
+        faltar sem estragar formularios estaticos. Levanta RuntimeError com o
+        motivo, ja em portugues."""
+        import urllib.error
+        import urllib.request
+        from telezapp import VERSAO
+        from telezapp.nucleo import ponte_flows as pf
+        params = pf.parametros_do_botao(acao.get("params"))
+        flow_id = str(params.get("flow_id") or acao.get("id") or "")
+        if not flow_id.isdigit():
+            raise RuntimeError("O botão não traz o número do formulário.")
+        pedido = urllib.request.Request(
+            pf.URL_DO_JSON % flow_id, headers={
+                "User-Agent": "TeleZapp/" + VERSAO,
+                "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(pedido, timeout=20) as r:
+                flow_json = json.loads(r.read().decode("utf-8"))
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            log.info("formulário: não baixei o JSON (%s)", type(e).__name__)
+            raise RuntimeError("Não consegui baixar o formulário do "
+                               "WhatsApp.")
+        usuario, servidor = jid_de_texto(msg.conversa_id)
+        chave = ""
+        for jid in ("%s@s.whatsapp.net" % usuario, "%s@c.us" % usuario):
+            try:
+                dados = self._mex(pf.CONSULTA_DOS_DADOS,
+                                  pf.variaveis_da_consulta(jid, flow_id),
+                                  espera_ms=15000)
+            except Exception as e:
+                log.info("formulário: consulta dos dados com %s: %s",
+                         jid.split("@")[1], type(e).__name__)
+                continue
+            chave = pf.chave_publica_dos_dados(dados)
+            log.info("formulário: consulta dos dados voltou %s (chave "
+                     "pública: %s)", json.dumps(pf.formato(dados),
+                                                ensure_ascii=False)[:300],
+                     "sim" if chave else "não")
+            if chave:
+                break
+        nome = ""
+        conversa = self._conversas.get(msg.conversa_id)
+        if conversa is not None:
+            nome = conversa.nome or ""
+        return pf.dados_do_formulario(
+            params, flow_json, chave_publica=chave,
+            biz_jid="%s@s.whatsapp.net" % usuario, nome_da_empresa=nome)
+
+    def responder_formulario(self, msg, acao, payload):
+        """Manda a empresa o que o formulario concluido entregou."""
+        from telezapp.nucleo import ponte_flows as pf
+        params = pf.parametros_do_botao(acao.get("params"))
+        resposta = pf.resposta_final(payload, params.get("flow_token", ""))
+        log.info("formulário: enviando a resposta (%d caracteres)",
+                 len(resposta))
+        self.responder_acao(msg, dict(acao, tipo="formulario_resposta",
+                                      resposta=resposta, rotulo="Enviado"))
+
     def _variantes_da_acao(self, msg, acao):
         """[(nome, destino, Message, add_msg_secret)]: do mais parecido com o
         que o celular envia ao mais simples. O servidor recusa (479) o que
@@ -6729,6 +6792,15 @@ class ProvedorWhatsApp(Provedor):
             resp.nativeFlowResponseMessage.paramsJSON = json.dumps(
                 {"display_text": rotulo, "id": acao.get("id", "")},
                 ensure_ascii=False)
+            resp.nativeFlowResponseMessage.version = 3
+            return Message(interactiveResponseMessage=resp)
+        if tipo == "formulario_resposta":
+            resp = InteractiveResponseMessage(contextInfo=ctx)
+            resp.body.text = rotulo or "Enviado"
+            resp.body.format = InteractiveResponseMessage.Body.EXTENSIONS_1
+            resp.nativeFlowResponseMessage.name = ACAO_DE_FORMULARIO
+            resp.nativeFlowResponseMessage.paramsJSON = acao.get(
+                "resposta", "{}")
             resp.nativeFlowResponseMessage.version = 3
             return Message(interactiveResponseMessage=resp)
         raise ValueError("ação desconhecida: %s" % tipo)

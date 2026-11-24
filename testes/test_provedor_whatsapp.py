@@ -1206,7 +1206,9 @@ def test_botao_de_formulario_do_whatsapp_vira_acao_com_o_rotulo_do_flow():
         nativeFlowMessage=nf))
     acoes = wa.acoes_do_whatsapp(msg)
     assert acoes == [{"tipo": "formulario", "indice": 0,
-                      "rotulo": "Iniciar atendimento", "id": "123"}]
+                      "rotulo": "Iniciar atendimento", "id": "123",
+                      "params": acoes[0]["params"]}]
+    assert json.loads(acoes[0]["params"])["flow_id"] == "123"
     assert wa.rotulos_dos_botoes(msg)[0] == ["Iniciar atendimento"]         if hasattr(wa, "rotulos_dos_botoes") else True
     assert wa.NOMES_ACOES_INTERATIVAS["galaxy_message"] ==         "formulário do WhatsApp"
 
