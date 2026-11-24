@@ -250,7 +250,8 @@ def test_interface_e_mensagens_reunem_as_categorias_antigas(mod):
     falado = {o.chave for o in mod.opcoes_do_grupo("Interface",
                                                    "Conteúdo falado")}
     assert falado == {"falar_novas", "falar_novas_outras_conversas",
-                      "falar_novas_fora_do_telezapp", "confirmar_envio",
+                      "falar_novas_fora_do_telezapp", "falar_voz_preparando",
+                      "falar_voz_enviada", "confirmar_envio",
                       "falar_reacoes", "falar_descricoes",
                       "falar_quantas_no_filtro",
                       "falar_aviso_estado_celular"}

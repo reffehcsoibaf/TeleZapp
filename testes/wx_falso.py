@@ -40,7 +40,7 @@ EVT_CHAR = object()
 EVT_SET_FOCUS = object()
 TE_PASSWORD = 2048
 EVT_CHOICE = EVT_TEXT = EVT_CHECKBOX = EVT_SPINCTRL = object()
-EVT_CHECKLISTBOX = object()
+EVT_CHECKLISTBOX = EVT_TIMER = object()
 DefaultPosition = (-1, -1)
 mensagens = []          # o que passou por MessageBox
 resposta_messagebox = [NO]
@@ -100,6 +100,9 @@ class Janela:
 
     def SetName(self, nome):
         self.nome_acessivel = nome
+
+    def GetId(self):
+        return getattr(self, "id", ID_ANY)
 
     def Close(self, *a):
         self.vivo = False
@@ -266,6 +269,11 @@ class Dialog(Frame):
 
     def Show(self, v=True):
         self.mostrado = v
+        self.visivel = v
+
+    def Hide(self):
+        self.mostrado = False
+        self.visivel = False
 
     def CreateStdDialogButtonSizer(self, flags):
         return None
@@ -568,6 +576,23 @@ class Button(Janela):
 
     def Disable(self):
         self.ativo = False
+
+
+class Timer:
+    """Guarda intervalo e estado; o teste chama o handler de `dlg`."""
+    def __init__(self, pai=None, *a, **k):
+        self.pai = pai
+        self.intervalo = 0
+        self.ativo = False
+
+    def Start(self, ms=0):
+        self.intervalo = ms
+        self.ativo = True
+        return True
+
+    def Stop(self):
+        self.ativo = False
+        return True
 
 
 class BoxSizer:

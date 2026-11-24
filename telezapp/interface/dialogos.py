@@ -257,7 +257,8 @@ def mostrar_texto(pai, titulo, texto, rotulo, links=(), botoes=(),
 
 
 def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
-               microfone=None, ao_terminar=None, ocultar=None):
+               microfone=None, ao_terminar=None, ocultar=None,
+               falar_preparando=True, ao_tempo=None):
     """Deixa gravar, pausar, ouvir e devolve a Gravacao que a pessoa quer
     enviar, ou None se ela descartar.
 
@@ -274,7 +275,12 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
     `ao_terminar(gravacao_ou_None)`, ela abre sem travar o programa e volta
     na hora com a janela; o resultado chega por essa funcao. Nesse modo,
     `ocultar(dlg)` liga o botao "Ocultar a janela": a gravacao segue, e a
-    pessoa usa o TeleZapp ate trazer a janela de volta."""
+    pessoa usa o TeleZapp ate trazer a janela de volta. `falar_preparando`
+    (ligado por padrao) controla o aviso falado "Preparando..." quando a
+    conversao de uma gravacao longa roda em segundo plano; desligado, a janela
+    entra nessa fase em silencio. `ao_tempo((segundos, pausada) ou None)`
+    avisa a janela principal do tempo da gravacao (None quando ela para), para
+    ela mostrar o tempo no titulo enquanto esta janela fica oculta."""
     dlg = wx.Dialog(pai, title=titulo, style=wx.DEFAULT_DIALOG_STYLE)
     explicacao = wx.StaticText(dlg, label=instrucao)
     explicacao.Wrap(420)
@@ -311,10 +317,36 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
     est = {"gravador": None, "gravacao": None, "player": None,
            "fase": "inicio", "feito": False, "fechado": False}
 
+    def tempo_de_gravacao():
+        """(segundos, pausada) agora, ou None se nada esta gravando."""
+        g = est["gravador"]
+        if g is None or est["fase"] not in ("gravando", "pausada"):
+            return None
+        return g.decorrido, est["fase"] == "pausada"
+    dlg.tempo_de_gravacao = tempo_de_gravacao
+
+    def atualizar_titulo(original=False):
+        """Mostra o tempo no titulo da janela de gravacao e avisa a janela
+        principal, que acrescenta o tempo ao titulo dela quando esta oculta."""
+        g = est["gravador"]
+        if not original and est["fase"] in ("gravando", "pausada") and \
+                g is not None:
+            segundos = int(g.decorrido)
+            pausada = est["fase"] == "pausada"
+            dlg.SetTitle("%s - %d segundos" % (
+                "Pausado" if pausada else "Gravando", segundos))
+            tempo = (segundos, pausada)
+        else:
+            dlg.SetTitle(titulo)
+            tempo = None
+        if ao_tempo is not None:
+            ao_tempo(tempo)
+
     def encerrar(ok):
         """Termina: no modo modal fecha o dialogo; sem travar, limpa, fecha e
         entrega o resultado a `ao_terminar`."""
         est["fechado"] = True
+        atualizar_titulo(True)
         if ao_terminar is None:
             dlg.EndModal(wx.ID_OK if ok else wx.ID_CANCEL)
             return
@@ -397,6 +429,7 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
                 g.microfone_ligado = c_microfone.GetValue()
         situacao.SetLabel("Gravando: 0:00")
         mostrar("gravando")
+        atualizar_titulo()
         fala.falar("Gravando." + aviso_mic, interromper=True)
         temporizador.Start(500)
         return True
@@ -410,11 +443,13 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
             texto = "Pausado em %s." % formatar_tempo(g.decorrido)
             situacao.SetLabel(texto)
             mostrar("pausada")
+            atualizar_titulo()
             fala.falar(texto, interromper=True)
         elif est["fase"] == "pausada":
             g.continuar()
             situacao.SetLabel("Gravando: %s" % formatar_tempo(g.decorrido))
             mostrar("gravando")
+            atualizar_titulo()
             fala.falar("Gravando.", interromper=True)
 
     def parar(_e=None):
@@ -422,6 +457,7 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
         if est["fase"] not in ("gravando", "pausada") or g is None:
             return
         temporizador.Stop()
+        atualizar_titulo(True)
         if g.decorrido < LONGA_PARA_CODIFICAR_NA_HORA:
             try:
                 est["gravacao"] = g.parar()
@@ -439,7 +475,8 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
         texto = "Preparando a gravação de %s..." % formatar_tempo(g.decorrido)
         situacao.SetLabel(texto)
         mostrar("preparando")
-        fala.falar(texto, interromper=True)
+        if falar_preparando:
+            fala.falar(texto, interromper=True)
 
         def depois(gravacao, erro):
             if est["fechado"]:           # descartada enquanto convertia
@@ -460,6 +497,7 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
         parar_em_segundo_plano(g, depois)
 
     def gravacao_pronta(g, com_bipe=True):
+        atualizar_titulo(True)
         if com_bipe:
             bipe("gravacao_parada")
         r = est["gravacao"]
@@ -476,6 +514,7 @@ def gravar_voz(pai, nova_gravacao, titulo, instrucao, fala,
     def quando_o_tempo_passa(_e=None):
         g = est["gravador"]
         if est["fase"] in ("gravando", "pausada") and g is not None:
+            atualizar_titulo()
             if not g.gravando:
                 parar()        # chegou ao limite de tempo
             elif est["fase"] == "gravando":

@@ -678,6 +678,9 @@ class Janela(wx.Frame):
         self.vozes = {}               # (conta, conversa) -> ao_vivo: tem chat
         #                               de voz ou live em andamento
         self._gravacao_rapida = None  # {"gravador", "origem"} gravando por atalho
+        self._tempo_gravacao_titulo = None   # (segundos, pausada) no titulo
+        self._timer_titulo_gravacao = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, self._tick_titulo_gravacao)
         self._busca_global_volta = None   # {"estado", "chave"}: Esc volta a ela
         self._bandeja = None          # icone da area de notificacao
         self._saindo = False          # True: fechar e sair de verdade
@@ -942,6 +945,8 @@ class Janela(wx.Frame):
              "Pausar ou continuar a gravação por atalho")
         item(m_mid, "gravar_descartar",
              "Descartar a gravação por atalho (sem enviar)")
+        item(m_mid, "gravar_tempo",
+             "Falar o tempo da gravação em andamento")
         item(m_mid, "gravar_mic_janela",
              "Gravar nota de voz em uma &janela...")
         item(m_mid, "gravar_som_janela",
@@ -1197,6 +1202,7 @@ class Janela(wx.Frame):
             "ia_resumir_conv": lambda e: self._ia_resumir_conversa(),
             "gravar_pausa": lambda e: self._pausar_gravacao_rapida(),
             "gravar_descartar": lambda e: self._descartar_gravacao_rapida(),
+            "gravar_tempo": lambda e: self._falar_tempo_da_gravacao(),
             "abrir_atalhos": lambda e: self._configuracoes("Atalhos"),
             "gravar_mic_janela": lambda e: self._gravar(MICROFONE),
             "gravar_som_janela": lambda e: self._gravar(SOM_INTERNO),
@@ -1999,6 +2005,10 @@ class Janela(wx.Frame):
                           else "baixando mídia")
         elif n > 1:
             extras.append("baixando %d mídias" % n)
+        if self._tempo_gravacao_titulo is not None:
+            segundos, pausada = self._tempo_gravacao_titulo
+            extras.append("%s %d segundos" % (
+                "pausado" if pausada else "gravando", segundos))
         if conv is None and not extras:
             n = self._conversas_nao_lidas()
             if n:
@@ -6673,6 +6683,12 @@ class Janela(wx.Frame):
             return
         self._ocultas = [(n, w) for n, w in self._ocultas
                          if w is not janela] + [(nome, janela)]
+        if janela is getattr(self, "_dlg_gravacao", None):
+            try:
+                tempo = janela.tempo_de_gravacao()
+            except Exception:       # janela fechada enquanto escondia
+                tempo = None
+            self._ao_tempo_da_gravacao(tempo)
         try:
             self.Raise()
         except Exception:
@@ -6716,6 +6732,8 @@ class Janela(wx.Frame):
         except Exception:
             log.exception("mostrar a janela oculta")
         self._ocultas = [(n, w) for n, w in self._ocultas if w is not janela]
+        if janela is getattr(self, "_dlg_gravacao", None):
+            self._ao_tempo_da_gravacao(None)
 
     @seguro
     def _mostrar_oculta(self):
@@ -11547,7 +11565,8 @@ class Janela(wx.Frame):
             "Fale perto do microfone, por até %d segundos. Aperte Enter em "
             "Gravar para começar. Gravando, Enter para e Pausar faz uma pausa; "
             "depois você pode ouvir, gravar de novo ou usar a gravação. Esc "
-            "descarta." % SEGUNDOS_VOZ_NO_STATUS, self.fala)
+            "descarta." % SEGUNDOS_VOZ_NO_STATUS, self.fala,
+            falar_preparando=self.cfg.get("falar_voz_preparando"))
         return gravacao.caminho if gravacao is not None else None
 
     def _pode_recompartilhar(self, x):
@@ -11839,6 +11858,8 @@ class Janela(wx.Frame):
             return
         self._gravacao_rapida = {"gravador": g, "origem": origem}
         self.SetStatusText("Gravando...")
+        self._tick_titulo_gravacao()
+        self._timer_titulo_gravacao.Start(500)
         # sem anuncio falado: o bipe de "gravando" ja avisa, e a fala poderia
         # entrar na gravacao do som do computador
         if origem == SOM_E_MICROFONE and not g.microfone_disponivel:
@@ -11859,13 +11880,71 @@ class Janela(wx.Frame):
             time.sleep(0.4)         # o bipe nao pode entrar na gravacao
             g.continuar()
             self.SetStatusText("Gravando...")
+            self._tick_titulo_gravacao()
             self.fala.falar("Gravando de novo.", interromper=True)
         else:
             g.pausar()
             bipe("gravacao_parada")
             self.SetStatusText("Gravação pausada")
+            self._tick_titulo_gravacao()
             self.fala.falar("Gravação pausada em %s." % formatar_tempo(
                 g.decorrido), interromper=True)
+
+    @seguro
+    def _tick_titulo_gravacao(self, _e=None):
+        """Tempo da gravacao rapida (sem janela) no titulo da janela principal."""
+        est = self._gravacao_rapida
+        if est is None:
+            return
+        g = est["gravador"]
+        self._tempo_gravacao_titulo = (int(g.decorrido),
+                                       bool(getattr(g, "pausado", False)))
+        self._atualizar_titulo()
+
+    @seguro
+    def _ao_tempo_da_gravacao(self, tempo):
+        """A janela de gravacao avisa o tempo; so entra no titulo principal
+        enquanto ela estiver oculta (com a janela aberta, o tempo esta nela)."""
+        dlg = getattr(self, "_dlg_gravacao", None)
+        if tempo is None or dlg is None or not hasattr(dlg, "IsShown") or \
+                dlg.IsShown():
+            tempo = None
+        if tempo is not None:
+            try:
+                segundos, pausada = tempo
+                tempo = (int(segundos), bool(pausada))
+            except (TypeError, ValueError):
+                tempo = None
+        self._tempo_gravacao_titulo = tempo
+        self._atualizar_titulo()
+
+    def _falar_tempo_da_gravacao(self):
+        """Atalho para saber ha quanto tempo a gravacao rola: vale para a
+        gravacao por atalho e para a janela de gravacao (a fala da janela
+        mesma ja mostra o tempo, mas o atalho funciona sem olhar a tela)."""
+        est = self._gravacao_rapida
+        if est is not None:
+            g = est["gravador"]
+            tempo = (g.decorrido, bool(getattr(g, "pausado", False)))
+        else:
+            dlg = getattr(self, "_dlg_gravacao", None)
+            tempo = None
+            if dlg is not None:
+                try:
+                    tempo = dlg.tempo_de_gravacao()
+                except Exception:       # janela ja fechada enquanto apertou
+                    pass
+        if tempo is None:
+            self.fala.falar("Nenhuma gravação de áudio em andamento.",
+                            interromper=True)
+            return
+        segundos, pausada = tempo
+        if pausada:
+            self.fala.falar("Gravação pausada em %s." % formatar_tempo(
+                segundos), interromper=True)
+        else:
+            self.fala.falar("Gravando há %s." % formatar_tempo(segundos),
+                            interromper=True)
 
     def _descartar_gravacao_rapida(self):
         if self._gravacao_rapida is None:
@@ -11877,6 +11956,9 @@ class Janela(wx.Frame):
     def _terminar_gravacao_rapida(self, enviar):
         """Para a gravacao do atalho: envia como nota de voz ou descarta."""
         est, self._gravacao_rapida = self._gravacao_rapida, None
+        self._timer_titulo_gravacao.Stop()
+        self._tempo_gravacao_titulo = None
+        self._atualizar_titulo()
         if est is None:
             return
         g = est["gravador"]
@@ -11899,8 +11981,9 @@ class Janela(wx.Frame):
         # gravacao longa: converter para Ogg/Opus leva alguns segundos; e
         # feito em segundo plano e a voz sai sozinha quando termina
         bipe("gravacao_parada")
-        self.fala.falar("Preparando a gravação de %s..." % formatar_tempo(
-            g.decorrido), interromper=True)
+        if self.cfg.get("falar_voz_preparando"):
+            self.fala.falar("Preparando a gravação de %s..." % formatar_tempo(
+                g.decorrido), interromper=True)
 
         def depois(gravacao, erro):
             if erro is not None:
@@ -11976,6 +12059,8 @@ class Janela(wx.Frame):
             self, lambda: self._novo_gravador(pasta, origem_gravada, 3600),
             titulo, instrucao, self.fala, microfone=microfone,
             ao_terminar=lambda g: self._gravacao_pronta(origem, chave, g),
+            falar_preparando=self.cfg.get("falar_voz_preparando"),
+            ao_tempo=self._ao_tempo_da_gravacao,
             ocultar=lambda d: self._ocultar_janela(d, "Janela da gravação"))
 
     @seguro
@@ -12052,13 +12137,14 @@ class Janela(wx.Frame):
         if legenda:
             self.caixa.Clear()
         self._preencher_mensagens()
-        texto = "Enviando %s, %s." % (m.NOMES_TIPOS[anexo.tipo],
-                                      m.tamanho_legivel(anexo.tamanho))
-        if anexo.aviso:
-            texto += " " + anexo.aviso
-        if resposta:
-            texto += " Como resposta."
-        self.fala.falar(texto, interromper=True)
+        if anexo.tipo != m.VOZ or self.cfg.get("falar_voz_enviada"):
+            texto = "Enviando %s, %s." % (m.NOMES_TIPOS[anexo.tipo],
+                                          m.tamanho_legivel(anexo.tamanho))
+            if anexo.aviso:
+                texto += " " + anexo.aviso
+            if resposta:
+                texto += " Como resposta."
+            self.fala.falar(texto, interromper=True)
         mencoes = self.mencoes if legenda else []
         if legenda:
             self.mencoes = []

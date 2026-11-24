@@ -536,6 +536,21 @@ OPCOES = (
           "programa ou com a janela do TeleZapp minimizada, de qualquer "
           "conversa. Não depende dos sons.",
           grupo="Conteúdo falado"),
+    Opcao("falar_voz_preparando",
+          "Falar 'Preparando' ao gravar por mais de 20 segundos", "Interface",
+          True,
+          "Ao parar uma gravação de mais de 20 segundos, fala 'Preparando a "
+          "gravação de 0:30...' enquanto o áudio é convertido. Desmarcada, a "
+          "conversão continua em segundo plano e a gravação sai sozinha, só "
+          "que em silêncio. Não muda os sons nem o envio.",
+          grupo="Conteúdo falado"),
+    Opcao("falar_voz_enviada",
+          "Falar 'Enviando mensagem de voz' depois de enviar", "Interface",
+          True,
+          "Depois de enviar uma mensagem de voz, fala 'Enviando mensagem de "
+          "voz, 174 KB'. Desmarcada, a mensagem sai sem esse anúncio. Não muda "
+          "o que é falado ao enviar fotos, vídeos ou outros arquivos.",
+          grupo="Conteúdo falado"),
     Opcao("confirmar_envio", "Falar mensagem enviada", "Interface", False,
           "Fala Enviada depois que uma mensagem sai.",
           grupo="Conteúdo falado"),
