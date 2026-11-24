@@ -69,6 +69,14 @@ class Corretor:
         self._fab = c_void_p()
         self._ver = c_void_p()
         self.disponivel = False
+        self._mac = None          # o NSSpellChecker, no Mac
+        if sys.platform == "darwin":
+            try:
+                self._iniciar_mac(idioma)
+            except Exception:
+                log.exception("Verificador ortografico do Mac indisponivel")
+                self.disponivel = False
+            return
         if sys.platform != "win32":
             return
         try:
@@ -97,6 +105,47 @@ class Corretor:
             return
         self.disponivel = True
 
+    # ------------------------------------------------------------------ Mac
+    def _iniciar_mac(self, idioma):
+        """O corretor do macOS (NSSpellChecker), o mesmo dos outros apps."""
+        from AppKit import NSSpellChecker
+        verificador = NSSpellChecker.sharedSpellChecker()
+        self._lingua_mac = idioma.replace("-", "_")
+        if not verificador.setLanguage_(self._lingua_mac):
+            return                       # idioma sem dicionario no Mac
+        self._mac = verificador
+        self.disponivel = True
+
+    def _verificar_mac(self, texto):
+        pos16 = []
+        for i, ch in enumerate(texto):
+            pos16.extend([i] * (2 if ord(ch) > 0xFFFF else 1))
+        pos16.append(len(texto))
+        erros = []
+        inicio = 0
+        total16 = len(pos16) - 1
+        while inicio < total16 and len(erros) < 500:
+            verificar = getattr(self._mac, "checkSpellingOfString_startingAt_language_wrap_"
+                                "inSpellDocumentWithTag_wordCount_")
+            r = verificar(texto, inicio, self._lingua_mac, False, 0, None)
+            local, tamanho = r.location, r.length
+            if tamanho == 0 or local >= total16:
+                break
+            a = pos16[min(local, total16)]
+            b = pos16[min(local + tamanho, total16)]
+            erros.append(Erro(a, b - a, texto[a:b], ACAO_SUGERIR))
+            inicio = local + tamanho
+        return erros
+
+    def _sugerir_mac(self, palavra, maximo):
+        from Foundation import NSMakeRange
+        sugestoes = getattr(self._mac, "guessesForWordRange_inString_"
+                            "language_inSpellDocumentWithTag_")
+        achadas = sugestoes(
+            NSMakeRange(0, len(palavra.encode("utf-16-le")) // 2), palavra,
+            self._lingua_mac, 0)
+        return [str(s) for s in (achadas or [])][:maximo]
+
     def __del__(self):
         try:
             _soltar(self._ver)
@@ -109,6 +158,8 @@ class Corretor:
         """Lista de Erro, na ordem do texto."""
         if not self.disponivel or not texto.strip():
             return []
+        if self._mac is not None:
+            return self._verificar_mac(texto)
         # o Windows conta em unidades UTF-16; emojis ocupam duas
         pos16 = []
         for i, ch in enumerate(texto):
@@ -151,6 +202,8 @@ class Corretor:
     def sugerir(self, palavra, maximo=8):
         if not self.disponivel:
             return []
+        if self._mac is not None:
+            return self._sugerir_mac(palavra, maximo)
         enum = c_void_p()
         if _chamar(self._ver, 5, ctypes.c_long, c_wchar_p, POINTER(c_void_p))(
                 self._ver, palavra, byref(enum)) != 0 or not enum.value:
@@ -170,12 +223,18 @@ class Corretor:
 
     # ------------------------------------------------------------- dicionario
     def adicionar(self, palavra):
-        """Grava a palavra no dicionario pessoal do Windows."""
+        """Grava a palavra no dicionario pessoal do sistema."""
+        if self._mac is not None:
+            self._mac.learnWord_(palavra)
+            return
         if self.disponivel:
             _chamar(self._ver, 6, ctypes.c_long, c_wchar_p)(self._ver, palavra)
 
     def ignorar(self, palavra):
         """Deixa de marcar a palavra enquanto o programa estiver aberto."""
+        if self._mac is not None:
+            self._mac.ignoreWord_inSpellDocumentWithTag_(palavra, 0)
+            return
         if self.disponivel:
             _chamar(self._ver, 7, ctypes.c_long, c_wchar_p)(self._ver, palavra)
 

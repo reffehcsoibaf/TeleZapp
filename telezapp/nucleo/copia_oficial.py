@@ -161,15 +161,15 @@ def _conferir(comparar, baixar):
 
 def conferir_programa(pasta=None, baixar=baixar_lista):
     """O estado da copia em uso (demora: le todos os arquivos)."""
-    if not getattr(sys, "frozen", False) and pasta is None:
-        return CODIGO_FONTE
+    if sys.platform == "darwin" or             (not getattr(sys, "frozen", False) and pasta is None):
+        return CODIGO_FONTE      # o .app do Mac nao tem lista de hashes
     pasta = pasta or instalacao.pasta_do_programa()
     return _conferir(lambda lista: diferencas(pasta, lista), baixar)
 
 
 def conferir_instalador(caminho=None, baixar=baixar_lista):
     """O mesmo, para o instalador de um arquivo que esta rodando."""
-    if not getattr(sys, "frozen", False) and caminho is None:
+    if sys.platform == "darwin" or             (not getattr(sys, "frozen", False) and caminho is None):
         return CODIGO_FONTE
     caminho = caminho or sys.executable
 

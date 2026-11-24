@@ -74,6 +74,16 @@ def main():
             except Exception as e:
                 anotar("Chaveiro: FALHOU %r" % e)
             try:
+                from telezapp.nucleo import ortografia
+                c = ortografia.Corretor("pt-BR")
+                erros = c.verificar("Eu gosto de casaa e de livro")                     if c.disponivel else []
+                anotar("corretor: disponível %s, erros achados %s, "
+                       "sugestões %s" % (c.disponivel,
+                                         [e.palavra for e in erros],
+                                         c.sugerir("casaa") if erros else []))
+            except Exception as e:
+                anotar("corretor: FALHOU %r" % e)
+            try:
                 from telezapp.midia import video
                 anotar("telas: %s" % [n for n, _ in video.listar_telas()])
             except Exception as e:

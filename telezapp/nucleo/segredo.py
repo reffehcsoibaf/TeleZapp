@@ -94,7 +94,7 @@ def cifrar(dados):
     if chave is None:
         return None
     from Cryptodome.Cipher import AES
-    cifra = AES.new(chave, AES.MODE_GCM)
+    cifra = AES.new(chave, AES.MODE_GCM, nonce=secrets.token_bytes(12))
     texto, etiqueta = cifra.encrypt_and_digest(dados)
     return CABECALHO + cifra.nonce + etiqueta + texto
 

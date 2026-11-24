@@ -504,7 +504,8 @@ def main():
         _instalacao.renovar_registro()   # versao no "Aplicativos instalados"
     except Exception:
         log.exception("registro do desinstalador")
-    if cfg.get("abrir_links_no_telezapp"):
+    # no Mac, os links tg:// e whatsapp:// ja estao declarados no Info.plist
+    if cfg.get("abrir_links_no_telezapp") and sys.platform != "darwin":
         from telezapp.nucleo import protocolos
         if not protocolos.registrar():
             log.warning("não consegui registrar o TeleZapp para abrir links")

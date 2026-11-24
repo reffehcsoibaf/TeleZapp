@@ -549,7 +549,7 @@ def duracao_legivel(seg):
 
 def hora_legivel(ts, agora=None):
     """'08:10' hoje, 'ontem 08:10', '12/10 08:10' no ano, '12/10/2025' antes."""
-    if not ts or ts < 0:
+    if not ts or ts < 0 or ts > 4102444800:      # depois de 2100: lixo
         return ""
     agora = time.time() if agora is None else agora
     try:

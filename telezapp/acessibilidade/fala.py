@@ -157,13 +157,13 @@ class Fala:
     def _leitor_ativo(self):
         """("nvda", None) ou ("jaws", objeto) ou ("voiceover", None) ou
         (None, None)."""
-        if sys.platform == "darwin":
-            return ("voiceover", None) if self._voiceover() else (None, None)
         if self._nvda_ativo():
             return "nvda", None
         obj = self._jaws()
         if obj is not None:
             return "jaws", obj
+        if sys.platform == "darwin" and self._voiceover():
+            return "voiceover", None
         return None, None
 
     def ativa(self):
