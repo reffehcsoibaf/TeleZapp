@@ -1372,6 +1372,17 @@ def ficha_de(interna):
             return Message(videoMessage=video).SerializeToString()
     except (ValueError, AttributeError):
         pass
+    try:
+        if interna.HasField("audioStickerMessage"):
+            # figurinha com audio mais nova: o audio em si nao tem formato
+            # conhecido ainda, mas o fallback (dentro do FutureProofMessage)
+            # costuma ser uma figurinha comum - guarda isso, pelo menos a
+            # imagem fica baixavel
+            aninhada = ficha_de(interna.audioStickerMessage.message)
+            if aninhada:
+                return aninhada
+    except (ValueError, AttributeError):
+        pass
     for nome in CAMPOS_MIDIA:
         try:
             if not interna.HasField(nome):
@@ -2445,9 +2456,8 @@ class ProvedorWhatsApp(Provedor):
     # ----------------------------------------------------------- conversas
     def _publicar_conversas(self):
         with self._trava:
-            for c in self._conversas.values():
-                if c.tipo == "canal":
-                    c.somente_leitura = True     # canais: so quem administra
+            # canais: _conversa() ja marca somente leitura ao criar (seguro
+            # por padrao) e _buscar_nome_canal corrige se a conta administra
             lista = sorted(self._conversas.values(), key=lambda c: -c.data)
         self.barramento.publicar(ev.ConversasAtualizadas(self.conta.id,
                                                          lista))
@@ -4978,7 +4988,10 @@ class ProvedorWhatsApp(Provedor):
                                   self.servico,
                                   "grupo" if grupo else (
                                       "canal" if canal else "privada"),
-                                  data=data)
+                                  data=data,
+                                  # seguro por padrao: _buscar_nome_canal
+                                  # libera se a conta administra ou e dona
+                                  somente_leitura=canal)
                 self._conversas[conversa_id] = conv
                 criada = True
             elif not grupo and not canal and (
@@ -5076,17 +5089,25 @@ class ProvedorWhatsApp(Provedor):
     def _buscar_nome_canal(self, conversa_id, chat):
         try:
             info = self.cliente.get_newsletter_info(chat)
-            nome = info.ThreadMeta.Name.Text
         except Exception:
-            log.info("não consegui o nome de um canal")
+            log.info("não consegui os dados de um canal")
             return
-        if not nome:
-            return
+        nome = info.ThreadMeta.Name.Text
+        # 3=administrador, 4=dono: so esses escrevem no canal
+        sou_admin = int(info.ViewerMeta.Role) in (3, 4)
         with self._trava:
             conv = self._conversas.get(conversa_id)
             if conv is None:
                 return
-            conv.nome = nome
+            mudou = False
+            if nome and conv.nome != nome:
+                conv.nome = nome
+                mudou = True
+            if conv.somente_leitura == sou_admin:
+                conv.somente_leitura = not sou_admin
+                mudou = True
+        if not mudou:
+            return
         self.banco.salvar_conversas([conv])
         self._publicar_conversas()
 
@@ -6297,6 +6318,52 @@ class ProvedorWhatsApp(Provedor):
         else:
             self.cliente.download_any(mensagem, parcial)
 
+    def baixar_audio_da_figurinha(self, msg, cancelado):
+        """Baixa o audio embutido numa figurinha com som (separado da
+        imagem, que `baixar_arquivo` ja baixa): o `stickerMessage` traz um
+        `audioMessage` com chave e URL proprias. Levanta ErroMidia se a
+        figurinha nao tiver audio ou os dados nao estiverem mais guardados."""
+        dados = self.banco.ficha(msg.conta_id, msg.conversa_id, msg.id)
+        if dados is None:
+            raise ErroMidia(
+                "Esta mídia chegou antes do TeleZapp guardar os dados para "
+                "baixá-la. Só as mídias recebidas daqui para a frente, ou do "
+                "histórico de um novo pareamento, podem ser baixadas.")
+        from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import Message
+        mensagem = Message.FromString(dados)
+        if not mensagem.HasField("stickerMessage") or not \
+                mensagem.stickerMessage.HasField("audioMessage"):
+            raise ErroMidia("Esta figurinha não tem áudio.")
+        audio = mensagem.stickerMessage.audioMessage
+        caminho = armazem.com_extensao(
+            armazem.caminho_base_audio(msg),
+            armazem.extensao(audio.mimetype, m.AUDIO))
+        if os.path.isfile(caminho):
+            return caminho
+        if not self._conectada or self.cliente is None:
+            raise ErroMidia("Sem conexão com o WhatsApp.")
+        if cancelado():
+            raise DownloadCancelado()
+        parcial = caminho + ".parte"
+        try:
+            self.cliente.download_any(Message(audioMessage=audio), parcial)
+            if cancelado():
+                raise DownloadCancelado()
+            os.replace(parcial, caminho)
+        except DownloadCancelado:
+            raise
+        except Exception as e:
+            if cancelado():
+                raise DownloadCancelado()
+            log.warning("download do áudio da figurinha falhou: %s",
+                       type(e).__name__)
+            raise ErroMidia("O WhatsApp não entregou o áudio da figurinha. "
+                            "Ele pode ter expirado no servidor.")
+        finally:
+            if os.path.exists(parcial):
+                os.remove(parcial)
+        return caminho
+
     def _funcoes_de_pedir_midia(self):
         """As funcoes da DLL que pedem a midia ao celular, com os tipos que o
         ctypes precisa; None numa DLL sem elas."""
@@ -6738,7 +6805,12 @@ class ProvedorWhatsApp(Provedor):
         flow_id = str(params.get("flow_id") or acao.get("id") or "")
         if not flow_id.isdigit():
             raise RuntimeError("O botão não traz o número do formulário.")
-        if pf.formulario_consulta_a_empresa(params):
+        usuario, servidor = jid_de_texto(msg.conversa_id)
+        # TESTE LOCAL, NAO COMMITAR: so tenta a chave real se a pessoa pos um
+        # token na variavel de ambiente TELEZAPP_FLOW_TOKEN_TESTE.
+        chave = self._chave_do_formulario_teste(
+            "%s@c.us" % usuario, flow_id)
+        if not chave and pf.formulario_consulta_a_empresa(params):
             # a pagina criptografa os pedidos a empresa com a chave publica
             # dela, que a Meta so entrega a quem apresenta o token do
             # aplicativo do WhatsApp Web; obter esse token exigiria acessar
@@ -6761,7 +6833,6 @@ class ProvedorWhatsApp(Provedor):
             log.info("formulário: não baixei o JSON (%s)", type(e).__name__)
             raise RuntimeError("Não consegui baixar o formulário do "
                                "WhatsApp.")
-        usuario, servidor = jid_de_texto(msg.conversa_id)
         nome = ""
         conversa = self._conversas.get(msg.conversa_id)
         if conversa is not None:
@@ -6774,7 +6845,50 @@ class ProvedorWhatsApp(Provedor):
         elif servidor == "lid":
             biz_jid = "%s@lid" % usuario
         return pf.dados_do_formulario(
-            params, flow_json, biz_jid=biz_jid, nome_da_empresa=nome)
+            params, flow_json, chave_publica=chave, biz_jid=biz_jid,
+            nome_da_empresa=nome)
+
+    def _chave_do_formulario_teste(self, biz_jid, flow_id):
+        """TESTE LOCAL, NAO COMMITAR, NAO LANCAR: tenta a consulta real da
+        chave publica da empresa com um token lido so da variavel de
+        ambiente TELEZAPP_FLOW_TOKEN_TESTE (nunca de config nem de arquivo).
+        O valor do token nunca e logado nem guardado. '' se a variavel nao
+        estiver definida ou a consulta falhar."""
+        import os
+        token = (os.environ.get("TELEZAPP_FLOW_TOKEN_TESTE") or "").strip()
+        if not token:
+            return ""
+        import urllib.error
+        import urllib.request
+        from telezapp import VERSAO
+        corpo = json.dumps({
+            "access_token": token, "doc_id": "40083220921276114",
+            "variables": {"request": {"extensions": {
+                "biz_jid": biz_jid, "flow_id": str(flow_id)}}},
+            "lang": "pt_BR"}).encode("utf-8")
+        pedido = urllib.request.Request(
+            "https://graph.whatsapp.com/graphql/catalog", data=corpo,
+            method="POST", headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "TeleZapp/" + VERSAO})
+        try:
+            with urllib.request.urlopen(pedido, timeout=20) as r:
+                dados = json.loads(r.read().decode("utf-8")).get("data")
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            log.info("teste de chave: a consulta falhou (%s)",
+                     type(e).__name__)
+            return ""
+        try:
+            lista = dados["xwa_extensions_get_flow_data"][
+                "extensions_flow_data"]
+            chave = (lista[0]["extensions"]["metadata"].get(
+                "endpoint_public_key") or {}).get("key") or ""
+        except (KeyError, IndexError, TypeError, AttributeError):
+            chave = ""
+        log.info("teste de chave: a consulta voltou com chave: %s",
+                 "sim" if chave else "não")
+        return chave
 
     def responder_formulario(self, msg, acao, payload):
         """Manda a empresa o que o formulario concluido entregou."""

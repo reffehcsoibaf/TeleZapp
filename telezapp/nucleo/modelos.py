@@ -691,8 +691,8 @@ def anuncio_reproducao(msg, velocidade="", proximo=False,
     `detalhado` falso: nada (texto vazio); o proprio audio e o aviso."""
     if not detalhado:
         return "Próximo áudio." if proximo else ""
-    coisa = {VOZ: "mensagem de voz", AUDIO: "áudio",
-             VIDEO: "vídeo"}.get(msg.tipo, "áudio")
+    coisa = {VOZ: "mensagem de voz", AUDIO: "áudio", VIDEO: "vídeo",
+             FIGURINHA: "áudio da figurinha"}.get(msg.tipo, "áudio")
     if msg.minha:
         o_que = "sua " + coisa if msg.tipo == VOZ else "seu " + coisa
     else:

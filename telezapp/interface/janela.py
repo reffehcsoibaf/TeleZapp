@@ -71,7 +71,7 @@ from telezapp.midia.reprodutor import (FormatoNaoSuportado, Reprodutor,
                                        formatar_tempo)
 from telezapp.nucleo import chamadas as ch
 from telezapp.nucleo import chat_de_voz as cv
-from telezapp.provedores.base import ErroPerfil, ErroPrivacidade
+from telezapp.provedores.base import ErroMidia, ErroPerfil, ErroPrivacidade
 from telezapp.nucleo import atualizacao
 from telezapp.nucleo import atualizador
 from telezapp.nucleo import inicializacao
@@ -8426,7 +8426,50 @@ class Janela(wx.Frame):
         else:
             opcoes.append(("Baixar a mídia sem abrir",
                            lambda: self._abrir_midia(False, x)))
+        if x.tipo == m.FIGURINHA and x.segundos:
+            opcoes.append(("Tocar o áudio da figurinha",
+                           lambda: self._tocar_audio_da_figurinha(x)))
         return opcoes
+
+    def _tocar_audio_da_figurinha(self, x=None):
+        """Figurinha com som (novidade da Meta): baixa so o audio embutido,
+        separado da imagem, e toca como qualquer audio curto."""
+        if x is None:
+            x = self._mensagem_selecionada()
+        if x is None or x.tipo != m.FIGURINHA or not x.segundos or \
+                x.id.startswith("local-"):
+            return
+        if m.extras_de(x)["apagada"]:
+            bipe("erro")
+            self.fala.falar("Esta mensagem foi apagada pelo autor.",
+                            interromper=True)
+            return
+        if self.banco.foi_limpa(x.conta_id, x.conversa_id, x.id):
+            bipe("erro")
+            self.fala.falar(TEXTO_LIMPA, interromper=True)
+            return
+        provedor = self.contas.provedor(x.conta_id) if self.contas else None
+        if provedor is None or not hasattr(provedor,
+                                           "baixar_audio_da_figurinha"):
+            bipe("erro")
+            self.fala.falar("Não consegui tocar o áudio da figurinha.",
+                            interromper=True)
+            return
+        self.fala.falar("Baixando o áudio da figurinha...", interromper=True)
+
+        def trabalho():
+            try:
+                caminho = provedor.baixar_audio_da_figurinha(x, lambda: False)
+            except Exception as e:
+                texto = str(e) if isinstance(e, ErroMidia) else \
+                    "Não consegui baixar o áudio da figurinha."
+                log.info("áudio da figurinha: %s", type(e).__name__)
+                wx.CallAfter(lambda: (bipe("erro"), self.fala.falar(
+                    texto, interromper=True)))
+                return
+            wx.CallAfter(self._tocar_sem_janela, x, caminho)
+        threading.Thread(target=trabalho, daemon=True,
+                         name="figurinha-audio").start()
 
     def _opcoes_ia(self, x):
         genero = self._genero_ia(x)

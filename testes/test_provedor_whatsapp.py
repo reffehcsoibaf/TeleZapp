@@ -79,6 +79,25 @@ def test_midias():
     vid = E.Message(videoMessage=E.VideoMessage(seconds=12, caption="olha"))
     x = wa.converter(evento("B5", vid), "w1", "c")[0]
     assert (x.tipo, x.segundos, x.texto) == (m.VIDEO, 12, "olha")
+    fig = E.Message(stickerMessage=E.StickerMessage(mimetype="image/webp"))
+    x = wa.converter(evento("B6", fig), "w1", "c")[0]
+    assert (x.tipo, x.segundos) == (m.FIGURINHA, 0)
+
+
+def test_campos_brutos_acha_campo_que_o_proto_nao_conhece():
+    # simula um campo novo da Meta (numero 2, ainda sem nome no nosso .proto)
+    # dentro de um FutureProofMessage, para confirmar que a leitura bruta
+    # (wire format) acha mesmo o que ListFields()/HasField nao veem
+    inner = E.Message(conversation="oi").SerializeToString()
+
+    def tag(numero, wire):
+        return bytes([(numero << 3) | wire])
+    bruto = tag(1, 2) + bytes([len(inner)]) + inner
+    bruto += tag(2, 0) + bytes([42])           # campo desconhecido (varint)
+    f = E.FutureProofMessage.FromString(bruto)
+    assert wa.campos(f) == ["message"]         # so o que o proto conhece
+    achados = wa.campos_brutos(f)
+    assert (2, 0, 42) in achados               # mas o bruto acha o resto
 
 
 def test_envelopes_sao_abertos():
@@ -775,6 +794,48 @@ def test_ficha_guarda_so_o_necessario_e_baixa(amb, dados_midia):
     assert progressos == [0, 100]
     chave = amb.c.baixadas[0].imageMessage
     assert chave.directPath == "/v/t62/abc"
+
+
+def msg_figurinha_com_audio(id_, caption=""):
+    return E.Message(stickerMessage=E.StickerMessage(
+        mimetype="image/webp", fileLength=50, mediaKey=b"k" * 32,
+        directPath="/v/t62/fig",
+        audioMessage=E.AudioMessage(
+            seconds=3, mimetype="audio/ogg; codecs=opus", fileLength=12,
+            mediaKey=b"a" * 32, directPath="/v/t62/aud")))
+
+
+def test_figurinha_com_audio_baixa_o_audio_separado_da_imagem(amb,
+                                                               dados_midia):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento("G1", msg_figurinha_com_audio("G1")))
+    nova = esperar(amb.fila, ev.MensagemNova).mensagem
+    assert nova.tipo == m.FIGURINHA and nova.segundos == 3
+
+    caminho = amb.p.baixar_audio_da_figurinha(nova, lambda: False)
+    assert caminho.endswith(".ogg") and caminho != base_de(nova)
+    assert open(caminho, "rb").read() == b"conteudo"
+    assert not os.path.exists(caminho + ".parte")
+    pedido = amb.c.baixadas[0]
+    assert pedido.audioMessage.directPath == "/v/t62/aud"
+
+    # ja baixado: nao pede de novo ao WhatsApp
+    amb.c.baixadas = []
+    caminho2 = amb.p.baixar_audio_da_figurinha(nova, lambda: False)
+    assert caminho2 == caminho and amb.c.baixadas == []
+
+
+def test_figurinha_sem_audio_nao_tem_o_que_baixar(amb, dados_midia):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.f["Message"](amb.c, evento(
+        "G2", E.Message(stickerMessage=E.StickerMessage(
+            mimetype="image/webp", fileLength=50))))
+    nova = esperar(amb.fila, ev.MensagemNova).mensagem
+    assert nova.tipo == m.FIGURINHA and not nova.segundos
+    with pytest.raises(wa.ErroMidia, match="não tem áudio"):
+        amb.p.baixar_audio_da_figurinha(nova, lambda: False)
 
 
 def test_download_cancelado_com_falha_ou_sem_ficha(amb, dados_midia):
@@ -2360,11 +2421,33 @@ def test_grupo_so_de_admins_vira_somente_leitura_para_quem_nao_e_admin(
     p.cliente.get_group_info = sai                   # nao participo mais
     p._conferir_escrita(c.id, True)
     assert c.somente_leitura
-    canal = m.Conversa("w1", "999@newsletter", "Canal", "whatsapp", "canal")
-    p._conversas[canal.id] = canal
-    p._publicar_conversas()
-    assert canal.somente_leitura
     banco.fechar()
+
+
+def test_canal_novo_comeca_somente_leitura_e_libera_se_eu_administro(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.c.get_newsletter_info = lambda j: N.NewsletterMetadata(
+        ThreadMeta=N.NewsletterThreadMetadata(
+            Name=N.NewsletterText(Text="Meu Canal")),
+        ViewerMeta=N.NewsletterViewerMetadata(Role=4))      # dono
+    conv = _receber(amb, "C2", "120363000000000002", "newsletter")
+    assert conv.tipo == "canal"
+    for _ in range(50):
+        if not conv.somente_leitura:
+            break
+        threading.Event().wait(0.02)
+    assert not amb.p._conversas["120363000000000002@newsletter"]\
+        .somente_leitura
+
+
+def test_canal_que_eu_so_sigo_fica_somente_leitura(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    conv = _receber(amb, "C3", "120363000000000003", "newsletter")
+    assert conv.somente_leitura
+    threading.Event().wait(0.05)
+    assert amb.p._conversas["120363000000000003@newsletter"].somente_leitura
 
 
 def test_editar_mensagem_manda_a_edicao_e_atualiza_o_texto(tmp_path):

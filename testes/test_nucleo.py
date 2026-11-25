@@ -61,7 +61,8 @@ def test_conteudo_de_midias():
     assert m.conteudo(msg(tipo=m.OUTRO)) == "mensagem sem suporte ainda"
     assert m.conteudo(msg(tipo=m.FIGURINHA)) == "figurinha"
     # figurinha com audio embutido (25/11): entra a duracao
-    assert m.conteudo(msg(tipo=m.FIGURINHA, segundos=3)) ==         "figurinha, 3 segundos"
+    assert m.conteudo(msg(tipo=m.FIGURINHA, segundos=3)) == \
+        "figurinha, 3 segundos"
 
 
 def test_resposta():
