@@ -4388,13 +4388,15 @@ class ProvedorTelegram(Provedor):
         self.barramento.publicar(ev.MensagemNova(nova, conv))
 
     async def _ao_mensagens_apagadas(self, evento):
-        """Mensagens apagadas em outro aparelho (ou por quem as enviou)."""
+        """Mensagens apagadas em outro aparelho (ou por quem as enviou).
+        Minha, conta a opcao `manter_apagadas_no_celular`; de outra pessoa,
+        conta `manter_apagadas` (mesma regra do WhatsApp)."""
         chat = getattr(evento, "chat_id", None)
         conversa = str(chat) if chat else None
         for x in self.banco.mensagens_por_id(
                 self.conta.id, evento.deleted_ids, conversa):
-            if m.MANTER["apagadas"] and not x.minha:
-                # opcao "manter as apagadas": fica guardada, so marcada
+            if m.MANTER["do_celular" if x.minha else "apagadas"]:
+                # opcao de manter: fica guardada, so marcada
                 m.atualizar_extras(x, apagada_pelo_autor=True)
                 self.banco.salvar_mensagens([x])
                 self.barramento.publicar(ev.MensagemAtualizada(
@@ -4408,26 +4410,45 @@ class ProvedorTelegram(Provedor):
     # so "o celular"), na hora, sem precisar do celular aberto.
     APAGA_NA_CONTA = True
 
-    def apagar_conversa(self, conversa_id, ultima=None):
-        self._agendar(self._apagar_historico(conversa_id, just_clear=False))
+    # O Telegram deixa, pelo mesmo pedido, apagar tambem para quem mais esta
+    # na conversa: sempre em privado; em grupo/canal, so com direitos de
+    # administrador (o servico recusa sem eles).
+    APAGA_PARA_TODOS = True
+
+    def apagar_conversa(self, conversa_id, ultima=None, para_todos=False):
+        self._agendar(self._apagar_historico(
+            conversa_id, just_clear=False, para_todos=para_todos))
         return True
 
-    def limpar_conversa(self, conversa_id, ultima=None):
-        self._agendar(self._apagar_historico(conversa_id, just_clear=True))
+    def limpar_conversa(self, conversa_id, ultima=None, para_todos=False):
+        self._agendar(self._apagar_historico(
+            conversa_id, just_clear=True, para_todos=para_todos))
         return True
 
-    async def _apagar_historico(self, conversa_id, just_clear):
+    async def _apagar_historico(self, conversa_id, just_clear,
+                                para_todos=False):
         """`just_clear` True limpa as mensagens e mantem o dialogo; False tira
         o dialogo da lista (sem sair do grupo/canal: so para quando a acao e
-        apagar a conversa, nao sair). `revoke` sempre False: nunca apaga para
-        quem mais esta na conversa sem a pessoa pedir isso explicitamente."""
+        apagar a conversa, nao sair). `revoke` (para_todos) tira o historico
+        tambem de quem mais esta na conversa; a pessoa so pede isso de forma
+        explicita. Se o Telegram recusar com para_todos (falta de direitos no
+        grupo/canal), tenta de novo so na conta, para a parte daqui nao ficar
+        pela metade."""
         from telethon.tl.functions.messages import DeleteHistoryRequest
         ent = await self._entidade(conversa_id)
         try:
             await self.cliente(DeleteHistoryRequest(
-                ent, max_id=0, just_clear=just_clear, revoke=False))
+                ent, max_id=0, just_clear=just_clear, revoke=para_todos))
         except Exception:
-            log.exception("apagar/limpar na conta do Telegram")
+            log.exception("apagar/limpar na conta do Telegram "
+                          "(para_todos=%s)", para_todos)
+            if para_todos:
+                try:
+                    await self.cliente(DeleteHistoryRequest(
+                        ent, max_id=0, just_clear=just_clear, revoke=False))
+                except Exception:
+                    log.exception("apagar/limpar na conta do Telegram "
+                                  "(repescagem só na conta)")
 
     def apagar_mensagem(self, mensagem, para_todos=False):
         """Apaga a mensagem no Telegram (para todos, ou so para mim onde o

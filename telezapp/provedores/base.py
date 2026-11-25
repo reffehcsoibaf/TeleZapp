@@ -335,15 +335,21 @@ class Provedor(ABC):
     # (no celular), alem de apaga-la aqui
     APAGA_NA_CONTA = False
 
-    def apagar_conversa(self, conversa_id, ultima=None):
+    # True nos servicos em que apagar/limpar na conta pode, a pedido, tirar
+    # tambem de quem mais esta na conversa (nao so da propria conta)
+    APAGA_PARA_TODOS = False
+
+    def apagar_conversa(self, conversa_id, ultima=None, para_todos=False):
         """Apaga a conversa na conta do servico (no celular). `ultima`: a
-        mensagem mais nova que o TeleZapp tem, ou None. Devolve True se o
-        servico foi avisado."""
+        mensagem mais nova que o TeleZapp tem, ou None. `para_todos`: so nos
+        servicos com APAGA_PARA_TODOS. Devolve True se o servico foi
+        avisado."""
         return False
 
-    def limpar_conversa(self, conversa_id, ultima=None):
+    def limpar_conversa(self, conversa_id, ultima=None, para_todos=False):
         """Apaga as mensagens da conversa na conta, sem tirar a conversa da
-        lista. Devolve True se o servico foi avisado."""
+        lista. `para_todos`: so nos servicos com APAGA_PARA_TODOS. Devolve
+        True se o servico foi avisado."""
         return False
 
     def apagar_varias_mensagens(self, itens):

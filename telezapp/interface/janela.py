@@ -3342,6 +3342,7 @@ class Janela(wx.Frame):
                  "nova." % quantas)
         if self._sem_pergunta("confirmar_apagar_conversas"):
             no_celular = False
+            para_todos = False
         elif no_celular:
             dlg = wx.MessageDialog(
                 self, texto + " Quer apagar também %s?" % onde,
@@ -3358,6 +3359,8 @@ class Janela(wx.Frame):
             no_celular = r == wx.ID_YES
             if no_celular and not self._lembrar_celular(convs=convs):
                 return False
+            para_todos = (self._perguntar_para_todos(convs)
+                         if no_celular else False)
         else:
             r = wx.MessageBox(texto + " A conta não é afetada.",
                               "Apagar conversas",
@@ -3365,6 +3368,7 @@ class Janela(wx.Frame):
                               self)
             if r != wx.YES:
                 return False
+            para_todos = False
         for c in convs:
             prov = provs[c.chave]
             celular = no_celular and prov and getattr(
@@ -3376,7 +3380,8 @@ class Janela(wx.Frame):
             self._remover_conversa_local(c)
             if celular:
                 threading.Thread(
-                    target=self._apagar_no_celular, args=(prov, c, ultima),
+                    target=self._apagar_no_celular,
+                    args=(prov, c, ultima, para_todos),
                     daemon=True, name="apagar-no-celular").start()
         self.fala.falar("%s apagadas. Elas só voltam com uma mensagem nova."
                         % quantas.capitalize(), interromper=True)
@@ -3729,6 +3734,7 @@ class Janela(wx.Frame):
                 self._limpar_conversa(conv)
                 return
             celular = False
+            para_todos = False
             if acao == "sair_apagar":
                 onde = self._onde_tambem([conv])
                 celular = self._perguntar_celular(
@@ -3738,8 +3744,11 @@ class Janela(wx.Frame):
                     "Sair e apagar só aqui")
                 if celular is None:
                     return
+                if celular:
+                    para_todos = self._perguntar_para_todos([conv])
             if acao in ("sair", "sair_apagar"):
-                self._sair_do_grupo(conv, prov, acao == "sair_apagar", celular)
+                self._sair_do_grupo(conv, prov, acao == "sair_apagar",
+                                    celular, para_todos)
                 return
         no_celular = bool(prov and getattr(prov, "APAGA_NA_CONTA", False) and
                           conv.tipo != "status" and
@@ -3750,6 +3759,7 @@ class Janela(wx.Frame):
                  "uma mensagem nova." % conv.nome)
         if self._sem_pergunta("confirmar_apagar_conversas"):
             no_celular = False
+            para_todos = False
         elif no_celular:
             dlg = wx.MessageDialog(
                 self, texto + " Quer apagar também %s?" % onde,
@@ -3773,12 +3783,15 @@ class Janela(wx.Frame):
                     wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING, self)
                 if r != wx.YES:
                     return
+            para_todos = (self._perguntar_para_todos([conv])
+                         if no_celular else False)
         else:
             r = wx.MessageBox(
                 texto + " A conta não é afetada.", "Apagar conversa",
                 wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
             if r != wx.YES:
                 return
+            para_todos = False
         ultima = None
         if no_celular:
             guardadas = self.banco.mensagens(conv.conta_id, conv.id, 1)
@@ -3788,7 +3801,8 @@ class Janela(wx.Frame):
             self.fala.falar("Conversa apagada aqui. Apagando no celular...",
                             interromper=True)
             threading.Thread(
-                target=self._apagar_no_celular, args=(prov, conv, ultima),
+                target=self._apagar_no_celular,
+                args=(prov, conv, ultima, para_todos),
                 daemon=True, name="apagar-no-celular").start()
         else:
             self.fala.falar("Conversa apagada. Ela só volta com uma "
@@ -3820,6 +3834,36 @@ class Janela(wx.Frame):
         if servicos == {"whatsapp"}:
             return "no celular"
         return "na conta"
+
+    def _perguntar_para_todos(self, convs, dono=None):
+        """Depois de escolher apagar/limpar tambem na conta: perguntar se
+        tambem para quem mais esta na conversa (so quando algum dos servicos
+        envolvidos deixa, via APAGA_PARA_TODOS). Nao tem volta, por isso
+        pergunta sempre, mesmo com as confirmacoes desligadas."""
+        if not any(getattr(self.contas.provedor(c.conta_id),
+                           "APAGA_PARA_TODOS", False) for c in convs):
+            return False
+        aviso = ("Quer que também saia do lado de quem mais está na "
+                 "conversa? Não tem volta." if len(convs) == 1 else
+                 "Quer que também saiam do lado de quem mais está nas "
+                 "conversas? Não tem volta.")
+        if any(c.tipo == "grupo" for c in convs):
+            aviso += (" Só funciona nos grupos e canais em que você for "
+                      "administrador; nos outros, sai só da sua conta.")
+        log.info("apagar/limpar: pergunta de 'para todos' aberta")
+        r = wx.MessageBox(aviso, "Apagar também para todos",
+                          wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING,
+                          dono or self)
+        log.info("apagar/limpar: 'para todos' respondido (%s)",
+                 "sim" if r == wx.YES else "não")
+        return r == wx.YES
+
+    def _kw_para_todos(self, prov, para_todos):
+        """kwargs para apagar_conversa/limpar_conversa: so manda para_todos
+        aos servicos que aceitam o parametro (APAGA_PARA_TODOS)."""
+        if getattr(prov, "APAGA_PARA_TODOS", False):
+            return {"para_todos": para_todos}
+        return {}
 
     def _lembrar_celular(self, dono=None, convs=None):
         """Quem escolheu apagar tambem na conta: no WhatsApp, so funciona de
@@ -3890,6 +3934,7 @@ class Janela(wx.Frame):
                 "Limpar só aqui")
         if celular is None:
             return
+        para_todos = self._perguntar_para_todos([conv]) if celular else False
         ultima = self._ultima_guardada(conv) if celular else None
         feitos, liberados, falhas = limpeza.apagar(self.banco, sel)
         self._ao_limpar(sel)
@@ -3897,7 +3942,8 @@ class Janela(wx.Frame):
         if celular:
             threading.Thread(
                 target=self._limpar_no_celular,
-                args=(self.contas.provedor(conv.conta_id), conv, ultima),
+                args=(self.contas.provedor(conv.conta_id), conv, ultima,
+                     para_todos),
                 daemon=True, name="limpar-no-celular").start()
         texto = "Conversa limpa: %d mensagens apagadas" % feitos
         if liberados:
@@ -3947,9 +3993,12 @@ class Janela(wx.Frame):
         onde = self._onde_tambem(convs_sel)
         texto = ("Limpar %s? As mensagens e as mídias saem deste "
                  "computador e as conversas continuam na lista." % quantas)
+        para_todos = False
         if self._sem_pergunta("confirmar_limpar_conversa"):
             if no_celular and not self._lembrar_celular(convs=convs_sel):
                 return
+            if no_celular:
+                para_todos = self._perguntar_para_todos(convs_sel)
         elif no_celular:
             dlg = wx.MessageDialog(
                 self, texto + " Quer limpar também %s?" % onde,
@@ -3966,6 +4015,8 @@ class Janela(wx.Frame):
             no_celular = r == wx.ID_YES
             if no_celular and not self._lembrar_celular(convs=convs_sel):
                 return
+            if no_celular:
+                para_todos = self._perguntar_para_todos(convs_sel)
         elif wx.MessageBox(texto, "Limpar conversas",
                            wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
                            self) != wx.YES:
@@ -3981,21 +4032,26 @@ class Janela(wx.Frame):
             if celular:
                 threading.Thread(
                     target=self._limpar_no_celular,
-                    args=(self.contas.provedor(c.conta_id), c, ultima),
+                    args=(self.contas.provedor(c.conta_id), c, ultima,
+                         para_todos),
                     daemon=True, name="limpar-no-celular").start()
         self.fala.falar("%s limpadas: %d mensagens apagadas%s." % (
             self._plural(len(selecoes), "conversa", "conversas"), total,
             ", também %s" % onde if no_celular else ""), interromper=True)
 
-    def _limpar_no_celular(self, prov, conv, ultima):
-        ok = prov.limpar_conversa(conv.id, ultima)
+    def _limpar_no_celular(self, prov, conv, ultima, para_todos=False):
+        ok = prov.limpar_conversa(conv.id, ultima,
+                                  **self._kw_para_todos(prov, para_todos))
         onde = self._onde_tambem([conv])
+        if para_todos:
+            onde += " para quem mais está na conversa"
         wx.CallAfter(lambda: self.fala.falar(
             "Conversa limpa também %s." % onde if ok else
             "Não consegui limpar a conversa %s. Ela foi limpa só "
             "aqui." % onde))
 
-    def _sair_do_grupo(self, conv, prov, apagar, celular=False):
+    def _sair_do_grupo(self, conv, prov, apagar, celular=False,
+                       para_todos=False):
         """Tira a conta do grupo, num thread, e so depois (se deu certo e
         `apagar`) tira a conversa da lista."""
         if prov is None or not getattr(prov, "SAI_DE_GRUPO", False) or \
@@ -4012,11 +4068,13 @@ class Janela(wx.Frame):
             except Exception:
                 log.exception("erro ao sair do grupo")
                 ok = False
-            wx.CallAfter(self._saiu_do_grupo, conv, apagar, ok, prov, celular)
+            wx.CallAfter(self._saiu_do_grupo, conv, apagar, ok, prov,
+                         celular, para_todos)
         threading.Thread(target=trabalho, daemon=True,
                          name="sair-do-grupo").start()
 
-    def _saiu_do_grupo(self, conv, apagar, ok, prov=None, celular=False):
+    def _saiu_do_grupo(self, conv, apagar, ok, prov=None, celular=False,
+                       para_todos=False):
         if not ok:
             bipe("erro")
             self.fala.falar("Não consegui sair do grupo %s. Nada foi "
@@ -4030,12 +4088,16 @@ class Janela(wx.Frame):
             interromper=True)
         if apagar and celular:
             threading.Thread(
-                target=self._apagar_no_celular, args=(prov, conv, ultima),
+                target=self._apagar_no_celular,
+                args=(prov, conv, ultima, para_todos),
                 daemon=True, name="apagar-no-celular").start()
 
-    def _apagar_no_celular(self, prov, conv, ultima):
-        ok = prov.apagar_conversa(conv.id, ultima)
+    def _apagar_no_celular(self, prov, conv, ultima, para_todos=False):
+        ok = prov.apagar_conversa(conv.id, ultima,
+                                  **self._kw_para_todos(prov, para_todos))
         onde = self._onde_tambem([conv])
+        if para_todos:
+            onde += " para quem mais está na conversa"
         wx.CallAfter(lambda: self.fala.falar(
             "Conversa apagada também %s." % onde if ok else
             "Não consegui apagar a conversa %s. Ela foi apagada só "

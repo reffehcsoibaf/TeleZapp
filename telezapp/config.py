@@ -627,15 +627,16 @@ OPCOES = (
           "chegar depois de marcar; o que já foi apagado não volta. As "
           "mensagens que você mesmo apaga continuam sendo apagadas."),
     Opcao("manter_apagadas_no_celular",
-          "Manter no computador o que eu apagar no WhatsApp do celular",
+          "Manter no computador o que eu apagar no serviço",
           "Privacidade", False,
-          "Marcada, as mensagens e conversas que você apagar no WhatsApp do "
-          "celular, ou em outro aparelho, continuam neste computador, com as "
-          "mídias já baixadas. Uma mensagem sua apagada para todos fica "
-          "marcada como apagada pelo autor. Desmarcada, o que você apaga lá "
-          "também é apagado aqui. O que você apaga pelo próprio TeleZapp "
-          "continua sendo apagado neste computador. Só vale para o que for "
-          "apagado depois de marcar; o que já saiu não volta."),
+          "Marcada, as mensagens e conversas que você apagar direto no "
+          "serviço (no celular, na conta ou em outro aparelho) continuam "
+          "neste computador, com as mídias já baixadas. Uma mensagem sua "
+          "apagada para todos fica marcada como apagada pelo autor. "
+          "Desmarcada, o que você apaga lá também é apagado aqui. O que "
+          "você apaga pelo próprio TeleZapp continua sendo apagado neste "
+          "computador. Só vale para o que for apagado depois de marcar; o "
+          "que já saiu não volta."),
     Opcao("verificar_atualizacoes",
           "Avisar quando houver versão nova do TeleZapp", "Atualizações",
           True,
