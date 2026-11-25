@@ -2143,6 +2143,43 @@ def test_envelopes_novos_do_whatsapp_sao_abertos():
         assert wa.conteudo_de(wa.desembrulhar(msg))[1] == "oi @todos", envelope
 
 
+def test_campos_brutos_acha_campo_que_o_proto_nao_conhece():
+    # simula um campo novo da Meta (numero 2, ainda sem nome no nosso
+    # .proto) dentro de um FutureProofMessage, para confirmar que a leitura
+    # bruta (wire format) acha mesmo o que ListFields()/HasField nao veem
+    inner = E.Message(conversation="oi").SerializeToString()
+
+    def tag(numero, wire):
+        return bytes([(numero << 3) | wire])
+    bruto = tag(1, 2) + bytes([len(inner)]) + inner
+    bruto += tag(2, 0) + bytes([42])           # campo desconhecido (varint)
+    f = E.FutureProofMessage.FromString(bruto)
+    assert wa.campos(f) == ["message"]         # so o que o proto conhece
+    achados = wa.campos_brutos(f)
+    assert (2, 0, 42) in achados               # mas o bruto acha o resto
+
+
+def test_figurinha_com_audio_embutido_e_reconhecida(amb):
+    # 25/11: audioStickerMessage e um envelope (FutureProofMessage) com uma
+    # Message contendo stickerMessage, que por sua vez tem um AudioMessage
+    # embutido (stickerMessage.audioMessage)
+    figurinha = E.StickerMessage(fileLength=5000, audioMessage=E.AudioMessage(
+        seconds=3, mediaKey=b"k", URL="https://x"))
+    msg = E.Message(audioStickerMessage=E.FutureProofMessage(
+        message=E.Message(stickerMessage=figurinha)))
+    aberta = wa.desembrulhar(msg)
+    assert aberta.HasField("stickerMessage")
+    tipo, texto, segundos, nome, tamanho = wa.conteudo_de(aberta)
+    assert tipo == m.FIGURINHA and segundos == 3 and tamanho == 5000
+
+
+def test_figurinha_comum_sem_audio_continua_sem_duracao(amb):
+    figurinha = E.StickerMessage(fileLength=2000)
+    msg = E.Message(stickerMessage=figurinha)
+    tipo, texto, segundos, nome, tamanho = wa.conteudo_de(msg)
+    assert tipo == m.FIGURINHA and segundos == 0
+
+
 def test_mensagem_minha_para_quem_nao_esta_nos_contatos_nao_poe_meu_nome(amb):
     amb.f["Connected"](amb.c, N.Connected())
     esperar(amb.fila, ev.ContaPronta)
