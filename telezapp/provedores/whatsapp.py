@@ -75,7 +75,11 @@ EMBRULHOS = ("deviceSentMessage", "ephemeralMessage", "viewOnceMessage",
              "limitSharingMessage", "questionMessage", "questionReplyMessage",
              "botForwardedMessage", "groupStatusMessage",
              # a enquete V4 vem dentro de um envelope
-             "pollCreationMessageV4")
+             "pollCreationMessageV4",
+             # figurinha com audio embutido (25/11): o envelope guarda uma
+             # Message com stickerMessage dentro, que por sua vez tem um
+             # AudioMessage embutido (stickerMessage.audioMessage)
+             "audioStickerMessage")
 # Todas as versoes da mensagem que cria uma enquete (a V4 e aberta como
 # envelope, ver EMBRULHOS)
 CRIACAO_DE_ENQUETE = ("pollCreationMessage", "pollCreationMessageV2",
@@ -1102,7 +1106,9 @@ def conteudo_de(interna):
         return (m.DOCUMENTO, x.caption, 0, x.fileName or x.title,
                 x.fileLength)
     if "stickerMessage" in presentes:
-        return m.FIGURINHA, "", 0, "", 0
+        x = interna.stickerMessage
+        segundos = x.audioMessage.seconds if x.HasField("audioMessage")             else 0
+        return m.FIGURINHA, "", segundos, "", x.fileLength
     for nome in CRIACAO_DE_ENQUETE:
         if nome in presentes:
             p = getattr(interna, nome)
