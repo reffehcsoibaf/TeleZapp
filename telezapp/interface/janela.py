@@ -519,6 +519,49 @@ def _chave_em_texto(conversa):
     return "%s|%s" % conversa.chave
 
 
+class FilaDeIA:
+    """Uma midia por vez: a proxima so comeca quando a anterior termina.
+
+    `acabou` tambem atende ao download cancelado ou com erro, que nao passa
+    pelo _ia_pronto.
+    """
+
+    def __init__(self, mensagens, ao_andar, ao_fim):
+        self.mensagens = list(mensagens)
+        self.total = len(self.mensagens)
+        self.feitas = 0
+        self.falhas = 0
+        self.atual = None
+        self.cancelada = False
+        self.ao_andar = ao_andar
+        self.ao_fim = ao_fim
+
+    def contem(self, chave):
+        return any(x.chave == chave for x in self.mensagens)
+
+    def proxima(self):
+        """Guarda e devolve a proxima mensagem, se houver."""
+        if self.cancelada or self.atual is not None or \
+                self.feitas >= self.total:
+            return None
+        self.atual = self.mensagens[self.feitas]
+        return self.atual
+
+    def acabou(self, falha=False):
+        if self.cancelada or self.atual is None:
+            return
+        self.atual = None
+        self.feitas += 1
+        self.falhas += 1 if falha else 0
+        self.ao_andar(self.feitas, self.total)
+        if self.feitas >= self.total:
+            self.ao_fim(self.falhas)
+
+    def cancelar(self):
+        self.cancelada = True
+        self.atual = None
+
+
 class Janela(wx.Frame):
     def __init__(self, cfg, banco, barramento):
         super().__init__(None, title=NOME, size=(1000, 700))
@@ -613,6 +656,7 @@ class Janela(wx.Frame):
         self._copia_pendente = {}  # chave -> mensagem a copiar ao baixar
         self._ia_ocupadas = set()  # mensagens que a IA esta processando
         self._lote_resumo = None   # midias sendo processadas para um resumo
+        self._fila_ia = None      # fila manual de transcricao/descricao
         self._ia_do_lote = set()   # as dele: sem fala a cada uma
         self._ia_canceladas = set()  # esperavam a vez e nao devem mais sair
         self._ia_texto_ocupada = False     # redigir, resumir, corrigir
@@ -3248,6 +3292,8 @@ class Janela(wx.Frame):
              lambda: self._massa_mensagens("copiar")),
             ("Encaminhar %s..." % n,
              lambda: self._massa_mensagens("encaminhar")),
+            ("Transcrever ou descrever %s" % n,
+             lambda: self._transcrever_marcadas(exigir_foco=False)),
             ("Apagar %s..." % n, lambda: self._massa_mensagens("apagar")),
             ("Desfazer a seleção",
              lambda: self._sair_selecao(self.lista_msgs))]
@@ -8389,9 +8435,11 @@ class Janela(wx.Frame):
         return opcoes
 
     def _transcrever_descrever(self, x=None):
-        """O item Transcrever/Descrever do menu, na mensagem em foco: mostra
-        o texto da IA se ja existir, ou processa a midia se ainda nao houver."""
+        """Transcrever/Descrever: com mais de uma mensagem marcada, todas vao
+        numa fila; com uma so, age na mensagem em foco."""
         if x is None:
+            if self._transcrever_marcadas():
+                return
             x = self._mensagem_selecionada()
         if x is None:
             self.fala.falar("Nenhuma mensagem selecionada.", interromper=True)
@@ -8406,6 +8454,93 @@ class Janela(wx.Frame):
             self._ia_ver(x)
         else:
             self._ia_processar(x)
+
+    def _transcrever_marcadas(self, exigir_foco=True):
+        """Poem as mensagens marcadas numa fila, uma por vez. Devolve True se
+        a acao foi tomada, mesmo quando nenhuma entrou na fila. O menu de
+        selecao chama sem exigir foco: ele mesmo pode ter tirado o foco."""
+        if not self.modo_msg or (exigir_foco and
+                                 self.FindFocus() is not self.lista_msgs):
+            return False
+        marcadas = self._marcadas_msg()
+        if len(marcadas) < 2:
+            return False
+        if self._fila_ia is not None:
+            self.fala.falar("Ainda estou processando a fila anterior.",
+                            interromper=True)
+            return True
+        if self._lote_resumo is not None:
+            self.fala.falar("Aguarde as mídias do resumo.", interromper=True)
+            return True
+        ja, processar, fora, sem = [], [], [], []
+        for y in marcadas:
+            genero = self._genero_ia(y)
+            if not genero:
+                fora.append(y)
+            elif m.extras_de(y)["ia"].get("texto"):
+                ja.append(y)
+            elif not (self._ia_tem_provedor(genero) or
+                      self._externo_para(genero)):
+                sem.append(y)
+            else:
+                processar.append(y)
+        partes = ["%s na fila" % self._plural(
+            len(processar), "mensagem", "mensagens")]
+        if ja:
+            partes.append("%s já %s texto" % (
+                self._plural(len(ja), "mensagem", "mensagens"),
+                "tinha" if len(ja) == 1 else "tinham"))
+        if fora:
+            partes.append("%s sem mídia" % self._plural(
+                len(fora), "mensagem", "mensagens"))
+        if sem:
+            partes.append("%s sem provedor" % self._plural(
+                len(sem), "mensagem", "mensagens"))
+        self.fala.falar("; ".join(partes) + ".", interromper=True)
+        # a conclusao de cada midia redesenha a lista: limpa as marcas antes
+        self._sair_selecao(self.lista_msgs, falar=False)
+        if not processar or not self._consentir_midias(processar):
+            return True
+        total = len(processar)
+
+        def andou(feitas, total):
+            self.SetStatusText("Processando mídias: %d de %d." %
+                               (feitas, total))
+
+        def fim(falhas):
+            self._fila_ia = None
+            self.SetStatusText("")
+            texto = "%s processadas com sucesso." % self._plural(
+                total - falhas, "mensagem", "mensagens")
+            if falhas:
+                texto += " %s falharam." % self._plural(
+                    falhas, "mensagem", "mensagens")
+            self.fala.falar(texto, interromper=False)
+
+        self._fila_ia = FilaDeIA(processar, andou, fim)
+        self._iniciar_fila_ia()
+        return True
+
+    def _iniciar_fila_ia(self):
+        """Inicia a proxima da fila. Se a atual foi recusada na hora (midia
+        limpa, por exemplo), conta como falha e segue."""
+        while self._fila_ia is not None:
+            x = self._fila_ia.proxima()
+            if x is None:
+                return
+            self._ia_processar(x)
+            if x.chave in self._ia_ocupadas or x.chave in self._ia_pendentes:
+                return
+            self._fila_acabou(x.chave, True)
+
+    def _fila_acabou(self, chave, falha=False):
+        """Uma etapa da fila manual terminou: libera a proxima."""
+        fila = self._fila_ia
+        if fila is None or fila.atual is None or chave != fila.atual.chave:
+            return
+        fila.acabou(falha)
+        if self._fila_ia is fila and fila.feitas < fila.total:
+            self._iniciar_fila_ia()
 
     def _opcoes_ia(self, x):
         genero = self._genero_ia(x)
@@ -8426,6 +8561,8 @@ class Janela(wx.Frame):
         genero = self._genero_ia(x)
         if not genero:
             return
+        fila_atual = self._fila_ia
+        em_fila = fila_atual is not None and fila_atual.contem(x.chave)
         tarefa = cat_ia.TAREFA_DO_GENERO[genero]
         ordens = self.cfg.get("ia_ordem") or {}
         ordem = [p for p in ordens.get(tarefa, [])
@@ -8501,7 +8638,7 @@ class Janela(wx.Frame):
                 self.midias.baixar(x)
             if not auto:
                 self.fala.falar("Baixando a mídia primeiro.",
-                                interromper=True)
+                                interromper=not em_fila)
             return
         modelos = dict(self.cfg.get("ia_modelos") or {})
         perfil = self.cfg.get("ia_perfil") or "medio"
@@ -8514,7 +8651,7 @@ class Janela(wx.Frame):
                               if meta.nome.startswith("Bot") else
                               "a " + meta.nome) if meta is not None else
                              cat_ia.PROVEDORES[com_chave[0]].nome),
-                            interromper=True)
+                            interromper=not em_fila)
 
         def trabalho():
             # as automaticas esperam a vez: um grupo cheio de audios nao
@@ -8611,6 +8748,15 @@ class Janela(wx.Frame):
         dialogos.mostrar_texto(self, titulo, resultado.texto, "Descrição")
 
     def _ia_pronto(self, x, genero, resultado, erro, auto=False):
+        """Guarda o resultado e, havendo fila manual, libera a proxima."""
+        try:
+            self._ia_resultado(x, genero, resultado, erro, auto)
+        finally:
+            self._fila_acabou(x.chave, bool(erro))
+
+    def _ia_resultado(self, x, genero, resultado, erro, auto=False):
+        fila_atual = self._fila_ia
+        em_fila = fila_atual is not None and fila_atual.contem(x.chave)
         self._ia_ocupadas.discard(x.chave)
         self._ia_canceladas.discard(x.chave)
         do_lote = x.chave in self._ia_do_lote
@@ -8628,7 +8774,7 @@ class Janela(wx.Frame):
                     erro))[:150])
                 return
             bipe("erro")
-            self.fala.falar(erro, interromper=True)
+            self.fala.falar(erro, interromper=not em_fila)
             wx.MessageBox(erro, NOME, wx.OK | wx.ICON_WARNING, self)
             return
         m.atualizar_extras(x, ia={
@@ -8661,7 +8807,7 @@ class Janela(wx.Frame):
             self._ia_ver(x)
             return
         self.fala.falar("%s: %s" % (m.rotulo_da_ia(x).capitalize(), texto),
-                        interromper=True)
+                        interromper=not em_fila)
 
     # ---- redigir, resumir e corrigir textos
     def _ia_texto(self, operacao, texto, pronto, contexto="",
@@ -9015,10 +9161,12 @@ class Janela(wx.Frame):
             dlg.Destroy()
         return {wx.ID_YES: True, wx.ID_NO: False}.get(r)
 
-    def _consentir_midias_do_resumo(self, plano):
+    def _consentir_midias(self, msgs):
         """A permissao de enviar midia aos provedores, de uma vez: uma por uma,
         a IA automatica nao pergunta."""
-        generos = {self._genero_ia(x) for x in plano.processar}
+        generos = {self._genero_ia(x) for x in msgs}
+        if "video" in generos:
+            generos.add("audio")   # a fala do video vai pelos provedores de voz
         usados = [p for g in generos for p in self._provedores_do_genero(g)]
         consentidos = self.cfg.get("ia_consentimento") or []
         novos = [p for p in dict.fromkeys(usados) if p not in consentidos]
@@ -9026,7 +9174,7 @@ class Janela(wx.Frame):
             return True
         nomes = ", ".join(cat_ia.PROVEDORES[p].nome for p in novos)
         r = wx.MessageBox(
-            "Para isso o TeleZapp envia os áudios e as imagens para %s, "
+            "Para isso o TeleZapp envia as mídias para %s, "
             "serviço%s de terceiros, com a sua chave. O que eles fazem com os "
             "dados depende da política de cada um. Continuar e lembrar esta "
             "escolha para %s?" % (nomes, "" if len(novos) == 1 else "s", nomes),
@@ -9036,6 +9184,9 @@ class Janela(wx.Frame):
             return False
         self.cfg.set("ia_consentimento", list(consentidos) + novos)
         return True
+
+    def _consentir_midias_do_resumo(self, plano):
+        return self._consentir_midias(plano.processar)
 
     def _processar_midias_do_resumo(self, msgs, conv, titulo, plano):
         if not self._consentir_midias_do_resumo(plano):
@@ -12799,6 +12950,7 @@ class Janela(wx.Frame):
         if e.cancelada:
             self._copia_pendente.pop(chave, None)
             self._ia_pendentes.pop(chave, None)
+            self._fila_acabou(chave, True)
             self._midia_do_resumo_acabou(chave, True)
             if pedida:
                 self.fala.falar("Download cancelado.", interromper=True)
@@ -12806,6 +12958,7 @@ class Janela(wx.Frame):
         if e.erro:
             self._copia_pendente.pop(chave, None)
             self._ia_pendentes.pop(chave, None)
+            self._fila_acabou(chave, True)
             self._midia_do_resumo_acabou(chave, True)
             if pedida or not e.automatica:
                 bipe("erro")

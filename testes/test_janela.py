@@ -1288,6 +1288,120 @@ def test_transcrever_ou_descrever_tem_slot_de_atalho(
     assert "Nenhuma mensagem selecionada" in ditas[-1]
 
 
+def _preparar_fila_de_ia(j, monkeypatch, mensagens):
+    """Deixa as mensagens prontas para a fila, sem chamar provedor de verdade."""
+    _abrir_com_caixa(j)
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", mensagens))
+    monkeypatch.setattr(j, "_ia_tem_provedor", lambda g: True)
+    monkeypatch.setattr(j, "_externo_para", lambda g: None)
+    monkeypatch.setattr(j, "_consentir_midias", lambda ms: True)
+    monkeypatch.setattr(j, "_ia_resultado", lambda *a, **k: None)
+    j.fala.falar = lambda t, interromper=False: None
+
+
+def test_transcrever_em_fila_as_mensagens_marcadas(j, monkeypatch):
+    a, b = [m.Mensagem("t1", "20", i, tipo=m.VOZ, autor="Ana")
+            for i in ("6", "7")]
+    _preparar_fila_de_ia(j, monkeypatch, [a, b])
+    feitos = []
+
+    def processar(x):
+        feitos.append(x.id)
+        j._ia_ocupadas.add(x.chave)
+    monkeypatch.setattr(j, "_ia_processar", processar)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.modo_msg, j.marc_msg = True, {a.id, b.id}
+    j.lista_msgs.SetFocus()
+
+    j._transcrever_descrever()
+    assert feitos == ["6"]   # a segunda espera a primeira acabar
+    assert not j.marc_msg and not j.modo_msg
+    assert "2 mensagens na fila" in ditas[0]
+
+    pronto = types.SimpleNamespace(texto="oi", provedor="p", modelo="q")
+    j._ia_pronto(a, "audio", pronto, None)
+    assert feitos == ["6", "7"]
+    assert j._fila_ia is not None
+    j._ia_pronto(b, "audio", pronto, None)
+    assert j._fila_ia is None
+    assert "2 mensagens processadas com sucesso." in ditas[-1]
+
+
+def test_fila_de_transcricao_pula_as_que_ja_tem_texto_e_sem_midia(
+        j, monkeypatch):
+    a, b = [m.Mensagem("t1", "20", i, tipo=m.VOZ, autor="Ana")
+            for i in ("6", "7")]
+    texto = msg("8", "oi", conversa="20")
+    _preparar_fila_de_ia(j, monkeypatch, [a, b, texto])
+    m.atualizar_extras(a, ia={"genero": "audio", "texto": "pronta"})
+    feitos = []
+
+    def processar(x):
+        feitos.append(x.id)
+        j._ia_ocupadas.add(x.chave)
+    monkeypatch.setattr(j, "_ia_processar", processar)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.modo_msg, j.marc_msg = True, {a.id, b.id, texto.id}
+    j.lista_msgs.SetFocus()
+
+    j._transcrever_descrever()
+    assert feitos == ["7"]
+    assert "1 mensagem na fila" in ditas[0]
+    assert "1 mensagem já tinha texto" in ditas[0]
+    assert "1 mensagem sem mídia" in ditas[0]
+    j._ia_pronto(b, "audio", types.SimpleNamespace(
+        texto="oi", provedor="p", modelo="q"), None)
+
+
+def test_opcao_do_menu_de_selecao_transcreve_sem_exigir_foco(j, monkeypatch):
+    a, b = [m.Mensagem("t1", "20", i, tipo=m.VOZ, autor="Ana")
+            for i in ("6", "7")]
+    _preparar_fila_de_ia(j, monkeypatch, [a, b])
+    feitos = []
+
+    def processar(x):
+        feitos.append(x.id)
+        j._ia_ocupadas.add(x.chave)
+    monkeypatch.setattr(j, "_ia_processar", processar)
+    j.modo_msg, j.marc_msg = True, {a.id, b.id}
+    j.lista_conv.SetFocus()          # o popup tira o foco da lista de mensagens
+
+    opcoes = [o for o in j._opcoes_em_massa_msg()
+              if o[0].startswith("Transcrever")]
+    assert len(opcoes) == 1 and opcoes[0][0] == \
+        "Transcrever ou descrever 2 mensagens"
+    opcoes[0][1]()
+    assert feitos == ["6"]
+
+
+def test_fila_de_transcricao_segue_apos_download_com_erro(j, monkeypatch):
+    a, b = [m.Mensagem("t1", "20", i, tipo=m.VOZ, autor="Ana")
+            for i in ("6", "7")]
+    _preparar_fila_de_ia(j, monkeypatch, [a, b])
+    feitos = []
+
+    def processar(x):
+        feitos.append(x.id)
+        if len(feitos) == 1:
+            j._ia_pendentes[x.chave] = (x, False)
+        else:
+            j._ia_ocupadas.add(x.chave)
+    monkeypatch.setattr(j, "_ia_processar", processar)
+    j.modo_msg, j.marc_msg = True, {a.id, b.id}
+    j.lista_msgs.SetFocus()
+
+    j._transcrever_descrever()
+    assert feitos == ["6"]
+    j.b.publicar(ev.MidiaBaixada("t1", "20", "6", erro="sem rede"))
+    assert feitos == ["6", "7"]
+    assert j._fila_ia is not None
+    j._ia_pronto(b, "audio", types.SimpleNamespace(
+        texto="oi", provedor="p", modelo="q"), None)
+    assert j._fila_ia is None
+
+
 def test_detalhes_pedem_ao_provedor_o_nome_de_quem_recebeu(j, monkeypatch):
     j.lista_conv.SetSelection(0)
     j._char_hook(Tecla(wx_falso.WXK_RETURN))
