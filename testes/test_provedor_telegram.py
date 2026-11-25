@@ -2661,6 +2661,48 @@ def test_privacidade_manter_arquivadas_do_telegram_le_e_grava(ambiente):
     assert not cliente.gravadas[-1].keep_archived_unmuted
 
 
+def test_apagar_conversa_no_telegram_limpa_o_historico_sem_sair():
+    from telethon.tl.functions.messages import DeleteHistoryRequest
+    enviados = []
+
+    async def cliente(req):
+        enviados.append(req)
+    prov = tg.ProvedorTelegram.__new__(tg.ProvedorTelegram)
+    prov.cliente = cliente
+    prov._entidades = {"55": "entidade-55"}
+    prov._agendar = lambda coro: asyncio.run(coro)
+    assert tg.ProvedorTelegram.APAGA_NA_CONTA is True
+    assert prov.apagar_conversa("55") is True
+    pedido = enviados[-1]
+    assert isinstance(pedido, DeleteHistoryRequest)
+    assert pedido.peer == "entidade-55" and pedido.just_clear is False
+    assert pedido.revoke is False                 # nunca apaga pros outros
+
+
+def test_limpar_conversa_no_telegram_mantem_o_dialogo():
+    from telethon.tl.functions.messages import DeleteHistoryRequest
+    enviados = []
+
+    async def cliente(req):
+        enviados.append(req)
+    prov = tg.ProvedorTelegram.__new__(tg.ProvedorTelegram)
+    prov.cliente = cliente
+    prov._entidades = {"55": "entidade-55"}
+    prov._agendar = lambda coro: asyncio.run(coro)
+    assert prov.limpar_conversa("55") is True
+    pedido = enviados[-1]
+    assert isinstance(pedido, DeleteHistoryRequest) and pedido.just_clear
+
+
+def test_apagar_historico_sem_derrubar_com_erro_do_telegram():
+    async def cliente(req):
+        raise RuntimeError("sem permissão")
+    prov = tg.ProvedorTelegram.__new__(tg.ProvedorTelegram)
+    prov.cliente = cliente
+    prov._entidades = {"55": "entidade-55"}
+    asyncio.run(prov._apagar_historico("55", just_clear=False))  # nao estoura
+
+
 def test_pastas_do_telegram_viram_conversas_por_pasta():
     from telethon.tl import types as tipos
     pf = tipos.DialogFilter(

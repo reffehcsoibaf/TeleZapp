@@ -9559,6 +9559,26 @@ def _com_celular(j, monkeypatch):
     return pedidos
 
 
+def test_onde_tambem_depende_do_servico(j):
+    tele = j.indice[("t1", "20")]
+    zap = m.Conversa("w1", "30", "Zap", "whatsapp", "privada", data=AGORA)
+    assert j._onde_tambem([tele]) == "na conta do Telegram"
+    assert j._onde_tambem([zap]) == "no celular"
+    assert j._onde_tambem([tele, zap]) == "na conta"
+
+
+def test_lembrar_celular_pula_o_aviso_so_com_telegram(j, monkeypatch):
+    tele = j.indice[("t1", "20")]
+    zap = m.Conversa("w1", "30", "Zap", "whatsapp", "privada", data=AGORA)
+    avisos = []
+    monkeypatch.setattr(jm.wx, "MessageBox",
+                        lambda *a, **k: avisos.append(a) or jm.wx.OK)
+    assert j._lembrar_celular(convs=[tele]) is True
+    assert avisos == []                       # so Telegram: sem aviso
+    assert j._lembrar_celular(convs=[tele, zap]) is True
+    assert len(avisos) == 1                   # tem WhatsApp: avisa
+
+
 def test_item_limpar_a_conversa_fica_no_menu_conversas_e_age_na_em_foco(
         j, monkeypatch):
     assert "limpar_conversa" in j.itens
@@ -9637,7 +9657,8 @@ def test_limpar_varias_conversas_marcadas_com_uma_pergunta_so(j, monkeypatch):
     assert not j.banco.mensagens("t1", "20", 1)
     assert not j.banco.mensagens("t1", "21", 1)
     assert c1.chave in j.indice and c2.chave in j.indice   # seguem na lista
-    assert "2 conversas limpadas" in falas[-1] and "celular" in falas[-1]
+    assert "2 conversas limpadas" in falas[-1]
+    assert "na conta do Telegram" in falas[-1]
 
 
 def test_dados_das_contas_em_gerenciar_contas(j, monkeypatch, tmp_path):

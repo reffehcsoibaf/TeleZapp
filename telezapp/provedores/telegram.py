@@ -4403,6 +4403,32 @@ class ProvedorTelegram(Provedor):
             self.barramento.publicar(ev.MensagemApagadaNoCelular(
                 self.conta.id, x.conversa_id, x.id))
 
+    # Diferente do WhatsApp: o Telegram guarda o historico no servidor, entao
+    # limpar/apagar na conta vale para todos os aparelhos ligados a ela (nao
+    # so "o celular"), na hora, sem precisar do celular aberto.
+    APAGA_NA_CONTA = True
+
+    def apagar_conversa(self, conversa_id, ultima=None):
+        self._agendar(self._apagar_historico(conversa_id, just_clear=False))
+        return True
+
+    def limpar_conversa(self, conversa_id, ultima=None):
+        self._agendar(self._apagar_historico(conversa_id, just_clear=True))
+        return True
+
+    async def _apagar_historico(self, conversa_id, just_clear):
+        """`just_clear` True limpa as mensagens e mantem o dialogo; False tira
+        o dialogo da lista (sem sair do grupo/canal: so para quando a acao e
+        apagar a conversa, nao sair). `revoke` sempre False: nunca apaga para
+        quem mais esta na conversa sem a pessoa pedir isso explicitamente."""
+        from telethon.tl.functions.messages import DeleteHistoryRequest
+        ent = await self._entidade(conversa_id)
+        try:
+            await self.cliente(DeleteHistoryRequest(
+                ent, max_id=0, just_clear=just_clear, revoke=False))
+        except Exception:
+            log.exception("apagar/limpar na conta do Telegram")
+
     def apagar_mensagem(self, mensagem, para_todos=False):
         """Apaga a mensagem no Telegram (para todos, ou so para mim onde o
         Telegram deixa)."""
