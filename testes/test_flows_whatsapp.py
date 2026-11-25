@@ -54,21 +54,6 @@ def test_ab_props_devolvem_o_padrao_de_cada_um():
     assert pf.valores_dos_ab_props(None) == {}
 
 
-def test_chave_publica_vem_da_resposta_da_consulta():
-    dados = {"xwa_extensions_get_flow_data": {"extensions_flow_data": [
-        {"flow_id": "999", "extensions": {"metadata": {
-            "endpoint_public_key": {"key": "ABC", "signature": "s"}}}}]}}
-    assert pf.chave_publica_dos_dados(dados) == "ABC"
-    assert pf.chave_publica_dos_dados({}) == ""
-    assert pf.chave_publica_dos_dados(None) == ""
-
-
-def test_variaveis_da_consulta_levam_so_biz_jid_e_flow_id():
-    assert pf.variaveis_da_consulta("5561@s.whatsapp.net", 999) == {
-        "request": {"extensions": {"biz_jid": "5561@s.whatsapp.net",
-                                   "flow_id": "999"}}}
-
-
 def test_resposta_final_leva_o_que_o_formulario_entregou_e_o_token():
     j = json.loads(pf.resposta_final({"response": {"cpf": "1"}}, "tok"))
     assert j == {"cpf": "1", "flow_token": "tok"}
@@ -176,23 +161,16 @@ class RespostaHttp(io.BytesIO):
         self.close()
 
 
-def _provedor_de_formulario(monkeypatch, resposta_da_chave=None,
-                            json_do_fluxo=None, erro_http=None):
+def _provedor_de_formulario(monkeypatch, json_do_fluxo=None, erro_http=None):
     p = object.__new__(wa.ProvedorWhatsApp)
     p.cliente, p._conectada = None, False      # sem mapa de LID
     p._conversas = {"5561@s.whatsapp.net": m.Conversa(
         "w1", "5561@s.whatsapp.net", "Sicoob", "whatsapp")}
-    visto = {"gets": [], "posts": []}
+    visto = {"gets": []}
 
     def urlopen(pedido, timeout=0):
         if erro_http:
             raise erro_http
-        if pedido.get_method() == "POST":
-            visto["posts"].append((pedido.full_url, json.loads(pedido.data)))
-            if resposta_da_chave is None:
-                raise OSError("sem consulta")
-            return RespostaHttp(json.dumps(
-                {"data": resposta_da_chave}).encode())
         visto["gets"].append(pedido.full_url)
         return RespostaHttp(json.dumps(
             json_do_fluxo or {"screens": [], "version": "7.3"}).encode())
@@ -206,43 +184,26 @@ def _msg():
                       id="m1", texto="x")
 
 
-def test_buscar_formulario_baixa_o_json_publico_e_pede_a_chave(monkeypatch):
-    from telezapp import config
-    config.Config().set("whatsapp_formularios_token", "WA|123|abc")
-    dados = {"xwa_extensions_get_flow_data": {"extensions_flow_data": [
-        {"extensions": {"metadata": {"endpoint_public_key": {
-            "key": "CHAVE"}}}}]}}
-    p, visto = _provedor_de_formulario(monkeypatch, resposta_da_chave=dados)
-    d = p.buscar_formulario(_msg(), {"tipo": "formulario", "id": "999",
-                                     "params": json.dumps(PARAMS)})
-    assert visto["gets"] == ["https://web.whatsapp.com/flows/json/999"]
-    url, corpo = visto["posts"][0]
-    assert url == pf.URL_DA_CONSULTA_HTTP
-    assert corpo["access_token"] == "WA|123|abc"
-    assert corpo["doc_id"] == pf.CONSULTA_DOS_DADOS
-    assert corpo["variables"]["request"]["extensions"]["flow_id"] == "999"
-    assert d["public_key"] == "CHAVE" and d["business_name"] == "Sicoob"
-    assert d["extension_id"] == "999"
-
-
-def test_sem_token_formularios_estaticos_abrem_com_a_chave_de_reserva(
+def test_buscar_formulario_estatico_baixa_o_json_e_usa_a_chave_de_reserva(
         monkeypatch):
     p, visto = _provedor_de_formulario(monkeypatch)
     d = p.buscar_formulario(_msg(), {"tipo": "formulario", "id": "999",
                                      "params": json.dumps(PARAMS)})
-    assert visto["posts"] == []                       # nada foi consultado
+    assert visto["gets"] == ["https://web.whatsapp.com/flows/json/999"]
     assert d["public_key"] == pf.chave_de_reserva()
     assert json.loads(d["flow_json"])["version"] == "7.3"
+    assert d["business_name"] == "Sicoob" and d["extension_id"] == "999"
 
 
-def test_sem_token_formulario_que_consulta_a_empresa_avisa_em_vez_de_abrir(
+def test_formulario_que_consulta_a_empresa_avisa_em_vez_de_abrir(
         monkeypatch):
-    p, _ = _provedor_de_formulario(monkeypatch)
+    p, visto = _provedor_de_formulario(monkeypatch)
     dinamico = dict(PARAMS, flow_metadata=dict(
         PARAMS["flow_metadata"], data_api_version=3))
-    with pytest.raises(RuntimeError, match="token do aplicativo"):
+    with pytest.raises(RuntimeError, match="consulta a empresa"):
         p.buscar_formulario(_msg(), {"tipo": "formulario", "id": "999",
                                      "params": json.dumps(dinamico)})
+    assert visto["gets"] == []           # nem baixa o JSON: avisa direto
 
 
 def test_formulario_dinamico_e_estatico_se_reconhecem_pelos_parametros():
@@ -251,11 +212,6 @@ def test_formulario_dinamico_e_estatico_se_reconhecem_pelos_parametros():
         "data_api_version": 3})) is True
     assert pf.formulario_consulta_a_empresa(dict(PARAMS, flow_metadata={
         "data_api_protocol": "x"})) is True
-    corpo = pf.corpo_da_consulta_http("T", "5561@c.us", 9)
-    assert corpo == {"access_token": "T", "doc_id": pf.CONSULTA_DOS_DADOS,
-                     "variables": {"request": {"extensions": {
-                         "biz_jid": "5561@c.us", "flow_id": "9"}}},
-                     "lang": "pt_BR"}
 
 
 def test_buscar_formulario_diz_o_motivo_quando_nao_baixa(monkeypatch):

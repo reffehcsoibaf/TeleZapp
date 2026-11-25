@@ -21,7 +21,6 @@ log = logging.getLogger("telezapp.flows")
 URL_DA_PAGINA = "https://flows.whatsapp.net/flows-v2/wa-web/"
 URL_DO_JSON = "https://web.whatsapp.com/flows/json/%s"
 ORIGEM_DO_APLICATIVO = "https://web.whatsapp.com"
-CONSULTA_DOS_DADOS = "40083220921276114"   # xwa_extensions_get_flow_data
 NOME_DO_MANIPULADOR = "telezappFlows"
 
 # Nomes dos eventos que a pagina manda (WAFlowsWebBridgeEventNames)
@@ -165,33 +164,11 @@ def _em_base64(valor):
     return base64.b64encode(texto.encode("utf-8")).decode("ascii")
 
 
-URL_DA_CONSULTA_HTTP = "https://graph.whatsapp.com/graphql/catalog"
-
-
-def corpo_da_consulta_http(token, biz_jid, flow_id, idioma="pt_BR"):
-    """O corpo JSON que o WhatsApp Web manda por HTTPS para buscar os dados
-    do formulario (inclusive a chave publica da empresa)."""
-    return {"access_token": token, "doc_id": CONSULTA_DOS_DADOS,
-            "variables": variaveis_da_consulta(biz_jid, flow_id),
-            "lang": idioma}
-
-
 def formulario_consulta_a_empresa(params):
     """O formulario troca dados com a empresa a cada tela (precisa da chave
     publica dela)? Os parametros do botao dizem: `data_api_version`."""
     meta = params.get("flow_metadata") or {}
     return meta.get("data_api_version") is not None or         meta.get("data_api_protocol") is not None
-
-
-def chave_publica_dos_dados(dados):
-    """A chave publica do endpoint do formulario na resposta da consulta MEX
-    (`xwa_extensions_get_flow_data`), ou ''."""
-    try:
-        lista = dados["xwa_extensions_get_flow_data"]["extensions_flow_data"]
-        meta = lista[0]["extensions"]["metadata"]
-        return (meta.get("endpoint_public_key") or {}).get("key") or ""
-    except (KeyError, IndexError, TypeError, AttributeError):
-        return ""
 
 
 _CHAVE_DE_RESERVA = []
@@ -208,11 +185,6 @@ def chave_de_reserva():
         _CHAVE_DE_RESERVA.append(base64.b64encode(
             pem.encode("ascii")).decode("ascii"))
     return _CHAVE_DE_RESERVA[0]
-
-
-def variaveis_da_consulta(biz_jid, flow_id):
-    return {"request": {"extensions": {"biz_jid": biz_jid,
-                                       "flow_id": str(flow_id)}}}
 
 
 def dados_do_formulario(params, flow_json, chave_publica="", biz_jid="",

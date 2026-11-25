@@ -57,13 +57,16 @@ Estado no TeleZapp (branch `log-acoes-interativas`): o botão aparece como açã
 - O pedido de dados repete 3 vezes e depois vem `GetClientAbProps`; `DataChannelExchange` com `data: {}` na primeira tela foi respondido com nulo no WhatsApp Web (formulário estático).
 - O formato do que `WAExtensionsComplete` entrega e como vira a resposta à empresa ainda não foi visto: exigiria concluir um formulário (dados pessoais). O TeleZapp registra o formato (sem valores) na primeira vez.
 
-## Token do aplicativo (formulários que consultam a empresa)
+## Formulários que consultam a empresa a cada tela: sem solução por ora
 
-O TeleZapp não traz embutido o token do aplicativo do WhatsApp Web (não é
-distribuído com o programa, por ser de uso pessoal da sessão de quem usa).
-Quem quiser os formulários que trocam dados com a empresa (ex.: o do
-Sicoob, que pede CPF/CNPJ) precisa obter o próprio token e colar na opção
-"Token do aplicativo para formulários que consultam a empresa"
-(Configurações, Experimental). Passo a passo acessível, com um script para
-colar no Console do navegador: `docs/como-obter-token-formularios-whatsapp.md`
-(`ferramentas/extrair-token-flows-whatsapp.js`).
+Esses formulários (ex.: o do Sicoob, que pede CPF/CNPJ) exigem a chave
+pública da empresa, que a Meta só entrega pela consulta MEX
+`xwa_extensions_get_flow_data` com o token do aplicativo do WhatsApp Web
+(a DLL (whatsmeow) tentou a mesma consulta sem esse token e recebeu
+`400 Bad Request`). Obter esse token exige acessar o WhatsApp Web — e
+evitar justamente isso é o motivo de existir do TeleZapp, então essa
+troca não será resolvida assim. Por ora, esses formulários avisam que
+ainda não abrem no TeleZapp e pedem para preencher no celular
+(`ProvedorWhatsApp.buscar_formulario`, `ponte_flows.formulario_consulta_a_empresa`).
+Os formulários que não trocam dados com a empresa (estáticos) continuam
+abrindo normalmente.
