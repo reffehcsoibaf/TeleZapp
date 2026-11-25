@@ -56,3 +56,14 @@ Estado no TeleZapp (branch `log-acoes-interativas`): o botão aparece como açã
 - Eventos da ponte (`WAFlowsWebBridgeEventNames`): `WAExtensionsGetFlowData`, `WAExtensionsComplete`, `WAExtensionsGetClientAbProps`, `WAExtensionsNavigate`, `WAExtensionsClose`, `WAFlowsExternalNavigation`, `WAFlowsOpenURL`, `WAExtensionsConfigureNavBar`, `WAExtensionsVibrate`, `WAExtensionsSetDraggable`, `WAFlowsShowOverlay`, `WAFlowsShowNativeInputDialogComponent`, `WAQPLLogger.*`, `WAMLogger`, `WAExtensionsSpamReport`, `WAExtensionsReportItem`, `WAExtensionsLearnMore`...
 - O pedido de dados repete 3 vezes e depois vem `GetClientAbProps`; `DataChannelExchange` com `data: {}` na primeira tela foi respondido com nulo no WhatsApp Web (formulário estático).
 - O formato do que `WAExtensionsComplete` entrega e como vira a resposta à empresa ainda não foi visto: exigiria concluir um formulário (dados pessoais). O TeleZapp registra o formato (sem valores) na primeira vez.
+
+## Token do aplicativo (formulários que consultam a empresa)
+
+O TeleZapp não traz embutido o token do aplicativo do WhatsApp Web (não é
+distribuído com o programa, por ser de uso pessoal da sessão de quem usa).
+Quem quiser os formulários que trocam dados com a empresa (ex.: o do
+Sicoob, que pede CPF/CNPJ) precisa obter o próprio token e colar na opção
+"Token do aplicativo para formulários que consultam a empresa"
+(Configurações, Experimental). Passo a passo acessível, com um script para
+colar no Console do navegador: `docs/como-obter-token-formularios-whatsapp.md`
+(`ferramentas/extrair-token-flows-whatsapp.js`).

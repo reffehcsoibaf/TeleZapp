@@ -457,9 +457,11 @@ OPCOES = (
           "empresa a cada tela e, para isso, precisam da chave pública dela, "
           "que o WhatsApp só entrega a quem apresenta o token do aplicativo "
           "do WhatsApp Web. O TeleZapp não traz esse token: se você tiver "
-          "um, cole aqui. Fica gravado nas configurações deste computador. "
-          "Vazio, os formulários que consultam a empresa avisam que só "
-          "abrem no celular.", texto=True, servico="whatsapp"),
+          "um, cole aqui (veja "
+          "docs/como-obter-token-formularios-whatsapp.md para obter o seu). "
+          "Fica gravado nas configurações deste computador. Vazio, os "
+          "formulários que consultam a empresa avisam que só abrem no "
+          "celular.", texto=True, servico="whatsapp"),
     Opcao("chamada_em_andamento_whatsapp",
           "Entrar em chamadas em grupo do WhatsApp que já começaram",
           CATEGORIA_EXPERIMENTAL, False,
