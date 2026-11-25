@@ -594,7 +594,8 @@ def rotulos_dos_botoes(interna):
         if inter is not None and inter.HasField("nativeFlowMessage"):
             for b in inter.nativeFlowMessage.buttons:
                 dados = json.loads(b.buttonParamsJSON or "{}")
-                botoes.append(dados.get("display_text") or "")
+                botoes.append(dados.get("display_text") or
+                              dados.get("flow_cta") or "")
         if interna.HasField("listMessage"):
             for sec in interna.listMessage.sections:
                 opcoes += [r.title for r in sec.rows]
@@ -657,6 +658,7 @@ def _texto_estruturado(interna, presentes):
 
 
 NOMES_ACOES_INTERATIVAS = {
+    "galaxy_message": "formulário do WhatsApp",
     "payment_info": "solicitação de pagamento",
     "review_and_pay": "solicitação de pagamento",
     "order_details": "detalhes do pedido",
@@ -781,6 +783,10 @@ def botoes_do_whatsapp(interna):
     return botoes
 
 
+# nome da acao do botao que abre um formulario (Flow) dentro do WhatsApp
+ACAO_DE_FORMULARIO = "galaxy_message"
+
+
 def acoes_do_whatsapp(interna):
     """Botoes de resposta e opcoes de lista que o toque pode acionar:
     [{'tipo', 'rotulo', 'id', 'indice', 'descricao'}]. Tipos: modelo
@@ -814,6 +820,15 @@ def acoes_do_whatsapp(interna):
             inter = interna.interactiveMessage
         if inter is not None and inter.HasField("nativeFlowMessage"):
             for i, b in enumerate(inter.nativeFlowMessage.buttons):
+                if b.name == ACAO_DE_FORMULARIO:
+                    # formulario do WhatsApp (Flow): o rotulo vem em flow_cta
+                    dados = json.loads(b.buttonParamsJSON or "{}")
+                    acoes.append({
+                        "tipo": "formulario", "indice": i,
+                        "rotulo": dados.get("flow_cta") or
+                        dados.get("display_text") or "Abrir o formulário",
+                        "id": str(dados.get("flow_id") or "")})
+                    continue
                 if b.name != "quick_reply":
                     continue
                 dados = json.loads(b.buttonParamsJSON or "{}")
@@ -902,6 +917,53 @@ def forma_sem_textos(x):
     if isinstance(x, str):
         return x if _NOME_DE_ENUM.match(x) else "<texto %d>" % len(x)
     return "<n>" if isinstance(x, (int, float)) else x
+
+
+def _nome_da_acao(nome):
+    """O nome de uma acao de botao (galaxy_message, cta_url...) para o
+    registro: so se parece mesmo um identificador; senao so o tamanho."""
+    nome = nome or ""
+    if re.fullmatch(r"[a-z][a-z0-9_]{0,39}", nome):
+        return nome
+    return "<texto %d>" % len(nome)
+
+
+def _chaves_do_json(texto):
+    """As chaves (nunca os valores) de um JSON de parametros."""
+    try:
+        dados = json.loads(texto or "{}")
+    except ValueError:
+        return ["<json invalido>"]
+    if not isinstance(dados, dict):
+        return ["<%s>" % type(dados).__name__]
+    return sorted(_nome_da_acao(k) for k in dados)[:20]
+
+
+def acoes_interativas(interna):
+    """[{"acao": nome, "chaves": [...]}] dos botoes de fluxo de uma mensagem
+    de empresa (e da resposta a eles), sem nenhum texto das mensagens: o
+    registro mostra qual acao e (galaxy_message abre um formulario do
+    WhatsApp, cta_url um link...) e que dados ela traz."""
+    saida = []
+    try:
+        inter = None
+        if interna.HasField("interactiveMessage"):
+            inter = interna.interactiveMessage
+        elif interna.HasField("templateMessage") and                 interna.templateMessage.HasField("interactiveMessageTemplate"):
+            inter = interna.templateMessage.interactiveMessageTemplate
+        if inter is not None and inter.HasField("nativeFlowMessage"):
+            for b in inter.nativeFlowMessage.buttons[:10]:
+                saida.append({"acao": _nome_da_acao(b.name),
+                              "chaves": _chaves_do_json(b.buttonParamsJSON)})
+        if interna.HasField("interactiveResponseMessage"):
+            r = interna.interactiveResponseMessage
+            if r.HasField("nativeFlowResponseMessage"):
+                n = r.nativeFlowResponseMessage
+                saida.append({"resposta": _nome_da_acao(n.name),
+                              "chaves": _chaves_do_json(n.paramsJSON)})
+    except Exception:
+        log.info("não consegui ler as ações dos botões")
+    return saida
 
 
 def estrutura_interativa(interna):
@@ -1254,6 +1316,10 @@ def converter(evento, conta_id, conversa_id, autor=""):
     if forma:
         log.info("mensagem interativa: %s", json.dumps(
             forma_sem_textos(forma), ensure_ascii=False))
+        acoes = acoes_interativas(interna)
+        if acoes:
+            log.info("ações da mensagem interativa: %s", json.dumps(
+                acoes, ensure_ascii=False))
     msg = m.Mensagem(
         conta_id=conta_id, conversa_id=conversa_id, id=info.ID,
         autor="" if minha else (autor or info.Pushname or
@@ -1420,6 +1486,10 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
     if forma:
         log.info("mensagem interativa: %s", json.dumps(
             forma_sem_textos(forma), ensure_ascii=False))
+        acoes = acoes_interativas(desembrulhar(wmi.message))
+        if acoes:
+            log.info("ações da mensagem interativa: %s", json.dumps(
+                acoes, ensure_ascii=False))
     ctx = _contexto(desembrulhar(wmi.message))
     remetente = wmi.key.participant or wmi.participant or wmi.key.remoteJID
     msg = m.Mensagem(
