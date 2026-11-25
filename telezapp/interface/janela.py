@@ -8296,9 +8296,10 @@ class Janela(wx.Frame):
             bipe("erro")
             self.fala.falar(
                 "Este botão abre um formulário do WhatsApp, que o TeleZapp "
-                "ainda não consegue abrir. Abra esta conversa no celular "
-                "para preencher. Também dá para digitar MENU ou pedir para "
-                "falar com um atendente, se a empresa oferecer.",
+                "ainda não dá suporte. Continue pelo celular ou pelo "
+                "WhatsApp Web para preencher. Também dá para digitar MENU "
+                "ou pedir para falar com um atendente, se a empresa "
+                "oferecer.",
                 interromper=True)
             return
         if tipo == "robo_indisponivel":
