@@ -3331,8 +3331,13 @@ class Janela(wx.Frame):
 
     def _apagar_varias_conversas(self, convs, quantas):
         """Uma pergunta so para todas; False se a pessoa desistiu."""
-        if not self._perguntar_favoritas([c.chave for c in convs], "apagar"):
+        perguntou, escolha = self._escolher_sobre_favoritas(
+            [c.chave for c in convs], "apagar")
+        if escolha is None:
             return False
+        if perguntou and escolha:  # manter as favoritas: limpa em vez de apagar
+            self._executar_limpeza_varias(convs, quantas, True)
+            return True
         provs = {c.chave: self.contas.provedor(c.conta_id) for c in convs}
         no_celular = any(
             p and getattr(p, "APAGA_NA_CONTA", False) and
@@ -3731,7 +3736,13 @@ class Janela(wx.Frame):
                 return
             celular = False
             if acao == "sair_apagar":
-                if not self._perguntar_favoritas([conv.chave], "apagar"):
+                perguntou, escolha = self._escolher_sobre_favoritas(
+                    [conv.chave], "apagar")
+                if escolha is None:
+                    return
+                if perguntou and escolha:   # manter: limpa, so sai do grupo
+                    self._executar_limpeza(conv, True)
+                    self._sair_do_grupo(conv, prov, False, False)
                     return
                 celular = self._perguntar_celular(
                     conv, "Sair do grupo %s e apagar a conversa daqui. Quer "
@@ -3743,7 +3754,12 @@ class Janela(wx.Frame):
             if acao in ("sair", "sair_apagar"):
                 self._sair_do_grupo(conv, prov, acao == "sair_apagar", celular)
                 return
-        if not self._perguntar_favoritas([conv.chave], "apagar"):
+        perguntou, escolha = self._escolher_sobre_favoritas([conv.chave],
+                                                             "apagar")
+        if escolha is None:
+            return
+        if perguntou and escolha:   # manter as favoritas: limpa em vez de apagar
+            self._executar_limpeza(conv, True)
             return
         no_celular = bool(prov and getattr(prov, "APAGA_NA_CONTA", False) and
                           conv.tipo != "status" and
@@ -3850,35 +3866,56 @@ class Janela(wx.Frame):
         guardadas = self.banco.mensagens(conv.conta_id, conv.id, 1)
         return guardadas[-1] if guardadas else None
 
-    def _perguntar_favoritas(self, chaves, verbo):
+    def _escolher_sobre_favoritas(self, chaves, verbo):
         """Com "Manter as mensagens favoritas ao limpar a conversa" ligada,
         se alguma das conversas (conta_id, id) tiver mensagem favorita,
-        avisa e pergunta antes de continuar — mesmo com a pergunta normal
-        de limpar/apagar desligada ("sem pergunta"). True para seguir."""
-        if not self.cfg.get("limpar_manter_favoritas"):
-            return True
+        pergunta o que fazer com elas ao limpar/apagar — mesmo com a
+        pergunta normal desligada ("sem pergunta"). Devolve (perguntou,
+        escolha): `escolha` e True (manter), False (apagar tudo) ou None
+        (desistiu); `perguntou` diz se a pergunta chegou a aparecer (sem
+        favoritas na jogada, ou com a opção desligada, nada e perguntado e
+        `escolha` vem o padrão da opção, so para servir de filtro em quem
+        limpa; quem apaga a conversa inteira deve olhar `perguntou` antes de
+        decidir redirecionar para uma limpeza)."""
+        manter_padrao = bool(self.cfg.get("limpar_manter_favoritas"))
         chaves = list(chaves)
-        if not (self.banco.conversas_com_favoritas() & set(chaves)):
-            return True
+        if not manter_padrao or \
+                not (self.banco.conversas_com_favoritas() & set(chaves)):
+            return False, manter_padrao
         texto = ("Alguma das conversas marcadas tem mensagens favoritas."
                  if len(chaves) > 1 else "Esta conversa tem mensagens "
                  "favoritas.")
-        return wx.MessageBox(
-            "%s Quer mesmo %s?" % (texto, verbo), "Mensagens favoritas",
-            wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING, self) == wx.YES
+        dlg = wx.MessageDialog(
+            self, "%s O que fazer com elas ao %s?" % (texto, verbo),
+            "Mensagens favoritas",
+            wx.YES_NO | wx.CANCEL | wx.CANCEL_DEFAULT | wx.ICON_WARNING)
+        dlg.SetYesNoCancelLabels("Manter as favoritas", "Apagar tudo",
+                                 "Cancelar")
+        try:
+            r = dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+        if r == wx.ID_CANCEL:
+            return True, None
+        return True, r == wx.ID_YES
 
     def _limpar_conversa(self, conv):
         """Apaga as mensagens e as mídias da conversa neste computador e, se a
-        pessoa quiser, no celular, mas deixa a conversa na lista. As
-        favoritas ficam de fora conforme a opção "Manter as mensagens
-        favoritas ao limpar a conversa". O que e limpo nao volta por
-        historico."""
-        if not self._perguntar_favoritas([conv.chave], "limpar"):
+        pessoa quiser, no celular, mas deixa a conversa na lista. Com
+        mensagem favorita na conversa, pergunta antes se quer manter as
+        favoritas ou apagar tudo. O que e limpo nao volta por historico."""
+        _, manter_favoritas = self._escolher_sobre_favoritas([conv.chave],
+                                                              "limpar")
+        if manter_favoritas is None:
             return
+        self._executar_limpeza(conv, manter_favoritas)
+
+    def _executar_limpeza(self, conv, manter_favoritas):
+        """A limpeza de verdade, depois de decidido o que fazer com as
+        favoritas (`_escolher_sobre_favoritas`, ou direto pela opção)."""
         sel = limpeza.selecionar(self.banco, limpeza.Filtros(
             o_que=limpeza.MENSAGENS, conta_id=conv.conta_id,
-            conversa_id=conv.id,
-            manter_favoritas=bool(self.cfg.get("limpar_manter_favoritas"))))
+            conversa_id=conv.id, manter_favoritas=manter_favoritas))
         if not sel.quantidade:
             self.fala.falar("A conversa já está vazia.", interromper=True)
             return
@@ -3937,9 +3974,15 @@ class Janela(wx.Frame):
     def _limpar_varias_conversas(self, convs, quantas):
         """Limpa as conversas marcadas com uma pergunta so (ou nenhuma, com a
         confirmacao desligada). As conversas continuam na lista."""
-        manter_favoritas = bool(self.cfg.get("limpar_manter_favoritas"))
-        if not self._perguntar_favoritas([c.chave for c in convs], "limpar"):
+        _, manter_favoritas = self._escolher_sobre_favoritas(
+            [c.chave for c in convs], "limpar")
+        if manter_favoritas is None:
             return
+        self._executar_limpeza_varias(convs, quantas, manter_favoritas)
+
+    def _executar_limpeza_varias(self, convs, quantas, manter_favoritas):
+        """A limpeza em lote de verdade, depois de decidido o que fazer com
+        as favoritas."""
         selecoes = []
         for c in convs:
             sel = limpeza.selecionar(self.banco, limpeza.Filtros(
