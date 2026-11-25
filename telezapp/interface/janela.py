@@ -849,6 +849,8 @@ class Janela(wx.Frame):
         item(m_msg, "copiar_conteudo",
              "Copiar a mídia ou escolher o que copiar...\tCtrl+Shift+C")
         item(m_msg, "copiar_ia", "Copiar a transcrição ou descrição")
+        item(m_msg, "transcrever_descrever",
+             "Transcrever o áudio ou descrever a mídia selecionada")
         item(m_msg, "detalhes", "&Detalhes\tAlt+Enter")
         item(m_msg, "editar_msg", "Edi&tar mensagem	F2")
         item(m_msg, "reagir", "Re&agir à mensagem...\tCtrl+Shift+G")
@@ -1170,6 +1172,7 @@ class Janela(wx.Frame):
             "copiar": lambda e: self._copiar(),
             "copiar_conteudo": lambda e: self._copiar_o_conteudo(),
             "copiar_ia": lambda e: self._copiar_texto_ia(),
+            "transcrever_descrever": lambda e: self._transcrever_descrever(),
             "encaminhar": lambda e: self._encaminhar(),
             "recompartilhar_status": lambda e: self._recompartilhar_status(),
             "editar_msg": lambda e: self._editar_mensagem(),
@@ -7737,10 +7740,7 @@ class Janela(wx.Frame):
         if acao == "baixar":
             self._abrir_midia(False, x)
         elif acao == "ia":
-            if m.extras_de(x)["ia"].get("texto"):
-                self._ia_ver(x)
-            else:
-                self._ia_processar(x)
+            self._transcrever_descrever(x)
         else:
             self._abrir_midia(True, x)
 
@@ -8387,6 +8387,25 @@ class Janela(wx.Frame):
             opcoes.append(("Baixar a mídia sem abrir",
                            lambda: self._abrir_midia(False, x)))
         return opcoes
+
+    def _transcrever_descrever(self, x=None):
+        """O item Transcrever/Descrever do menu, na mensagem em foco: mostra
+        o texto da IA se ja existir, ou processa a midia se ainda nao houver."""
+        if x is None:
+            x = self._mensagem_selecionada()
+        if x is None:
+            self.fala.falar("Nenhuma mensagem selecionada.", interromper=True)
+            return
+        if not self._genero_ia(x):
+            bipe("erro")
+            self.fala.falar("Esta mensagem não tem áudio, imagem, vídeo, "
+                            "figurinha nem PDF para transcrever ou descrever.",
+                            interromper=True)
+            return
+        if m.extras_de(x)["ia"].get("texto"):
+            self._ia_ver(x)
+        else:
+            self._ia_processar(x)
 
     def _opcoes_ia(self, x):
         genero = self._genero_ia(x)

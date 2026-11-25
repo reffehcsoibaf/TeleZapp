@@ -793,6 +793,8 @@ Nenhum arquivo sai do computador antes de você usar a ação numa mensagem e co
 
 No menu de contexto de uma mensagem de voz, áudio, foto, figurinha, vídeo ou PDF aparece a ação, como Transcrever o áudio. A mídia é baixada antes, se preciso.
 
+No menu Mensagens há "Transcrever o áudio ou descrever a mídia selecionada", que faz o mesmo pela mensagem em foco: se o texto já existir, abre; se não existir, transcreve ou descreve. Ele nasce sem tecla; escolha uma em Configurações, Atalhos.
+
 O texto fica guardado na mensagem. A linha mostra o começo; Ver a transcrição, a descrição ou o texto do PDF abre o texto inteiro, com Copiar e Salvar em arquivo; e Copiar copia só ele. Para refazer, use a ação de novo.
 
 A descrição de PDF mantém a ordem da leitura e põe, no lugar de cada imagem, gráfico ou tabela, uma descrição entre colchetes.

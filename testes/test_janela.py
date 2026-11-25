@@ -1260,6 +1260,34 @@ def test_copiar_transcricao_ou_descricao_tem_slot_de_atalho(j, monkeypatch):
     assert copiados[-1] == ("um gato", "Descrição copiada.")
 
 
+def test_transcrever_ou_descrever_tem_slot_de_atalho(
+        j, monkeypatch, tmp_path):
+    chave = "transcrever_descrever"
+    assert chave in j.atalhos.acoes
+    assert j.atalhos.efetivo(chave) == ""
+    j._aplicar_opcao("atalhos", {chave: "Ctrl+Alt+Y"})
+    assert j.itens[chave].rotulo.endswith("\tCtrl+Alt+Y")
+
+    x, _ = _ia_pronta(j, monkeypatch, tmp_path)
+    j.lista_msgs.SetSelection(j.mapa.index("7"))
+    feitos = []
+    monkeypatch.setattr(j, "_ia_processar",
+                        lambda y: feitos.append(("processar", y.id)))
+    monkeypatch.setattr(j, "_ia_ver",
+                        lambda y: feitos.append(("ver", y.id)))
+    j._transcrever_descrever()
+    assert feitos == [("processar", "7")]
+    m.atualizar_extras(x, ia={"texto": "ola, tudo bem?", "genero": "audio"})
+    j._transcrever_descrever()
+    assert feitos[-1] == ("ver", "7")
+
+    monkeypatch.setattr(j, "_mensagem_selecionada", lambda: None)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._transcrever_descrever()
+    assert "Nenhuma mensagem selecionada" in ditas[-1]
+
+
 def test_detalhes_pedem_ao_provedor_o_nome_de_quem_recebeu(j, monkeypatch):
     j.lista_conv.SetSelection(0)
     j._char_hook(Tecla(wx_falso.WXK_RETURN))
