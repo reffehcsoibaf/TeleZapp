@@ -5,6 +5,7 @@ com Espaco; numa enquete de uma resposta so, marcar uma desmarca a outra),
 Votar, Tirar meu voto, Atualizar e Ver quem votou."""
 import wx
 
+from telezapp.interface import dialogos
 from telezapp.nucleo import modelos as m
 
 DEMORA_ATUALIZAR_MS = 1500     # o voto vai e volta pelo servico
@@ -134,18 +135,19 @@ class DialogoEnquete(wx.Dialog):
         wx.CallLater(DEMORA_ATUALIZAR_MS, refazer)
 
     def _quem(self):
-        linhas = []
-        for i, opcao in enumerate(self.enq["opcoes"]):
-            nomes = m.quem_votou_em(self.enq, i)
-            if nomes:
-                linhas.append("%s (%d): %s" % (opcao, len(nomes),
-                                               ", ".join(nomes)))
-        texto = "\n".join(linhas) or "Ninguém votou ainda."
-        dlg = wx.MessageDialog(self, texto, "Quem votou", wx.OK)
-        try:
-            dlg.ShowModal()
-        finally:
-            dlg.Destroy()
+        """Um texto somente leitura, uma linha por pessoa: 'Nome: opção'."""
+        linhas = m.linhas_de_quem_votou(self.enq)
+        texto = "\n".join(linhas) if linhas else "Ninguém votou ainda."
+        dialogos.mostrar_mensagem(self, "Quem votou em quê", texto,
+                                  self._copiar)
+
+    def _copiar(self, texto):
+        if wx.TheClipboard.Open():
+            try:
+                wx.TheClipboard.SetData(wx.TextDataObject(texto))
+            finally:
+                wx.TheClipboard.Close()
+        self._dizer("Texto copiado.")
 
 
 def abrir(pai, obter, pode_votar, votar, atualizar, fala):

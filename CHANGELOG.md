@@ -7,6 +7,10 @@ Antes de escrever aqui, confira a versão em vigor: `git fetch --tags` e
 `gh release list -L 3` (a Latest é a publicada). O que veio depois dela vai em
 "Próxima versão (ainda sem número)".
 
+## Próxima versão (ainda sem número)
+
+"Ver quem votou" da enquete, um por linha e texto somente leitura (pedido de quem usa): em vez de uma `wx.MessageBox` agrupando por opção ("Sexta (2): Ana, Bia"), a janela "Ver quem votou" abre com `dialogos.mostrar_mensagem` (texto somente leitura, com Copiar texto e Fechar), uma linha por pessoa: "Ana: Sexta", "Bia: Sexta, Domingo" (`modelos.linhas_de_quem_votou`, em ordem alfabética, ignorando quem tirou o voto). Anônimas continuam sem nada (o botão já fica desligado). Testes em `test_enquetes.py`.
+
 ## 2026.11.23.1
 
 Chamada recebida que não acaba (log do Igor, 23/11: uma oferta do WhatsApp Web, `platform=web`, ficou 6823 s tocando sem `terminate`; `_ao_receber` recusa toda chamada nova com `ocupado = bool(self.ligacoes)` e dez ofertas foram recusadas como "outra aberta"). Três camadas: (1) `Janela._vigiar_toque` (a cada 5 s, a partir de `TOCANDO`) recusa a chamada recebida que passa de `nucleo.chamadas.SEGUNDOS_TOCANDO_SEM_INTERACAO` (90 s) sem tecla, Tab ou clique na janela (`DialogoChamada.ao_interagir`; `EVT_CHAR_HOOK`, `EVT_CHILD_FOCUS`, `EVT_LEFT_DOWN`) e, se o provedor não publicar `ENCERRADA` em `ESPERA_DO_FIM_FORCADO_MS` (4 s), encerra a `Chamada` localmente; (2) `ChamadasWhatsapp._descartar_toques_parados` e `ChamadasTelegram._descartar_toques_parados` rodam no início de `_ao_receber`: ligação entrante em `TOCANDO` com 90 s ou mais (`_Ligacao.criada_em`, `Chamada.criada_em`) é recusada na rede (se der) e tirada de `ligacoes`/`chamadas` como `PERDIDA`; (3) `deve_recusar_por_inatividade` é a regra pura, testável. A causa de o aviso de fim não chegar segue sem prova.
