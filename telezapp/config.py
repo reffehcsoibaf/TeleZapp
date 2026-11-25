@@ -437,19 +437,6 @@ OPCOES = (
           "toca como antes, sem ser reconhecida como de grupo. Se o "
           "desempenho não for satisfatório, o recurso pode sair do TeleZapp "
           "nas próximas versões.", servico="whatsapp"),
-    Opcao("whatsapp_formularios",
-          "Formulários das empresas do WhatsApp",
-          CATEGORIA_EXPERIMENTAL, False,
-          "Experimental. Quando uma empresa manda um botão que abre um "
-          "formulário (como Iniciar atendimento), o botão abre o formulário "
-          "numa janela do TeleZapp, e o que você preencher é enviado à "
-          "empresa, como no WhatsApp. Funciona com os formulários que não "
-          "dependem de uma consulta da empresa a cada tela; os outros "
-          "avisam que ainda não abrem no TeleZapp e pedem para preencher no "
-          "celular. Desmarcada, todo formulário avisa que abre no celular. "
-          "A janela usa o navegador do Windows (WebView2). Se o desempenho "
-          "não for satisfatório, o recurso pode sair do TeleZapp nas "
-          "próximas versões.", servico="whatsapp"),
     Opcao("chamada_em_andamento_whatsapp",
           "Entrar em chamadas em grupo do WhatsApp que já começaram",
           CATEGORIA_EXPERIMENTAL, False,

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+﻿# SPDX-License-Identifier: GPL-3.0-or-later
 """Logica da janela principal com um wx simulado (testes/wx_falso.py)."""
 import os
 import sys
@@ -6980,31 +6980,13 @@ def test_comandos_do_robo_listam_e_enviam(j):
     assert enviados == ["/start"]
 
 
-def test_botao_de_formulario_com_a_caixa_experimental_abre_o_formulario(j):
+def test_botao_de_formulario_abre_o_formulario(j):
     x = msg("7", "Clique abaixo")
-    abertos, ditas = [], []
-    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    abertos = []
     j._abrir_formulario = lambda m_, a, p: abertos.append(a["rotulo"])
     acao = {"tipo": "formulario", "rotulo": "Iniciar atendimento", "id": "1"}
-    j.cfg.set("whatsapp_formularios", False)
-    j._tocar_acao(x, acao)
-    assert abertos == [] and "formulário do WhatsApp" in ditas[-1]
-    j.cfg.set("whatsapp_formularios", True)
     j._tocar_acao(x, acao)
     assert abertos == ["Iniciar atendimento"]
-
-
-def test_botao_de_formulario_explica_que_so_abre_no_celular(j):
-    x = msg("7", "Clique abaixo")
-    ditas = []
-    j.fala.falar = lambda t, interromper=False: ditas.append(t)
-    enviadas = []
-    j.contas.provedores[x.conta_id].responder_acao =         lambda m, a: enviadas.append(a)
-    j._tocar_acao(x, {"tipo": "formulario", "rotulo": "Iniciar atendimento",
-                      "id": "1"})
-    assert enviadas == []                 # nada e mandado a empresa
-    assert "formulário do WhatsApp" in ditas[-1]
-    assert "celular" in ditas[-1]
 
 
 def test_botoes_de_robo_no_tocar_acao(j):

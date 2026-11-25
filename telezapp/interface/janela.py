@@ -8292,17 +8292,8 @@ class Janela(wx.Frame):
         if tipo == "robo_copiar":
             self._copiar_texto(acao.get("texto", ""))
             return
-        if tipo == "formulario" and self.cfg.get("whatsapp_formularios"):
-            self._abrir_formulario(x, acao, prov)
-            return
         if tipo == "formulario":
-            bipe("erro")
-            self.fala.falar(
-                "Este botão abre um formulário do WhatsApp, que o TeleZapp "
-                "ainda não consegue abrir. Abra esta conversa no celular "
-                "para preencher. Também dá para digitar MENU ou pedir para "
-                "falar com um atendente, se a empresa oferecer.",
-                interromper=True)
+            self._abrir_formulario(x, acao, prov)
             return
         if tipo == "robo_indisponivel":
             bipe("erro")
@@ -8328,8 +8319,8 @@ class Janela(wx.Frame):
 
     @seguro
     def _abrir_formulario(self, x, acao, prov):
-        """Abre o formulario de uma empresa do WhatsApp (experimental): busca
-        os dados fora da janela e depois abre a janela do formulario."""
+        """Abre o formulario de uma empresa do WhatsApp: busca os dados fora
+        da janela e depois abre a janela do formulario."""
         from telezapp.interface import formulario_whatsapp as fw
         if not fw.disponivel():
             bipe("erro")
@@ -8337,8 +8328,7 @@ class Janela(wx.Frame):
                             "Windows, que não está disponível.",
                             interromper=True)
             return
-        self.fala.falar("Abrindo o formulário. Recurso experimental.",
-                        interromper=True)
+        self.fala.falar("Abrindo o formulário...", interromper=True)
 
         def trabalho():
             try:

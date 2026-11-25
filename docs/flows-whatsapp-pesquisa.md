@@ -41,7 +41,7 @@ Estado no TeleZapp (branch `log-acoes-interativas`): o botão aparece como açã
 1. **Prova de conceito:** abrir a primeira tela do formulário numa janela do TeleZapp (navegador embutido, como na janela dos robôs do Telegram) com uma ponte mínima, só para ver se a página carrega e quais respostas ela pede.
 2. **DLL:** consulta `xwa_extensions_get_flow_data` e, se for o caso, o canal de dados.
 3. **Concluir:** receber o resultado do formulário e mandar o `nativeFlowResponseMessage` à empresa, como o celular.
-4. Caixa em Recursos experimentais, desligada por padrão. Se a Meta mudar o protocolo, o recurso pode quebrar sem aviso.
+4. Sempre ligado, sem caixa em Recursos experimentais (decisão de 25/11): é pouca coisa a mais, e rara de acontecer. Se a Meta mudar o protocolo, o recurso pode quebrar sem aviso.
 
 ## Cuidados
 
