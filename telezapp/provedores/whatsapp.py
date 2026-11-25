@@ -75,7 +75,11 @@ EMBRULHOS = ("deviceSentMessage", "ephemeralMessage", "viewOnceMessage",
              "limitSharingMessage", "questionMessage", "questionReplyMessage",
              "botForwardedMessage", "groupStatusMessage",
              # a enquete V4 vem dentro de um envelope
-             "pollCreationMessageV4")
+             "pollCreationMessageV4",
+             # figurinha com audio embutido (25/11): o envelope guarda uma
+             # Message com stickerMessage dentro, que por sua vez tem um
+             # AudioMessage embutido (stickerMessage.audioMessage)
+             "audioStickerMessage")
 # Todas as versoes da mensagem que cria uma enquete (a V4 e aberta como
 # envelope, ver EMBRULHOS)
 CRIACAO_DE_ENQUETE = ("pollCreationMessage", "pollCreationMessageV2",
@@ -291,12 +295,72 @@ def campos(msg):
         return []
 
 
+def _varint(dados, i):
+    valor = deslocamento = 0
+    while True:
+        b = dados[i]
+        i += 1
+        valor |= (b & 0x7F) << deslocamento
+        if not (b & 0x80):
+            return valor, i
+        deslocamento += 7
+
+
+def campos_brutos(msg):
+    """[(numero, tipo_wire, tamanho_ou_valor)] de TODOS os campos na
+    serializacao de `msg`, inclusive os que o nosso .proto nao conhece (nao
+    aparecem em campos()/ListFields) - o UnknownFields() do protobuf nao
+    funciona com o backend instalado (upb). Usado so para investigar tipos
+    de mensagem novos da Meta; nunca registra o conteudo, so o formato."""
+    try:
+        dados = msg.SerializeToString()
+    except Exception:
+        return []
+    saida, i, n = [], 0, len(dados)
+    try:
+        while i < n:
+            tag, i = _varint(dados, i)
+            numero, wire = tag >> 3, tag & 7
+            if wire == 0:
+                valor, i = _varint(dados, i)
+                saida.append((numero, wire, valor))
+            elif wire == 1:
+                saida.append((numero, wire, 8))
+                i += 8
+            elif wire == 2:
+                tamanho, i = _varint(dados, i)
+                saida.append((numero, wire, tamanho))
+                i += tamanho
+            elif wire == 5:
+                saida.append((numero, wire, 4))
+                i += 4
+            else:
+                break
+    except (IndexError, ValueError):
+        pass
+    return saida
+
+
 def desembrulhar(msg):
     """Abre os envelopes ate a mensagem de verdade."""
     for _ in range(6):
         for nome in EMBRULHOS:
             try:
                 if msg.HasField(nome):
+                    if nome == "audioStickerMessage":
+                        # a Meta pode ter posto o audio num campo que o
+                        # nosso .proto ainda nao conhece (so sabemos abrir
+                        # o campo 1, "message", o fallback) - registra o
+                        # formato bruto pra investigar quando chegar um
+                        # exemplo real com o audio de verdade
+                        brutos = [t for t in
+                                  campos_brutos(getattr(msg, nome))
+                                  if t[0] != 1]
+                        if brutos:
+                            log.info(
+                                "audioStickerMessage: campos desconhecidos "
+                                "(numero, tipo_wire, tamanho/valor): %s",
+                                brutos)
                     msg = getattr(msg, nome).message
                     break
             except (ValueError, AttributeError):
@@ -1164,7 +1228,9 @@ def conteudo_de(interna):
         return (m.DOCUMENTO, x.caption, 0, x.fileName or x.title,
                 x.fileLength)
     if "stickerMessage" in presentes:
-        return m.FIGURINHA, "", 0, "", 0
+        x = interna.stickerMessage
+        segundos = x.audioMessage.seconds if x.HasField("audioMessage")             else 0
+        return m.FIGURINHA, "", segundos, "", x.fileLength
     for nome in CRIACAO_DE_ENQUETE:
         if nome in presentes:
             p = getattr(interna, nome)
