@@ -3521,6 +3521,45 @@ def test_grupo_limpar_conversa_apaga_mensagens_e_mantem_na_lista(j):
     assert chave in j.indice
 
 
+def test_limpar_conversa_mantem_as_favoritas_por_padrao(j):
+    _abrir_com_caixa(j)
+    chave = ("t1", "20")
+    fav = m.Mensagem("t1", "20", "5", texto="oi", data=AGORA)
+    m.atualizar_extras(fav, favorita=True)
+    comum = m.Mensagem("t1", "20", "6", texto="tchau", data=AGORA)
+    j.banco.salvar_mensagens([fav, comum])
+    wx_falso.resposta_messagebox[0] = wx_falso.YES
+    j._limpar_conversa(j.indice[chave])
+    assert "mensagens favoritas" in wx_falso.mensagens[-1]
+    restantes = j.banco.mensagens("t1", "20")
+    assert [x.id for x in restantes] == ["5"]
+    assert chave in j.indice
+    wx_falso.resposta_messagebox[0] = wx_falso.NO
+
+
+def test_limpar_conversa_com_favorita_pergunta_mesmo_sem_pergunta_ligada(j):
+    _abrir_com_caixa(j)
+    chave = ("t1", "20")
+    fav = m.Mensagem("t1", "20", "5", texto="oi", data=AGORA)
+    m.atualizar_extras(fav, favorita=True)
+    j.banco.salvar_mensagens([fav])
+    j.cfg.set("confirmar_limpar_conversa", False)   # "sem pergunta" ligada
+    wx_falso.resposta_messagebox[0] = wx_falso.NO
+    j._limpar_conversa(j.indice[chave])
+    assert [x.id for x in j.banco.mensagens("t1", "20")] == ["5"]  # desistiu
+
+
+def test_limpar_conversa_com_a_opcao_desligada_apaga_as_favoritas_tambem(j):
+    _abrir_com_caixa(j)
+    chave = ("t1", "20")
+    fav = m.Mensagem("t1", "20", "5", texto="oi", data=AGORA)
+    m.atualizar_extras(fav, favorita=True)
+    j.banco.salvar_mensagens([fav])
+    j.cfg.set("limpar_manter_favoritas", False)
+    j._limpar_conversa(j.indice[chave])
+    assert j.banco.mensagens("t1", "20") == []
+
+
 def test_limpar_conversa_zera_as_nao_lidas_na_lista_na_hora(j):
     _abrir_com_caixa(j)
     chave = ("t1", "20")
@@ -3567,6 +3606,24 @@ def test_limpar_conversa_escolhendo_celular_lembra_e_manda(j, monkeypatch):
     j._limpar_conversa(conv)
     assert pedidos == [("20", "L1")]
     assert not j.banco.mensagens("t1", "20", 1)
+
+
+def test_apagar_conversa_com_favorita_pergunta_antes(j):
+    chave = ("t1", "10")
+    fav = m.Mensagem("t1", "10", "5", texto="oi", data=AGORA)
+    m.atualizar_extras(fav, favorita=True)
+    j.banco.salvar_mensagens([fav])
+    wx_falso.resposta_messagebox[0] = wx_falso.NO
+    j._apagar_conversa(j.indice[chave])
+    assert chave in j.indice            # desistiu no aviso de favoritas
+    assert "mensagens favoritas" in wx_falso.mensagens[-1]
+    wx_falso.mensagens.clear()
+    j.cfg.set("limpar_manter_favoritas", False)
+    wx_falso.resposta_messagebox[0] = wx_falso.YES
+    j._apagar_conversa(j.indice[chave])
+    assert not any("favoritas" in t for t in wx_falso.mensagens)
+    assert chave not in j.indice
+    wx_falso.resposta_messagebox[0] = wx_falso.NO
 
 
 def test_grupo_apagar_pergunta_a_acao_e_encaminha(j, monkeypatch):
