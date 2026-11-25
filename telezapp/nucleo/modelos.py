@@ -657,7 +657,8 @@ def conteudo(m, com_estado=True):
     if m.tipo == DOCUMENTO:
         return _partes("documento", m.nome_arquivo, tam, legenda)
     if m.tipo == FIGURINHA:
-        return _partes("figurinha", m.texto)
+        # figurinha com audio (25/11): m.segundos vem do audio embutido
+        return _partes("figurinha", dur, m.texto)
     if m.tipo == AGUARDANDO:
         return ("mensagem ainda não recebida: o WhatsApp não entregou o "
                 "conteúdo, ela pode chegar depois")
