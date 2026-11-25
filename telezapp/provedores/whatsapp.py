@@ -6806,11 +6806,7 @@ class ProvedorWhatsApp(Provedor):
         if not flow_id.isdigit():
             raise RuntimeError("O botão não traz o número do formulário.")
         usuario, servidor = jid_de_texto(msg.conversa_id)
-        # TESTE LOCAL, NAO COMMITAR: so tenta a chave real se a pessoa pos um
-        # token na variavel de ambiente TELEZAPP_FLOW_TOKEN_TESTE.
-        chave = self._chave_do_formulario_teste(
-            "%s@c.us" % usuario, flow_id)
-        if not chave and pf.formulario_consulta_a_empresa(params):
+        if pf.formulario_consulta_a_empresa(params):
             # a pagina criptografa os pedidos a empresa com a chave publica
             # dela, que a Meta so entrega a quem apresenta o token do
             # aplicativo do WhatsApp Web; obter esse token exigiria acessar
@@ -6845,50 +6841,8 @@ class ProvedorWhatsApp(Provedor):
         elif servidor == "lid":
             biz_jid = "%s@lid" % usuario
         return pf.dados_do_formulario(
-            params, flow_json, chave_publica=chave, biz_jid=biz_jid,
+            params, flow_json, biz_jid=biz_jid,
             nome_da_empresa=nome)
-
-    def _chave_do_formulario_teste(self, biz_jid, flow_id):
-        """TESTE LOCAL, NAO COMMITAR, NAO LANCAR: tenta a consulta real da
-        chave publica da empresa com um token lido so da variavel de
-        ambiente TELEZAPP_FLOW_TOKEN_TESTE (nunca de config nem de arquivo).
-        O valor do token nunca e logado nem guardado. '' se a variavel nao
-        estiver definida ou a consulta falhar."""
-        import os
-        token = (os.environ.get("TELEZAPP_FLOW_TOKEN_TESTE") or "").strip()
-        if not token:
-            return ""
-        import urllib.error
-        import urllib.request
-        from telezapp import VERSAO
-        corpo = json.dumps({
-            "access_token": token, "doc_id": "40083220921276114",
-            "variables": {"request": {"extensions": {
-                "biz_jid": biz_jid, "flow_id": str(flow_id)}}},
-            "lang": "pt_BR"}).encode("utf-8")
-        pedido = urllib.request.Request(
-            "https://graph.whatsapp.com/graphql/catalog", data=corpo,
-            method="POST", headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "User-Agent": "TeleZapp/" + VERSAO})
-        try:
-            with urllib.request.urlopen(pedido, timeout=20) as r:
-                dados = json.loads(r.read().decode("utf-8")).get("data")
-        except (urllib.error.URLError, OSError, ValueError) as e:
-            log.info("teste de chave: a consulta falhou (%s)",
-                     type(e).__name__)
-            return ""
-        try:
-            lista = dados["xwa_extensions_get_flow_data"][
-                "extensions_flow_data"]
-            chave = (lista[0]["extensions"]["metadata"].get(
-                "endpoint_public_key") or {}).get("key") or ""
-        except (KeyError, IndexError, TypeError, AttributeError):
-            chave = ""
-        log.info("teste de chave: a consulta voltou com chave: %s",
-                 "sim" if chave else "não")
-        return chave
 
     def responder_formulario(self, msg, acao, payload):
         """Manda a empresa o que o formulario concluido entregou."""
