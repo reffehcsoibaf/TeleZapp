@@ -9,6 +9,8 @@ $conversation_out, ...): o texto fora delas é falado como está escrito, e
 repetir uma flag repete o pedaço. Modelo vazio desliga a fala daquele tipo
 (o som da notificação continua).
 O padrão repete o aviso de antes: "Nova mensagem em Ana. Ana, 10:00: oi".
+Uma flag sem valor (ou a conversa na conversa aberta) é omitida da frase,
+como era antes do modelo editável.
 """
 import re
 
@@ -35,8 +37,10 @@ FLAGS = {
 CHAVE_POR_FLAG = {flag: chave for chave, flag in FLAGS.items()}
 PADRAO_OCULTOS = ("servico", "conta")
 MODELO_PADRAO = "$New em $conversation_out. $Sender_Name, $Time, $Content"
-AUSENTE = "(sem conteúdo)"
 _PADRAO_DE_FLAGS = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*")
+# Palavras de ligação que ficam soltas quando a flag seguinte não tem valor
+# ("Nova mensagem em ." -> "Nova mensagem.").
+_LIGACOES = re.compile(r"(?<!\w)(?:em|de|na|no|com|por|para)\s*(?=[.,;:]|$)")
 
 TIPOS = ("privada", "grupo", "canal")
 TIPO_PADRAO = "privada"
@@ -225,21 +229,33 @@ def texto_do_item(valor, chave, tipo=TIPO_PADRAO):
     return "%s: %s" % (ROTULOS[chave], estado)
 
 
+def _limpar(texto):
+    """Tira o que ficou solto quando uma flag não tinha valor: ligações
+    ("em ."), espaços antes de pontuação e separadores no fim."""
+    texto = _LIGACOES.sub("", texto)
+    texto = re.sub(r"\s+", " ", texto)
+    texto = re.sub(r"\s+([.,;:])", r"\1", texto)
+    texto = re.sub(r"(?:\.\s*,)+", ".", texto)
+    return re.sub(r"[\s,;:]+$", "", texto).strip()
+
+
 def renderizar(modelo, partes, aberta=False):
     """Troca cada flag pelo pedaço correspondente. Pedaço que não existe
-    (ou a conversa aberta) vira `(sem conteúdo)`; flag desconhecida fica
-    como texto. Modelo vazio não fala nada."""
+    (ou a conversa aberta) sai da frase, como antes do modelo editável;
+    flag desconhecida fica como texto. Modelo vazio não fala nada."""
     if not isinstance(modelo, str) or not modelo.strip():
         return ""
 
     def troca(m):
         flag = m.group(0)
         chave = CHAVE_POR_FLAG.get(flag)
-        if chave is None or (aberta and chave == "conversa"):
-            return AUSENTE if chave is not None else flag
-        return partes.get(chave) or AUSENTE
+        if chave is None:
+            return flag
+        if aberta and chave == "conversa":
+            return ""
+        return partes.get(chave) or ""
 
-    return _PADRAO_DE_FLAGS.sub(troca, modelo)
+    return _limpar(_PADRAO_DE_FLAGS.sub(troca, modelo))
 
 
 def montar(valor, partes, aberta=False, tipo=TIPO_PADRAO):

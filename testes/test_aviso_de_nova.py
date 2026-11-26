@@ -11,7 +11,9 @@ PARTES = {"inicio": "Nova mensagem", "conversa": "Família",
 def test_padrao_e_o_aviso_de_antes():
     assert an.montar(None, PARTES) == "Nova mensagem em Família. Ana, 10:00, oi"
     assert an.montar(None, PARTES, aberta=True) == \
-        "Nova mensagem em (sem conteúdo). Ana, 10:00, oi"
+        "Nova mensagem. Ana, 10:00, oi"
+    assert an.montar(None, dict(PARTES, conversa="")) == \
+        "Nova mensagem. Ana, 10:00, oi"
     for tipo in an.TIPOS:
         assert an.montar(None, PARTES, tipo=tipo) == \
             "Nova mensagem em Família. Ana, 10:00, oi"
@@ -46,10 +48,10 @@ def test_flag_repetida_repete_o_pedaco():
         ["$Sender_Name", "$Sender_Name"]
 
 
-def test_pedaco_ausente_vira_aviso():
+def test_pedaco_ausente_sai_da_frase():
     v = an.definir_modelo(None, "$New $Content")
     assert an.montar(v, {"inicio": "Nova mensagem", "conteudo": ""}) == \
-        "Nova mensagem (sem conteúdo)"
+        "Nova mensagem"
     v = an.definir_modelo(None, "$Desconhecida $New")
     assert an.montar(v, PARTES) == "$Desconhecida Nova mensagem"
 
