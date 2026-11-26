@@ -12,6 +12,49 @@ import wx
 from telezapp.nucleo import lista_conversas as lc
 
 
+class DialogoFlags(wx.Dialog):
+    """Flags que o modelo do aviso aceita. Enter (ou duplo clique) escolhe
+    a flag e fecha; quem chamou insere no ponto do cursor."""
+
+    def __init__(self, pai, flags, rotulos, fala=None,
+                 titulo="Flags do aviso"):
+        super().__init__(pai, title=titulo)
+        self.fala, self.escolhida = fala, None
+        self.opcoes = [(flags[c], rotulos[c]) for c in flags]
+        lay = wx.BoxSizer(wx.VERTICAL)
+        lay.Add(wx.StaticText(
+            self, label="Escolha a flag e pressione Enter para inseri-la "
+                        "no modelo:"), 0, wx.ALL, 10)
+        self.lista = wx.ListBox(
+            self, name="Flags disponíveis",
+            choices=["%s — %s" % (f, r) for f, r in self.opcoes])
+        lay.Add(self.lista, 0, wx.EXPAND | wx.ALL, 10)
+        b = wx.Button(self, wx.ID_OK, "&Inserir")
+        b.Bind(wx.EVT_BUTTON, lambda e: self.escolher(self.lista.GetSelection()))
+        lay.Add(b, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+        self.SetEscapeId(wx.ID_CANCEL)
+        self.SetSizerAndFit(lay)
+        self.lista.Bind(wx.EVT_KEY_DOWN, self._tecla)
+        self.lista.Bind(wx.EVT_LISTBOX_DCLICK,
+                        lambda e: self.escolher(self.lista.GetSelection()))
+        if self.opcoes:
+            self.lista.SetSelection(0)
+
+    def _tecla(self, evt):
+        if evt.GetKeyCode() in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
+            self.escolher(self.lista.GetSelection())
+            return
+        evt.Skip()
+
+    def escolher(self, i):
+        if not 0 <= i < len(self.opcoes):
+            return
+        self.escolhida = self.opcoes[i][0]
+        if self.fala is not None:
+            self.fala.falar("Inserir %s." % self.escolhida, interromper=True)
+        self.EndModal(wx.ID_OK)
+
+
 class DialogoListaConversas(wx.Dialog):
     """Lista de quatro informacoes, na ordem em que aparecem na lista de
     conversas; Enter ou Espaco ativa e desativa, e dois botoes mudam a ordem.
@@ -56,6 +99,25 @@ class DialogoListaConversas(wx.Dialog):
                     wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
             self._mostrar_digitar()
             self.digitar.Bind(wx.EVT_CHOICE, lambda e: self.mudar_digitar())
+        self.modelo = None
+        self.botao_flags = None
+        self._sincronizando = False
+        if hasattr(nucleo, "FLAGS"):       # so o aviso falado tem modelo
+            rotulo = "&Modelo do aviso (flags e texto livre):"
+            lay.Add(wx.StaticText(self, label=rotulo), 0,
+                    wx.LEFT | wx.RIGHT, 10)
+            self.modelo = wx.TextCtrl(
+                self, value=self.lc.normalizar(self.ler())["modelo"],
+                style=wx.TE_MULTILINE, size=(420, 80),
+                name=rotulo.replace("&", ""))
+            lay.Add(self.modelo, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+            self.modelo.Bind(wx.EVT_TEXT, lambda e: self.mudar_modelo())
+            self.botao_flags = wx.Button(self, label="Inserir &flag")
+            linha_flags = wx.WrapSizer(wx.HORIZONTAL)
+            linha_flags.Add(self.botao_flags, 0, wx.RIGHT | wx.BOTTOM, 8)
+            lay.Add(linha_flags, 0, wx.LEFT | wx.RIGHT, 10)
+            self.botao_flags.Bind(
+                wx.EVT_BUTTON, lambda e: self.inserir_flag())
         linha = wx.WrapSizer(wx.HORIZONTAL)
         self.botoes = {}
         for chave, rotulo in (("cima", "Mover para &cima"),
@@ -88,6 +150,10 @@ class DialogoListaConversas(wx.Dialog):
             self.digitar.SetFocus()
         elif foco == "so_muda" and self.so_muda is not None:
             self.so_muda.SetFocus()
+        elif foco == "modelo" and self.modelo is not None:
+            self.modelo.SetFocus()
+        elif foco == "inserir_flag" and self.botao_flags is not None:
+            self.botao_flags.SetFocus()
         elif foco in self.botoes and self.botoes[foco].IsEnabled():
             self.botoes[foco].SetFocus()
 
@@ -127,6 +193,7 @@ class DialogoListaConversas(wx.Dialog):
             self._dizer(self.lc.MENSAGEM_DO_MINIMO)
             return
         self.gravar(novo)
+        self._mostrar_modelo(novo)
         i = self.lista.GetSelection()
         self.preencher(i)
         self._dizer("ativado" if ativado else "desativado")
@@ -164,10 +231,41 @@ class DialogoListaConversas(wx.Dialog):
         self.gravar(novo)
         self.botoes["padrao"].Enable(not self.lc.eh_padrao(novo))
 
+    # ------------------------------------------------------------- modelo
+    def _mostrar_modelo(self, valor):
+        if self.modelo is not None:
+            self._sincronizando = True
+            self.modelo.SetValue(self.lc.normalizar(valor)["modelo"])
+            self._sincronizando = False
+
+    def mudar_modelo(self):
+        """Texto digitado manda: as flags presentes ligam os itens da lista."""
+        if self._sincronizando or self.modelo is None:
+            return
+        novo = self.lc.definir_modelo(self.ler(), self.modelo.GetValue())
+        self.gravar(novo)
+        self.preencher(self.lista.GetSelection())
+        self.botoes["padrao"].Enable(not self.lc.eh_padrao(novo))
+
+    def inserir_flag(self):
+        """Abre a lista de flags e insere a escolhida no ponto do cursor."""
+        if self.modelo is None:
+            return
+        dlg = DialogoFlags(self, self.lc.FLAGS, self.lc.ROTULOS, self.fala)
+        try:
+            if dlg.ShowModal() == wx.ID_OK and dlg.escolhida:
+                self.modelo.InsertText(self.modelo.GetInsertionPoint(),
+                                       dlg.escolhida)
+                self.mudar_modelo()
+                self.modelo.SetFocus()
+        finally:
+            dlg.Destroy()
+
     def restaurar(self):
         if self.so_muda is not None:
             self.so_muda.SetValue(False)
         self.gravar(self.lc.padrao())
+        self._mostrar_modelo(self.ler())
         self._mostrar_digitar()
         self.preencher(0)
         self._dizer("%s no padrão." % self.titulo)

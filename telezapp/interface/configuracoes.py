@@ -751,8 +751,8 @@ class DialogoConfiguracoes(wx.Dialog):
             self, self.modelo.aviso_em_uso, self.modelo.aviso_definir,
             self.fala, nucleo=an, titulo="Aviso falado de mensagem nova",
             explicacao="O que o TeleZapp fala quando chega uma mensagem "
-                       "nova, e em que ordem. Pelo menos um item fica "
-                       "ativado.",
+                       "nova. Marque os itens e escreva o modelo da frase "
+                       "com as flags. Modelo vazio desliga a fala.",
             foco=foco)
         try:
             dlg.ShowModal()

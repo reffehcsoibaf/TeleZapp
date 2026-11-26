@@ -49,6 +49,12 @@ def _destinos_da_lista(tipo, titulo, nucleo):
     if hasattr(nucleo, "ROTULO_SO_QUANDO_MUDA"):
         itens.append(Destino("%s: %s" % (titulo, nucleo.ROTULO_SO_QUANDO_MUDA),
                              tipo, "so_muda", ajuda))
+    if hasattr(nucleo, "FLAGS"):
+        itens.append(Destino("%s: modelo da frase" % titulo, tipo, "modelo",
+                             ajuda, "texto flag escrever personalizar"
+                                    " modelo frase aviso"))
+        itens.append(Destino("%s: inserir flag no modelo" % titulo, tipo,
+                             "inserir_flag", ajuda, "flags disponíveis"))
     itens += [
         Destino("%s: mudar a ordem das informações" % titulo, tipo, "cima",
                 ajuda, "mover para cima baixo"),

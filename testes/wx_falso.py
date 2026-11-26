@@ -392,9 +392,9 @@ class StaticText(Janela):
 
 
 class ListBox(Janela):
-    def __init__(self, *a, **k):
+    def __init__(self, *a, choices=(), **k):
         super().__init__()
-        self.itens, self.sel = [], -1
+        self.itens, self.sel = list(choices), -1
 
     def Freeze(self):
         pass
@@ -536,6 +536,11 @@ class TextCtrl(Janela):
         if getattr(self, "tudo_selecionado", False):
             self.valor, self.tudo_selecionado = "", False
         self.valor += texto
+
+    def InsertText(self, pos, texto):
+        pos = min(max(pos, 0), len(self.valor))
+        self.valor = self.valor[:pos] + texto + self.valor[pos:]
+        self.ponto = pos + len(texto)
 
     def SetInsertionPoint(self, i):
         self.ponto = i

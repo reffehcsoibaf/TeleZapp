@@ -1635,7 +1635,9 @@ PADROES.update({
     # o que o aviso falado de mensagem nova diz (nucleo/aviso_de_nova.py)
     "aviso_nova": {"ordem": ["inicio", "conversa", "servico", "conta",
                              "autor", "hora", "conteudo"],
-                   "ocultos": ["servico", "conta"]},
+                   "ocultos": ["servico", "conta"],
+                   "modelo": "$New em $conversation_out. "
+                             "$Sender_Name, $Time, $Content"},
 })
 
 
