@@ -208,7 +208,6 @@ class DialogoListaConversas(wx.Dialog):
         """Abre um menu com as flags e acrescenta a escolhida ao fim."""
         if self.modelo is None:
             return
-        ponto = len(self.modelo.GetValue())
         menu = wx.Menu()
         try:
             for chave in self.lc.CHAVES:
@@ -219,17 +218,17 @@ class DialogoListaConversas(wx.Dialog):
                 # o popup, nao para o menu: liga no dialogo, como nos outros
                 # menus da interface.
                 self.Bind(wx.EVT_MENU,
-                          lambda e, f=flag, p=ponto: self._inserir_no_modelo(
-                              f, p), item)
+                          lambda e, f=flag: self._inserir_no_modelo(f), item)
             self.botao_flags.PopupMenu(menu)
         finally:
             menu.Destroy()
 
-    def _inserir_no_modelo(self, flag, ponto):
+    def _inserir_no_modelo(self, flag):
+        # InsertText nao existe nesta versao do wxPython: WriteText escreve
+        # no ponto atual, que vai sempre para o fim do modelo.
         self.modelo.SetFocus()
-        self.modelo.InsertText(ponto, flag)
-        self.modelo.SetInsertionPoint(ponto + len(flag))
-        self.modelo.ShowPosition(ponto + len(flag))
+        self.modelo.SetInsertionPointEnd()
+        self.modelo.WriteText(flag)
         self.mudar_modelo()
 
     def restaurar(self):

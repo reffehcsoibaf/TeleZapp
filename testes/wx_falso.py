@@ -548,11 +548,7 @@ class TextCtrl(Janela):
         if getattr(self, "tudo_selecionado", False):
             self.valor, self.tudo_selecionado = "", False
         self.valor += texto
-
-    def InsertText(self, pos, texto):
-        pos = min(max(pos, 0), len(self.valor))
-        self.valor = self.valor[:pos] + texto + self.valor[pos:]
-        self.ponto = pos + len(texto)
+        self.ponto = len(self.valor)
 
     def SetInsertionPoint(self, i):
         self.ponto = i
