@@ -208,22 +208,29 @@ class DialogoListaConversas(wx.Dialog):
         """Abre um menu com as flags e insere a escolhida no cursor."""
         if self.modelo is None:
             return
+        ponto = self.modelo.GetInsertionPoint()
         menu = wx.Menu()
         try:
             for chave in self.lc.CHAVES:
                 flag = self.lc.FLAGS[chave]
                 item = menu.Append(wx.ID_ANY, "%s — %s" % (
                     flag, self.lc.ROTULOS[chave]))
-                menu.Bind(wx.EVT_MENU,
-                          lambda e, f=flag: self._inserir_no_modelo(f), item)
+                # No Windows o comando do menu vai para a janela que abriu
+                # o popup, nao para o menu: liga no dialogo, como nos outros
+                # menus da interface.
+                self.Bind(wx.EVT_MENU,
+                          lambda e, f=flag, p=ponto: self._inserir_no_modelo(
+                              f, p), item)
             self.botao_flags.PopupMenu(menu)
         finally:
             menu.Destroy()
 
-    def _inserir_no_modelo(self, flag):
-        self.modelo.InsertText(self.modelo.GetInsertionPoint(), flag)
-        self.mudar_modelo()
+    def _inserir_no_modelo(self, flag, ponto):
         self.modelo.SetFocus()
+        self.modelo.InsertText(ponto, flag)
+        self.modelo.SetInsertionPoint(ponto + len(flag))
+        self.modelo.ShowPosition(ponto + len(flag))
+        self.mudar_modelo()
 
     def restaurar(self):
         if self.so_muda is not None:

@@ -91,6 +91,14 @@ class Janela:
             if not hasattr(self, "ligacoes"):
                 self.ligacoes = {}
             self.ligacoes[a[0]] = a[1]
+            id_ = k.get("id")
+            if id_ is None and len(a) > 2:
+                origem = a[2]
+                id_ = origem.GetId() if hasattr(origem, "GetId") else origem
+            if id_ is not None:
+                if not hasattr(self, "ligacoes_por_id"):
+                    self.ligacoes_por_id = {}
+                self.ligacoes_por_id[(a[0], id_)] = a[1]
 
     def Show(self, v=True):
         self.visivel = v

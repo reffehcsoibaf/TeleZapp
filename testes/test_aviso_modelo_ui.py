@@ -93,9 +93,12 @@ def test_flag_escolhida_no_menu_entra_no_ponto_do_cursor():
     d.inserir_flag()
     menu = d.botao_flags.menu_popup
     hora = menu.itens[5]
-    menu.ligacoes[hora.GetId()](None)     # Enter/click no item $Time
+    # O comando do item de um popup vai para a janela, nao para o menu.
+    d.ligacoes_por_id[(wx_falso.EVT_MENU, hora.GetId())](None)
     assert g.valor["modelo"] == "$New$Time de $Sender_Name"
     assert "hora" not in g.valor["ocultos"]
+    assert d.modelo.GetValue() == "$New$Time de $Sender_Name"
+    assert d.modelo.GetInsertionPoint() == len("$New$Time")
     assert wx_falso._foco[0] is d.modelo
 
 
