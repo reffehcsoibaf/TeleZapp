@@ -40,6 +40,9 @@ def test_janela_tem_um_bloco_por_tipo():
     assert list(d.blocos) == list(an.TIPOS)
     for tipo in an.TIPOS:
         bloco = d.blocos[tipo]
+        assert bloco.rotulo_info.GetLabel() == (
+            "Informações de %s (Enter ou Espaço ativa e desativa):"
+            % an.ROTULOS_TIPO[tipo].lower())
         assert bloco.modelo.GetValue() == an.MODELO_PADRAO
         assert bloco.lista.itens[0] == \
             'As palavras "Nova mensagem": ativado'

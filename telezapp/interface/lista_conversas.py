@@ -254,9 +254,10 @@ class BlocoAviso:
         sizer.Add(wx.StaticText(
             pai, label="%s (modelo vazio: sem aviso falado):" % rotulo),
             0, wx.TOP | wx.LEFT | wx.RIGHT, 10)
-        sizer.Add(wx.StaticText(
-            pai, label="Informações (Enter ou Espaço ativa e desativa):"),
-            0, wx.LEFT | wx.RIGHT, 10)
+        self.rotulo_info = wx.StaticText(
+            pai, label="Informações de %s (Enter ou Espaço ativa e desativa):"
+                      % rotulo.lower())
+        sizer.Add(self.rotulo_info, 0, wx.LEFT | wx.RIGHT, 10)
         self.lista = wx.ListBox(pai, name=rotulo, size=(420, 160))
         sizer.Add(self.lista, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
         self.lista.Bind(wx.EVT_KEY_DOWN, self._tecla)
