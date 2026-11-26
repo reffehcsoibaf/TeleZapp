@@ -1292,6 +1292,7 @@ def _preparar_fila_de_ia(j, monkeypatch, mensagens):
     """Deixa as mensagens prontas para a fila, sem chamar provedor de verdade."""
     _abrir_com_caixa(j)
     j.b.publicar(ev.MensagensCarregadas("t1", "20", mensagens))
+    jm.wx.mensagens.clear()
     monkeypatch.setattr(j, "_ia_tem_provedor", lambda g: True)
     monkeypatch.setattr(j, "_externo_para", lambda g: None)
     monkeypatch.setattr(j, "_consentir_midias", lambda ms: True)
@@ -1325,7 +1326,31 @@ def test_transcrever_em_fila_as_mensagens_marcadas(j, monkeypatch):
     assert j._fila_ia is not None
     j._ia_pronto(b, "audio", pronto, None)
     assert j._fila_ia is None
-    assert "2 mensagens processadas com sucesso." in ditas[-1]
+    assert "2 de 2 processadas." in ditas[-1]
+    assert jm.wx.mensagens == ["2 de 2 processadas."]
+
+
+def test_fila_de_transcricao_falhas_geram_um_unico_aviso_no_fim(
+        j, monkeypatch):
+    a, b = [m.Mensagem("t1", "20", i, tipo=m.VOZ, autor="Ana")
+            for i in ("6", "7")]
+    _preparar_fila_de_ia(j, monkeypatch, [a, b])
+    feitos = []
+
+    def processar(x):
+        feitos.append(x.id)
+        j._ia_ocupadas.add(x.chave)
+    monkeypatch.setattr(j, "_ia_processar", processar)
+    j.modo_msg, j.marc_msg = True, {a.id, b.id}
+    j.lista_msgs.SetFocus()
+
+    j._transcrever_descrever()
+    j._ia_pronto(a, "audio", None, "falhou a primeira")
+    assert jm.wx.mensagens == []        # segue sem caixa modal no meio
+    assert feitos == ["6", "7"]
+    j._ia_pronto(b, "audio", None, "falhou a segunda")
+    assert j._fila_ia is None
+    assert jm.wx.mensagens == ["0 de 2 processadas; 2 falharam."]
 
 
 def test_fila_de_transcricao_pula_as_que_ja_tem_texto_e_sem_midia(
@@ -1397,9 +1422,11 @@ def test_fila_de_transcricao_segue_apos_download_com_erro(j, monkeypatch):
     j.b.publicar(ev.MidiaBaixada("t1", "20", "6", erro="sem rede"))
     assert feitos == ["6", "7"]
     assert j._fila_ia is not None
+    assert jm.wx.mensagens == []     # erro de download nao abre caixa pela fila
     j._ia_pronto(b, "audio", types.SimpleNamespace(
         texto="oi", provedor="p", modelo="q"), None)
     assert j._fila_ia is None
+    assert jm.wx.mensagens == ["1 de 2 processadas; 1 falhou."]
 
 
 def test_detalhes_pedem_ao_provedor_o_nome_de_quem_recebeu(j, monkeypatch):

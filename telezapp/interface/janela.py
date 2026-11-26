@@ -8510,12 +8510,15 @@ class Janela(wx.Frame):
         def fim(falhas):
             self._fila_ia = None
             self.SetStatusText("")
-            texto = "%s processadas com sucesso." % self._plural(
-                total - falhas, "mensagem", "mensagens")
+            feitas = total - falhas
+            texto = "%d de %d processadas" % (feitas, total)
             if falhas:
-                texto += " %s falharam." % self._plural(
-                    falhas, "mensagem", "mensagens")
+                texto += "; " + ("1 falhou" if falhas == 1 else
+                                 "%d falharam" % falhas)
+            texto += "."
             self.fala.falar(texto, interromper=False)
+            # uma unica janela no fim, em vez de uma por mensagem que falhou
+            wx.MessageBox(texto, NOME, wx.OK | wx.ICON_INFORMATION, self)
 
         self._fila_ia = FilaDeIA(processar, andou, fim)
         self._iniciar_fila_ia()
@@ -8775,7 +8778,8 @@ class Janela(wx.Frame):
                 return
             bipe("erro")
             self.fala.falar(erro, interromper=not em_fila)
-            wx.MessageBox(erro, NOME, wx.OK | wx.ICON_WARNING, self)
+            if not em_fila:
+                wx.MessageBox(erro, NOME, wx.OK | wx.ICON_WARNING, self)
             return
         m.atualizar_extras(x, ia={
             "genero": genero, "texto": resultado.texto,
@@ -8803,9 +8807,10 @@ class Janela(wx.Frame):
                 self.fala.falar(aviso)      # sem cortar o que esta falando
             return
         bipe("tarefa_pronta")
-        if genero == "pdf":
+        if genero == "pdf" and not em_fila:
             self._ia_ver(x)
             return
+        # na fila o PDF fala o texto: uma janela por item prenderia a sequencia
         self.fala.falar("%s: %s" % (m.rotulo_da_ia(x).capitalize(), texto),
                         interromper=not em_fila)
 
@@ -12941,6 +12946,8 @@ class Janela(wx.Frame):
 
     def _ev_midia_baixada(self, e):
         chave = (e.conta_id, e.conversa_id, e.mensagem_id)
+        fila_atual = self._fila_ia
+        em_fila = fila_atual is not None and fila_atual.contem(chave)
         self._fechar_barra_de_transferencia(("baixando",) + chave)
         if self.progresso_midias.pop(chave, None) is not None:
             self._atualizar_titulo()
@@ -12960,7 +12967,11 @@ class Janela(wx.Frame):
             self._ia_pendentes.pop(chave, None)
             self._fila_acabou(chave, True)
             self._midia_do_resumo_acabou(chave, True)
-            if pedida or not e.automatica:
+            if em_fila:
+                # a janela de erro viria uma por item e travaria a fila;
+                # o resumo no fim ja diz quantas falharam
+                self.fala.falar(e.erro, interromper=False)
+            elif pedida or not e.automatica:
                 bipe("erro")
                 self.fala.falar(e.erro, interromper=True)
                 wx.MessageBox(e.erro, NOME, wx.OK | wx.ICON_WARNING, self)
