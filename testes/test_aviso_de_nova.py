@@ -56,6 +56,14 @@ def test_pedaco_ausente_sai_da_frase():
     assert an.montar(v, PARTES) == "$Desconhecida Nova mensagem"
 
 
+def test_pontuacao_solta_no_comeco_sai_da_frase():
+    partes = dict(PARTES, conversa="")
+    v = an.definir_modelo(None, "$conversation_out. $Sender_Name, $Content")
+    assert an.montar(v, partes, aberta=True) == "Ana, oi"
+    v = an.definir_modelo(v, "$conversation_out, $Sender_Name: $Content")
+    assert an.montar(v, partes, aberta=True) == "Ana: oi"
+
+
 def test_alternar_atualiza_a_lista_e_o_modelo():
     v = an.padrao()
     v, ativado = an.alternar(v, "hora")

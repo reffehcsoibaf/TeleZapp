@@ -231,11 +231,12 @@ def texto_do_item(valor, chave, tipo=TIPO_PADRAO):
 
 def _limpar(texto):
     """Tira o que ficou solto quando uma flag não tinha valor: ligações
-    ("em ."), espaços antes de pontuação e separadores no fim."""
+    ("em ."), espaços antes de pontuação e separadores no começo e no fim."""
     texto = _LIGACOES.sub("", texto)
     texto = re.sub(r"\s+", " ", texto)
     texto = re.sub(r"\s+([.,;:])", r"\1", texto)
     texto = re.sub(r"(?:\.\s*,)+", ".", texto)
+    texto = re.sub(r"^[.,;:]\s*", "", texto)   # pontuacao solta no comeco
     return re.sub(r"[\s,;:]+$", "", texto).strip()
 
 
