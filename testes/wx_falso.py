@@ -113,6 +113,10 @@ class Janela:
     def SetFocus(self):
         _foco[0] = self
 
+    def PopupMenu(self, menu, pos=None):
+        self.menu_popup = menu
+        return True
+
     def IsShown(self):
         return getattr(self, "visivel", True) is not False
 
@@ -627,6 +631,9 @@ class MenuItem:
     def GetId(self):
         return self.id
 
+    def GetLabel(self):
+        return self.rotulo
+
     def SetItemLabel(self, rotulo):
         self.rotulo = rotulo
 
@@ -647,6 +654,14 @@ class Menu:
     def __init__(self, *a, **k):
         self.itens = []
         self.submenus = []
+        self.ligacoes = {}
+        self.destruido = False
+
+    def Bind(self, evento, handler, item=None, **k):
+        self.ligacoes[item.GetId() if item is not None else "todos"] = handler
+
+    def Destroy(self):
+        self.destruido = True
 
     def Append(self, *a, **k):
         item = MenuItem()

@@ -226,7 +226,7 @@ Em Configurações, categoria Interface, o botão "Aviso falado de mensagem nova
 
 A janela também tem o campo "Modelo do aviso": nele você escreve a frase com uma flag por informação. $New são as palavras "Nova mensagem", $conversation_out é o nome da conversa, $Service o serviço (WhatsApp ou Telegram), $Account a conta que recebeu, $Sender_Name quem enviou, $Time a hora e $Content o conteúdo. Todo o resto que você escrever é falado como está, e a mesma flag pode aparecer mais de uma vez. Por exemplo, "$New de $Sender_Name em $conversation_out: $Content" fala "Nova mensagem de Ana em Família: oi".
 
-Marcar ou desmarcar um item na lista tira ou acrescenta a flag dele no modelo. Escrever ou apagar uma flag no modelo marca ou desmarca o item da lista. O botão "Inserir flag" abre a lista de flags: Enter numa delas coloca a flag onde está o cursor, sem apagar o que você escreveu.
+Marcar ou desmarcar um item na lista tira ou acrescenta a flag dele no modelo. Escrever ou apagar uma flag no modelo marca ou desmarca o item da lista. O botão "Inserir flag" abre um menu com as flags: use as setas para escolher e Enter para colocar a flag onde está o cursor, sem apagar o que você escreveu.
 
 Quando uma informação não existe — uma mídia sem legenda, ou o nome da conversa na conversa aberta — o aviso fala "(sem conteúdo)" no lugar da flag. Se você apagar tudo do modelo, o aviso falado para e o som da notificação continua. O modelo de fábrica fala "Nova mensagem em Ana. Ana, 10:00, oi", como antes.
 

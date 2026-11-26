@@ -12,49 +12,6 @@ import wx
 from telezapp.nucleo import lista_conversas as lc
 
 
-class DialogoFlags(wx.Dialog):
-    """Flags que o modelo do aviso aceita. Enter (ou duplo clique) escolhe
-    a flag e fecha; quem chamou insere no ponto do cursor."""
-
-    def __init__(self, pai, flags, rotulos, fala=None,
-                 titulo="Flags do aviso"):
-        super().__init__(pai, title=titulo)
-        self.fala, self.escolhida = fala, None
-        self.opcoes = [(flags[c], rotulos[c]) for c in flags]
-        lay = wx.BoxSizer(wx.VERTICAL)
-        lay.Add(wx.StaticText(
-            self, label="Escolha a flag e pressione Enter para inseri-la "
-                        "no modelo:"), 0, wx.ALL, 10)
-        self.lista = wx.ListBox(
-            self, name="Flags disponíveis",
-            choices=["%s — %s" % (f, r) for f, r in self.opcoes])
-        lay.Add(self.lista, 0, wx.EXPAND | wx.ALL, 10)
-        b = wx.Button(self, wx.ID_OK, "&Inserir")
-        b.Bind(wx.EVT_BUTTON, lambda e: self.escolher(self.lista.GetSelection()))
-        lay.Add(b, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
-        self.SetEscapeId(wx.ID_CANCEL)
-        self.SetSizerAndFit(lay)
-        self.lista.Bind(wx.EVT_KEY_DOWN, self._tecla)
-        self.lista.Bind(wx.EVT_LISTBOX_DCLICK,
-                        lambda e: self.escolher(self.lista.GetSelection()))
-        if self.opcoes:
-            self.lista.SetSelection(0)
-
-    def _tecla(self, evt):
-        if evt.GetKeyCode() in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
-            self.escolher(self.lista.GetSelection())
-            return
-        evt.Skip()
-
-    def escolher(self, i):
-        if not 0 <= i < len(self.opcoes):
-            return
-        self.escolhida = self.opcoes[i][0]
-        if self.fala is not None:
-            self.fala.falar("Inserir %s." % self.escolhida, interromper=True)
-        self.EndModal(wx.ID_OK)
-
-
 class DialogoListaConversas(wx.Dialog):
     """Lista de quatro informacoes, na ordem em que aparecem na lista de
     conversas; Enter ou Espaco ativa e desativa, e dois botoes mudam a ordem.
@@ -248,18 +205,25 @@ class DialogoListaConversas(wx.Dialog):
         self.botoes["padrao"].Enable(not self.lc.eh_padrao(novo))
 
     def inserir_flag(self):
-        """Abre a lista de flags e insere a escolhida no ponto do cursor."""
+        """Abre um menu com as flags e insere a escolhida no cursor."""
         if self.modelo is None:
             return
-        dlg = DialogoFlags(self, self.lc.FLAGS, self.lc.ROTULOS, self.fala)
+        menu = wx.Menu()
         try:
-            if dlg.ShowModal() == wx.ID_OK and dlg.escolhida:
-                self.modelo.InsertText(self.modelo.GetInsertionPoint(),
-                                       dlg.escolhida)
-                self.mudar_modelo()
-                self.modelo.SetFocus()
+            for chave in self.lc.CHAVES:
+                flag = self.lc.FLAGS[chave]
+                item = menu.Append(wx.ID_ANY, "%s — %s" % (
+                    flag, self.lc.ROTULOS[chave]))
+                menu.Bind(wx.EVT_MENU,
+                          lambda e, f=flag: self._inserir_no_modelo(f), item)
+            self.botao_flags.PopupMenu(menu)
         finally:
-            dlg.Destroy()
+            menu.Destroy()
+
+    def _inserir_no_modelo(self, flag):
+        self.modelo.InsertText(self.modelo.GetInsertionPoint(), flag)
+        self.mudar_modelo()
+        self.modelo.SetFocus()
 
     def restaurar(self):
         if self.so_muda is not None:

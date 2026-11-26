@@ -71,34 +71,32 @@ def test_alternar_um_item_escreve_e_apaga_a_flag_no_campo():
     assert fala.ditas[-1] == "ativado"
 
 
-def test_botao_insere_a_flag_no_ponto_do_cursor(monkeypatch):
-    class FlagsFalsas:
-        def __init__(self, *a, **k):
-            self.escolhida = "$Time"
+def test_botao_abre_um_menu_com_todas_as_flags():
+    d, g, _ = dialogo()
+    d.inserir_flag()
+    menu = d.botao_flags.menu_popup
+    assert [i.GetLabel() for i in menu.itens] == [
+        '$New — As palavras "Nova mensagem"',
+        "$conversation_out — Nome da conversa (fora da conversa aberta)",
+        "$Service — Serviço (WhatsApp ou Telegram)",
+        "$Account — Conta que recebeu",
+        "$Sender_Name — Nome de quem enviou",
+        "$Time — Hora da mensagem",
+        "$Content — Conteúdo (texto, tipo da mídia e legenda)"]
+    assert menu.destruido
 
-        def ShowModal(self):
-            return wx_falso.ID_OK
 
-        def Destroy(self):
-            pass
-
-    monkeypatch.setattr(ui, "DialogoFlags", FlagsFalsas)
+def test_flag_escolhida_no_menu_entra_no_ponto_do_cursor():
     d, g, _ = dialogo()
     d.modelo.SetValue("$New de $Sender_Name")
     d.modelo.SetInsertionPoint(4)
     d.inserir_flag()
+    menu = d.botao_flags.menu_popup
+    hora = menu.itens[5]
+    menu.ligacoes[hora.GetId()](None)     # Enter/click no item $Time
     assert g.valor["modelo"] == "$New$Time de $Sender_Name"
     assert "hora" not in g.valor["ocultos"]
-
-
-def test_popup_de_flags_escolhe_com_enter():
-    fala = Fala()
-    dlg = ui.DialogoFlags(None, an.FLAGS, an.ROTULOS, fala)
-    assert dlg.lista.itens[0] == '$New — As palavras "Nova mensagem"'
-    dlg.escolher(2)
-    assert dlg.escolhida == "$Service"
-    assert fala.ditas[-1] == "Inserir $Service."
-    assert dlg.encerrado == wx_falso.ID_OK
+    assert wx_falso._foco[0] is d.modelo
 
 
 def test_restaurar_volta_o_modelo_padrao_e_a_busca_acha_o_campo():
