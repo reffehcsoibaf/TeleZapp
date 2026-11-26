@@ -205,10 +205,10 @@ class DialogoListaConversas(wx.Dialog):
         self.botoes["padrao"].Enable(not self.lc.eh_padrao(novo))
 
     def inserir_flag(self):
-        """Abre um menu com as flags e insere a escolhida no cursor."""
+        """Abre um menu com as flags e acrescenta a escolhida ao fim."""
         if self.modelo is None:
             return
-        ponto = self.modelo.GetInsertionPoint()
+        ponto = len(self.modelo.GetValue())
         menu = wx.Menu()
         try:
             for chave in self.lc.CHAVES:
