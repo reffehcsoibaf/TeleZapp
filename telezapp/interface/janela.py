@@ -5154,9 +5154,9 @@ class Janela(wx.Frame):
         return (self.contas.servico(conta_id) or "") if self.contas else ""
 
     def _texto_do_aviso(self, msg, conv, aberta):
-        """O aviso de mensagem nova, com o que a pessoa escolheu dizer e na
-        ordem dela (Configuracoes, Interface, Aviso falado de mensagem
-        nova)."""
+        """O aviso de mensagem nova, com o modelo do tipo da conversa
+        (privada, grupo ou canal) escolhido em Configuracoes, Interface,
+        Aviso falado de mensagem nova."""
         from telezapp.nucleo import aviso_de_nova as an
         quem = self._quem_enviou(msg)
         partes = {"inicio": "Nova mensagem", "conversa": conv.nome,
@@ -5166,7 +5166,8 @@ class Janela(wx.Frame):
         for chave in ("autor", "hora", "conteudo"):
             partes[chave] = m.formatar(msg, m.ESTILO_AUTOR_PRIMEIRO,
                                        quem=quem, itens=[chave])
-        return an.montar(self.cfg.get("aviso_nova"), partes, aberta)
+        return an.montar(self.cfg.get("aviso_nova"), partes, aberta,
+                         tipo=getattr(conv, "tipo", an.TIPO_PADRAO))
 
     def _nome_da_conta_por_id(self, conta_id):
         for d in self.cfg.contas():

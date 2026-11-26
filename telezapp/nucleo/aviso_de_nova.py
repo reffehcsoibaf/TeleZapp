@@ -3,11 +3,11 @@
 """O que o aviso falado de mensagem nova diz, e em que ordem (como a lista
 de conversas e a de mensagens). Sem wx.
 
-A escolha vive em `aviso_nova` (config): {"ordem": [chaves de ITENS],
-"ocultos": [chaves que ficam de fora], "modelo": texto com as flags}.
-Cada item tem uma flag ($New, $conversation_out, ...): o texto fora delas é
-falado como está escrito, e repetir uma flag repete o pedaço. Modelo vazio
-desliga a fala do aviso (o som da notificação continua).
+Ha um bloco por tipo de conversa (privada, grupo, canal), cada um com
+`ordem`, `ocultos` e `modelo`. Cada item tem uma flag ($New,
+$conversation_out, ...): o texto fora delas é falado como está escrito, e
+repetir uma flag repete o pedaço. Modelo vazio desliga a fala daquele tipo
+(o som da notificação continua).
 O padrão repete o aviso de antes: "Nova mensagem em Ana. Ana, 10:00: oi".
 """
 import re
@@ -38,19 +38,40 @@ MODELO_PADRAO = "$New em $conversation_out. $Sender_Name, $Time, $Content"
 AUSENTE = "(sem conteúdo)"
 _PADRAO_DE_FLAGS = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*")
 
+TIPOS = ("privada", "grupo", "canal")
+TIPO_PADRAO = "privada"
+ROTULOS_TIPO = {
+    "privada": "Conversas individuais",
+    "grupo": "Grupos",
+    "canal": "Canais",
+}
 
-def _modelo_dos_ativos(ordem):
-    """Flags dos itens ativos, na ordem da lista, separadas por espaço."""
-    return " ".join(FLAGS[c] for c in ordem)
+
+def normalizar_tipo(tipo):
+    """Tipo de conversa conhecido; o resto cai em conversa individual."""
+    return tipo if tipo in TIPOS else TIPO_PADRAO
 
 
-def normalizar(valor):
+def rotulo_tipo(tipo):
+    return ROTULOS_TIPO[normalizar_tipo(tipo)]
+
+
+def _bloco_padrao():
+    return {"ordem": list(CHAVES), "ocultos": list(PADRAO_OCULTOS),
+            "modelo": MODELO_PADRAO}
+
+
+def padrao():
+    return {"tipos": {t: _bloco_padrao() for t in TIPOS}}
+
+
+def _normalizar_bloco(valor):
     """Chaves uma vez cada (as desconhecidas saem, as que faltam entram no
-    fim, ocultas), ocultos so entre elas, e o modelo como texto. Config
-    antiga sem modelo ganha o padrão quando a escolha também é a padrão, ou
-    as flags dos ativos na ordem em que estavam."""
+    fim, ocultas), ocultos só entre elas, e modelo como texto. Bloco sem
+    modelo (config muito antiga) ganha o padrão se a escolha também for a
+    padrão, ou as flags dos ativos na ordem em que estavam."""
     if not isinstance(valor, dict):
-        return padrao()
+        return _bloco_padrao()
     ordem = []
     for c in valor.get("ordem") or []:
         if c in CHAVES and c not in ordem:
@@ -63,24 +84,45 @@ def normalizar(valor):
     if isinstance(valor.get("modelo"), str):
         modelo = valor["modelo"]
     else:
-        ativos = [c for c in ordem if c not in ocultos]
-        modelo = (MODELO_PADRAO if ativos ==
+        ativos_ = [c for c in ordem if c not in ocultos]
+        modelo = (MODELO_PADRAO if ativos_ ==
                   [c for c in CHAVES if c not in PADRAO_OCULTOS]
-                  else _modelo_dos_ativos(ativos))
+                  else _modelo_dos_ativos(ativos_))
     return {"ordem": ordem, "ocultos": ocultos, "modelo": modelo}
 
 
-def padrao():
-    return {"ordem": list(CHAVES), "ocultos": list(PADRAO_OCULTOS),
-            "modelo": MODELO_PADRAO}
+def normalizar(valor):
+    """Config completa. Quem vem de uma versão com um modelo só começa com
+    os três blocos no padrão, como decidido para a atualização."""
+    if not isinstance(valor, dict) or not isinstance(valor.get("tipos"), dict):
+        return padrao()
+    return {"tipos": {t: _normalizar_bloco(valor["tipos"].get(t))
+                      for t in TIPOS}}
 
 
-def eh_padrao(valor):
-    return normalizar(valor) == padrao()
+def bloco(valor, tipo=TIPO_PADRAO):
+    """O bloco normalizado de um tipo, sem mexer nos outros."""
+    return normalizar(valor)["tipos"][normalizar_tipo(tipo)]
 
 
-def ativos(valor):
+def definir_bloco(valor, novo, tipo=TIPO_PADRAO):
+    """Troca o bloco de um tipo na config completa."""
     lay = normalizar(valor)
+    lay["tipos"][normalizar_tipo(tipo)] = _normalizar_bloco(novo)
+    return lay
+
+
+def _modelo_dos_ativos(ordem):
+    """Flags dos itens ativos, na ordem da lista, separadas por espaço."""
+    return " ".join(FLAGS[c] for c in ordem)
+
+
+def eh_padrao(valor, tipo=TIPO_PADRAO):
+    return bloco(valor, tipo) == _bloco_padrao()
+
+
+def ativos(valor, tipo=TIPO_PADRAO):
+    lay = bloco(valor, tipo)
     return [c for c in lay["ordem"] if c not in lay["ocultos"]]
 
 
@@ -106,12 +148,12 @@ def _remover(modelo, flag):
     return re.sub(r"[ \t]{2,}", " ", sem).strip()
 
 
-def alternar(valor, chave):
-    """(novo valor, ativado); ativado None se a chave nao existe. Pode sobrar
-    nenhum item ativado: e o jeito de desligar a fala pelo modelo."""
-    lay = normalizar(valor)
+def _alternar_bloco(lay, chave):
     if chave not in CHAVES:
         return lay, None
+    lay = dict(lay)
+    lay["ordem"] = list(lay["ordem"])
+    lay["ocultos"] = list(lay["ocultos"])
     if chave in lay["ocultos"]:
         lay["ocultos"].remove(chave)
         lay["modelo"] = _inserir(lay["modelo"], FLAGS[chave])
@@ -123,19 +165,30 @@ def alternar(valor, chave):
     return lay, False
 
 
-def definir_modelo(valor, modelo):
-    """Troca o texto e ajusta a lista: fica ativo quem tem flag no modelo."""
-    lay = normalizar(valor)
+def alternar(valor, chave, tipo=TIPO_PADRAO):
+    """(nova config, ativado); ativado None se a chave não existe."""
+    novo, ativado = _alternar_bloco(bloco(valor, tipo), chave)
+    return definir_bloco(valor, novo, tipo), ativado
+
+
+def _definir_modelo_bloco(lay, modelo):
+    lay = dict(lay)
     lay["modelo"] = modelo if isinstance(modelo, str) else ""
     usadas = set(flags_usadas(lay["modelo"]))
     lay["ocultos"] = [c for c in lay["ordem"] if FLAGS[c] not in usadas]
     return lay
 
 
-def mover(valor, chave, delta):
-    """Muda só a ordem da lista. A ordem da frase é a do modelo, escrito
-    pelo usuario."""
-    lay = normalizar(valor)
+def definir_modelo(valor, modelo, tipo=TIPO_PADRAO):
+    """Troca o texto e ajusta a lista daquele tipo: fica ativo quem tem
+    flag no modelo."""
+    novo = _definir_modelo_bloco(bloco(valor, tipo), modelo)
+    return definir_bloco(valor, novo, tipo)
+
+
+def _mover_bloco(lay, chave, delta):
+    lay = dict(lay)
+    lay["ordem"] = list(lay["ordem"])
     i = lay["ordem"].index(chave) if chave in lay["ordem"] else -1
     j = i + delta
     if i < 0 or not 0 <= j < len(lay["ordem"]):
@@ -144,16 +197,23 @@ def mover(valor, chave, delta):
     return lay, j
 
 
-def texto_do_item(valor, chave):
-    estado = "desativado" if chave in normalizar(valor)["ocultos"] \
+def mover(valor, chave, delta, tipo=TIPO_PADRAO):
+    """Muda só a ordem da lista daquele tipo. A ordem da frase é a do
+    modelo, escrito pela pessoa."""
+    novo, pos = _mover_bloco(bloco(valor, tipo), chave, delta)
+    return definir_bloco(valor, novo, tipo), pos
+
+
+def texto_do_item(valor, chave, tipo=TIPO_PADRAO):
+    estado = "desativado" if chave in bloco(valor, tipo)["ocultos"] \
         else "ativado"
     return "%s: %s" % (ROTULOS[chave], estado)
 
 
 def renderizar(modelo, partes, aberta=False):
-    """Troca cada flag pelo pedaço correspondente. Pedaço que nao existe
+    """Troca cada flag pelo pedaço correspondente. Pedaço que não existe
     (ou a conversa aberta) vira `(sem conteúdo)`; flag desconhecida fica
-    como texto. Modelo vazio nao fala nada."""
+    como texto. Modelo vazio não fala nada."""
     if not isinstance(modelo, str) or not modelo.strip():
         return ""
 
@@ -167,7 +227,7 @@ def renderizar(modelo, partes, aberta=False):
     return _PADRAO_DE_FLAGS.sub(troca, modelo)
 
 
-def montar(valor, partes, aberta=False):
-    """O aviso, com o modelo escolhido (Configurações, Interface, Aviso
-    falado de mensagem nova)."""
-    return renderizar(normalizar(valor)["modelo"], partes, aberta)
+def montar(valor, partes, aberta=False, tipo=TIPO_PADRAO):
+    """O aviso, com o modelo do tipo de conversa (Configurações, Interface,
+    Aviso falado de mensagem nova)."""
+    return renderizar(bloco(valor, tipo)["modelo"], partes, aberta)

@@ -240,3 +240,198 @@ class DialogoListaConversas(wx.Dialog):
         self.preencher(0)
         self._dizer("%s no padrão." % self.titulo)
         self.lista.SetFocus()
+
+
+class BlocoAviso:
+    """Lista de itens + campo de modelo de um tipo de conversa. Cada bloco
+    sincroniza só com o seu tipo; o valor lido/gravado é a config inteira."""
+
+    def __init__(self, dialogo, pai, sizer, nucleo, tipo, ler, gravar, fala):
+        self.d, self.lc, self.tipo = dialogo, nucleo, tipo
+        self.ler, self.gravar, self.fala = ler, gravar, fala
+        self._sincronizando = False
+        rotulo = nucleo.rotulo_tipo(tipo)
+        sizer.Add(wx.StaticText(
+            pai, label="%s (modelo vazio: sem aviso falado):" % rotulo),
+            0, wx.TOP | wx.LEFT | wx.RIGHT, 10)
+        sizer.Add(wx.StaticText(
+            pai, label="Informações (Enter ou Espaço ativa e desativa):"),
+            0, wx.LEFT | wx.RIGHT, 10)
+        self.lista = wx.ListBox(pai, name=rotulo, size=(420, 160))
+        sizer.Add(self.lista, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        self.lista.Bind(wx.EVT_KEY_DOWN, self._tecla)
+        self.lista.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self.alternar())
+        self.modelo = wx.TextCtrl(
+            pai, value=nucleo.bloco(ler(), tipo)["modelo"],
+            style=wx.TE_MULTILINE, size=(420, 80),
+            name="Modelo do aviso — %s" % rotulo)
+        sizer.Add(self.modelo, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        self.modelo.Bind(wx.EVT_TEXT, lambda e: self.mudar_modelo())
+        self.botao_flags = wx.Button(pai, label="Inserir &flag — %s" % rotulo)
+        self.botoes = {
+            "cima": wx.Button(pai, label="Mover para &cima — %s" % rotulo),
+            "baixo": wx.Button(pai, label="Mover para &baixo — %s" % rotulo),
+            "padrao": wx.Button(
+                pai, label="&Restaurar o padrão — %s" % rotulo),
+        }
+        self.botao_padrao = self.botoes["padrao"]
+        linha = wx.WrapSizer(wx.HORIZONTAL)
+        linha.Add(self.botao_flags, 0, wx.RIGHT | wx.BOTTOM, 8)
+        for botao in self.botoes.values():
+            linha.Add(botao, 0, wx.RIGHT | wx.BOTTOM, 8)
+        sizer.Add(linha, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+        self.botao_flags.Bind(wx.EVT_BUTTON, lambda e: self.inserir_flag())
+        self.botoes["cima"].Bind(wx.EVT_BUTTON, lambda e: self.mover(-1))
+        self.botoes["baixo"].Bind(wx.EVT_BUTTON, lambda e: self.mover(1))
+        self.botao_padrao.Bind(wx.EVT_BUTTON, lambda e: self.restaurar())
+        self.preencher(0)
+
+    def _dizer(self, texto):
+        if self.fala is not None:
+            self.fala.falar(texto, interromper=True)
+
+    def bloco(self):
+        return self.lc.bloco(self.ler(), self.tipo)
+
+    def preencher(self, selecionar=0):
+        lay = self.bloco()
+        self.lista.Set([self.lc.texto_do_item(self.ler(), c, self.tipo)
+                        for c in lay["ordem"]])
+        self.lista.SetSelection(min(max(selecionar, 0),
+                                    len(lay["ordem"]) - 1))
+        self.botao_padrao.Enable(not self.lc.eh_padrao(self.ler(), self.tipo))
+
+    def chave(self):
+        ordem = self.bloco()["ordem"]
+        i = self.lista.GetSelection()
+        return ordem[i] if 0 <= i < len(ordem) else None
+
+    def _tecla(self, evt):
+        sem_mod = not (evt.ControlDown() or evt.AltDown() or evt.ShiftDown())
+        if sem_mod and evt.GetKeyCode() in (
+                wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER, wx.WXK_SPACE):
+            self.alternar()
+            return
+        evt.Skip()
+
+    def alternar(self):
+        chave = self.chave()
+        if chave is None:
+            return
+        novo, ativado = self.lc.alternar(self.ler(), chave, self.tipo)
+        if ativado is None:
+            return
+        self.gravar(novo)
+        self._mostrar_modelo(novo)
+        self.preencher(self.lista.GetSelection())
+        self._dizer("ativado" if ativado else "desativado")
+
+    def mover(self, delta):
+        chave = self.chave()
+        if chave is None:
+            return
+        novo, pos = self.lc.mover(self.ler(), chave, delta, self.tipo)
+        if pos == self.lista.GetSelection():
+            self._dizer("Já é o primeiro item." if delta < 0
+                        else "Já é o último item.")
+            return
+        self.gravar(novo)
+        self.preencher(pos)
+        self._dizer("%s, posição %d de %d." % (
+            self.lc.ROTULOS[chave], pos + 1, len(self.lc.CHAVES)))
+        self.lista.SetFocus()
+
+    def _mostrar_modelo(self, valor):
+        self._sincronizando = True
+        self.modelo.SetValue(self.lc.bloco(valor, self.tipo)["modelo"])
+        self._sincronizando = False
+
+    def mudar_modelo(self):
+        """Texto digitado manda: as flags ligam os itens deste tipo."""
+        if self._sincronizando:
+            return
+        novo = self.lc.definir_modelo(
+            self.ler(), self.modelo.GetValue(), self.tipo)
+        self.gravar(novo)
+        self.preencher(self.lista.GetSelection())
+        self.botao_padrao.Enable(not self.lc.eh_padrao(novo, self.tipo))
+
+    def inserir_flag(self):
+        """Menu com as flags; a escolhida vai para o fim deste campo."""
+        menu = wx.Menu()
+        try:
+            for chave in self.lc.CHAVES:
+                flag = self.lc.FLAGS[chave]
+                item = menu.Append(wx.ID_ANY, "%s — %s" % (
+                    flag, self.lc.ROTULOS[chave]))
+                # No Windows o comando do popup vai para a janela que abriu
+                # o menu, nao para o menu.
+                self.d.Bind(wx.EVT_MENU,
+                            lambda e, f=flag: self._inserir_no_modelo(f), item)
+            self.botao_flags.PopupMenu(menu)
+        finally:
+            menu.Destroy()
+
+    def _inserir_no_modelo(self, flag):
+        # InsertText nao existe no wxPython 4.3.2: WriteText escreve no
+        # ponto atual, que vai sempre para o fim do modelo.
+        self.modelo.SetFocus()
+        self.modelo.SetInsertionPointEnd()
+        self.modelo.WriteText(flag)
+        self.mudar_modelo()
+
+    def restaurar(self):
+        novo = self.lc.definir_bloco(
+            self.ler(), self.lc.bloco(None, self.tipo), self.tipo)
+        self.gravar(novo)
+        self._mostrar_modelo(novo)
+        self.preencher(0)
+        self._dizer("%s no padrão." % self.lc.rotulo_tipo(self.tipo))
+        self.lista.SetFocus()
+
+
+class DialogoAvisoNova(wx.Dialog):
+    """Um bloco de lista + modelo para cada tipo de conversa."""
+
+    def __init__(self, pai, ler, gravar, fala=None, nucleo=None, foco=None):
+        from telezapp.nucleo import aviso_de_nova as an
+        nucleo = nucleo or an
+        super().__init__(
+            pai, title="Aviso falado de mensagem nova",
+            style=wx.DEFAULT_DIALOG_STYLE)
+        self.lc, self.fala = nucleo, fala
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(wx.StaticText(
+            self, label="O que o TeleZapp fala quando chega uma mensagem "
+                        "nova. Marque os itens e escreva o modelo da frase "
+                        "com as flags."), 0, wx.ALL, 10)
+        self.blocos = {}
+        for tipo in nucleo.TIPOS:
+            self.blocos[tipo] = BlocoAviso(
+                self, self, sizer, nucleo, tipo, ler, gravar, fala)
+        sizer.Add(wx.Button(self, wx.ID_OK, "&Fechar"),
+                  0, wx.ALL | wx.ALIGN_RIGHT, 10)
+        self.SetEscapeId(wx.ID_OK)
+        self.SetSizerAndFit(sizer)
+        self.CentreOnParent()
+        if foco:
+            self._focar(foco)
+
+    def _focar(self, foco):
+        alvo, _, tipo = foco.partition(":")
+        if not tipo:
+            tipo = self.lc.TIPO_PADRAO
+        bloco = self.blocos.get(self.lc.normalizar_tipo(tipo))
+        if bloco is None:
+            return
+        if alvo == "modelo":
+            bloco.modelo.SetFocus()
+        elif alvo == "inserir_flag":
+            bloco.botao_flags.SetFocus()
+        elif alvo in ("padrao", "cima", "baixo"):
+            bloco.botoes[alvo].SetFocus()
+        elif alvo in self.lc.CHAVES:
+            ordem = bloco.bloco()["ordem"]
+            if alvo in ordem:
+                bloco.preencher(ordem.index(alvo))
+                bloco.lista.SetFocus()

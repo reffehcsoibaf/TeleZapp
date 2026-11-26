@@ -745,15 +745,10 @@ class DialogoConfiguracoes(wx.Dialog):
         self.controles["aviso_nova"] = b
 
     def _abrir_aviso_nova(self, foco=None):
-        from telezapp.interface.lista_conversas import DialogoListaConversas
-        from telezapp.nucleo import aviso_de_nova as an
-        dlg = DialogoListaConversas(
+        from telezapp.interface.lista_conversas import DialogoAvisoNova
+        dlg = DialogoAvisoNova(
             self, self.modelo.aviso_em_uso, self.modelo.aviso_definir,
-            self.fala, nucleo=an, titulo="Aviso falado de mensagem nova",
-            explicacao="O que o TeleZapp fala quando chega uma mensagem "
-                       "nova. Marque os itens e escreva o modelo da frase "
-                       "com as flags. Modelo vazio desliga a fala.",
-            foco=foco)
+            self.fala, foco=foco)
         try:
             dlg.ShowModal()
         finally:

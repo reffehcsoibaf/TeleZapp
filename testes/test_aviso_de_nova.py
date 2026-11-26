@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""O que o aviso falado de mensagem nova diz, como o modelo usa flags e
-como a lista e o modelo se sincronizam."""
+"""O que o aviso falado de mensagem nova diz, com um modelo por tipo de
+conversa, e como a lista e o modelo se sincronizam."""
 from telezapp.nucleo import aviso_de_nova as an
 
 PARTES = {"inicio": "Nova mensagem", "conversa": "Família",
@@ -12,6 +12,9 @@ def test_padrao_e_o_aviso_de_antes():
     assert an.montar(None, PARTES) == "Nova mensagem em Família. Ana, 10:00, oi"
     assert an.montar(None, PARTES, aberta=True) == \
         "Nova mensagem em (sem conteúdo). Ana, 10:00, oi"
+    for tipo in an.TIPOS:
+        assert an.montar(None, PARTES, tipo=tipo) == \
+            "Nova mensagem em Família. Ana, 10:00, oi"
 
 
 def test_flags_tem_um_nome_por_item():
@@ -23,7 +26,7 @@ def test_flags_tem_um_nome_por_item():
 
 def test_modelo_personalizado_e_texto_livre():
     v = an.definir_modelo(None, "Atenção: $New de $Sender_Name "
-                                "em $conversation_out. $Content")
+                                 "em $conversation_out. $Content")
     assert an.montar(v, PARTES) == \
         "Atenção: Nova mensagem de Ana em Família. oi"
     assert an.ativos(v) == ["inicio", "conversa", "autor", "conteudo"]
@@ -39,7 +42,8 @@ def test_modelo_vazio_nao_fala():
 def test_flag_repetida_repete_o_pedaco():
     v = an.definir_modelo(None, "$Sender_Name, $Sender_Name")
     assert an.montar(v, PARTES) == "Ana, Ana"
-    assert an.flags_usadas(v["modelo"]) == ["$Sender_Name", "$Sender_Name"]
+    assert an.flags_usadas(an.bloco(v)["modelo"]) == \
+        ["$Sender_Name", "$Sender_Name"]
 
 
 def test_pedaco_ausente_vira_aviso():
@@ -54,11 +58,12 @@ def test_alternar_atualiza_a_lista_e_o_modelo():
     v = an.padrao()
     v, ativado = an.alternar(v, "hora")
     assert ativado is False
-    assert "hora" in v["ocultos"] and "$Time" not in v["modelo"]
+    bloco = an.bloco(v)
+    assert "hora" in bloco["ocultos"] and "$Time" not in bloco["modelo"]
     v, ativado = an.alternar(v, "servico")
     assert ativado is True
-    assert "servico" not in v["ocultos"]
-    assert v["modelo"].endswith("$Service")
+    assert "servico" not in an.bloco(v)["ocultos"]
+    assert an.bloco(v)["modelo"].endswith("$Service")
 
 
 def test_pode_desligar_todos_os_itens():
@@ -68,17 +73,31 @@ def test_pode_desligar_todos_os_itens():
     v = an.definir_modelo(None, "$New")
     v, ativado = an.alternar(v, "inicio")
     assert ativado is False
-    assert v["modelo"] == "" and an.ativos(v) == []
+    assert an.bloco(v)["modelo"] == "" and an.ativos(v) == []
 
 
-def test_config_antiga_sem_modelo_vira_flags_dos_ativos():
-    antigo = {"ordem": list(an.CHAVES),
-              "ocultos": ["servico", "conta", "hora"]}
-    assert an.normalizar(antigo)["modelo"] == \
-        "$New $conversation_out $Sender_Name $Content"
-    assert an.montar(antigo, PARTES) == "Nova mensagem Família Ana oi"
+def test_cada_tipo_tem_seu_modelo_e_seus_ativos():
+    v = an.padrao()
+    v = an.definir_modelo(v, "$New: $Sender_Name", "grupo")
+    v = an.definir_modelo(v, "$Content", "canal")
+    v = an.definir_modelo(v, "", "privada")
+    assert an.montar(v, PARTES, tipo="privada") == ""
+    assert an.montar(v, PARTES, tipo="grupo") == "Nova mensagem: Ana"
+    assert an.montar(v, PARTES, tipo="canal") == "oi"
+    assert an.ativos(v, "grupo") == ["inicio", "autor"]
+    assert an.eh_padrao(v, "privada") is False
+    assert an.eh_padrao(an.padrao(), "grupo") is True
+
+
+def test_config_antiga_volta_ao_padrao_nos_tres_tipos():
+    antigo = {"ordem": ["conteudo"], "ocultos": ["conteudo"],
+              "modelo": "$Content"}
+    v = an.normalizar(antigo)
+    assert v == an.padrao()
+    assert an.montar(antigo, PARTES, tipo="grupo") == \
+        "Nova mensagem em Família. Ana, 10:00, oi"
     assert an.normalizar("lixo") == an.padrao()
-    assert an.eh_padrao(an.padrao())
+    assert an.normalizar_tipo("invalido") == "privada"
 
 
 def test_mover_muda_a_lista_nao_a_frase():
@@ -89,11 +108,12 @@ def test_mover_muda_a_lista_nao_a_frase():
     assert an.ativos(v) == ["inicio", "conversa", "autor", "conteudo", "hora"]
 
 
-def test_rotulo_dos_itens():
+def test_rotulo_dos_itens_e_dos_tipos():
     assert an.texto_do_item(an.padrao(), "conta") == \
         "Conta que recebeu: desativado"
     assert an.texto_do_item(an.padrao(), "autor") == \
         "Nome de quem enviou: ativado"
+    assert an.rotulo_tipo("grupo") == "Grupos"
 
 
 def test_padrao_do_config_e_o_mesmo_do_modulo():
@@ -101,11 +121,12 @@ def test_padrao_do_config_e_o_mesmo_do_modulo():
     assert config.PADROES["aviso_nova"] == an.padrao()
 
 
-def test_backup_saneia_o_modelo_sem_perder_a_escolha():
+def test_backup_saneia_os_tres_tipos():
     from telezapp.nucleo import backup
-    lidas = {"aviso_nova": {"ordem": ["conteudo"],
-                            "ocultos": ["conteudo"],
-                            "modelo": "$Content"}}
+    lidas = {"aviso_nova": {"tipos": {"grupo": {
+        "ordem": ["conteudo"], "ocultos": ["conteudo"],
+        "modelo": "$Content"}}}}
     boas = backup.opcoes_validas(lidas)["aviso_nova"]
-    assert boas["modelo"] == "$Content"
-    assert boas["ocultos"] == ["conteudo", "servico", "conta"]
+    assert an.bloco(boas, "grupo")["modelo"] == "$Content"
+    assert an.bloco(boas, "privada") == an.bloco(an.padrao(), "privada")
+    assert an.bloco(boas, "canal") == an.bloco(an.padrao(), "canal")
