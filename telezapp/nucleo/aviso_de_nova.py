@@ -57,6 +57,9 @@ EXEMPLOS = {
 }
 EXEMPLO_COMUM = {"conta": "Minha conta", "hora": "10:00",
                  "conteudo": "Mensagem de teste"}
+# O som de notificação falsa imita o de uma mensagem real do mesmo tipo.
+EVENTOS_EXEMPLO = {"privada": "nova_pessoal", "grupo": "nova_grupo",
+                   "canal": "nova_canal"}
 
 
 def normalizar_tipo(tipo):

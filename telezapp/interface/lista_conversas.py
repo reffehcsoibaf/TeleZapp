@@ -246,9 +246,11 @@ class BlocoAviso:
     """Lista de itens + campo de modelo de um tipo de conversa. Cada bloco
     sincroniza só com o seu tipo; o valor lido/gravado é a config inteira."""
 
-    def __init__(self, dialogo, pai, sizer, nucleo, tipo, ler, gravar, fala):
+    def __init__(self, dialogo, pai, sizer, nucleo, tipo, ler, gravar, fala,
+                 tocar=None):
         self.d, self.lc, self.tipo = dialogo, nucleo, tipo
         self.ler, self.gravar, self.fala = ler, gravar, fala
+        self.tocar = tocar
         self._sincronizando = False
         rotulo = nucleo.rotulo_tipo(tipo)
         sizer.Add(wx.StaticText(
@@ -385,7 +387,10 @@ class BlocoAviso:
         self.mudar_modelo()
 
     def testar(self):
-        """Fala a notificação falsa deste bloco, com os dados de exemplo."""
+        """Toca o som e fala a notificação falsa deste bloco, com os dados
+        de exemplo (igual a uma mensagem chegando)."""
+        if self.tocar is not None:
+            self.tocar(self.tipo)
         frase = self.lc.exemplo_de_aviso(self.ler(), self.tipo)
         self._dizer(frase or "Modelo vazio: nenhum aviso falado neste bloco.")
 
@@ -402,7 +407,8 @@ class BlocoAviso:
 class DialogoAvisoNova(wx.Dialog):
     """Um bloco de lista + modelo para cada tipo de conversa."""
 
-    def __init__(self, pai, ler, gravar, fala=None, nucleo=None, foco=None):
+    def __init__(self, pai, ler, gravar, fala=None, nucleo=None, foco=None,
+                 tocar=None):
         from telezapp.nucleo import aviso_de_nova as an
         nucleo = nucleo or an
         super().__init__(
@@ -417,7 +423,7 @@ class DialogoAvisoNova(wx.Dialog):
         self.blocos = {}
         for tipo in nucleo.TIPOS:
             self.blocos[tipo] = BlocoAviso(
-                self, self, sizer, nucleo, tipo, ler, gravar, fala)
+                self, self, sizer, nucleo, tipo, ler, gravar, fala, tocar)
         sizer.Add(wx.Button(self, wx.ID_OK, "&Fechar"),
                   0, wx.ALL | wx.ALIGN_RIGHT, 10)
         self.SetEscapeId(wx.ID_OK)
