@@ -833,6 +833,8 @@ Arquivos WAV, Ogg, MP3 e FLAC servem. Arquivos longos tocam só os primeiros 15 
 
 O arquivo escolhido é copiado para a pasta sons, ao lado das contas e das mídias; Ajuda, Abrir a pasta de sons abre a pasta. Se um som sumir, o TeleZapp usa o padrão. A pasta vai junto no backup das configurações.
 
+A caixa "Não cortar os sons dos avisos" decide o que acontece quando chega uma mensagem enquanto outro som ainda está tocando. Desmarcada, o som novo corta o anterior. Marcada, os dois tocam ao mesmo tempo, sem cortar nenhum.
+
 # Segundo plano e abrir com o Windows
 Em Configurações, categoria Sistema, "Continuar em segundo plano ao fechar a janela" faz o botão de fechar e Alt+F4 só minimizarem a janela. O TeleZapp segue conectado, dando os avisos de mensagens, com o botão na barra de tarefas e um ícone na área de notificação do Windows.
 

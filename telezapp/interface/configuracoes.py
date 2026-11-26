@@ -469,6 +469,8 @@ class DialogoConfiguracoes(wx.Dialog):
         # que toca o tom ao escolher
         self._criar_opcao(next(o for o in config.OPCOES
                                if o.chave == "tom_de_chamada"))
+        self._criar_opcao(next(o for o in config.OPCOES
+                               if o.chave == "sons_sem_cortar"))
         self._sons_preencher_pacotes()
         self._sons_preencher_eventos()
 

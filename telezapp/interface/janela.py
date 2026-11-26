@@ -24,7 +24,8 @@ from telezapp import (GRUPO_DE_SUPORTE, NOME, PAGINA_DO_PROJETO, VERSAO,
                       config)
 from telezapp.acessibilidade.fala import (Fala, intervalo_do_tom_de_chamada,
                                           INTERVALO_TOQUE_MS, bipe,
-                                          definir_sons, definir_tom_de_chamada)
+                                          definir_sem_cortar, definir_sons,
+                                          definir_tom_de_chamada)
 from telezapp.interface import colagem, dialogos, robos, visualizadores
 from telezapp.interface import salvar as ui_salvar
 from telezapp.nucleo import agendamento as ag_nucleo
@@ -13046,6 +13047,8 @@ class Janela(wx.Frame):
                 self._carregar_eco()
             elif chave == "chamada_retornar_sem_audio":
                 self._carregar_eco()
+            elif chave == "sons_sem_cortar":
+                definir_sem_cortar(valor)
             elif chave in ("ia_linha_descricao", "ia_linha_transcricao"):
                 self._carregar_limites_ia()
                 if self.atual is not None:
@@ -13108,6 +13111,7 @@ class Janela(wx.Frame):
             ativo = pacotes_de_som.PADRAO
         desativados = (self.cfg.get("sons_desativados") or {}).get(ativo, [])
         definir_sons(pacotes_de_som.mapa(ativo, desativados))
+        definir_sem_cortar(self.cfg.get("sons_sem_cortar"))
         definir_tom_de_chamada(self.cfg.get("tom_de_chamada"))
 
     def _aplicar_privacidade_conta(self, mudancas):

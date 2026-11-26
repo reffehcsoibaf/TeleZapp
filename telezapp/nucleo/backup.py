@@ -48,7 +48,7 @@ NOMES_PARTES = dict(PARTES)
 PARTES_DE_OPCOES = ("configuracoes", "atalhos", "sons", "filtros")
 OPCOES_DE_PARTE = {"atalhos": ("atalhos", "mostrar_atalhos"),
                    "sons": ("pacote_de_sons", "sons_desativados",
-                            "sons_de_conversa"),
+                            "sons_de_conversa", "sons_sem_cortar"),
                    "filtros": ("filtros_personalizados",)}
 FORMATO = 2
 
