@@ -45,6 +45,18 @@ ROTULOS_TIPO = {
     "grupo": "Grupos",
     "canal": "Canais",
 }
+# Dados ficticios para o botao de teste, um por tipo de conversa. Nao vem
+# de conta nem de mensagem nenhuma: serve so para ouvir o modelo montado.
+EXEMPLOS = {
+    "privada": {"conversa": "Fábio Schefer", "servico": "WhatsApp",
+                "autor": "Ana"},
+    "grupo": {"conversa": "TeleZapp", "servico": "WhatsApp",
+              "autor": "Bia"},
+    "canal": {"conversa": "Canal de atualizações do TeleZapp",
+              "servico": "Telegram", "autor": "TeleZapp"},
+}
+EXEMPLO_COMUM = {"conta": "Minha conta", "hora": "10:00",
+                 "conteudo": "Mensagem de teste"}
 
 
 def normalizar_tipo(tipo):
@@ -231,3 +243,13 @@ def montar(valor, partes, aberta=False, tipo=TIPO_PADRAO):
     """O aviso, com o modelo do tipo de conversa (Configurações, Interface,
     Aviso falado de mensagem nova)."""
     return renderizar(bloco(valor, tipo)["modelo"], partes, aberta)
+
+
+def exemplo_de_aviso(valor, tipo=TIPO_PADRAO):
+    """Frase que seria falada numa notificação falsa daquele tipo, com os
+    dados de EXEMPLOS. Modelo vazio continua sem dizer nada."""
+    tipo = normalizar_tipo(tipo)
+    partes = {"inicio": "Nova mensagem"}
+    partes.update(EXEMPLO_COMUM)
+    partes.update(EXEMPLOS[tipo])
+    return montar(valor, partes, aberta=False, tipo=tipo)

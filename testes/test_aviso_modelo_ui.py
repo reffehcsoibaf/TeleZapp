@@ -124,9 +124,39 @@ def test_restaurar_volta_o_padrao_so_do_bloco():
     assert g.valor["tipos"]["privada"] == an.bloco(an.padrao(), "privada")
 
 
+def test_botao_de_teste_fala_a_notificacao_falsa_do_bloco():
+    d, g, fala = dialogo()
+    for tipo in an.TIPOS:
+        d.blocos[tipo].botoes["testar"].ligacoes[wx_falso.EVT_BUTTON](None)
+        assert fala.ditas[-1] == an.exemplo_de_aviso(None, tipo)
+    bloco = d.blocos["grupo"]
+    bloco.modelo.SetValue("$Content")
+    bloco.mudar_modelo()
+    bloco.botoes["testar"].ligacoes[wx_falso.EVT_BUTTON](None)
+    assert fala.ditas[-1] == "Mensagem de teste"
+    assert an.bloco(g.valor, "privada") == an.bloco(an.padrao(), "privada")
+
+
+def test_botao_de_teste_com_modelo_vazio_diz_que_nao_fala():
+    d, g, fala = dialogo()
+    bloco = d.blocos["canal"]
+    bloco.modelo.SetValue("")
+    bloco.mudar_modelo()
+    bloco.botoes["testar"].ligacoes[wx_falso.EVT_BUTTON](None)
+    assert fala.ditas[-1] == "Modelo vazio: nenhum aviso falado neste bloco."
+
+
 def test_busca_pode_focar_o_modelo_de_cada_tipo():
     for tipo in an.TIPOS:
         g = Gravador(None)
         d = ui.DialogoAvisoNova(
             None, g.ler, g.gravar, foco="modelo:%s" % tipo)
         assert wx_falso._foco[0] is d.blocos[tipo].modelo
+
+
+def test_busca_pode_focar_o_botao_de_teste_de_cada_tipo():
+    for tipo in an.TIPOS:
+        g = Gravador(None)
+        d = ui.DialogoAvisoNova(
+            None, g.ler, g.gravar, foco="testar:%s" % tipo)
+        assert wx_falso._foco[0] is d.blocos[tipo].botoes["testar"]

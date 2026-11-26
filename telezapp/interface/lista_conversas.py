@@ -270,6 +270,8 @@ class BlocoAviso:
         self.modelo.Bind(wx.EVT_TEXT, lambda e: self.mudar_modelo())
         self.botao_flags = wx.Button(pai, label="Inserir &flag — %s" % rotulo)
         self.botoes = {
+            "testar": wx.Button(
+                pai, label="&Testar notificação — %s" % rotulo),
             "cima": wx.Button(pai, label="Mover para &cima — %s" % rotulo),
             "baixo": wx.Button(pai, label="Mover para &baixo — %s" % rotulo),
             "padrao": wx.Button(
@@ -282,6 +284,7 @@ class BlocoAviso:
             linha.Add(botao, 0, wx.RIGHT | wx.BOTTOM, 8)
         sizer.Add(linha, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
         self.botao_flags.Bind(wx.EVT_BUTTON, lambda e: self.inserir_flag())
+        self.botoes["testar"].Bind(wx.EVT_BUTTON, lambda e: self.testar())
         self.botoes["cima"].Bind(wx.EVT_BUTTON, lambda e: self.mover(-1))
         self.botoes["baixo"].Bind(wx.EVT_BUTTON, lambda e: self.mover(1))
         self.botao_padrao.Bind(wx.EVT_BUTTON, lambda e: self.restaurar())
@@ -381,6 +384,11 @@ class BlocoAviso:
         self.modelo.WriteText(flag)
         self.mudar_modelo()
 
+    def testar(self):
+        """Fala a notificação falsa deste bloco, com os dados de exemplo."""
+        frase = self.lc.exemplo_de_aviso(self.ler(), self.tipo)
+        self._dizer(frase or "Modelo vazio: nenhum aviso falado neste bloco.")
+
     def restaurar(self):
         novo = self.lc.definir_bloco(
             self.ler(), self.lc.bloco(None, self.tipo), self.tipo)
@@ -429,7 +437,7 @@ class DialogoAvisoNova(wx.Dialog):
             bloco.modelo.SetFocus()
         elif alvo == "inserir_flag":
             bloco.botao_flags.SetFocus()
-        elif alvo in ("padrao", "cima", "baixo"):
+        elif alvo in ("testar", "padrao", "cima", "baixo"):
             bloco.botoes[alvo].SetFocus()
         elif alvo in self.lc.CHAVES:
             ordem = bloco.bloco()["ordem"]

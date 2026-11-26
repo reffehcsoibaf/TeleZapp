@@ -61,6 +61,12 @@ def _destinos_da_lista(tipo, titulo, nucleo):
                 "%s: inserir flag — %s" % (titulo, rotulo), tipo,
                 "inserir_flag:%s" % t, ajuda,
                 "flags disponíveis " + rotulo.lower()))
+            if hasattr(nucleo, "EXEMPLOS"):
+                itens.append(Destino(
+                    "%s: testar notificação — %s" % (titulo, rotulo), tipo,
+                    "testar:%s" % t, ajuda,
+                    "ouvir exemplo falso previa testar aviso "
+                    + rotulo.lower()))
     itens += [
         Destino("%s: mudar a ordem das informações" % titulo, tipo, "cima",
                 ajuda, "mover para cima baixo"),

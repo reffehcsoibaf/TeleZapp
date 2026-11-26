@@ -121,6 +121,26 @@ def test_padrao_do_config_e_o_mesmo_do_modulo():
     assert config.PADROES["aviso_nova"] == an.padrao()
 
 
+def test_exemplo_de_notificacao_tem_dados_de_cada_tipo():
+    assert an.exemplo_de_aviso(None) == (
+        "Nova mensagem em Fábio Schefer. Ana, 10:00, Mensagem de teste")
+    assert an.exemplo_de_aviso(None, "grupo") == (
+        "Nova mensagem em TeleZapp. Bia, 10:00, Mensagem de teste")
+    assert an.exemplo_de_aviso(None, "canal") == (
+        "Nova mensagem em Canal de atualizações do TeleZapp. "
+        "TeleZapp, 10:00, Mensagem de teste")
+
+
+def test_exemplo_usa_o_modelo_do_bloco_e_respeita_modelo_vazio():
+    v = an.definir_modelo(
+        None, "$Service/$Account/$Sender_Name/$Time/$Content", "grupo")
+    assert an.exemplo_de_aviso(v, "grupo") == (
+        "WhatsApp/Minha conta/Bia/10:00/Mensagem de teste")
+    v = an.definir_modelo(v, "", "canal")
+    assert an.exemplo_de_aviso(v, "canal") == ""
+    assert an.exemplo_de_aviso(v, "privada") == an.exemplo_de_aviso(None)
+
+
 def test_backup_saneia_os_tres_tipos():
     from telezapp.nucleo import backup
     lidas = {"aviso_nova": {"tipos": {"grupo": {
