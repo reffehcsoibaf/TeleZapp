@@ -41,6 +41,22 @@ def test_contagem_vem_dos_votos_ou_do_que_o_servico_mandou():
     assert m.votantes_da_enquete(pronta) == 5
 
 
+def test_linhas_de_quem_votou_uma_por_pessoa():
+    e = m.enquete_de(mensagem(votos={
+        "a": {"nome": "Ana", "escolhas": [0]},
+        "b": {"nome": "Bia", "escolhas": [0, 2]},
+        "c": {"nome": "Caio", "escolhas": []}}))     # tirou o voto: nao entra
+    assert m.linhas_de_quem_votou(e) == [
+        "Ana: Sexta", "Bia: Sexta, Domingo"]
+
+
+def test_linhas_de_quem_votou_vazia_sem_voto_ou_anonima():
+    assert m.linhas_de_quem_votou(m.enquete_de(mensagem())) == []
+    cheia = m.enquete_de(mensagem(anonima=True, votos={
+        "a": {"nome": "Ana", "escolhas": [0]}}))
+    assert m.linhas_de_quem_votou(cheia) == []
+
+
 def test_contagem_de_tamanho_errado_e_ignorada():
     e = m.enquete_de(mensagem(contagem=[1, 2]))
     assert e["contagem"] is None

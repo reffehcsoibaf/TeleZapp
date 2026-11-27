@@ -3703,7 +3703,7 @@ def test_grupo_apagar_pergunta_a_acao_e_encaminha(j, monkeypatch):
     conv.tipo = "grupo"
     chamadas = []
     j._limpar_conversa = lambda c: chamadas.append(("limpar", c.id))
-    j._sair_do_grupo = lambda c, p, ap, cel=False: chamadas.append(
+    j._sair_do_grupo = lambda c, p, ap, cel=False, pt=False: chamadas.append(
         ("sair", ap))
     for acao in ("limpar", "sair_apagar", None):
         monkeypatch.setattr(jm.dialogos, "escolher_acao_grupo",
@@ -9701,6 +9701,55 @@ def _com_celular(j, monkeypatch):
     return pedidos
 
 
+def test_onde_tambem_depende_do_servico(j):
+    tele = j.indice[("t1", "20")]
+    zap = m.Conversa("w1", "30", "Zap", "whatsapp", "privada", data=AGORA)
+    assert j._onde_tambem([tele]) == "na conta do Telegram"
+    assert j._onde_tambem([zap]) == "no celular"
+    assert j._onde_tambem([tele, zap]) == "na conta"
+
+
+def test_lembrar_celular_pula_o_aviso_so_com_telegram(j, monkeypatch):
+    tele = j.indice[("t1", "20")]
+    zap = m.Conversa("w1", "30", "Zap", "whatsapp", "privada", data=AGORA)
+    avisos = []
+    monkeypatch.setattr(jm.wx, "MessageBox",
+                        lambda *a, **k: avisos.append(a) or jm.wx.OK)
+    assert j._lembrar_celular(convs=[tele]) is True
+    assert avisos == []                       # so Telegram: sem aviso
+    assert j._lembrar_celular(convs=[tele, zap]) is True
+    assert len(avisos) == 1                   # tem WhatsApp: avisa
+
+
+def test_perguntar_para_todos_so_pergunta_quando_o_servico_deixa(
+        j, monkeypatch):
+    tele = j.indice[("t1", "20")]
+    zap = m.Conversa("w1", "30", "Zap", "whatsapp", "privada", data=AGORA)
+    prov_t1 = j.contas.provedor("t1")
+    prov_t1.APAGA_PARA_TODOS = False
+    assert j._perguntar_para_todos([zap]) is False   # whatsapp nunca pergunta
+    chamadas = []
+    monkeypatch.setattr(jm.wx, "MessageBox",
+                        lambda *a, **k: chamadas.append(a) or jm.wx.YES)
+    prov_t1.APAGA_PARA_TODOS = True
+    assert j._perguntar_para_todos([tele]) is True
+    assert len(chamadas) == 1
+    assert "administrador" not in chamadas[0][0]   # privada: sem o aviso
+    tele_grupo = m.Conversa("t1", "21", "Grupo", "telegram", "grupo",
+                            data=AGORA)
+    chamadas.clear()
+    assert j._perguntar_para_todos([tele_grupo]) is True
+    assert "administrador" in chamadas[0][0]
+
+
+def test_kw_para_todos_so_manda_ao_servico_que_aceita(j):
+    prov_t1 = j.contas.provedor("t1")
+    prov_t1.APAGA_PARA_TODOS = True
+    assert j._kw_para_todos(prov_t1, True) == {"para_todos": True}
+    prov_t1.APAGA_PARA_TODOS = False
+    assert j._kw_para_todos(prov_t1, True) == {}
+
+
 def test_item_limpar_a_conversa_fica_no_menu_conversas_e_age_na_em_foco(
         j, monkeypatch):
     assert "limpar_conversa" in j.itens
@@ -9779,7 +9828,8 @@ def test_limpar_varias_conversas_marcadas_com_uma_pergunta_so(j, monkeypatch):
     assert not j.banco.mensagens("t1", "20", 1)
     assert not j.banco.mensagens("t1", "21", 1)
     assert c1.chave in j.indice and c2.chave in j.indice   # seguem na lista
-    assert "2 conversas limpadas" in falas[-1] and "celular" in falas[-1]
+    assert "2 conversas limpadas" in falas[-1]
+    assert "na conta do Telegram" in falas[-1]
 
 
 def test_dados_das_contas_em_gerenciar_contas(j, monkeypatch, tmp_path):
