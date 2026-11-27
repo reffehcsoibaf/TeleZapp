@@ -32,6 +32,7 @@ class JanelaNavegador(wx.Frame):
     def __init__(self, pai, url):
         import wx.html2 as webview
         super().__init__(pai, title=NOME, size=(1000, 720))
+        self._url = url
         os.environ["WEBVIEW2_USER_DATA_FOLDER"] = config.pasta("webview")
         painel = wx.Panel(self)
         self.web = webview.WebView.New(painel, backend=webview.WebViewBackendEdge)
@@ -42,21 +43,27 @@ class JanelaNavegador(wx.Frame):
         self.web.Bind(webview.EVT_WEBVIEW_ERROR, self._ao_erro)
         self.web.Bind(webview.EVT_WEBVIEW_NEWWINDOW, self._ao_nova_janela)
 
-        self._voltar = wx.Button(painel, label="&Voltar")
-        self._avancar = wx.Button(painel, label="Ava&nçar")
-        recarregar = wx.Button(painel, label="&Recarregar")
-        fechar = wx.Button(painel, wx.ID_CLOSE, "&Fechar")
-        self._voltar.Bind(wx.EVT_BUTTON, lambda e: self.web.GoBack())
-        self._avancar.Bind(wx.EVT_BUTTON, lambda e: self.web.GoForward())
-        recarregar.Bind(wx.EVT_BUTTON, lambda e: self.web.Reload())
-        fechar.Bind(wx.EVT_BUTTON, lambda e: self.Close())
-        linha = wx.BoxSizer(wx.HORIZONTAL)
-        for b in (self._voltar, self._avancar, recarregar):
-            linha.Add(b, 0, wx.ALL, 4)
-        linha.AddStretchSpacer()
-        linha.Add(fechar, 0, wx.ALL, 4)
+        # Os comandos ficam no menu que o Alt abre (um botao some da tela e
+        # o Tab ainda tinha de atravessar a pagina para chegar neles).
+        menu = wx.Menu()
+        self._voltar = menu.Append(wx.ID_ANY, "&Voltar	Alt+Left")
+        self._avancar = menu.Append(wx.ID_ANY, "Ava&nçar	Alt+Right")
+        recarregar = menu.Append(wx.ID_ANY, "&Recarregar	F5")
+        externo = menu.Append(wx.ID_ANY, "Abrir no &navegador externo")
+        menu.AppendSeparator()
+        fechar = menu.Append(wx.ID_CLOSE, "&Fechar	Esc")
+        barra = wx.MenuBar()
+        barra.Append(menu, "&Navegador")
+        self.SetMenuBar(barra)
+        self.Bind(wx.EVT_MENU, lambda e: self.web.GoBack(), self._voltar)
+        self.Bind(wx.EVT_MENU, lambda e: self.web.GoForward(), self._avancar)
+        self.Bind(wx.EVT_MENU, lambda e: self.web.Reload(), recarregar)
+        self.Bind(wx.EVT_MENU, self._abrir_externo, externo)
+        self.Bind(wx.EVT_MENU, lambda e: self.Close(), fechar)
+        # o foco fica dentro da pagina (um controle do Edge): o Esc tambem
+        # e tratado aqui, antes de chegar a ela
+        self.Bind(wx.EVT_CHAR_HOOK, self._ao_tecla)
         caixa = wx.BoxSizer(wx.VERTICAL)
-        caixa.Add(linha, 0, wx.EXPAND)
         caixa.Add(self.web, 1, wx.EXPAND)
         painel.SetSizer(caixa)
         self._atualizar_botoes()
@@ -66,6 +73,18 @@ class JanelaNavegador(wx.Frame):
     def _atualizar_botoes(self):
         self._voltar.Enable(self.web.CanGoBack())
         self._avancar.Enable(self.web.CanGoForward())
+
+    def _ao_tecla(self, evt):
+        if evt.GetKeyCode() == wx.WXK_ESCAPE and not evt.HasModifiers():
+            self.Close()
+            return
+        evt.Skip()
+
+    def _abrir_externo(self, evt):
+        """A pagina que esta na tela, no navegador padrao do Windows."""
+        url = self.web.GetCurrentURL() or self._url
+        if url.lower().startswith(("http://", "https://")):
+            wx.LaunchDefaultBrowser(url)
 
     def _ao_titulo(self, evt):
         titulo = evt.GetString()
