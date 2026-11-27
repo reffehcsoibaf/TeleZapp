@@ -108,6 +108,7 @@ class Reprodutor:
         self.terminou = False
         self._velocidade = 1.0
         self._esticador = None
+        self.volume = 1.0       # 0.0 a 1.0; aplicado no callback de audio
 
     def _apagar_wav(self):
         wav, self._wav = self._wav, None
@@ -244,7 +245,8 @@ class Reprodutor:
                 return
             n = len(dados)
             if n:
-                saida[:n] = dados
+                saida[:n] = dados if self.volume == 1.0 \
+                    else dados * self.volume
             if fim:
                 self._tocando = False
                 self.terminou = True

@@ -615,6 +615,15 @@ OPCOES = (
           "Com a autenticação ao abrir ligada, usa o Windows Hello deste "
           "computador em vez de pedir o PIN do TeleZapp. Desmarcada, pede "
           "sempre o PIN do TeleZapp."),
+    Opcao("limpar_manter_favoritas",
+          "Manter as mensagens favoritas ao limpar a conversa",
+          "Privacidade", True,
+          "Ao limpar uma conversa pelo item do menu \"Limpar a conversa "
+          "(aqui e no celular)\", ou várias marcadas de uma vez, as "
+          "mensagens favoritas (e as mídias delas) não são apagadas, como já "
+          "acontece na janela Limpar mídias e mensagens (o botão \"Limpar a "
+          "conversa...\" dos Detalhes). Desmarcada, a limpeza apaga tudo, "
+          "inclusive as favoritas."),
     Opcao("manter_apagadas",
           "Manter as mensagens que quem enviou apagar para todos",
           "Privacidade", False,
@@ -627,15 +636,16 @@ OPCOES = (
           "chegar depois de marcar; o que já foi apagado não volta. As "
           "mensagens que você mesmo apaga continuam sendo apagadas."),
     Opcao("manter_apagadas_no_celular",
-          "Manter no computador o que eu apagar no WhatsApp do celular",
+          "Manter no computador o que eu apagar no serviço",
           "Privacidade", False,
-          "Marcada, as mensagens e conversas que você apagar no WhatsApp do "
-          "celular, ou em outro aparelho, continuam neste computador, com as "
-          "mídias já baixadas. Uma mensagem sua apagada para todos fica "
-          "marcada como apagada pelo autor. Desmarcada, o que você apaga lá "
-          "também é apagado aqui. O que você apaga pelo próprio TeleZapp "
-          "continua sendo apagado neste computador. Só vale para o que for "
-          "apagado depois de marcar; o que já saiu não volta."),
+          "Marcada, as mensagens e conversas que você apagar direto no "
+          "serviço (no celular, na conta ou em outro aparelho) continuam "
+          "neste computador, com as mídias já baixadas. Uma mensagem sua "
+          "apagada para todos fica marcada como apagada pelo autor. "
+          "Desmarcada, o que você apaga lá também é apagado aqui. O que "
+          "você apaga pelo próprio TeleZapp continua sendo apagado neste "
+          "computador. Só vale para o que for apagado depois de marcar; o "
+          "que já saiu não volta."),
     Opcao("verificar_atualizacoes",
           "Avisar quando houver versão nova do TeleZapp", "Atualizações",
           True,
@@ -1103,6 +1113,12 @@ OPCOES = (
               0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75,
               3.0)),
           grupo="Reprodução de áudio"),
+    Opcao("volume_reproducao", "Volume da reprodução, em porcentagem",
+          "Mídias", 100,
+          "Volume do controle que abre com o foco em vídeos e áudios "
+          "tocados com janela (setas para cima e para baixo mudam). "
+          "Guardado de uma vez para a próxima.",
+          numero=(0, 100), grupo="Reprodução de áudio"),
     Opcao("falar_pulo_audio",
           "Falar o ponto do áudio ao avançar ou voltar com as teclas",
           "Mídias", True,
