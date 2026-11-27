@@ -396,6 +396,23 @@ def quem_votou_em(enq, posicao):
             if posicao in v["escolhas"]]
 
 
+def linhas_de_quem_votou(enq):
+    """Uma linha por quem votou: 'Nome: opção' (ou as opções escolhidas,
+    separadas por vírgula). Vazio nas anônimas ou sem ninguém ter votado."""
+    if enq["anonima"]:
+        return []
+    linhas = []
+    for quem, v in enq["votos"].items():
+        if not v["escolhas"]:
+            continue
+        nome = nome_a_mostrar(v["nome"]) or quem
+        opcoes = ", ".join(enq["opcoes"][i] for i in sorted(v["escolhas"])
+                           if 0 <= i < len(enq["opcoes"]))
+        if opcoes:
+            linhas.append("%s: %s" % (nome, opcoes))
+    return sorted(linhas, key=str.casefold)
+
+
 def resumo_enquete(msg):
     """'enquete: Pergunta, 3 opções, 5 votos' (+ 'seu voto: A, B')."""
     enq = enquete_de(msg)
@@ -657,7 +674,8 @@ def conteudo(m, com_estado=True):
     if m.tipo == DOCUMENTO:
         return _partes("documento", m.nome_arquivo, tam, legenda)
     if m.tipo == FIGURINHA:
-        return _partes("figurinha", m.texto)
+        # figurinha com audio (25/11): m.segundos vem do audio embutido
+        return _partes("figurinha", dur, m.texto)
     if m.tipo == AGUARDANDO:
         return ("mensagem ainda não recebida: o WhatsApp não entregou o "
                 "conteúdo, ela pode chegar depois")
@@ -690,8 +708,8 @@ def anuncio_reproducao(msg, velocidade="", proximo=False,
     `detalhado` falso: nada (texto vazio); o proprio audio e o aviso."""
     if not detalhado:
         return "Próximo áudio." if proximo else ""
-    coisa = {VOZ: "mensagem de voz", AUDIO: "áudio",
-             VIDEO: "vídeo"}.get(msg.tipo, "áudio")
+    coisa = {VOZ: "mensagem de voz", AUDIO: "áudio", VIDEO: "vídeo",
+             FIGURINHA: "áudio da figurinha"}.get(msg.tipo, "áudio")
     if msg.minha:
         o_que = "sua " + coisa if msg.tipo == VOZ else "seu " + coisa
     else:
@@ -855,8 +873,8 @@ LIMITE_IA_NA_LINHA = {"descricao": 0, "transcricao": 1000}
 # Ligado pela janela a partir da opcao `manter_apagadas`: o que o remetente
 # apaga para todos continua guardado aqui, so marcado.
 MANTER = {"apagadas": False,
-          # opcao `manter_apagadas_no_celular`: o que eu apago no WhatsApp do
-          # celular continua aqui
+          # opcao `manter_apagadas_no_celular`: o que eu apago direto no
+          # servico (celular, conta, outro aparelho) continua aqui
           "do_celular": False}
 
 

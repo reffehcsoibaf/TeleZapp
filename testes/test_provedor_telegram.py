@@ -503,6 +503,35 @@ def test_manter_apagadas_no_telegram_marca_em_vez_de_remover(
         p.parar()
 
 
+def test_manter_do_celular_no_telegram_mantem_a_minha_apagada_em_outro(
+        ambiente, monkeypatch):
+    import asyncio
+    monkeypatch.setitem(m.MANTER, "do_celular", True)
+    cliente = ClienteFalso()
+    p = ambiente.criar(cliente)
+    p.iniciar()
+    try:
+        esperar(ambiente.fila, ev.ConversasAtualizadas)
+        ambiente.banco.salvar_mensagens([
+            m.Mensagem("t1", "10", "61", texto="oi", data=time.time()),
+            m.Mensagem("t1", "10", "62", texto="meu", minha=True,
+                       data=time.time())])
+        apagadas = cliente.handlers[3]
+        asyncio.run_coroutine_threadsafe(
+            apagadas(types.SimpleNamespace(deleted_ids=[61, 62],
+                                           chat_id=None)),
+            p._loop).result(5)
+        # a de outra pessoa continua sendo removida (opcao "apagadas" desligada)
+        e = esperar(ambiente.fila, ev.MensagemApagadaNoCelular)
+        assert e.mensagem_id == "61"
+        # a minha, apagada em outro aparelho: mantida (opcao do_celular)
+        a = esperar(ambiente.fila, ev.MensagemAtualizada)
+        assert (a.mensagem.id, a.motivo) == ("62", "apagada")
+        assert m.extras_de(a.mensagem)["apagada_pelo_autor"]
+    finally:
+        p.parar()
+
+
 def test_mensagem_apagada_no_celular_e_apagada_daqui(ambiente):
     import asyncio
     cliente = ClienteFalso()
@@ -2659,6 +2688,79 @@ def test_privacidade_manter_arquivadas_do_telegram_le_e_grava(ambiente):
     assert asyncio.run(p._ler_privacidade())["keeparchived"] == "keep"
     asyncio.run(p._gravar_privacidade("keeparchived", "unarchive"))
     assert not cliente.gravadas[-1].keep_archived_unmuted
+
+
+def test_apagar_conversa_no_telegram_limpa_o_historico_sem_sair():
+    from telethon.tl.functions.messages import DeleteHistoryRequest
+    enviados = []
+
+    async def cliente(req):
+        enviados.append(req)
+    prov = tg.ProvedorTelegram.__new__(tg.ProvedorTelegram)
+    prov.cliente = cliente
+    prov._entidades = {"55": "entidade-55"}
+    prov._agendar = lambda coro: asyncio.run(coro)
+    assert tg.ProvedorTelegram.APAGA_NA_CONTA is True
+    assert prov.apagar_conversa("55") is True
+    pedido = enviados[-1]
+    assert isinstance(pedido, DeleteHistoryRequest)
+    assert pedido.peer == "entidade-55" and pedido.just_clear is False
+    assert pedido.revoke is False                 # nunca apaga pros outros
+
+
+def test_limpar_conversa_no_telegram_mantem_o_dialogo():
+    from telethon.tl.functions.messages import DeleteHistoryRequest
+    enviados = []
+
+    async def cliente(req):
+        enviados.append(req)
+    prov = tg.ProvedorTelegram.__new__(tg.ProvedorTelegram)
+    prov.cliente = cliente
+    prov._entidades = {"55": "entidade-55"}
+    prov._agendar = lambda coro: asyncio.run(coro)
+    assert prov.limpar_conversa("55") is True
+    pedido = enviados[-1]
+    assert isinstance(pedido, DeleteHistoryRequest) and pedido.just_clear
+
+
+def test_apagar_historico_sem_derrubar_com_erro_do_telegram():
+    async def cliente(req):
+        raise RuntimeError("sem permissão")
+    prov = tg.ProvedorTelegram.__new__(tg.ProvedorTelegram)
+    prov.cliente = cliente
+    prov._entidades = {"55": "entidade-55"}
+    asyncio.run(prov._apagar_historico("55", just_clear=False))  # nao estoura
+
+
+def test_apagar_conversa_no_telegram_para_todos_manda_revoke():
+    from telethon.tl.functions.messages import DeleteHistoryRequest
+    enviados = []
+
+    async def cliente(req):
+        enviados.append(req)
+    prov = tg.ProvedorTelegram.__new__(tg.ProvedorTelegram)
+    prov.cliente = cliente
+    prov._entidades = {"55": "entidade-55"}
+    prov._agendar = lambda coro: asyncio.run(coro)
+    assert tg.ProvedorTelegram.APAGA_PARA_TODOS is True
+    assert prov.apagar_conversa("55", para_todos=True) is True
+    assert enviados[-1].revoke is True
+
+
+def test_apagar_para_todos_sem_direitos_tenta_de_novo_so_na_conta():
+    from telethon.tl.functions.messages import DeleteHistoryRequest
+    enviados = []
+
+    async def cliente(req):
+        enviados.append(req)
+        if req.revoke:
+            raise RuntimeError("sem permissão de administrador")
+    prov = tg.ProvedorTelegram.__new__(tg.ProvedorTelegram)
+    prov.cliente = cliente
+    prov._entidades = {"55": "entidade-55"}
+    asyncio.run(prov._apagar_historico("55", just_clear=False,
+                                       para_todos=True))
+    assert [e.revoke for e in enviados] == [True, False]  # repescagem
 
 
 def test_pastas_do_telegram_viram_conversas_por_pasta():

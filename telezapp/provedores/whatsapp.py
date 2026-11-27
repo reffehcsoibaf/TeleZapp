@@ -75,7 +75,11 @@ EMBRULHOS = ("deviceSentMessage", "ephemeralMessage", "viewOnceMessage",
              "limitSharingMessage", "questionMessage", "questionReplyMessage",
              "botForwardedMessage", "groupStatusMessage",
              # a enquete V4 vem dentro de um envelope
-             "pollCreationMessageV4")
+             "pollCreationMessageV4",
+             # figurinha com audio embutido (25/11): o envelope guarda uma
+             # Message com stickerMessage dentro, que por sua vez tem um
+             # AudioMessage embutido (stickerMessage.audioMessage)
+             "audioStickerMessage")
 # Todas as versoes da mensagem que cria uma enquete (a V4 e aberta como
 # envelope, ver EMBRULHOS)
 CRIACAO_DE_ENQUETE = ("pollCreationMessage", "pollCreationMessageV2",
@@ -291,12 +295,72 @@ def campos(msg):
         return []
 
 
+def _varint(dados, i):
+    valor = deslocamento = 0
+    while True:
+        b = dados[i]
+        i += 1
+        valor |= (b & 0x7F) << deslocamento
+        if not (b & 0x80):
+            return valor, i
+        deslocamento += 7
+
+
+def campos_brutos(msg):
+    """[(numero, tipo_wire, tamanho_ou_valor)] de TODOS os campos na
+    serializacao de `msg`, inclusive os que o nosso .proto nao conhece (nao
+    aparecem em campos()/ListFields) - o UnknownFields() do protobuf nao
+    funciona com o backend instalado (upb). Usado so para investigar tipos
+    de mensagem novos da Meta; nunca registra o conteudo, so o formato."""
+    try:
+        dados = msg.SerializeToString()
+    except Exception:
+        return []
+    saida, i, n = [], 0, len(dados)
+    try:
+        while i < n:
+            tag, i = _varint(dados, i)
+            numero, wire = tag >> 3, tag & 7
+            if wire == 0:
+                valor, i = _varint(dados, i)
+                saida.append((numero, wire, valor))
+            elif wire == 1:
+                saida.append((numero, wire, 8))
+                i += 8
+            elif wire == 2:
+                tamanho, i = _varint(dados, i)
+                saida.append((numero, wire, tamanho))
+                i += tamanho
+            elif wire == 5:
+                saida.append((numero, wire, 4))
+                i += 4
+            else:
+                break
+    except (IndexError, ValueError):
+        pass
+    return saida
+
+
 def desembrulhar(msg):
     """Abre os envelopes ate a mensagem de verdade."""
     for _ in range(6):
         for nome in EMBRULHOS:
             try:
                 if msg.HasField(nome):
+                    if nome == "audioStickerMessage":
+                        # a Meta pode ter posto o audio num campo que o
+                        # nosso .proto ainda nao conhece (so sabemos abrir
+                        # o campo 1, "message", o fallback) - registra o
+                        # formato bruto pra investigar quando chegar um
+                        # exemplo real com o audio de verdade
+                        brutos = [t for t in
+                                  campos_brutos(getattr(msg, nome))
+                                  if t[0] != 1]
+                        if brutos:
+                            log.info(
+                                "audioStickerMessage: campos desconhecidos "
+                                "(numero, tipo_wire, tamanho/valor): %s",
+                                brutos)
                     msg = getattr(msg, nome).message
                     break
             except (ValueError, AttributeError):
@@ -530,7 +594,8 @@ def rotulos_dos_botoes(interna):
         if inter is not None and inter.HasField("nativeFlowMessage"):
             for b in inter.nativeFlowMessage.buttons:
                 dados = json.loads(b.buttonParamsJSON or "{}")
-                botoes.append(dados.get("display_text") or "")
+                botoes.append(dados.get("display_text") or
+                              dados.get("flow_cta") or "")
         if interna.HasField("listMessage"):
             for sec in interna.listMessage.sections:
                 opcoes += [r.title for r in sec.rows]
@@ -593,6 +658,7 @@ def _texto_estruturado(interna, presentes):
 
 
 NOMES_ACOES_INTERATIVAS = {
+    "galaxy_message": "formulário do WhatsApp",
     "payment_info": "solicitação de pagamento",
     "review_and_pay": "solicitação de pagamento",
     "order_details": "detalhes do pedido",
@@ -717,6 +783,10 @@ def botoes_do_whatsapp(interna):
     return botoes
 
 
+# nome da acao do botao que abre um formulario (Flow) dentro do WhatsApp
+ACAO_DE_FORMULARIO = "galaxy_message"
+
+
 def acoes_do_whatsapp(interna):
     """Botoes de resposta e opcoes de lista que o toque pode acionar:
     [{'tipo', 'rotulo', 'id', 'indice', 'descricao'}]. Tipos: modelo
@@ -750,6 +820,16 @@ def acoes_do_whatsapp(interna):
             inter = interna.interactiveMessage
         if inter is not None and inter.HasField("nativeFlowMessage"):
             for i, b in enumerate(inter.nativeFlowMessage.buttons):
+                if b.name == ACAO_DE_FORMULARIO:
+                    # formulario do WhatsApp (Flow): o rotulo vem em flow_cta
+                    dados = json.loads(b.buttonParamsJSON or "{}")
+                    acoes.append({
+                        "tipo": "formulario", "indice": i,
+                        "rotulo": dados.get("flow_cta") or
+                        dados.get("display_text") or "Abrir o formulário",
+                        "id": str(dados.get("flow_id") or ""),
+                        "params": b.buttonParamsJSON or ""})
+                    continue
                 if b.name != "quick_reply":
                     continue
                 dados = json.loads(b.buttonParamsJSON or "{}")
@@ -838,6 +918,53 @@ def forma_sem_textos(x):
     if isinstance(x, str):
         return x if _NOME_DE_ENUM.match(x) else "<texto %d>" % len(x)
     return "<n>" if isinstance(x, (int, float)) else x
+
+
+def _nome_da_acao(nome):
+    """O nome de uma acao de botao (galaxy_message, cta_url...) para o
+    registro: so se parece mesmo um identificador; senao so o tamanho."""
+    nome = nome or ""
+    if re.fullmatch(r"[a-z][a-z0-9_]{0,39}", nome):
+        return nome
+    return "<texto %d>" % len(nome)
+
+
+def _chaves_do_json(texto):
+    """As chaves (nunca os valores) de um JSON de parametros."""
+    try:
+        dados = json.loads(texto or "{}")
+    except ValueError:
+        return ["<json invalido>"]
+    if not isinstance(dados, dict):
+        return ["<%s>" % type(dados).__name__]
+    return sorted(_nome_da_acao(k) for k in dados)[:20]
+
+
+def acoes_interativas(interna):
+    """[{"acao": nome, "chaves": [...]}] dos botoes de fluxo de uma mensagem
+    de empresa (e da resposta a eles), sem nenhum texto das mensagens: o
+    registro mostra qual acao e (galaxy_message abre um formulario do
+    WhatsApp, cta_url um link...) e que dados ela traz."""
+    saida = []
+    try:
+        inter = None
+        if interna.HasField("interactiveMessage"):
+            inter = interna.interactiveMessage
+        elif interna.HasField("templateMessage") and                 interna.templateMessage.HasField("interactiveMessageTemplate"):
+            inter = interna.templateMessage.interactiveMessageTemplate
+        if inter is not None and inter.HasField("nativeFlowMessage"):
+            for b in inter.nativeFlowMessage.buttons[:10]:
+                saida.append({"acao": _nome_da_acao(b.name),
+                              "chaves": _chaves_do_json(b.buttonParamsJSON)})
+        if interna.HasField("interactiveResponseMessage"):
+            r = interna.interactiveResponseMessage
+            if r.HasField("nativeFlowResponseMessage"):
+                n = r.nativeFlowResponseMessage
+                saida.append({"resposta": _nome_da_acao(n.name),
+                              "chaves": _chaves_do_json(n.paramsJSON)})
+    except Exception:
+        log.info("não consegui ler as ações dos botões")
+    return saida
 
 
 def estrutura_interativa(interna):
@@ -1102,7 +1229,10 @@ def conteudo_de(interna):
         return (m.DOCUMENTO, x.caption, 0, x.fileName or x.title,
                 x.fileLength)
     if "stickerMessage" in presentes:
-        return m.FIGURINHA, "", 0, "", 0
+        x = interna.stickerMessage
+        segundos = x.audioMessage.seconds if x.HasField("audioMessage") \
+            else 0
+        return m.FIGURINHA, "", segundos, "", x.fileLength
     for nome in CRIACAO_DE_ENQUETE:
         if nome in presentes:
             p = getattr(interna, nome)
@@ -1188,6 +1318,10 @@ def converter(evento, conta_id, conversa_id, autor=""):
     if forma:
         log.info("mensagem interativa: %s", json.dumps(
             forma_sem_textos(forma), ensure_ascii=False))
+        acoes = acoes_interativas(interna)
+        if acoes:
+            log.info("ações da mensagem interativa: %s", json.dumps(
+                acoes, ensure_ascii=False))
     msg = m.Mensagem(
         conta_id=conta_id, conversa_id=conversa_id, id=info.ID,
         autor="" if minha else (autor or info.Pushname or
@@ -1236,6 +1370,17 @@ def ficha_de(interna):
             for campo in ("contextInfo", "JPEGThumbnail", "caption"):
                 video.ClearField(campo)
             return Message(videoMessage=video).SerializeToString()
+    except (ValueError, AttributeError):
+        pass
+    try:
+        if interna.HasField("audioStickerMessage"):
+            # figurinha com audio mais nova: o audio em si nao tem formato
+            # conhecido ainda, mas o fallback (dentro do FutureProofMessage)
+            # costuma ser uma figurinha comum - guarda isso, pelo menos a
+            # imagem fica baixavel
+            aninhada = ficha_de(interna.audioStickerMessage.message)
+            if aninhada:
+                return aninhada
     except (ValueError, AttributeError):
         pass
     for nome in CAMPOS_MIDIA:
@@ -1354,6 +1499,10 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
     if forma:
         log.info("mensagem interativa: %s", json.dumps(
             forma_sem_textos(forma), ensure_ascii=False))
+        acoes = acoes_interativas(desembrulhar(wmi.message))
+        if acoes:
+            log.info("ações da mensagem interativa: %s", json.dumps(
+                acoes, ensure_ascii=False))
     ctx = _contexto(desembrulhar(wmi.message))
     remetente = wmi.key.participant or wmi.participant or wmi.key.remoteJID
     msg = m.Mensagem(
@@ -2307,9 +2456,8 @@ class ProvedorWhatsApp(Provedor):
     # ----------------------------------------------------------- conversas
     def _publicar_conversas(self):
         with self._trava:
-            for c in self._conversas.values():
-                if c.tipo == "canal":
-                    c.somente_leitura = True     # canais: so quem administra
+            # canais: _conversa() ja marca somente leitura ao criar (seguro
+            # por padrao) e _buscar_nome_canal corrige se a conta administra
             lista = sorted(self._conversas.values(), key=lambda c: -c.data)
         self.barramento.publicar(ev.ConversasAtualizadas(self.conta.id,
                                                          lista))
@@ -2850,12 +2998,19 @@ class ProvedorWhatsApp(Provedor):
         if info.OwnerPN.User:
             dono = self._nome_contato(info.OwnerPN)
         subgrupos = []
+        # na comunidade, os subgrupos; num grupo da comunidade, os irmaos
+        # (a mesma lista, pedida pelo grupo-pai)
+        pai = None
         if info.GroupParent.IsParent:
+            pai = _jid_obj(usuario, servidor)
+        elif info.GroupLinkedParent.LinkedParentJID.User:
+            pai = info.GroupLinkedParent.LinkedParentJID
+        if pai is not None:
             try:
-                for alvo in self.cliente.get_sub_groups(
-                        _jid_obj(usuario, servidor)):
-                    subgrupos.append((jid_texto(alvo.JID),
-                                      alvo.GroupName.Name or "Grupo"))
+                for alvo in self.cliente.get_sub_groups(pai):
+                    if jid_texto(alvo.JID) != conversa_id:
+                        subgrupos.append((jid_texto(alvo.JID),
+                                          alvo.GroupName.Name or "Grupo"))
             except Exception:
                 log.info("sem a lista de grupos da comunidade")
         ajustes = None
@@ -4510,10 +4665,31 @@ class ProvedorWhatsApp(Provedor):
                 # telefone: nesse caso vale o telefone consultado (23/11: o
                 # TeleZapp abriu a conversa como "+<LID de 15 digitos>")
                 if getattr(r.JID, "Server", "s.whatsapp.net")                         != "s.whatsapp.net" and consulta:
-                    registrados[consulta] = consulta
-                    log.info("a consulta do telefone voltou com endereço "
-                             "interno (%s, %d dígitos); vale o telefone "
-                             "consultado", r.JID.Server, len(r.JID.User))
+                    # o LID nao diz qual forma (com ou sem o 9) esta
+                    # registrada: o mapa LID -> telefone do WhatsApp diz
+                    # (24/11: o TeleZapp abriu a conversa com os 13 digitos
+                    # e o envio foi recusado, a conta era a de 12)
+                    pn = self._pn_do_lid(r.JID)
+                    real = getattr(pn, "User", "") if pn is not None and                         getattr(pn, "Server", "") == "s.whatsapp.net" else ""
+                    if real.isdigit():
+                        registrados[consulta] = real
+                        log.info("a consulta do telefone (%d dígitos) voltou "
+                                 "com endereço interno; o telefone "
+                                 "registrado tem %d dígitos", len(consulta),
+                                 len(real))
+                    else:
+                        registrados[consulta] = consulta
+                        log.info("a consulta do telefone voltou com endereço "
+                                 "interno (%s, %d dígitos) sem telefone "
+                                 "correspondente; vale o telefone consultado "
+                                 "(%d dígitos)", r.JID.Server,
+                                 len(r.JID.User), len(consulta))
+                    # 27/11: o envio a "<telefone>@s.whatsapp.net" de quem
+                    # nao esta salvo falha com "no LID found"; o endereco
+                    # interno que a consulta devolveu serve de destino
+                    for chave in {consulta, registrados[consulta]}:
+                        self.__dict__.setdefault("_lids_consultados", {})[
+                            chave] = (r.JID.User, r.JID.Server)
                 else:
                     registrados[consulta] = r.JID.User
         for f in formas:                      # a digitada vale primeiro
@@ -4840,7 +5016,10 @@ class ProvedorWhatsApp(Provedor):
                                   self.servico,
                                   "grupo" if grupo else (
                                       "canal" if canal else "privada"),
-                                  data=data)
+                                  data=data,
+                                  # seguro por padrao: _buscar_nome_canal
+                                  # libera se a conta administra ou e dona
+                                  somente_leitura=canal)
                 self._conversas[conversa_id] = conv
                 criada = True
             elif not grupo and not canal and (
@@ -4938,17 +5117,25 @@ class ProvedorWhatsApp(Provedor):
     def _buscar_nome_canal(self, conversa_id, chat):
         try:
             info = self.cliente.get_newsletter_info(chat)
-            nome = info.ThreadMeta.Name.Text
         except Exception:
-            log.info("não consegui o nome de um canal")
+            log.info("não consegui os dados de um canal")
             return
-        if not nome:
-            return
+        nome = info.ThreadMeta.Name.Text
+        # 3=administrador, 4=dono: so esses escrevem no canal
+        sou_admin = int(info.ViewerMeta.Role) in (3, 4)
         with self._trava:
             conv = self._conversas.get(conversa_id)
             if conv is None:
                 return
-            conv.nome = nome
+            mudou = False
+            if nome and conv.nome != nome:
+                conv.nome = nome
+                mudou = True
+            if conv.somente_leitura == sou_admin:
+                conv.somente_leitura = not sou_admin
+                mudou = True
+        if not mudou:
+            return
         self.banco.salvar_conversas([conv])
         self._publicar_conversas()
 
@@ -6159,6 +6346,52 @@ class ProvedorWhatsApp(Provedor):
         else:
             self.cliente.download_any(mensagem, parcial)
 
+    def baixar_audio_da_figurinha(self, msg, cancelado):
+        """Baixa o audio embutido numa figurinha com som (separado da
+        imagem, que `baixar_arquivo` ja baixa): o `stickerMessage` traz um
+        `audioMessage` com chave e URL proprias. Levanta ErroMidia se a
+        figurinha nao tiver audio ou os dados nao estiverem mais guardados."""
+        dados = self.banco.ficha(msg.conta_id, msg.conversa_id, msg.id)
+        if dados is None:
+            raise ErroMidia(
+                "Esta mídia chegou antes do TeleZapp guardar os dados para "
+                "baixá-la. Só as mídias recebidas daqui para a frente, ou do "
+                "histórico de um novo pareamento, podem ser baixadas.")
+        from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import Message
+        mensagem = Message.FromString(dados)
+        if not mensagem.HasField("stickerMessage") or not \
+                mensagem.stickerMessage.HasField("audioMessage"):
+            raise ErroMidia("Esta figurinha não tem áudio.")
+        audio = mensagem.stickerMessage.audioMessage
+        caminho = armazem.com_extensao(
+            armazem.caminho_base_audio(msg),
+            armazem.extensao(audio.mimetype, m.AUDIO))
+        if os.path.isfile(caminho):
+            return caminho
+        if not self._conectada or self.cliente is None:
+            raise ErroMidia("Sem conexão com o WhatsApp.")
+        if cancelado():
+            raise DownloadCancelado()
+        parcial = caminho + ".parte"
+        try:
+            self.cliente.download_any(Message(audioMessage=audio), parcial)
+            if cancelado():
+                raise DownloadCancelado()
+            os.replace(parcial, caminho)
+        except DownloadCancelado:
+            raise
+        except Exception as e:
+            if cancelado():
+                raise DownloadCancelado()
+            log.warning("download do áudio da figurinha falhou: %s",
+                       type(e).__name__)
+            raise ErroMidia("O WhatsApp não entregou o áudio da figurinha. "
+                            "Ele pode ter expirado no servidor.")
+        finally:
+            if os.path.exists(parcial):
+                os.remove(parcial)
+        return caminho
+
     def _funcoes_de_pedir_midia(self):
         """As funcoes da DLL que pedem a midia ao celular, com os tipos que o
         ctypes precisa; None numa DLL sem elas."""
@@ -6470,6 +6703,10 @@ class ProvedorWhatsApp(Provedor):
     def _jid(self, conversa_id):
         from neonize.utils.jid import build_jid
         usuario, servidor = conversa_id.split("@", 1)
+        if servidor == "s.whatsapp.net":
+            lid = self.__dict__.get("_lids_consultados", {}).get(usuario)
+            if lid is not None:
+                return build_jid(*lid)
         return build_jid(usuario, servidor)
 
     def _mencoes_no_texto(self, texto, mencoes):
@@ -6587,6 +6824,68 @@ class ProvedorWhatsApp(Provedor):
             msg.conversa_id, acao.get("rotulo", ""), msg.id,
             lambda: self._variantes_da_acao(msg, acao), descricao))
 
+    # ------------------------------------------- formularios (Flow)
+    def buscar_formulario(self, msg, acao):
+        """O `responseData` que a pagina do formulario pede (ver
+        nucleo/ponte_flows): o JSON do formulario (publico, pelo id).
+        Levanta RuntimeError com o motivo, ja em portugues."""
+        import urllib.error
+        import urllib.request
+        from telezapp import VERSAO
+        from telezapp.nucleo import ponte_flows as pf
+        params = pf.parametros_do_botao(acao.get("params"))
+        flow_id = str(params.get("flow_id") or acao.get("id") or "")
+        if not flow_id.isdigit():
+            raise RuntimeError("O botão não traz o número do formulário.")
+        usuario, servidor = jid_de_texto(msg.conversa_id)
+        if pf.formulario_consulta_a_empresa(params):
+            # a pagina criptografa os pedidos a empresa com a chave publica
+            # dela, que a Meta so entrega a quem apresenta o token do
+            # aplicativo do WhatsApp Web; obter esse token exigiria acessar
+            # o WhatsApp Web, que e exatamente o que o TeleZapp existe para
+            # evitar. Sem a chave real, o formulario so mostraria "Ocorreu
+            # um erro": melhor avisar e mandar preencher no celular.
+            raise RuntimeError(
+                "Este formulário consulta a empresa a cada tela e o "
+                "TeleZapp ainda não dá suporte a esse conteúdo. Continue "
+                "pelo celular ou pelo WhatsApp Web.")
+        pedido = urllib.request.Request(
+            pf.URL_DO_JSON % flow_id, headers={
+                "User-Agent": "TeleZapp/" + VERSAO,
+                "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(pedido, timeout=20) as r:
+                flow_json = r.read().decode("utf-8")
+            json.loads(flow_json)            # so confere que e um JSON
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            log.info("formulário: não baixei o JSON (%s)", type(e).__name__)
+            raise RuntimeError("Não consegui baixar o formulário do "
+                               "WhatsApp.")
+        nome = ""
+        conversa = self._conversas.get(msg.conversa_id)
+        if conversa is not None:
+            nome = conversa.nome or ""
+        biz_jid = "%s@s.whatsapp.net" % usuario
+        if servidor == "s.whatsapp.net":
+            lid = self._lid_do_pn(_jid_obj(usuario, servidor))
+            if lid is not None and getattr(lid, "User", ""):
+                biz_jid = "%s@lid" % lid.User   # a pagina usa o LID
+        elif servidor == "lid":
+            biz_jid = "%s@lid" % usuario
+        return pf.dados_do_formulario(
+            params, flow_json, biz_jid=biz_jid,
+            nome_da_empresa=nome)
+
+    def responder_formulario(self, msg, acao, payload):
+        """Manda a empresa o que o formulario concluido entregou."""
+        from telezapp.nucleo import ponte_flows as pf
+        params = pf.parametros_do_botao(acao.get("params"))
+        resposta = pf.resposta_final(payload, params.get("flow_token", ""))
+        log.info("formulário: enviando a resposta (%d caracteres)",
+                 len(resposta))
+        self.responder_acao(msg, dict(acao, tipo="formulario_resposta",
+                                      resposta=resposta, rotulo="Enviado"))
+
     def _variantes_da_acao(self, msg, acao):
         """[(nome, destino, Message, add_msg_secret)]: do mais parecido com o
         que o celular envia ao mais simples. O servidor recusa (479) o que
@@ -6659,6 +6958,15 @@ class ProvedorWhatsApp(Provedor):
             resp.nativeFlowResponseMessage.paramsJSON = json.dumps(
                 {"display_text": rotulo, "id": acao.get("id", "")},
                 ensure_ascii=False)
+            resp.nativeFlowResponseMessage.version = 3
+            return Message(interactiveResponseMessage=resp)
+        if tipo == "formulario_resposta":
+            resp = InteractiveResponseMessage(contextInfo=ctx)
+            resp.body.text = rotulo or "Enviado"
+            resp.body.format = InteractiveResponseMessage.Body.EXTENSIONS_1
+            resp.nativeFlowResponseMessage.name = ACAO_DE_FORMULARIO
+            resp.nativeFlowResponseMessage.paramsJSON = acao.get(
+                "resposta", "{}")
             resp.nativeFlowResponseMessage.version = 3
             return Message(interactiveResponseMessage=resp)
         raise ValueError("ação desconhecida: %s" % tipo)
