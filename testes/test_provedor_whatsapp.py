@@ -1176,6 +1176,52 @@ def test_estrutura_interativa_descreve_botoes_sem_imagem_nem_texto_longo():
     assert wa.estrutura_interativa(E.Message(conversation="oi")) is None
 
 
+def test_acoes_interativas_mostram_o_nome_e_so_as_chaves_dos_parametros():
+    nf = E.InteractiveMessage.NativeFlowMessage(buttons=[
+        E.InteractiveMessage.NativeFlowMessage.NativeFlowButton(
+            name="galaxy_message",
+            buttonParamsJSON='{"flow_token":"segredo-123","flow_id":"99",'
+                             '"flow_cta":"Iniciar atendimento"}'),
+        E.InteractiveMessage.NativeFlowMessage.NativeFlowButton(
+            name="Nome com Texto Livre", buttonParamsJSON="isto nao e json")])
+    msg = E.Message(interactiveMessage=E.InteractiveMessage(nativeFlowMessage=nf))
+    acoes = wa.acoes_interativas(msg)
+    assert acoes[0] == {"acao": "galaxy_message",
+                        "chaves": ["flow_cta", "flow_id", "flow_token"]}
+    assert acoes[1]["acao"] == "<texto 20>"
+    assert acoes[1]["chaves"] == ["<json invalido>"]
+    texto = str(acoes)
+    for proibido in ("segredo-123", "Iniciar atendimento", "99"):
+        assert proibido not in texto
+
+
+def test_botao_de_formulario_do_whatsapp_vira_acao_com_o_rotulo_do_flow():
+    nf = E.InteractiveMessage.NativeFlowMessage(buttons=[
+        E.InteractiveMessage.NativeFlowMessage.NativeFlowButton(
+            name="galaxy_message",
+            buttonParamsJSON='{"flow_token":"t","flow_id":"123",'
+                             '"flow_cta":"Iniciar atendimento"}')])
+    msg = E.Message(interactiveMessage=E.InteractiveMessage(
+        body=E.InteractiveMessage.Body(text="Clique abaixo"),
+        nativeFlowMessage=nf))
+    acoes = wa.acoes_do_whatsapp(msg)
+    assert acoes == [{"tipo": "formulario", "indice": 0,
+                      "rotulo": "Iniciar atendimento", "id": "123"}]
+    assert wa.rotulos_dos_botoes(msg)[0] == ["Iniciar atendimento"]         if hasattr(wa, "rotulos_dos_botoes") else True
+    assert wa.NOMES_ACOES_INTERATIVAS["galaxy_message"] ==         "formulário do WhatsApp"
+
+
+def test_acoes_interativas_da_resposta_a_um_formulario():
+    resp = E.InteractiveResponseMessage(
+        nativeFlowResponseMessage=E.InteractiveResponseMessage.
+        NativeFlowResponseMessage(name="galaxy_message",
+                                  paramsJSON='{"flow_token":"x","nome":"Ana"}'))
+    acoes = wa.acoes_interativas(E.Message(interactiveResponseMessage=resp))
+    assert acoes == [{"resposta": "galaxy_message",
+                      "chaves": ["flow_token", "nome"]}]
+    assert wa.acoes_interativas(E.Message(conversation="oi")) == []
+
+
 def test_album_foto_dentro_de_associated_child_aparece_e_cabecalho_some():
     foto = E.Message(imageMessage=E.ImageMessage(caption="da viagem",
                                                   fileLength=10))
@@ -2141,6 +2187,43 @@ def test_envelopes_novos_do_whatsapp_sao_abertos():
         msg = E.Message(**{envelope: E.FutureProofMessage(
             message=E.Message(conversation="oi @todos"))})
         assert wa.conteudo_de(wa.desembrulhar(msg))[1] == "oi @todos", envelope
+
+
+def test_campos_brutos_acha_campo_que_o_proto_nao_conhece():
+    # simula um campo novo da Meta (numero 2, ainda sem nome no nosso
+    # .proto) dentro de um FutureProofMessage, para confirmar que a leitura
+    # bruta (wire format) acha mesmo o que ListFields()/HasField nao veem
+    inner = E.Message(conversation="oi").SerializeToString()
+
+    def tag(numero, wire):
+        return bytes([(numero << 3) | wire])
+    bruto = tag(1, 2) + bytes([len(inner)]) + inner
+    bruto += tag(2, 0) + bytes([42])           # campo desconhecido (varint)
+    f = E.FutureProofMessage.FromString(bruto)
+    assert wa.campos(f) == ["message"]         # so o que o proto conhece
+    achados = wa.campos_brutos(f)
+    assert (2, 0, 42) in achados               # mas o bruto acha o resto
+
+
+def test_figurinha_com_audio_embutido_e_reconhecida(amb):
+    # 25/11: audioStickerMessage e um envelope (FutureProofMessage) com uma
+    # Message contendo stickerMessage, que por sua vez tem um AudioMessage
+    # embutido (stickerMessage.audioMessage)
+    figurinha = E.StickerMessage(fileLength=5000, audioMessage=E.AudioMessage(
+        seconds=3, mediaKey=b"k", URL="https://x"))
+    msg = E.Message(audioStickerMessage=E.FutureProofMessage(
+        message=E.Message(stickerMessage=figurinha)))
+    aberta = wa.desembrulhar(msg)
+    assert aberta.HasField("stickerMessage")
+    tipo, texto, segundos, nome, tamanho = wa.conteudo_de(aberta)
+    assert tipo == m.FIGURINHA and segundos == 3 and tamanho == 5000
+
+
+def test_figurinha_comum_sem_audio_continua_sem_duracao(amb):
+    figurinha = E.StickerMessage(fileLength=2000)
+    msg = E.Message(stickerMessage=figurinha)
+    tipo, texto, segundos, nome, tamanho = wa.conteudo_de(msg)
+    assert tipo == m.FIGURINHA and segundos == 0
 
 
 def test_mensagem_minha_para_quem_nao_esta_nos_contatos_nao_poe_meu_nome(amb):
@@ -4778,6 +4861,37 @@ def test_confirmar_telefone_so_diz_que_nao_existe_se_nenhuma_forma_existe():
                                ("+556283220258", False)])
     id_, motivo = p.confirmar_telefone("+5562983220258")
     assert id_ == "" and "não está registrado no WhatsApp" in motivo
+
+
+def _prov_com_lid(pn_do_lid):
+    """is_on_whatsapp que responde com endereco LID (as duas formas existem)
+    e get_pn_from_lid simulado."""
+    p = object.__new__(wa.ProvedorWhatsApp)
+    p._conectada = True
+
+    def is_on_whatsapp(*numeros):
+        return [N.IsOnWhatsAppResponse(Query=q, IsIn=True,
+                                       JID=jid("2000111222333", "lid"))
+                for q in numeros]
+    p.cliente = types.SimpleNamespace(is_on_whatsapp=is_on_whatsapp,
+                                      get_pn_from_lid=pn_do_lid)
+    return p
+
+
+def test_confirmar_telefone_com_resposta_lid_usa_o_telefone_do_mapa_do_lid():
+    # o numero digitado tem 13 digitos, mas a conta registrada e a de 12
+    p = _prov_com_lid(lambda lid: jid("556182921123"))
+    assert p.confirmar_telefone("+5561982921123") == (
+        "556182921123@s.whatsapp.net", "")
+
+
+def test_confirmar_telefone_com_lid_sem_mapa_vale_o_digitado():
+    def sem_mapa(lid):
+        raise RuntimeError("sem mapa")
+    p = _prov_com_lid(sem_mapa)
+    assert p.confirmar_telefone("+5561982921123")[0] ==         "5561982921123@s.whatsapp.net"
+    p = _prov_com_lid(lambda lid: jid("2000111222333", "lid"))   # nao e telefone
+    assert p.confirmar_telefone("+5561982921123")[0] ==         "5561982921123@s.whatsapp.net"
 
 
 def test_confirmar_telefone_com_erro_na_rede_vale_o_digitado():
