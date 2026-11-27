@@ -40,6 +40,11 @@ LIMITE_DO_GRUPO = 32
 ESPERA_DA_OFERTA_S = 2.0
 # Quanto tempo um convite de chamada em grupo continua valendo para entrar
 VALIDADE_DA_OFERTA_S = 3600
+TEXTO_GRUPO_SEM_A_CAIXA = (
+    "Esta chamada é de um grupo. Com as chamadas em grupo desligadas, o "
+    "WhatsApp costuma recusar o atendimento. Para tentar entrar, marque "
+    "Chamadas em grupo do WhatsApp em Configurações, Recursos "
+    "experimentais.")
 
 BYTES_POR_QUADRO = 1920          # 960 amostras de 16 bits (60 ms a 16 kHz)
 TAXA = 16000
@@ -516,6 +521,7 @@ class _Ligacao:
         self.quadros_retorno = 0
         self.quadros_mic = 0
         self.vigia_audio = False
+        self.era_grupo = False          # a oferta era de uma chamada em grupo
         self.na_sala = False            # link: esperando o anfitriao aprovar
         self.sala = {}                  # link: ultima sala de espera (evento)
         self.sala_avisada = set()       # quem ja foi anunciado na sala
@@ -567,6 +573,7 @@ class ChamadasWhatsApp:
         self.nome_de_jid = lambda jid, pn="": ""   # nome de um participante
         self.membros_de = lambda cid: None         # [jid] do grupo, ou None
         self._ofertas = {}              # call_id -> convite de chamada em grupo
+        self._vistos_de_grupo = {}      # call_id -> quando; mesmo sem a caixa
         self._eventos_cedo = {}         # call_id -> eventos antes do id
         # segunda chamada com outra em andamento (recurso experimental)
         self.espera_ligada = lambda: False
@@ -841,6 +848,7 @@ class ChamadasWhatsApp:
         # sem desligar: a chamada pode seguir em outro aparelho
         if self.oferta_velha is not None and self.oferta_velha(call_id):
             return
+        era_grupo = bool(grupo) or call_id in self._vistos_de_grupo
         grupo = bool(grupo) and self.grupo_ligado()
         cid = self._grupo_da_oferta(call_id) if grupo else ""
         if not cid:
@@ -866,9 +874,13 @@ class ChamadasWhatsApp:
         self.atualizar_dispositivos()
         c = ch.Chamada(self.conta_id, cid, nome, True, ch.TOCANDO,
                        video=bool(video) and not grupo, grupo=grupo)
+        lig = _Ligacao(c, call_id)
+        lig.era_grupo = era_grupo
         with self._trava:
-            self.ligacoes[cid] = _Ligacao(c, call_id)
+            self.ligacoes[cid] = lig
         self._publicar(c)
+        if era_grupo and not self.grupo_ligado():
+            self._avisar(TEXTO_GRUPO_SEM_A_CAIXA)
 
     def _descartar_toques_parados(self):
         """Chamada recebida que toca ha mais que o limite sem ninguem atender
@@ -991,6 +1003,20 @@ class ChamadasWhatsApp:
         c = lig.chamada
         if lig.intencao:
             motivo, erro = lig.intencao, lig.erro
+        elif razao.startswith("server") and (
+                lig.era_grupo or lig.call_id in self._vistos_de_grupo):
+            motivo = ch.FALHA
+            erro = ("O WhatsApp recusou a entrada nesta chamada em grupo "
+                    "(%s). O TeleZapp só entra em chamadas em grupo "
+                    "comuns por voz, sem vídeo." % razao
+                    if self.grupo_ligado() else
+                    "Esta era uma chamada em grupo, e o WhatsApp recusa o "
+                    "atendimento como chamada comum (%s). Para tentar "
+                    "entrar, marque Chamadas em grupo do WhatsApp e Entrar "
+                    "em chamadas em grupo que já começaram, em "
+                    "Configurações, Recursos experimentais. O vídeo só existe "
+                    "nas chamadas por link; nas chamadas em grupo comuns "
+                    "o TeleZapp só usa voz." % razao)
         elif razao.startswith("server"):
             motivo, erro = ch.FALHA, ("O WhatsApp recusou a chamada (%s)."
                                       % razao)
@@ -1092,12 +1118,20 @@ class ChamadasWhatsApp:
     def _ao_convite_de_grupo(self, e):
         """Chegou o convite de uma chamada em grupo (tocando ou nao): guarda
         para poder entrar nela enquanto durar."""
+        call_id, grupo = e.get("call", ""), e.get("group", "")
+        agora = time.monotonic()
+        if call_id and grupo:
+            # mesmo com as chamadas em grupo desligadas: se o WhatsApp
+            # recusar o atendimento, a explicacao diz que era de um grupo
+            with self._trava:
+                self._vistos_de_grupo = {
+                    k: v for k, v in self._vistos_de_grupo.items()
+                    if agora - v < VALIDADE_DA_OFERTA_S}
+                self._vistos_de_grupo[call_id] = agora
         if not self.grupo_ligado():
             return
-        call_id, grupo = e.get("call", ""), e.get("group", "")
         if not call_id or not grupo:
             return
-        agora = time.monotonic()
         with self._trava:
             self._ofertas = {k: v for k, v in self._ofertas.items()
                              if agora - v["quando"] < VALIDADE_DA_OFERTA_S}
