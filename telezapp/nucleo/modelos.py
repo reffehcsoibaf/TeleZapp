@@ -873,8 +873,8 @@ LIMITE_IA_NA_LINHA = {"descricao": 0, "transcricao": 1000}
 # Ligado pela janela a partir da opcao `manter_apagadas`: o que o remetente
 # apaga para todos continua guardado aqui, so marcado.
 MANTER = {"apagadas": False,
-          # opcao `manter_apagadas_no_celular`: o que eu apago no WhatsApp do
-          # celular continua aqui
+          # opcao `manter_apagadas_no_celular`: o que eu apago direto no
+          # servico (celular, conta, outro aparelho) continua aqui
           "do_celular": False}
 
 
