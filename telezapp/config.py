@@ -615,6 +615,15 @@ OPCOES = (
           "Com a autenticação ao abrir ligada, usa o Windows Hello deste "
           "computador em vez de pedir o PIN do TeleZapp. Desmarcada, pede "
           "sempre o PIN do TeleZapp."),
+    Opcao("limpar_manter_favoritas",
+          "Manter as mensagens favoritas ao limpar a conversa",
+          "Privacidade", True,
+          "Ao limpar uma conversa pelo item do menu \"Limpar a conversa "
+          "(aqui e no celular)\", ou várias marcadas de uma vez, as "
+          "mensagens favoritas (e as mídias delas) não são apagadas, como já "
+          "acontece na janela Limpar mídias e mensagens (o botão \"Limpar a "
+          "conversa...\" dos Detalhes). Desmarcada, a limpeza apaga tudo, "
+          "inclusive as favoritas."),
     Opcao("manter_apagadas",
           "Manter as mensagens que quem enviou apagar para todos",
           "Privacidade", False,

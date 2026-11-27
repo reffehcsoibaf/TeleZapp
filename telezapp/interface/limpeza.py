@@ -74,9 +74,11 @@ class DialogoLimpeza(wx.Dialog):
             "Só as maiores que quantos MB (0 = qualquer tamanho)",
             lambda: wx.SpinCtrl(self, min=0, max=100000, initial=0,
                                 name="Tamanho mínimo em MB"))
+        from telezapp import config
         self.favoritas = wx.CheckBox(
             self, label="Manter as mensagens &favoritas")
-        self.favoritas.SetValue(True)
+        self.favoritas.SetValue(bool(config.Config().get(
+            "limpar_manter_favoritas")))
         lay.Add(self.favoritas, 0, wx.ALL, 10)
         self.celular = None
         if no_celular:
