@@ -180,6 +180,9 @@ class Bancos:
     def remover_contato(self, conta_id, id_):
         self._de(conta_id).remover_contato(conta_id, id_)
 
+    def contatos_removidos(self, conta_id):
+        return self._de(conta_id).contatos_removidos(conta_id)
+
     def nome_de_contato(self, conta_id, *ids):
         return self._de(conta_id).nome_de_contato(conta_id, *ids)
 

@@ -10,17 +10,21 @@ aviso "Encaminhada").
 import os
 from dataclasses import dataclass
 
+from telezapp.midia import armazem
 from telezapp.nucleo import modelos as m, publicar_status as ps
 
 
 @dataclass
 class Item:
     """Uma mensagem pronta para sair. tipo: "texto" (usa `texto`) ou
-    "arquivo" (usa `caminho`, `tipo_midia` e `texto` como legenda)."""
+    "arquivo" (usa `caminho`, `tipo_midia` e `texto` como legenda).
+    `nome_arquivo`: o nome original do arquivo, sem o codigo da mensagem que
+    o armazem poe na frente (so faz sentido com tipo "arquivo")."""
     tipo: str
     texto: str = ""
     caminho: str = ""
     tipo_midia: str = ""
+    nome_arquivo: str = ""
 
 
 MIDIAS = (m.FOTO, m.VIDEO, m.VOZ, m.AUDIO, m.DOCUMENTO, m.FIGURINHA)
@@ -36,7 +40,8 @@ def preparar(msg, caminho_da_midia):
         if not caminho or not os.path.isfile(caminho):
             return None, "%s ainda não baixado(a)" % m.NOMES_TIPOS[msg.tipo]
         return Item("arquivo", msg.texto if msg.tipo not in (
-            m.VOZ, m.AUDIO, m.FIGURINHA) else "", caminho, msg.tipo), ""
+            m.VOZ, m.AUDIO, m.FIGURINHA) else "", caminho, msg.tipo,
+            armazem.nome_para_copiar(msg, caminho)), ""
     texto = msg.texto or m.conteudo(msg, com_estado=False)
     if msg.tipo == m.AGUARDANDO or not texto:
         return None, "mensagem sem conteúdo"

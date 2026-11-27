@@ -48,7 +48,7 @@ NOMES_PARTES = dict(PARTES)
 PARTES_DE_OPCOES = ("configuracoes", "atalhos", "sons", "filtros")
 OPCOES_DE_PARTE = {"atalhos": ("atalhos", "mostrar_atalhos"),
                    "sons": ("pacote_de_sons", "sons_desativados",
-                            "sons_de_conversa"),
+                            "sons_de_conversa", "sons_sem_cortar"),
                    "filtros": ("filtros_personalizados",)}
 FORMATO = 2
 
@@ -199,6 +199,10 @@ def opcoes_validas(lidas, partes=None):
         # lista de mensagens
         from telezapp.nucleo import lista_mensagens
         boas["lista_mensagens"] = lista_mensagens.do_estilo(lidas["estilo"])
+    aviso = lidas.get("aviso_nova")
+    if isinstance(aviso, dict):
+        from telezapp.nucleo import aviso_de_nova
+        boas["aviso_nova"] = aviso_de_nova.normalizar(aviso)
     if lidas.get("digitar_na_lista") == "campo":
         # backup antigo: a opcao unica virou uma escolha em cada lista
         from telezapp.nucleo import lista_conversas, lista_mensagens

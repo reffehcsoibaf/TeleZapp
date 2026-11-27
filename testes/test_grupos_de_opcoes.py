@@ -31,7 +31,7 @@ GRUPOS = {
         "enter_audio", "enter_imagem", "enter_video", "enter_pdf"},
     ("Mídias", "Reprodução de áudio"): {
         "audio_janela", "audio_passo_velocidade", "audio_velocidade",
-        "falar_quem_toca", "falar_pulo_audio"},
+        "volume_reproducao", "falar_quem_toca", "falar_pulo_audio"},
     ("Mensagens", "Prévia de links"): {
         "previa_links", "previa_receber", "previa_enviar"},
 }

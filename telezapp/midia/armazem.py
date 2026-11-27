@@ -60,6 +60,12 @@ def caminho_base(msg):
     return os.path.join(pasta, "%s_%s" % (ident, nome) if nome else ident)
 
 
+def caminho_base_audio(msg):
+    """Caminho (sem extensao) do audio embutido numa figurinha com som:
+    separado da propria figurinha (a imagem), que usa `caminho_base`."""
+    return caminho_base(msg) + "-audio"
+
+
 def nome_para_copiar(msg, caminho):
     """O nome que a midia tem ao ser colada: o que quem enviou deu ao arquivo,
     sem o codigo da mensagem que o armazem poe na frente ("<codigo>_nome"). Sem

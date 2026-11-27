@@ -294,7 +294,8 @@ def _com_sons(tmp_path):
     cfg = preparar(origem)
     cfg.update({"atalhos": {"responder": "Alt+R"},
                 "pacote_de_sons": "p:Meu", "sons_desativados": {
-                    "p:Meu": ["erro"]}, "mostrar_atalhos": False})
+                    "p:Meu": ["erro"]}, "sons_sem_cortar": True,
+                "mostrar_atalhos": False})
     os.makedirs(origem / "sons" / "pacotes" / "Meu")
     (origem / "sons" / "pacotes" / "Meu" / "nova.ogg").write_bytes(b"OGG")
     return origem, cfg
@@ -304,7 +305,8 @@ def test_cada_parte_de_configuracao_vai_e_volta_sozinha(tmp_path):
     origem, cfg = _com_sons(tmp_path)
     esperado = {
         "atalhos": {"atalhos", "mostrar_atalhos"},
-        "sons": {"pacote_de_sons", "sons_desativados", "sons_de_conversa"}}
+        "sons": {"pacote_de_sons", "sons_desativados", "sons_de_conversa",
+                 "sons_sem_cortar"}}
     for parte, chaves in esperado.items():
         arquivo = str(tmp_path / (parte + ".zip"))
         resumo = bk.criar(arquivo, str(origem), cfg, [parte])

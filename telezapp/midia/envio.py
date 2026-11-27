@@ -155,14 +155,16 @@ def parece_midia(caminho):
 
 
 def preparar(caminho, voz=False, temporario=False, como_documento=False,
-             colado=False):
+             colado=False, nome=None):
     """Anexo pronto para um provedor enviar; ErroEnvio se nao der.
 
     `como_documento`: o arquivo escolhido pelo botao de anexar vai sempre como
     documento, do jeito que esta. `colado`: veio do Control V; foto, video e
     audio seguem como midia quando o formato serve ou foi convertido, e os
-    que nao deram vao como documento, marcados em `sem_conversao`."""
-    anexo = _preparar(caminho, voz, temporario, como_documento)
+    que nao deram vao como documento, marcados em `sem_conversao`. `nome`:
+    nome a mostrar no lugar do nome do arquivo em `caminho` (ex.: ao
+    encaminhar, o arquivo fica guardado com o codigo da mensagem no nome)."""
+    anexo = _preparar(caminho, voz, temporario, como_documento, nome)
     if colado:
         anexo.colado = True
         anexo.sem_conversao = anexo.tipo == m.DOCUMENTO and \
@@ -175,7 +177,7 @@ EXT_ATALHO_GOOGLE = frozenset((".gdoc", ".gsheet", ".gslides", ".gdraw",
                                ".gjam", ".gscript"))
 
 
-def _preparar(caminho, voz, temporario, como_documento):
+def _preparar(caminho, voz, temporario, como_documento, nome=None):
     if not caminho or not os.path.isfile(caminho):
         raise ErroEnvio("O arquivo não foi encontrado.")
     tamanho = os.path.getsize(caminho)
@@ -184,8 +186,12 @@ def _preparar(caminho, voz, temporario, como_documento):
     if tamanho > LIMITE_BYTES:
         raise ErroEnvio("O arquivo tem %s; o limite para enviar é 2 GB." %
                         m.tamanho_legivel(tamanho))
-    nome = os.path.basename(caminho)
-    ext = os.path.splitext(nome)[1].lower()
+    ext = os.path.splitext(caminho)[1].lower()
+    if not nome:
+        nome = os.path.basename(caminho)
+    elif os.path.splitext(nome)[1].lower() != ext:
+        # o nome mostrado tem que ter a extensao de verdade do arquivo
+        nome = os.path.splitext(nome)[0] + ext
     if ext in EXT_ATALHO_GOOGLE:
         # o Google Drive para computador mostra Docs, Planilhas e
         # Apresentacoes como atalhos de ~200 bytes que o Windows nao le

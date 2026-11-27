@@ -59,6 +59,10 @@ def test_conteudo_de_midias():
     assert m.conteudo(msg(tipo=m.FOTO, texto="praia")) == \
         "foto, legenda: praia"
     assert m.conteudo(msg(tipo=m.OUTRO)) == "mensagem sem suporte ainda"
+    assert m.conteudo(msg(tipo=m.FIGURINHA)) == "figurinha"
+    # figurinha com audio embutido (25/11): entra a duracao
+    assert m.conteudo(msg(tipo=m.FIGURINHA, segundos=3)) == \
+        "figurinha, 3 segundos"
 
 
 def test_resposta():
@@ -237,13 +241,24 @@ def test_extrair_links():
 
 
 def test_abrir_link_so_http(monkeypatch):
-    from telezapp.interface import dialogos
+    from telezapp.interface import dialogos, navegador
+    monkeypatch.setattr(navegador, "disponivel", lambda: False)
     abertos = []
     monkeypatch.setattr(dialogos.wx, "LaunchDefaultBrowser",
                         lambda u: abertos.append(u) or True, raising=False)
     assert dialogos.abrir_link("https://a.com") is True
     assert dialogos.abrir_link("file:///c:/windows/x.exe") is False
     assert dialogos.abrir_link("javascript:alert(1)") is False
+    assert abertos == ["https://a.com"]
+
+
+def test_abrir_link_usa_o_navegador_interno_quando_disponivel(monkeypatch):
+    from telezapp.interface import dialogos, navegador
+    monkeypatch.setattr(navegador, "disponivel", lambda: True)
+    abertos = []
+    monkeypatch.setattr(navegador, "JanelaNavegador",
+                        lambda pai, url: abertos.append(url))
+    assert dialogos.abrir_link("https://a.com") == dialogos.PELO_TELEZAPP
     assert abertos == ["https://a.com"]
 
 
@@ -549,6 +564,16 @@ def test_encaminhar_prepara_texto_midia_baixada_e_explica_o_resto(tmp_path):
     assert contato.texto == "contato: Ana"
     apagada = m.atualizar_extras(msg(texto="x"), apagada=True)
     assert enc.preparar(apagada, lambda x: None)[0] is None
+
+
+def test_encaminhar_usa_o_nome_original_do_arquivo(tmp_path):
+    from telezapp.nucleo import encaminhar as enc
+    doc = tmp_path / "1_relatorio.pdf"
+    doc.write_bytes(b"PDF")
+    item, _ = enc.preparar(
+        msg(id="1", tipo=m.DOCUMENTO, nome_arquivo="relatorio.pdf"),
+        lambda x: str(doc))
+    assert item.nome_arquivo == "relatorio.pdf"
 
 
 def test_encaminhar_destinos_so_de_contas_conectadas_sem_repetir():
@@ -1070,6 +1095,9 @@ def test_trazer_contatos_so_entram_os_que_faltam():
 
         def salvar_contato(self, conta_id, id_, nome, tel):
             self.salvos.append((conta_id, id_, nome, tel))
+
+        def contatos_removidos(self, conta_id):
+            return set()
 
     class Prov:
         def contatos_da_conta(self):

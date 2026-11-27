@@ -59,6 +59,18 @@ def test_foto_enviavel_e_formato_estranho_como_documento(tmp_path):
     assert envio.preparar(str(bmp)).tipo == m.DOCUMENTO
 
 
+def test_nome_mostra_o_original_mas_com_a_extensao_do_arquivo(tmp_path):
+    pdf = tmp_path / "123abc_relatorio.pdf"
+    pdf.write_bytes(b"%PDF")
+    assert envio.preparar(str(pdf)).nome == "123abc_relatorio.pdf"
+    assert envio.preparar(str(pdf), nome="relatorio.pdf").nome == \
+        "relatorio.pdf"
+    assert envio.preparar(str(pdf), nome="relatorio").nome == "relatorio.pdf"
+    assert envio.preparar(str(pdf), nome="relatorio.docx").nome == \
+        "relatorio.pdf"
+    assert envio.preparar(str(pdf), nome="").nome == "123abc_relatorio.pdf"
+
+
 def test_audio_e_documento(tmp_path):
     mp3 = tmp_path / "som.mp3"
     mp3.write_bytes(b"ID3")
