@@ -375,6 +375,49 @@ def test_fluxo_dos_avisos_abre_uma_vez_e_troca_o_som(monkeypatch):
     assert fabrica.fluxos[1].parado and fabrica.fluxos[1].fechado
 
 
+def test_sem_cortar_corta_ou_mistura_os_avisos(monkeypatch):
+    import numpy as np
+    fabrica = _SaidaFalsa()
+    monkeypatch.setitem(sys.modules, "sounddevice",
+                        types.SimpleNamespace(OutputStream=fabrica))
+    canais = fala.CANAIS_DOS_AVISOS
+
+    def som(valor, n=6):
+        return np.full((n, canais), valor, dtype="float32")
+
+    # Desligada (padrao): o aviso novo corta o que ainda estava tocando.
+    monkeypatch.setattr(fala, "_sem_cortar", False)
+    saida = fala._SaidaDosAvisos()
+    saida.tocar(som(0.5), fala.TAXA_DOS_AVISOS)
+    saida.tocar(som(0.4, 4), fala.TAXA_DOS_AVISOS)
+    assert not saida._misturas
+    bloco = np.zeros((4, canais), dtype="float32")
+    fabrica.fluxos[0].callback(bloco, 4, None, None)
+    assert np.array_equal(bloco, som(0.4, 4))
+    assert saida._dados is None
+
+    # Ligada: os avisos se somam, continuam no buffer seguinte e nao estouram.
+    monkeypatch.setattr(fala, "_sem_cortar", True)
+    saida = fala._SaidaDosAvisos()
+    saida.tocar(som(0.9), fala.TAXA_DOS_AVISOS)
+    saida.tocar(som(0.9), fala.TAXA_DOS_AVISOS)
+    assert len(saida._misturas) == 2
+    bloco = np.zeros((4, canais), dtype="float32")
+    fabrica.fluxos[1].callback(bloco, 4, None, None)
+    assert np.array_equal(bloco, np.ones((4, canais), dtype="float32"))
+    bloco = np.zeros((4, canais), dtype="float32")
+    fabrica.fluxos[1].callback(bloco, 4, None, None)
+    assert np.array_equal(bloco[:2], np.ones((2, canais), dtype="float32"))
+    assert not bloco[2:].any() and not saida._misturas
+
+    # Trocar de modo larga o que ficou pelo caminho.
+    saida.tocar(som(0.5), fala.TAXA_DOS_AVISOS)
+    assert saida._misturas
+    monkeypatch.setattr(fala, "_saida", saida)
+    fala.definir_sem_cortar(False)
+    assert not saida._misturas and fala._sem_cortar is False
+
+
 def test_callback_do_fluxo_entrega_o_som_e_depois_silencio(monkeypatch):
     import numpy as np
     fabrica = _SaidaFalsa()

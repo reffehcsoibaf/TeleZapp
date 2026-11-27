@@ -1458,6 +1458,10 @@ OPCOES = OPCOES + _opcoes_de_ia()
 # Fica na tela de Sons (uma caixa so, que toca o tom ao escolher); aqui para
 # a busca achar. O tom e feito pelo programa, nao e um arquivo do pacote.
 OPCOES = OPCOES + (
+    Opcao("sons_sem_cortar", "Não cortar os sons dos avisos", "Sons", False,
+          "Quando chega uma mensagem enquanto outro aviso está tocando, o som "
+          "novo toca junto com o anterior, sem cortá-lo. Desligada, o som novo "
+          "toma o lugar do anterior, como antes."),
     Opcao("tom_de_chamada", "Tom de chamada feita", "Sons", "europa",
           "O tom que você ouve enquanto espera a outra pessoa atender, "
           "repetido até ela atender. Europa: 425 Hz, 1 segundo de tom e 3 de "
@@ -1622,6 +1626,7 @@ PADROES.update({
     "ia_url_personalizada": "",   # endereco do provedor personalizado (https)
     "pacote_de_sons": "padrao",   # padrao, telezapp ou p:<nome>
     "sons_desativados": {},      # pacote -> eventos sem som
+    "sons_sem_cortar": False,    # avisos juntos tocam ao mesmo tempo
     "lista_conversas": {"ordem": ["nome", "servico", "nao_lidas", "previa",
                                   "estado", "reacoes", "quem_reagiu"],
                         "ocultos": ["previa", "estado", "reacoes",

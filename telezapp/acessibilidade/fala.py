@@ -13,6 +13,7 @@ import atexit
 import ctypes
 import importlib.util
 import logging
+import numpy as np
 import os
 import struct
 import threading
@@ -138,6 +139,18 @@ class Fala:
 # "desligado" ou o caminho de um arquivo de som
 _sons = {}
 LIMITE_SEGUNDOS_ARQUIVO = 15
+
+# Ligado em Configuracoes, Sons: um aviso novo nao corta o que ainda esta
+# tocando; os sons sao misturados na saida dos avisos.
+_sem_cortar = False
+
+
+def definir_sem_cortar(valor):
+    """Escolhe se avisos que chegam juntos tocam ao mesmo tempo."""
+    global _sem_cortar
+    _sem_cortar = bool(valor)
+    if _saida is not None:
+        _saida.limpar_misturas()
 
 
 # Eventos que, no som padrao, tocam o mesmo som de outro (e acompanham a
@@ -495,12 +508,29 @@ class _SaidaDosAvisos:
         self._dispositivo = None
         self._dados = None
         self._pos = 0
+        self._misturas = []                    # sons simultaneos: (dados, pos)
         self._ocioso = None                    # temporizador do fechamento
         self._ultimo = 0.0                     # quando tocou pela ultima vez
         self._agora = time.monotonic
 
     def _callback(self, outdata, frames, tempo, status):
         with self._trava_dados:
+            if _sem_cortar:
+                # varios avisos ao mesmo tempo: soma as amostras de cada um
+                outdata.fill(0)
+                if not self._misturas:
+                    return
+                vivas = []
+                for dados, pos in self._misturas:
+                    n = min(frames, len(dados) - pos)
+                    if n:
+                        outdata[:n] += dados[pos:pos + n]
+                        pos += n
+                    if pos < len(dados):
+                        vivas.append((dados, pos))
+                self._misturas = vivas
+                np.clip(outdata, -1.0, 1.0, out=outdata)
+                return
             dados, pos = self._dados, self._pos
             if dados is None or pos >= len(dados):
                 outdata.fill(0)
@@ -555,13 +585,25 @@ class _SaidaDosAvisos:
             if self._fluxo is None or self._dispositivo != dispositivo:
                 with self._trava_dados:
                     self._dados = None
+                    self._misturas = []
                 self._fechar()
                 self._fluxo = self._abrir(dispositivo)
                 self._dispositivo = dispositivo
             with self._trava_dados:
-                self._dados, self._pos = dados, 0
+                if _sem_cortar:
+                    self._misturas.append((dados, 0))
+                    self._dados = None
+                else:
+                    self._misturas = []
+                    self._dados, self._pos = dados, 0
             self._ultimo = self._agora()
             self._armar_fechamento()
+
+    def limpar_misturas(self):
+        """Troca de modo sem deixar som antigo preso na saida."""
+        with self._trava_dados:
+            self._dados = None
+            self._misturas = []
 
     def _armar_fechamento(self):
         """(Re)arma o fechamento do fluxo para daqui a TEMPO_OCIOSO s."""
@@ -581,7 +623,7 @@ class _SaidaDosAvisos:
             if self._agora() - self._ultimo < TEMPO_OCIOSO_DOS_AVISOS_S:
                 return                         # tocou de novo: outro timer
             with self._trava_dados:
-                if self._dados is not None:
+                if self._dados is not None or self._misturas:
                     return                     # ainda tocando
             self._fechar()
 
@@ -592,6 +634,7 @@ class _SaidaDosAvisos:
         with self._trava:
             with self._trava_dados:
                 self._dados = None
+                self._misturas = []
             self._fechar()
 
 
