@@ -67,6 +67,20 @@ def test_toca_pausa_e_anda(tmp_path, nome, k):
     assert saidas[0].estado == "fechado"
 
 
+def test_volume_escala_o_audio(tmp_path):
+    p, saidas = criar(tmp_path, "a.wav", segundos=1)
+    p.tocar()
+    bloco_cheio = saidas[0].puxar(4800).copy()
+    p.ir_para(0)
+    p.volume = 0.5
+    bloco_meio = saidas[0].puxar(4800)
+    assert np.allclose(bloco_meio, bloco_cheio * 0.5, atol=1e-5)
+    p.ir_para(0)
+    p.volume = 0.0
+    assert saidas[0].puxar(4800).max() == 0
+    p.fechar()
+
+
 def test_fim_e_recomeco(tmp_path):
     p, saidas = criar(tmp_path, "a.wav", segundos=1)
     p.tocar()
