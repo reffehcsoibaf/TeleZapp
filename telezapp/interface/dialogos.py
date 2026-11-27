@@ -126,11 +126,16 @@ PELO_TELEZAPP = "telezapp"       # abrir_link: nao foi para o navegador
 
 def abrir_link(url):
     """Abre pelo TeleZapp, se for um link que ele sabe abrir; senao, no
-    navegador padrao, so enderecos http e https."""
+    navegador interno (WebView2) ou, sem ele, no navegador padrao do
+    Windows. So enderecos http e https."""
     if abrir_por_dentro is not None and abrir_por_dentro(url):
         return PELO_TELEZAPP
     if not url.lower().startswith(("http://", "https://")):
         return False
+    from telezapp.interface import navegador
+    if navegador.disponivel():
+        navegador.JanelaNavegador(None, url)
+        return PELO_TELEZAPP
     return wx.LaunchDefaultBrowser(url)
 
 
