@@ -18,11 +18,13 @@ def ler(provedor):
 
 
 def salvar(banco, conta_id, contatos):
-    """Guarda os contatos que faltam; devolve quantos entraram."""
+    """Guarda os contatos que faltam, menos os que a pessoa removeu da
+    agenda; devolve quantos entraram."""
     ja = {(c[0], c[1]) for c in banco.contatos(conta_id)}
+    removidos = banco.contatos_removidos(conta_id)
     novos = 0
     for id_, nome, tel in contatos:
-        if (conta_id, id_) not in ja:
+        if (conta_id, id_) not in ja and id_ not in removidos:
             banco.salvar_contato(conta_id, id_, nome, tel)
             ja.add((conta_id, id_))
             novos += 1

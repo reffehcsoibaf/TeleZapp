@@ -31,6 +31,22 @@ def test_agenda_de_contatos(tmp_path):
     assert b.contatos("w1") == []
 
 
+def test_contato_removido_nao_volta_ao_trazer_os_da_conta(tmp_path):
+    """27/11: contatos apagados voltavam ao reabrir o TeleZapp."""
+    from telezapp.armazenamento.banco import Banco
+    from telezapp.nucleo import trazer_contatos as tc
+    b = Banco(str(tmp_path / "r.db"))
+    da_conta = [("1", "Ana", "+55"), ("2", "Caio", "+56")]
+    assert tc.salvar(b, "w1", da_conta) == 2
+    b.remover_contato("w1", "1")
+    assert tc.salvar(b, "w1", da_conta) == 0      # reabrir: Ana nao volta
+    assert [c[1] for c in b.contatos("w1")] == ["2"]
+    b.salvar_contato("w1", "1", "Ana")             # a pessoa a adicionou de novo
+    assert b.contatos_removidos("w1") == set()
+    b.apagar_conta("w1")
+    assert b.contatos_removidos("w1") == set()
+
+
 def test_conversa_trancada_e_arquivada_vao_e_voltam_do_banco(tmp_path):
     from telezapp.armazenamento.banco import Banco
     from telezapp.nucleo import modelos as m

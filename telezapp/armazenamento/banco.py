@@ -152,6 +152,13 @@ CREATE TABLE IF NOT EXISTS contatos (
     telefone TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (conta_id, id)
 );
+-- Contatos que a pessoa removeu da agenda do TeleZapp: "Obter os contatos ao
+-- abrir" nao os traz de volta (relato de 27/11).
+CREATE TABLE IF NOT EXISTS contatos_removidos (
+    conta_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    PRIMARY KEY (conta_id, id)
+);
 -- Mensagens agendadas que o TeleZapp mesmo envia na hora (WhatsApp, que nao
 -- guarda mensagem agendada). `atrasada`: passou da hora sem o TeleZapp
 -- poder enviar; a pessoa decide o que fazer.
@@ -182,7 +189,7 @@ MAX_DEPURACAO = 500
 # percorrem todas.
 TABELAS = ("conversas", "mensagens", "recibos", "status", "fichas",
            "posicoes", "midias", "limpas", "apagadas", "apagar_pendente",
-           "contatos", "agendadas", "depuracao")
+           "contatos", "contatos_removidos", "agendadas", "depuracao")
 
 _CAMPOS_CONV = [f.name for f in fields(Conversa)]
 _CAMPOS_MSG = [f.name for f in fields(Mensagem)]
@@ -411,6 +418,9 @@ class Banco:
             self._con.execute(
                 "INSERT OR REPLACE INTO contatos VALUES (?,?,?,?)",
                 (conta_id, id_, nome, telefone))
+            self._con.execute(
+                "DELETE FROM contatos_removidos WHERE conta_id=? AND id=?",
+                (conta_id, id_))
             self._agenda = None
 
     def remover_contato(self, conta_id, id_):
@@ -418,7 +428,17 @@ class Banco:
             self._con.execute(
                 "DELETE FROM contatos WHERE conta_id=? AND id=?",
                 (conta_id, id_))
+            self._con.execute(
+                "INSERT OR IGNORE INTO contatos_removidos VALUES (?,?)",
+                (conta_id, id_))
             self._agenda = None
+
+    def contatos_removidos(self, conta_id):
+        """{id} dos contatos que a pessoa removeu da agenda."""
+        with self._trava:
+            return {l[0] for l in self._con.execute(
+                "SELECT id FROM contatos_removidos WHERE conta_id=?",
+                (conta_id,))}
 
     def nome_de_contato(self, conta_id, *ids):
         """Nome que a pessoa deu ao contato, pelo primeiro id conhecido;

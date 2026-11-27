@@ -1085,6 +1085,9 @@ def test_trazer_contatos_so_entram_os_que_faltam():
         def salvar_contato(self, conta_id, id_, nome, tel):
             self.salvos.append((conta_id, id_, nome, tel))
 
+        def contatos_removidos(self, conta_id):
+            return set()
+
     class Prov:
         def contatos_da_conta(self):
             return [("1", "Outra Bia", ""), ("2", "Caio", "+55")]
