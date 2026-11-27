@@ -1257,6 +1257,147 @@ def test_opcoes_das_chamadas_em_grupo_ficam_em_recursos_experimentais():
         assert "experimental" in o.descricao.lower()
 
 
+# ------------------------------------- video nas chamadas em grupo (experimental)
+from telezapp.midia import video as _midia_video  # noqa: E402
+
+
+class VideoDeGrupo(VideoFalso):
+    Mosaico = _midia_video.Mosaico
+
+
+class PonteDeGrupoComVideo(PonteDeGrupo):
+    def __init__(self):
+        super().__init__()
+        self.por_participante = queue.Queue()
+        self.lobby_resposta = {"call": "G9", "groupJid": GRUPO_CID,
+                               "video": True, "participants": []}
+
+    def suporta_video_de_participantes(self):
+        return True
+
+    def ler_video_de_participante(self, chamada, espera_ms=500):
+        if self.fim:
+            return False
+        try:
+            return self.por_participante.get(timeout=0.02)
+        except queue.Empty:
+            return None
+
+
+@pytest.fixture
+def mundo_grupo_video():
+    ponte, bus, audio = PonteDeGrupoComVideo(), Barramento(), AudioFalso()
+    v = cw.ChamadasWhatsApp(
+        ponte, "w1", bus,
+        conversa_do_peer=lambda peer: GRUPO_CID if "@g.us" in peer else CID,
+        nome_de=lambda cid: "Amigos" if cid == GRUPO_CID else "Ana",
+        destino_de=lambda cid: "5551", audio=audio, espera_s=0.3)
+    v.grupo_ligado = lambda: True
+    v.andamento_ligado = lambda: True
+    v.video_grupo_ligado = lambda: True
+    v.membros_de = lambda cid: ["x"] * 5
+    v.video = VideoDeGrupo()
+    quadros = []
+    v.destino_video = lambda cid, l, a, rgb: quadros.append((cid, l, a, rgb))
+    v.iniciar()
+    yield v, ponte, bus, quadros
+    v.parar()
+    ponte.fim = True
+
+
+def test_a_caixa_do_video_em_grupo_e_experimental_e_desligada():
+    from telezapp import config
+    o = next(x for x in config.OPCOES
+             if x.chave == "chamada_grupo_video_whatsapp")
+    assert o.categoria == config.CATEGORIA_EXPERIMENTAL
+    assert o.padrao is False and o.servico == "whatsapp"
+    assert "experimental" in o.descricao.lower()
+
+
+def test_sem_a_caixa_o_grupo_continua_so_com_voz(mundo_grupo_video):
+    v, ponte, bus, _ = mundo_grupo_video
+    v.video_grupo_ligado = lambda: False
+    assert v.suporta_video_em_grupo is False
+    v.ligar(GRUPO_CID, "", "", video=True)
+    assert esperar(lambda: ponte.grupos)
+    assert ponte.grupos == [(GRUPO_CID, False)]
+    e = [x for x in bus.eventos if isinstance(x, ev.EstadoChamada)][0]
+    assert e.video is False and e.suporta_video is False
+
+
+def test_ligar_para_grupo_com_video_manda_video_e_liga_a_camera(
+        mundo_grupo_video):
+    v, ponte, bus, _ = mundo_grupo_video
+    assert v.suporta_video_em_grupo is True
+    v.ligar(GRUPO_CID, "", "", video=True, camera="Câmera B")
+    assert esperar(lambda: ponte.grupos)
+    assert ponte.grupos == [(GRUPO_CID, True)]
+    e = [x for x in bus.eventos if isinstance(x, ev.EstadoChamada)][0]
+    assert e.grupo and e.video and e.suporta_video and e.suporta_tela
+    ponte.fila.put({"ev": "ready", "call": "G1"})
+    assert esperar(lambda: v.video.cameras_abertas == ["Câmera B"])
+
+
+def test_video_de_cada_participante_chega_numa_imagem_so(mundo_grupo_video):
+    v, ponte, bus, quadros = mundo_grupo_video
+    v.ligar(GRUPO_CID, "", "", video=True)
+    assert esperar(lambda: ponte.grupos)
+    ponte.fila.put({"ev": "ready", "call": "G1"})
+    assert esperar(lambda: v.ligacoes[GRUPO_CID].recebendo_video)
+    ponte.por_participante.put(("1@lid", b"\x00\x00\x00\x01a"))
+    ponte.por_participante.put(("2@lid", b"\x00\x00\x00\x01b"))
+    assert esperar(lambda: quadros)
+    assert quadros[-1][0] == GRUPO_CID
+    assert esperar(lambda: [x for x in bus.eventos
+                            if isinstance(x, ev.EstadoChamada)][-1]
+                   .video_remoto)
+
+
+def test_convite_de_video_em_grupo_atendido_entra_na_chamada(
+        mundo_grupo_video):
+    v, ponte, bus, _ = mundo_grupo_video
+    ponte.fila.put({"ev": "offer", "call": "R5", "group": GRUPO_CID,
+                    "creator": "1@lid", "video": True})
+    ponte.fila.put({"ev": "incoming", "call": "R5", "peer": "1@lid",
+                    "video": True})
+    assert esperar(lambda: bus.estados())
+    tocando = [x for x in bus.eventos if isinstance(x, ev.EstadoChamada)][0]
+    assert tocando.grupo and tocando.video and tocando.nome == "Amigos"
+    v.atender(GRUPO_CID)
+    # entra pelo caminho de quem chega numa chamada em andamento (lobby +
+    # entrar), e nao pelo atendimento comum que o WhatsApp recusa com 431
+    assert esperar(lambda: ponte.entradas)
+    assert ponte.entradas[0][0] == "R5" and ponte.entradas[0][2] is True
+    assert ponte.atendidas == []
+
+
+def test_atender_grupo_sem_poder_entrar_cai_no_atendimento_comum(
+        mundo_grupo_video):
+    v, ponte, bus, _ = mundo_grupo_video
+    v.andamento_ligado = lambda: False
+    ponte.fila.put({"ev": "offer", "call": "R5", "group": GRUPO_CID,
+                    "creator": "1@lid", "video": False})
+    ponte.fila.put({"ev": "incoming", "call": "R5", "peer": "1@lid",
+                    "group": True})
+    assert esperar(lambda: bus.estados())
+    v.atender(GRUPO_CID)
+    assert esperar(lambda: ponte.atendidas)
+    assert ponte.entradas == []
+
+
+def test_atender_grupo_cuja_entrada_falha_tenta_o_atendimento_comum(
+        mundo_grupo_video):
+    v, ponte, bus, _ = mundo_grupo_video
+    ponte.erro_entrar = "sem relay"
+    ponte.fila.put({"ev": "offer", "call": "R5", "group": GRUPO_CID,
+                    "creator": "1@lid", "video": False})
+    ponte.fila.put({"ev": "incoming", "call": "R5", "peer": "1@lid",
+                    "group": True})
+    assert esperar(lambda: bus.estados())
+    v.atender(GRUPO_CID)
+    assert esperar(lambda: ponte.atendidas)
+
+
 # ------------------------------------------------------- a ponte da DLL
 class GoFalso:
     def __init__(self, respostas):

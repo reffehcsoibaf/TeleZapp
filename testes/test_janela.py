@@ -10842,7 +10842,8 @@ class ProvedorWaGrupo(ProvedorFalso):
     def ligar(self, cid, mic="", saida="", video=False, camera=None):
         self.feito.append(("ligar", cid, video))
 
-    def entrar_chamada_em_andamento(self, cid, call_id, mic="", saida=""):
+    def entrar_chamada_em_andamento(self, cid, call_id, mic="", saida="",
+                                    camera=None):
         self.feito.append(("entrar", cid, call_id))
 
     def candidatos_da_chamada(self, cid):
@@ -10875,14 +10876,22 @@ def test_botao_do_grupo_do_whatsapp_so_com_a_caixa(j):
     assert j._rotulo_do_botao_de_grupo(c) == "Entrar na chamada em andamento"
 
 
-def test_ligar_para_o_grupo_do_whatsapp_chama_o_provedor_so_com_voz(j):
+def test_ligar_para_o_grupo_do_whatsapp_sem_pedir_video_so_liga_a_voz(j):
     c = _grupo_do_whatsapp(j)
     j.cfg.set("chamada_grupo_whatsapp", True)
     j.fala.falar = lambda t, interromper=False: None
+    j._ligar_para(c)
+    assert j.contas.p.feito == [("ligar", GRUPO_WA, False)]
+
+
+def test_video_em_grupo_sem_a_caixa_avisa_e_nao_liga(j):
+    c = _grupo_do_whatsapp(j)
+    j.cfg.set("chamada_grupo_whatsapp", True)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
     j._ligar_para(c, video=True)
-    assert j.contas.p.feito == [("ligar", GRUPO_WA, False)] or \
-        j.contas.p.feito == [("ligar", GRUPO_WA, None)] or \
-        j.contas.p.feito[0][:2] == ("ligar", GRUPO_WA)
+    assert j.contas.p.feito == []
+    assert any("Vídeo nas chamadas em grupo" in t for t in ditas)
 
 
 def test_ligar_para_o_grupo_sem_a_caixa_explica_que_nao_da(j):

@@ -7511,6 +7511,7 @@ class ProvedorWhatsApp(Provedor):
             return lambda: bool(config.Config().get(chave))
         self._voz.grupo_ligado = caixa("chamada_grupo_whatsapp")
         self._voz.andamento_ligado = caixa("chamada_em_andamento_whatsapp")
+        self._voz.video_grupo_ligado = caixa("chamada_grupo_video_whatsapp")
         self._voz.adicionar_ligado = caixa("chamada_adicionar_whatsapp")
         self._voz.link_ligado = caixa("chamada_por_link_whatsapp")
         self._voz.espera_ligada = caixa("chamada_em_espera")
@@ -7540,6 +7541,10 @@ class ProvedorWhatsApp(Provedor):
     def suporta_chamada_em_grupo(self):
         return bool(self.suporta_chamadas
                     and self._voz.ponte.suporta_grupo())
+
+    @property
+    def suporta_video_em_grupo(self):
+        return bool(self.suporta_chamadas and self._voz.suporta_video_em_grupo)
 
     @property
     def suporta_chamada_em_andamento(self):
@@ -7675,11 +7680,12 @@ class ProvedorWhatsApp(Provedor):
                          name="chamada-convidar").start()
 
     def entrar_chamada_em_andamento(self, conversa_id, call_id,
-                                    microfone="", saida=""):
+                                    microfone="", saida="", camera=None):
         if not self.suporta_chamadas:
             self._avisar("Chamadas de voz não estão disponíveis.")
             return
-        self._voz.entrar_em_andamento(conversa_id, call_id, microfone, saida)
+        self._voz.entrar_em_andamento(conversa_id, call_id, microfone, saida,
+                                      camera)
 
     @staticmethod
     def _ocultar_chamadas():
