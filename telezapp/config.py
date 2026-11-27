@@ -1558,6 +1558,14 @@ OPCOES = OPCOES + (
           "Pergunta antes de remover alguém dos contatos do TeleZapp, de "
           "remover um participante de um grupo e de recusar pedidos de "
           "entrada. Desmarcada, faz na hora.", grupo="Confirmações"),
+    Opcao("navegador_lembrar_sites",
+          "Navegador interno: lembrar o que foi feito em cada site",
+          "Interface", True,
+          "O navegador interno guarda, para cada site, a exibição de celular "
+          "ou de computador, o que você marcou e preencheu nos formulários e "
+          "as senhas que você mandar guardar (cifradas, só neste computador). "
+          "Desmarcada, não guarda nem preenche nada. Ao desmarcar, o TeleZapp "
+          "pergunta se apaga o que já foi guardado."),
 )
 
 

@@ -62,6 +62,10 @@ class _ConsultaRecusada(RuntimeError):
     """O WhatsApp respondeu, mas recusou a consulta (id ou variaveis que
     este aparelho nao aceita): vale tentar a proxima candidata."""
 
+class _VotoSemSuporte(Exception):
+    """Nao da para votar nesta enquete de canal; a mensagem diz o motivo."""
+
+
 class ColecaoFora(Exception):
     """O estado do WhatsApp nao confere: o envio espera a copia do celular."""
 
@@ -1344,6 +1348,9 @@ def converter(evento, conta_id, conversa_id, autor=""):
                      previa=previa_do_whatsapp(interna_))
     enquete_ = enquete_do_whatsapp(interna_)
     if enquete_:
+        if conversa_id.endswith("@newsletter") and info.ServerID:
+            # o voto em canal precisa do id que o servidor deu a enquete
+            enquete_["servidor_id"] = int(info.ServerID)
         m.atualizar_extras(msg, enquete=enquete_)
     return msg, msg.remetente
 
@@ -2998,6 +3005,7 @@ class ProvedorWhatsApp(Provedor):
         if info.OwnerPN.User:
             dono = self._nome_contato(info.OwnerPN)
         subgrupos = []
+        subgrupos_fora = []     # os que a conta NAO participa
         # na comunidade, os subgrupos; num grupo da comunidade, os irmaos
         # (a mesma lista, pedida pelo grupo-pai)
         pai = None
@@ -3011,12 +3019,21 @@ class ProvedorWhatsApp(Provedor):
                     if jid_texto(alvo.JID) != conversa_id:
                         subgrupos.append((jid_texto(alvo.JID),
                                           alvo.GroupName.Name or "Grupo"))
+                try:
+                    meus_grupos = {jid_texto(g.JID)
+                                   for g in self.cliente.get_joined_groups()}
+                    subgrupos_fora = [c for c, _n in subgrupos
+                                      if c not in meus_grupos]
+                except Exception:
+                    log.info("sem a lista dos grupos de que participo")
             except Exception:
                 log.info("sem a lista de grupos da comunidade")
         ajustes = None
         if eu is not None and (eu.IsAdmin or eu.IsSuperAdmin):
             ajustes = self.ajustes_do_grupo(conversa_id)
-        return {"subgrupos": subgrupos, "ajustes": ajustes,
+        return {"subgrupos": subgrupos, "subgrupos_fora": subgrupos_fora,
+            "comunidade_id": jid_texto(pai) if pai is not None else "",
+            "ajustes": ajustes,
             "nome": info.GroupName.Name, "descricao": info.GroupTopic.Topic,
             "id_descricao": info.GroupTopic.TopicID,
             "criado_em": float(info.GroupCreated or 0), "dono": dono,
@@ -3027,6 +3044,30 @@ class ProvedorWhatsApp(Provedor):
             "sou_admin": bool(eu is not None and (eu.IsAdmin or
                                                   eu.IsSuperAdmin)),
             "participantes": participantes}
+
+    def entrar_no_grupo_da_comunidade(self, comunidade_id, grupo_id):
+        """Entra num grupo de uma comunidade de que a conta ja faz parte (o
+        pedido do WhatsApp Web, funcao EntrarEmGrupoDaComunidade da DLL do
+        TeleZapp). Devolve "entrou", "pedido" (um administrador precisa
+        aprovar) ou "pendente" (ja havia um pedido); levanta se falhar."""
+        dll = getattr(self.cliente, "_NewClient__client", None)
+        funcao = getattr(dll, "EntrarEmGrupoDaComunidade", None)
+        if funcao is None:
+            raise RuntimeError(
+                "Esta versão do componente do WhatsApp ainda não entra em "
+                "grupos de comunidades. Entre pelo celular.")
+        if not self._conectada:
+            raise RuntimeError("Sem conexão com o WhatsApp.")
+        texto = ctypes.c_char_p
+        funcao.argtypes = [texto, texto, texto]
+        funcao.restype = texto
+        uuid_ = self.cliente.uuid
+        r = funcao(uuid_ if isinstance(uuid_, bytes) else str(uuid_).encode(),
+                   comunidade_id.encode(), grupo_id.encode()).decode()
+        log.info("entrar no grupo da comunidade %s: %s", grupo_id, r)
+        if not r.startswith("ok:"):
+            raise RuntimeError(r[5:] if r.startswith("erro:") else r)
+        return r[3:]
 
     def detalhes_do_canal(self, conversa_id):
         if self.cliente is None or not self._conectada or \
@@ -5220,6 +5261,13 @@ class ProvedorWhatsApp(Provedor):
         except Exception:
             log.exception("erro ao tratar o aviso de digitando")
 
+    def adotar_conversa(self, conv):
+        """Uma conversa criada pela tela (grupo irmao de uma comunidade, grupo
+        em comum) passa a ser conhecida do provedor: sem isso a conferencia
+        de quem pode escrever nela nao tinha onde gravar o resultado."""
+        with self._trava:
+            self._conversas.setdefault(conv.id, conv)
+
     def conversa_aberta(self, conversa_id):
         if conversa_id.endswith("@g.us"):
             self._fila.put(lambda: self._conferir_escrita(conversa_id))
@@ -5277,13 +5325,23 @@ class ProvedorWhatsApp(Provedor):
                 self._marcar_escrita(cid, False)       # nao participo mais
             return
         pode = True
-        if info.GroupAnnounce.IsAnnounce:
+        da_comunidade = _de_comunidade(info)
+        if info.GroupAnnounce.IsAnnounce or da_comunidade:
             eu = self.cliente.get_me()
             meus = {eu.JID.User, eu.LID.User} - {""}
+            achei = False
             for p in info.Participants:
                 if meus & {p.JID.User, p.LID.User, p.PhoneNumber.User}:
-                    pode = bool(p.IsAdmin or p.IsSuperAdmin)
+                    achei = True
+                    pode = (not info.GroupAnnounce.IsAnnounce) or bool(
+                        p.IsAdmin or p.IsSuperAdmin)
                     break
+            # nao achar a conta na lista NAO prova que nao participo (a lista
+            # pode vir incompleta ou so com LID): so registra no log; quem
+            # decide e o servidor, que recusa o envio de quem nao participa
+            if not achei and da_comunidade and len(info.Participants):
+                log.info("grupo de comunidade: não achei minha conta entre "
+                         "%d participantes", len(info.Participants))
         self._marcar_escrita(cid, pode)
 
     def _marcar_escrita(self, cid, pode):
@@ -6238,34 +6296,36 @@ class ProvedorWhatsApp(Provedor):
     def _votar_enquete(self, msg, escolhas):
         cid = msg.conversa_id
         enq = m.enquete_de(msg)
-        if cid.endswith("@newsletter"):
-            # canal: a mensagem nao tem a chave secreta das enquetes comuns
-            # e o neonize nao sabe votar nelas ("original message secret
-            # key not found" no log de 23/10/2026)
-            self._avisar("O TeleZapp ainda não vota em enquetes de canais "
-                         "do WhatsApp. Vote pelo celular.", False)
-            return
         try:
             if not self._conectada or self.cliente is None:
                 raise ConnectionError("sem conexão")
             if not enq:
                 raise ValueError("não é uma enquete")
             eu = self.cliente.get_me().JID
-            if msg.minha:
-                autor = eu
+            if cid.endswith("@newsletter"):
+                # canal: sem a chave secreta das enquetes comuns ("original
+                # message secret key not found" no log de 23/10/2026); o voto
+                # vai em claro, pela funcao da DLL do TeleZapp
+                self._votar_em_canal(cid, enq, escolhas)
             else:
-                individual = not cid.endswith("@g.us")
-                rem = msg.remetente or (cid if individual else "")
-                if not rem:
-                    raise ValueError("sem o remetente da enquete")
-                autor = _jid_obj(*jid_de_texto(rem))
-            chat = self._jid(cid)
-            enquete_info = info_da_mensagem(
-                chat, autor, msg.id, bool(msg.minha),
-                cid.endswith("@g.us"))
-            nomes = [enq["opcoes"][i] for i in escolhas]
-            self.cliente.send_message(
-                chat, self.cliente.build_poll_vote(enquete_info, nomes))
+                if msg.minha:
+                    autor = eu
+                else:
+                    individual = not cid.endswith("@g.us")
+                    rem = msg.remetente or (cid if individual else "")
+                    if not rem:
+                        raise ValueError("sem o remetente da enquete")
+                    autor = _jid_obj(*jid_de_texto(rem))
+                chat = self._jid(cid)
+                enquete_info = info_da_mensagem(
+                    chat, autor, msg.id, bool(msg.minha),
+                    cid.endswith("@g.us"))
+                nomes = [enq["opcoes"][i] for i in escolhas]
+                self.cliente.send_message(
+                    chat, self.cliente.build_poll_vote(enquete_info, nomes))
+        except _VotoSemSuporte as e:
+            self._avisar(str(e), False)
+            return
         except Exception as e:
             log.warning("voto em enquete falhou: %s: %s", type(e).__name__,
                         str(e)[:200])
@@ -6282,6 +6342,35 @@ class ProvedorWhatsApp(Provedor):
             atual["meus"] = list(escolhas)
             m.atualizar_extras(x, enquete=atual)
         self._alterar(cid, msg.id, aplicar, "enquete", "Você")
+
+    def _votar_em_canal(self, cid, enq, escolhas):
+        """Voto em enquete de canal: o canal nao e cifrado, entao o voto vai
+        em claro (SHA-256 do texto de cada opcao marcada), com o id que o
+        servidor deu a enquete. Funcao VotarEmEnqueteDeCanal da DLL do
+        TeleZapp; ela so envia, nao espera o ack do servidor."""
+        dll = getattr(self.cliente, "_NewClient__client", None)
+        funcao = getattr(dll, "VotarEmEnqueteDeCanal", None)
+        if funcao is None:
+            raise _VotoSemSuporte(
+                "Esta versão do componente do WhatsApp ainda não vota em "
+                "enquetes de canais. Vote pelo celular.")
+        servidor_id = int(enq.get("servidor_id") or 0)
+        if servidor_id <= 0:
+            raise _VotoSemSuporte(
+                "Esta enquete chegou antes do TeleZapp guardar o número que "
+                "o WhatsApp precisa para o voto. Vote pelo celular; as "
+                "próximas enquetes do canal já funcionam.")
+        hashes = ",".join(
+            hashlib.sha256(enq["opcoes"][i].encode("utf-8")).hexdigest()
+            for i in escolhas)
+        texto = ctypes.c_char_p
+        funcao.argtypes = [texto, texto, ctypes.c_longlong, texto]
+        funcao.restype = texto
+        uuid_ = self.cliente.uuid
+        r = funcao(uuid_ if isinstance(uuid_, bytes) else str(uuid_).encode(),
+                   cid.encode(), servidor_id, hashes.encode()).decode()
+        if not r.startswith("ok:"):
+            raise RuntimeError(r[5:] if r.startswith("erro:") else r)
 
     def _alterar(self, cid, alvo, aplicar, motivo, quem="", emoji=""):
         """Aplica `aplicar` a mensagem guardada, grava e avisa a interface.
@@ -7221,10 +7310,7 @@ class ProvedorWhatsApp(Provedor):
     def _enviar_por_arquivo(self, conversa_id, anexo, legenda):
         """Sobe o arquivo direto do disco, publicando o avanco, e devolve a
         mensagem pronta para enviar."""
-        from neonize.utils.enum import MediaType
-        tipo = {m.FOTO: MediaType.MediaImage, m.VIDEO: MediaType.MediaVideo,
-                m.VOZ: MediaType.MediaAudio, m.AUDIO: MediaType.MediaAudio
-                }.get(anexo.tipo, MediaType.MediaDocument)
+        tipo = self._tipo_de_upload(anexo)
         chave = "up-" + uuid.uuid4().hex
         fim = threading.Event()
         avisos = [0, -1]          # quantos avancos publicados, ultimo valor
@@ -7254,7 +7340,42 @@ class ProvedorWhatsApp(Provedor):
                                                    conversa_id, 100))
         return self._mensagem_de_midia(anexo, legenda, up)
 
-    def _mensagem_de_midia(self, anexo, legenda, up=None):
+    @staticmethod
+    def _tipo_de_upload(anexo):
+        from neonize.utils.enum import MediaType
+        return {m.FOTO: MediaType.MediaImage, m.VIDEO: MediaType.MediaVideo,
+                m.VOZ: MediaType.MediaAudio, m.AUDIO: MediaType.MediaAudio
+                }.get(anexo.tipo, MediaType.MediaDocument)
+
+    def _enviar_midia_de_canal(self, conversa_id, anexo, legenda):
+        """Midia para um canal do WhatsApp (dono ou administrador). O canal
+        nao e cifrado: o arquivo sobe por upload_newsletter e o "handle" do
+        envio vai no pedido, o que so a funcao EnviarParaCanal da DLL do
+        TeleZapp faz. Devolve a resposta (ID, Timestamp)."""
+        dll = getattr(self.cliente, "_NewClient__client", None)
+        funcao = getattr(dll, "EnviarParaCanal", None)
+        if funcao is None:
+            raise RuntimeError("Esta versão do componente do WhatsApp ainda "
+                               "não envia mídia para canais.")
+        with open(anexo.caminho, "rb") as f:
+            dados = f.read()
+        up = self.cliente.upload_newsletter(dados,
+                                            self._tipo_de_upload(anexo))
+        mensagem = self._mensagem_de_midia(anexo, legenda, up, canal=True)
+        texto = ctypes.c_char_p
+        funcao.argtypes = [texto, texto, ctypes.c_char_p, ctypes.c_int, texto]
+        funcao.restype = texto
+        corpo = mensagem.SerializeToString()
+        uuid_ = self.cliente.uuid
+        r = funcao(uuid_ if isinstance(uuid_, bytes) else str(uuid_).encode(),
+                   conversa_id.encode(), corpo, len(corpo),
+                   (up.Handle or "").encode()).decode()
+        if not r.startswith("ok:"):
+            raise RuntimeError(r[5:] if r.startswith("erro:") else r)
+        _, id_, quando = r.split(":")
+        return types.SimpleNamespace(ID=id_, Timestamp=int(quando))
+
+    def _mensagem_de_midia(self, anexo, legenda, up=None, canal=False):
         """Mensagem de midia montada a mao: o neonize so sabe montar foto e
         documento sem FFmpeg. `up`: o envio ja feito (por arquivo); sem ele a
         midia e lida inteira e enviada de uma vez."""
@@ -7266,8 +7387,10 @@ class ProvedorWhatsApp(Provedor):
                 dados = f.read()
             up = self.cliente.upload(dados)
         comum = dict(URL=up.url, directPath=up.DirectPath,
-                     fileEncSHA256=up.FileEncSHA256, fileLength=up.FileLength,
-                     fileSHA256=up.FileSHA256, mediaKey=up.MediaKey)
+                     fileLength=up.FileLength, fileSHA256=up.FileSHA256)
+        if not canal:       # canal nao e cifrado: sem chave nem hash cifrado
+            comum.update(fileEncSHA256=up.FileEncSHA256,
+                         mediaKey=up.MediaKey)
         if anexo.tipo == m.FOTO:
             return Message(imageMessage=ImageMessage(
                 caption=legenda or None, mimetype=anexo.mime or "image/jpeg",
@@ -7315,9 +7438,18 @@ class ProvedorWhatsApp(Provedor):
             anexo = self._anexo_que_o_whatsapp_toca(anexo)
             jid = self._jid(conversa_id)
             prazo = self._prazo_da_conversa(conversa_id)
-            legenda, ctx = self._contexto_da_midia(
-                conversa_id, legenda, resposta_a, mencoes)
-            if anexo.tamanho >= LIMITE_ENVIO_POR_ARQUIVO and \
+            canal = conversa_id.endswith("@newsletter")
+            if canal:
+                # canal: sem resposta a mensagem, sem mencao, sem prazo
+                resposta_a = ""
+                ctx = None
+            else:
+                legenda, ctx = self._contexto_da_midia(
+                    conversa_id, legenda, resposta_a, mencoes)
+            if canal:
+                resp = self._enviar_midia_de_canal(conversa_id, anexo,
+                                                   legenda)
+            elif anexo.tamanho >= LIMITE_ENVIO_POR_ARQUIVO and \
                     self._tem_transferencias():
                 resp = self.cliente.send_message(
                     jid, com_expiracao(self._com_contexto(
@@ -7344,6 +7476,8 @@ class ProvedorWhatsApp(Provedor):
             log.warning("envio de %s falhou: %s: %s", anexo.tipo,
                         type(e).__name__, str(e)[:300], exc_info=True)
             motivo = "sem conexão" if isinstance(e, ConnectionError) else \
+                ("canal: " + str(e)[:150]) if conversa_id.endswith(
+                    "@newsletter") and isinstance(e, RuntimeError) else \
                 "erro do WhatsApp (%s)" % type(e).__name__
             self.barramento.publicar(ev.EnvioFalhou(
                 self.conta.id, conversa_id, original, motivo,

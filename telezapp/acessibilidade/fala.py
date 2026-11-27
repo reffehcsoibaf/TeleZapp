@@ -13,7 +13,6 @@ import atexit
 import ctypes
 import importlib.util
 import logging
-import numpy as np
 import os
 import struct
 import threading
@@ -529,7 +528,7 @@ class _SaidaDosAvisos:
                     if pos < len(dados):
                         vivas.append((dados, pos))
                 self._misturas = vivas
-                np.clip(outdata, -1.0, 1.0, out=outdata)
+                outdata.clip(-1.0, 1.0, out=outdata)
                 return
             dados, pos = self._dados, self._pos
             if dados is None or pos >= len(dados):
