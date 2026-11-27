@@ -1648,10 +1648,15 @@ PADROES.update({
     "filtro_conversas": "todas",   # tipo escolhido na janela principal
     "filtro_conta": "todas",       # servico ou conta escolhido nela
     "filtro_pasta": {},            # conta -> pasta (ou lista) escolhida
-    # o que o aviso falado de mensagem nova diz (nucleo/aviso_de_nova.py)
-    "aviso_nova": {"ordem": ["inicio", "conversa", "servico", "conta",
-                             "autor", "hora", "conteudo"],
-                   "ocultos": ["servico", "conta"]},
+    # o que o aviso falado de mensagem nova diz (nucleo/aviso_de_nova.py):
+    # um bloco por tipo de conversa, todos com o mesmo modelo de fabrica
+    "aviso_nova": {"tipos": {t: {
+        "ordem": ["inicio", "conversa", "servico", "conta", "autor", "hora",
+                  "conteudo"],
+        "ocultos": ["servico", "conta"],
+        "modelo": "$New em $conversation_out. "
+                  "$Sender_Name, $Time, $Content"}
+        for t in ("privada", "grupo", "canal")}},
 })
 
 

@@ -91,6 +91,14 @@ class Janela:
             if not hasattr(self, "ligacoes"):
                 self.ligacoes = {}
             self.ligacoes[a[0]] = a[1]
+            id_ = k.get("id")
+            if id_ is None and len(a) > 2:
+                origem = a[2]
+                id_ = origem.GetId() if hasattr(origem, "GetId") else origem
+            if id_ is not None:
+                if not hasattr(self, "ligacoes_por_id"):
+                    self.ligacoes_por_id = {}
+                self.ligacoes_por_id[(a[0], id_)] = a[1]
 
     def Show(self, v=True):
         self.visivel = v
@@ -112,6 +120,10 @@ class Janela:
 
     def SetFocus(self):
         _foco[0] = self
+
+    def PopupMenu(self, menu, pos=None):
+        self.menu_popup = menu
+        return True
 
     def IsShown(self):
         return getattr(self, "visivel", True) is not False
@@ -392,9 +404,9 @@ class StaticText(Janela):
 
 
 class ListBox(Janela):
-    def __init__(self, *a, **k):
+    def __init__(self, *a, choices=(), **k):
         super().__init__()
-        self.itens, self.sel = [], -1
+        self.itens, self.sel = list(choices), -1
 
     def Freeze(self):
         pass
@@ -536,6 +548,7 @@ class TextCtrl(Janela):
         if getattr(self, "tudo_selecionado", False):
             self.valor, self.tudo_selecionado = "", False
         self.valor += texto
+        self.ponto = len(self.valor)
 
     def SetInsertionPoint(self, i):
         self.ponto = i
@@ -622,6 +635,9 @@ class MenuItem:
     def GetId(self):
         return self.id
 
+    def GetLabel(self):
+        return self.rotulo
+
     def SetItemLabel(self, rotulo):
         self.rotulo = rotulo
 
@@ -642,6 +658,14 @@ class Menu:
     def __init__(self, *a, **k):
         self.itens = []
         self.submenus = []
+        self.ligacoes = {}
+        self.destruido = False
+
+    def Bind(self, evento, handler, item=None, **k):
+        self.ligacoes[item.GetId() if item is not None else "todos"] = handler
+
+    def Destroy(self):
+        self.destruido = True
 
     def Append(self, *a, **k):
         item = MenuItem()

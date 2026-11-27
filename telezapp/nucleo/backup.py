@@ -199,6 +199,10 @@ def opcoes_validas(lidas, partes=None):
         # lista de mensagens
         from telezapp.nucleo import lista_mensagens
         boas["lista_mensagens"] = lista_mensagens.do_estilo(lidas["estilo"])
+    aviso = lidas.get("aviso_nova")
+    if isinstance(aviso, dict):
+        from telezapp.nucleo import aviso_de_nova
+        boas["aviso_nova"] = aviso_de_nova.normalizar(aviso)
     if lidas.get("digitar_na_lista") == "campo":
         # backup antigo: a opcao unica virou uma escolha em cada lista
         from telezapp.nucleo import lista_conversas, lista_mensagens
