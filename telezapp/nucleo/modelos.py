@@ -396,6 +396,23 @@ def quem_votou_em(enq, posicao):
             if posicao in v["escolhas"]]
 
 
+def linhas_de_quem_votou(enq):
+    """Uma linha por quem votou: 'Nome: opção' (ou as opções escolhidas,
+    separadas por vírgula). Vazio nas anônimas ou sem ninguém ter votado."""
+    if enq["anonima"]:
+        return []
+    linhas = []
+    for quem, v in enq["votos"].items():
+        if not v["escolhas"]:
+            continue
+        nome = nome_a_mostrar(v["nome"]) or quem
+        opcoes = ", ".join(enq["opcoes"][i] for i in sorted(v["escolhas"])
+                           if 0 <= i < len(enq["opcoes"]))
+        if opcoes:
+            linhas.append("%s: %s" % (nome, opcoes))
+    return sorted(linhas, key=str.casefold)
+
+
 def resumo_enquete(msg):
     """'enquete: Pergunta, 3 opções, 5 votos' (+ 'seu voto: A, B')."""
     enq = enquete_de(msg)
