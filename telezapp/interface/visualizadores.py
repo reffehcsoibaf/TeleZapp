@@ -230,6 +230,7 @@ class _MotorMediaCtrl:
         self.ctrl = ctrl
         self.terminou = False
         self._velocidade = 1.0
+        self._volume = 1.0
 
     @property
     def duracao(self):
@@ -277,6 +278,18 @@ class _MotorMediaCtrl:
         except Exception:
             pass
 
+    @property
+    def volume(self):
+        return self._volume
+
+    @volume.setter
+    def volume(self, valor):
+        self._volume = float(valor)
+        try:
+            self.ctrl.SetVolume(self._volume)
+        except Exception:
+            pass
+
     def fechar(self):
         try:
             self.ctrl.Stop()
@@ -303,6 +316,26 @@ def _reproducao(pai, msg, caminho, texto, fala, motor, video, cfg=None):
         botoes_extra=())
     ctrl = estado["ctrl"]
     mo = estado["motor"]
+
+    volume_inicial = int(cfg.get("volume_reproducao")) if cfg is not None \
+        else 100
+    rotulo_volume = wx.StaticText(dlg, label="Volume")
+    volume_ctrl = wx.Slider(dlg, value=volume_inicial, minValue=0,
+                            maxValue=100, name="Volume")
+    mo.volume = volume_inicial / 100.0
+    linha_volume = wx.BoxSizer(wx.HORIZONTAL)
+    linha_volume.Add(rotulo_volume, 0, wx.ALIGN_CENTER | wx.RIGHT, 8)
+    linha_volume.Add(volume_ctrl, 1)
+    dlg.GetSizer().Insert(2, linha_volume, 0, wx.EXPAND | wx.ALL, 8)
+
+    def volume_mudou(evt):
+        v = volume_ctrl.GetValue()
+        mo.volume = v / 100.0
+        if cfg is not None:
+            cfg.set("volume_reproducao", v)
+        fala.falar("Volume %d%%" % v, interromper=True)
+    dlg.Bind(wx.EVT_SLIDER, volume_mudou, volume_ctrl)
+
     posicao = wx.StaticText(dlg, label="")
     botao = wx.Button(dlg, wx.ID_ANY, "&Tocar")
     barra = wx.BoxSizer(wx.HORIZONTAL)
@@ -320,7 +353,7 @@ def _reproducao(pai, msg, caminho, texto, fala, motor, video, cfg=None):
         b = wx.Button(dlg, wx.ID_ANY, texto_b)
         dlg.Bind(wx.EVT_BUTTON, lambda e, d=direcao: mudar_velocidade(d), b)
         barra.Add(b, 0, wx.RIGHT, 8)
-    dlg.GetSizer().Insert(2, barra, 0, wx.EXPAND | wx.ALL, 8)
+    dlg.GetSizer().Insert(3, barra, 0, wx.EXPAND | wx.ALL, 8)
     dlg.Layout()
 
     def passo_atual():
@@ -459,6 +492,7 @@ def _reproducao(pai, msg, caminho, texto, fala, motor, video, cfg=None):
     atualizar_rotulo()
     relogio.Start(300)
     wx.CallAfter(iniciar)
+    wx.CallAfter(volume_ctrl.SetFocus)
     try:
         dlg.ShowModal()
     finally:
