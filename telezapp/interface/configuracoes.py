@@ -1178,6 +1178,8 @@ class DialogoConfiguracoes(wx.Dialog):
         self.modelo.definir(opcao.chave, valor)
         if opcao.chave == "tom_de_chamada":
             tocar_tom_de_chamada(valor)     # ouve o que acabou de escolher
+        if opcao.chave == "navegador_lembrar_sites" and not valor:
+            self._perguntar_apagar_sites()
         if opcao.chave == "audio_passo_velocidade":
             # a lista de velocidades depende do passo: refaz as opcoes
             i = self._categoria_escolhida()
@@ -1186,6 +1188,23 @@ class DialogoConfiguracoes(wx.Dialog):
                 c = self.controles.get(opcao.chave)
                 if c is not None:
                     c.SetFocus()
+
+    def _perguntar_apagar_sites(self):
+        """Ao desligar o que o navegador lembra: apagar o que ja foi guardado?"""
+        import os
+        from telezapp import config as _config
+        from telezapp.nucleo import sites_navegador
+        arquivo = os.path.join(_config.pasta_dados(), "navegador_sites.json")
+        if not os.path.exists(arquivo):
+            return
+        if wx.MessageBox(
+                "Apagar também tudo o que o navegador interno já guardou dos "
+                "sites (exibição, campos preenchidos e senhas)? Isso não "
+                "pode ser desfeito.", "Configurações",
+                wx.YES_NO | wx.ICON_QUESTION, self) == wx.YES:
+            sites_navegador.SitesDoNavegador(arquivo).apagar_tudo()
+            if self.fala is not None:
+                self.fala.falar("Dados dos sites apagados.", interromper=True)
 
     # ------------------------------------------------------------ botoes
     def _aplicar(self):

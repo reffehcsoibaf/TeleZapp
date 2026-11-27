@@ -7,6 +7,20 @@ Antes de escrever aqui, confira a versão em vigor: `git fetch --tags` e
 `gh release list -L 3` (a Latest é a publicada). O que veio depois dela vai em
 "Próxima versão (ainda sem número)".
 
+## 2026.11.27.1
+
+Instalador sem numpy (relato de 27/11, 27.0): `import numpy` no topo de `acessibilidade/fala.py` (commit 3ba7e88) quebrava o instalador, que exclui numpy, telethon, neonize, cv2, soundfile, sounddevice, PIL e emoji, porque o `config` importa a fala ao carregar. O import saiu do topo (`outdata.clip`), e `test_instalador_sem_pacotes_pesados.py` importa os módulos do instalador com esses pacotes bloqueados.
+
+Postar em canal do WhatsApp (pedido de usuário administrador de canal): a caixa de escrever fica liberada nos canais em que a conta é administradora; texto, link e mídia vão por `NewsletterSendMessage` da DLL (`canais_envio` no neonize-build). **Sem teste ao vivo.**
+
+Voto em enquete de canal: a enquete guarda o `servidor_id` (id dado pelo servidor, `modelos`) e o voto vai por `canais_voto.go` na DLL. Só vale para enquetes novas (as antigas não têm o id). **Sem teste ao vivo.**
+
+Comunidades (relato da Elaine, 27/11): `adotar_conversa` registra a conversa aberta por "Grupos da comunidade"; `_conferir_escrita` não marca mais "não participo" por não achar a conta na lista de participantes (só o erro 403 torna a conversa só leitura) e o rótulo "(você não participa)" saiu. Novo item "Entrar neste grupo da comunidade" para os grupos da lista de que a conta não faz parte (`entrar_no_grupo_da_comunidade`, DLL `comunidade_entrar.go`). **Sem teste ao vivo** (precisa de outra conta numa comunidade).
+
+Navegador interno (pedido dele, caso do Uber "tamanho de tela incompatível"): item "Exibição de celular" no menu do Alt (agente de usuário Android e janela de 430 px, recarrega), lembrado por domínio. `nucleo/sites_navegador.SitesDoNavegador` guarda em `navegador_sites.json`, cifrado com o DPAPI, os campos marcados e preenchidos (por endereço e página; fora senha, cartão, código e CPF) e a senha (por endereço exato; só quando a página tem exatamente um campo de senha; pergunta Guardar, Agora não ou Nunca neste site). O script da página (`SCRIPT_DOS_SITES`) só aceita eventos confiáveis. "Esquecer os dados salvos deste site" apaga tudo do endereço. Nova caixa `navegador_lembrar_sites` (Interface, ligada): desligada, nada é guardado nem preenchido, e a janela pergunta se apaga o que já existe. Testes em `test_sites_navegador.py` e `testes/oculto_navegador_sites.py` (WebView2 de verdade, área oculta). **Sem teste com o Uber real.**
+
+Volume nas janelas de reprodução: o `wx.Slider` nativo tratava cima e baixo ao contrário; `visualizadores._reproducao` passou a tratar as setas (cima aumenta, baixo diminui, passo do controle).
+
 ## 2026.11.27.0
 
 Vídeo nas chamadas em grupo do WhatsApp (experimental, pedido dele, 27/11): nova caixa `chamada_grupo_video_whatsapp` em Recursos experimentais (desligada), que precisa das caixas das chamadas em grupo e de entrar em chamadas em andamento. Com ela, "Ligar com vídeo" numa conversa de grupo e o convite de chamada de vídeo em grupo levam a câmera, e o vídeo de cada pessoa chega numa imagem só, em grade (`ChamadasWhatsApp`, `Janela._ligar_para_grupo`, `suporta_video_em_grupo`). Sem a caixa, pedir vídeo em grupo só avisa e não liga. Veio do branch `video-em-grupo`, mesclado em 27/11 com a main dentro; os dois testes de janela que falhavam eram do teste (provedor falso sem o parâmetro `camera`; teste do tempo do "grupo só voz") e foram corrigidos. A DLL atual pode recusar vídeo em grupo (431 do servidor). **Sem teste ao vivo.**

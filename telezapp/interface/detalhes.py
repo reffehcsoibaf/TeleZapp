@@ -1704,7 +1704,10 @@ class ControleDetalhes:
         if not gente:
             self.jan.fala.falar("Nenhum grupo listado nesta comunidade.")
             return
-        self._lista_de_grupos("Grupos da comunidade", gente)
+        self._lista_de_grupos(
+            "Grupos da comunidade", gente,
+            fora=(self.dados or {}).get("subgrupos_fora", ()),
+            comunidade=(self.dados or {}).get("comunidade_id", ""))
 
     def em_comum(self):
         self.jan.fala.falar("Procurando grupos em comum...",
@@ -1733,19 +1736,64 @@ class ControleDetalhes:
         self._lista_de_grupos("Grupos em comum com %s" % self.conv.nome,
                               achados)
 
-    def _lista_de_grupos(self, titulo, achados):
+    def _lista_de_grupos(self, titulo, achados, fora=(), comunidade=""):
         jan, conta = self.jan, self.conv.conta_id
+        prov = self.prov
 
         def itens(_):
+            # "fora" (grupos que o servidor nao lista como entrados) nao vira
+            # rotulo: a lista de entrados pode vir incompleta e a pessoa
+            # participar mesmo assim
             return [(nome, (cid, nome)) for cid, nome in achados]
 
         def menu(dado):
             cid, nome = dado
             conv = jan._garantir_conversa(conta, cid, nome, tipo="grupo")
-            return jan._opcoes_da_conversa(conv, com_abrir=True,
-                                           com_detalhes=True)
+            # o provedor precisa conhecer a conversa para conferir se a conta
+            # participa e pode escrever nela
+            p = jan.contas.provedor(conta) if jan.contas else None
+            if p is not None and hasattr(p, "adotar_conversa"):
+                p.adotar_conversa(conv)
+            opcoes = jan._opcoes_da_conversa(conv, com_abrir=True,
+                                             com_detalhes=True)
+            if comunidade and cid in fora and prov is not None:
+                opcoes.insert(0, ("Entrar neste grupo da comunidade",
+                                  lambda: self._entrar_no_grupo(
+                                      comunidade, cid, nome)))
+            return opcoes
         self._sub(DialogoLista(self.dlg, titulo, "Grupos (Menu abre as "
                                "ações)", (), itens, menu))
+
+    def _entrar_no_grupo(self, comunidade, cid, nome):
+        """Pede ao WhatsApp para entrar num grupo da comunidade."""
+        jan = self.jan
+        jan.fala.falar("Entrando no grupo...", interromper=True)
+
+        def depois(resultado):
+            if resultado is None or isinstance(resultado, Exception):
+                texto = "Não consegui entrar no grupo %s: %s" % (
+                    nome, resultado or "erro desconhecido")
+            else:
+                texto = {
+                    "entrou": "Você entrou no grupo %s." % nome,
+                    "pedido": "Pedido enviado. Um administrador do grupo %s "
+                              "precisa aprovar sua entrada." % nome,
+                    "pendente": "Você já tem um pedido de entrada pendente "
+                                "no grupo %s." % nome}.get(
+                    resultado, "Resposta do WhatsApp: %s." % resultado)
+            jan.fala.falar(texto, interromper=True)
+            if self.dlg is not None:
+                wx.MessageBox(texto, "Grupo da comunidade",
+                              wx.OK | wx.ICON_INFORMATION, self.dlg)
+
+        def trabalho():
+            try:
+                return self.prov.entrar_no_grupo_da_comunidade(comunidade, cid)
+            except Exception as e:
+                log.error("entrar no grupo da comunidade:\n%s",
+                          traceback.format_exc())
+                return e
+        self._em_segundo_plano("entrar-no-grupo", trabalho, depois)
 
     # ---- convite, foto, pedidos de entrada
     def _em_segundo_plano(self, nome, trabalho, depois):

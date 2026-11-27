@@ -325,7 +325,9 @@ def enquete_de(msg):
             and 0 <= bruta.get("correta") < len(opcoes) else None,
             "encerra_em": _numero(bruta.get("encerra_em")),
             "permite_adicionar": bool(bruta.get("permite_adicionar")),
-            "com_imagens": bool(bruta.get("com_imagens"))}
+            "com_imagens": bool(bruta.get("com_imagens")),
+            # id que o servidor deu a enquete de canal (o voto precisa dele)
+            "servidor_id": int(_numero(bruta.get("servidor_id")))}
 
 
 def _numero(valor):

@@ -1615,6 +1615,109 @@ def test_enviar_arquivo_sem_conexao(amb, tmp_path):
     assert esperar(amb.fila, ev.EnvioFalhou).motivo == "sem conexão"
 
 
+class _EnviarParaCanalFalso:
+    """A funcao EnviarParaCanal da DLL (ctypes): guarda o que recebeu."""
+    argtypes = restype = None
+
+    def __init__(self, resposta=b"ok:CANAL1:1700000000"):
+        self.resposta, self.chamadas = resposta, []
+
+    def __call__(self, uuid, para, corpo, tamanho, handle):
+        self.chamadas.append((para.decode(), E.Message.FromString(corpo),
+                              handle.decode()))
+        return self.resposta
+
+
+def _canal_com_dll(amb, **kw):
+    envio_canal = _EnviarParaCanalFalso(**kw)
+    amb.c._NewClient__client = types.SimpleNamespace(
+        EnviarParaCanal=envio_canal)
+    amb.c.uuid = b"u1"
+    amb.c.sobe = []
+
+    def upload_newsletter(dados, tipo):
+        amb.c.sobe.append((len(dados), tipo.name))
+        return types.SimpleNamespace(
+            url="https://mmg/c", DirectPath="/c", Handle="H123",
+            FileLength=len(dados), FileSHA256=b"s",
+            FileEncSHA256=b"", MediaKey=b"")
+    amb.c.upload_newsletter = upload_newsletter
+    return envio_canal
+
+
+def test_foto_para_canal_sobe_sem_cifra_e_leva_o_handle(amb, tmp_path):
+    """Canal nao e cifrado: upload_newsletter + handle no envio (DLL)."""
+    from telezapp.midia import envio
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    dll = _canal_com_dll(amb)
+    foto = tmp_path / "f.jpg"
+    foto.write_bytes(b"JPEG" + b"0" * 49)
+    cid = "120363@newsletter"
+    amb.p.enviar_arquivo(cid, envio.preparar(str(foto)), "Novidade",
+                         "ORIG9", [{"id": "5551@s.whatsapp.net",
+                                    "nome": "Ana"}])
+    nova = esperar(amb.fila, ev.MensagemNova).mensagem
+    assert nova.id == "CANAL1" and nova.resposta_a == ""
+    assert amb.c.sobe == [(53, "MediaImage")]
+    para, msg, handle = dll.chamadas[0]
+    assert para == cid and handle == "H123"
+    img = msg.imageMessage
+    assert img.caption == "Novidade" and img.URL == "https://mmg/c"
+    assert img.directPath == "/c" and not img.HasField("mediaKey")
+    assert not img.HasField("fileEncSHA256")
+    assert not img.contextInfo.stanzaID           # sem resposta em canal
+    assert not amb.c.enviadas                     # nada pelo envio comum
+
+
+def test_voz_e_documento_para_canal(amb, tmp_path):
+    from telezapp.midia import envio
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    dll = _canal_com_dll(amb)
+    pdf = tmp_path / "r.pdf"
+    pdf.write_bytes(b"%PDF")
+    amb.p.enviar_arquivo("120363@newsletter", envio.preparar(str(pdf)))
+    esperar(amb.fila, ev.MensagemNova)
+    doc = dll.chamadas[-1][1].documentMessage
+    assert doc.fileName == "r.pdf" and doc.URL == "https://mmg/c"
+    assert amb.c.sobe[-1][1] == "MediaDocument"
+
+
+def test_midia_para_canal_com_dll_antiga_avisa(amb, tmp_path):
+    from telezapp.midia import envio
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.c._NewClient__client = types.SimpleNamespace()
+    pdf = tmp_path / "r.pdf"
+    pdf.write_bytes(b"%PDF")
+    amb.p.enviar_arquivo("120363@newsletter", envio.preparar(str(pdf)))
+    falha = esperar(amb.fila, ev.EnvioFalhou)
+    assert "não envia mídia para canais" in falha.motivo
+
+
+def test_midia_para_canal_recusada_pelo_whatsapp(amb, tmp_path):
+    from telezapp.midia import envio
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    _canal_com_dll(amb, resposta=b"erro:not-authorized")
+    pdf = tmp_path / "r.pdf"
+    pdf.write_bytes(b"%PDF")
+    amb.p.enviar_arquivo("120363@newsletter", envio.preparar(str(pdf)))
+    assert "not-authorized" in esperar(amb.fila, ev.EnvioFalhou).motivo
+
+
+def test_texto_com_link_para_canal_vai_pelo_envio_comum(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    amb.p.enviar_texto("120363@newsletter", "Veja https://exemplo.com/a", "")
+    esperar(amb.fila, ev.MensagemNova)
+    para, msg = amb.c.enviadas[-1]
+    assert para == "120363@newsletter"
+    assert "https://exemplo.com/a" in (msg.conversation or
+                                       msg.extendedTextMessage.text)
+
+
 def test_mensagem_de_grupo_com_chave_e_conteudo_no_mesmo_pacote(amb):
     """Quando alguem fala no grupo depois de trocar a chave de envio, o
     pacote traz duas partes cifradas (a chave e o conteudo) e o whatsmeow
@@ -2421,6 +2524,41 @@ def test_grupo_so_de_admins_vira_somente_leitura_para_quem_nao_e_admin(
     p.cliente.get_group_info = sai                   # nao participo mais
     p._conferir_escrita(c.id, True)
     assert c.somente_leitura
+    banco.fechar()
+
+
+def test_grupo_de_comunidade_sem_minha_conta_na_lista_continua_com_escrita(
+        tmp_path):
+    b = ev.Barramento()
+    banco = Banco(str(tmp_path / "s.db"))
+    p = wa.ProvedorWhatsApp(m.Conta("w1", "whatsapp"), b, banco,
+                            pasta_sessoes=str(tmp_path),
+                            fabrica_cliente=ClienteFalso)
+    c = m.Conversa("w1", "123@g.us", "Irmao", "whatsapp", "grupo")
+    p.adotar_conversa(c)                  # criada pela tela, sem mensagens
+    assert p._conversas["123@g.us"] is c
+    p._conectada = True
+
+    def info(eu_incluso):
+        gente = [N.GroupParticipant(JID=jid("5551888880000"), IsAdmin=True)]
+        if eu_incluso:
+            gente.append(N.GroupParticipant(JID=jid("5551999990000")))
+        return N.GroupInfo(
+            GroupLinkedParent=N.GroupLinkedParent(
+                LinkedParentJID=jid("999")),
+            Participants=gente)
+    dados = {"info": info(False)}
+    p.cliente = types.SimpleNamespace(
+        get_group_info=lambda j_: dados["info"],
+        get_me=lambda: types.SimpleNamespace(
+            JID=jid("5551999990000"), LID=jid("")))
+    # a conta nao aparece na lista (pode vir incompleta ou so com LID):
+    # nao e prova de que nao participo, entao a escrita continua liberada
+    p._conferir_escrita(c.id, True)
+    assert not c.somente_leitura
+    dados["info"] = info(True)
+    p._conferir_escrita(c.id, True)
+    assert not c.somente_leitura
     banco.fechar()
 
 
@@ -3644,14 +3782,117 @@ def test_votar_envia_o_voto_e_guarda_o_meu(amb):
     assert m.enquete_de(b.mensagem)["meus"] == []
 
 
-def test_enquete_de_canal_nao_tenta_votar_e_avisa(amb):
-    msg = _enquete_chegou(amb)
-    msg.conversa_id = "120363172556943876@newsletter"
+class _VotarEmCanalFalso:
+    """A funcao VotarEmEnqueteDeCanal da DLL (ctypes): guarda o que recebeu."""
+    argtypes = restype = None
+
+    def __init__(self, resposta=b"ok:V1"):
+        self.resposta, self.chamadas = resposta, []
+
+    def __call__(self, uuid, para, servidor_id, hashes):
+        self.chamadas.append((para.decode(), servidor_id, hashes.decode()))
+        return self.resposta
+
+
+def _enquete_de_canal_chegou(amb, servidor_id=4321):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    criacao = E.Message(pollCreationMessage=E.PollCreationMessage(
+        name="Qual dia?", selectableOptionsCount=1,
+        options=[E.PollCreationMessage.Option(optionName=o)
+                 for o in ("Sexta", "Sábado", "Domingo")]))
+    e = evento("M9", criacao, chat="120363172556943876",
+               servidor="newsletter")
+    e.Info.ServerID = servidor_id
+    amb.f["Message"](amb.c, e)
+    return esperar(amb.fila, ev.MensagemNova).mensagem
+
+
+def test_enquete_de_canal_guarda_o_id_do_servidor(amb):
+    msg = _enquete_de_canal_chegou(amb)
+    assert m.enquete_de(msg)["servidor_id"] == 4321
+    # enquete comum nao guarda
+    assert m.enquete_de(_enquete_chegou(amb, id="M2"))["servidor_id"] == 0
+
+
+def test_votar_em_enquete_de_canal_manda_o_hash_das_opcoes(amb):
+    import hashlib
+    msg = _enquete_de_canal_chegou(amb)
+    voto = _VotarEmCanalFalso()
+    amb.c._NewClient__client = types.SimpleNamespace(
+        VotarEmEnqueteDeCanal=voto)
+    amb.c.uuid = b"u1"
     antes = len(amb.c.enviadas)
+    amb.p.votar_enquete(msg, [0, 2])
+    a = esperar(amb.fila, ev.MensagemAtualizada)
+    assert a.motivo == "enquete" and m.enquete_de(a.mensagem)["meus"] == [0, 2]
+    para, servidor_id, hashes = voto.chamadas[-1]
+    assert para == "120363172556943876@newsletter" and servidor_id == 4321
+    assert hashes.split(",") == [
+        hashlib.sha256(o.encode()).hexdigest() for o in ("Sexta", "Domingo")]
+    assert len(amb.c.enviadas) == antes     # nao passou pelo voto cifrado
+    # retirar o voto: lista vazia
+    amb.p.votar_enquete(a.mensagem, [])
+    b = esperar(amb.fila, ev.MensagemAtualizada)
+    assert voto.chamadas[-1][2] == "" and m.enquete_de(b.mensagem)["meus"] == []
+
+
+def test_entrar_no_grupo_da_comunidade_chama_a_dll_e_traduz_a_resposta(amb):
+    amb.f["Connected"](amb.c, N.Connected())
+    esperar(amb.fila, ev.ContaPronta)
+    chamadas = []
+    resposta = {"v": b"ok:entrou"}
+
+    def entrar(uuid, comunidade, grupo):
+        chamadas.append((comunidade.decode(), grupo.decode()))
+        return resposta["v"]
+    entrar.argtypes = entrar.restype = None
+    amb.c._NewClient__client = types.SimpleNamespace(
+        EntrarEmGrupoDaComunidade=entrar)
+    amb.c.uuid = b"u1"
+    assert amb.p.entrar_no_grupo_da_comunidade(
+        "999@g.us", "123@g.us") == "entrou"
+    assert chamadas == [("999@g.us", "123@g.us")]
+    resposta["v"] = b"ok:pedido"
+    assert amb.p.entrar_no_grupo_da_comunidade(
+        "999@g.us", "123@g.us") == "pedido"
+    resposta["v"] = b"erro:grupo indisponivel"
+    with pytest.raises(RuntimeError, match="indisponivel"):
+        amb.p.entrar_no_grupo_da_comunidade("999@g.us", "123@g.us")
+    # DLL antiga, sem a funcao
+    amb.c._NewClient__client = types.SimpleNamespace()
+    with pytest.raises(RuntimeError, match="Entre pelo celular"):
+        amb.p.entrar_no_grupo_da_comunidade("999@g.us", "123@g.us")
+
+
+def test_voto_em_canal_com_dll_antiga_avisa(amb):
+    msg = _enquete_de_canal_chegou(amb)
+    amb.c._NewClient__client = types.SimpleNamespace()
     amb.p.votar_enquete(msg, [0])
     aviso = esperar(amb.fila, ev.Aviso)
     assert "canais" in aviso.texto
-    assert len(amb.c.enviadas) == antes
+
+
+def test_voto_em_canal_de_enquete_antiga_sem_id_avisa(amb):
+    msg = _enquete_de_canal_chegou(amb, servidor_id=0)
+    voto = _VotarEmCanalFalso()
+    amb.c._NewClient__client = types.SimpleNamespace(
+        VotarEmEnqueteDeCanal=voto)
+    amb.c.uuid = b"u1"
+    amb.p.votar_enquete(msg, [0])
+    aviso = esperar(amb.fila, ev.Aviso)
+    assert "número" in aviso.texto and not voto.chamadas
+
+
+def test_voto_em_canal_recusado_pela_dll_avisa_e_nao_marca(amb):
+    msg = _enquete_de_canal_chegou(amb)
+    voto = _VotarEmCanalFalso(resposta=b"erro:not connected")
+    amb.c._NewClient__client = types.SimpleNamespace(
+        VotarEmEnqueteDeCanal=voto)
+    amb.c.uuid = b"u1"
+    amb.p.votar_enquete(msg, [1])
+    aviso = esperar(amb.fila, ev.Aviso)
+    assert "voto" in aviso.texto
 
 
 def test_info_da_enquete_pode_ser_serializada_como_o_neonize_faz():

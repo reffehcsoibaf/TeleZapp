@@ -412,6 +412,14 @@ def _reproducao(pai, msg, caminho, texto, fala, motor, video, cfg=None):
             pular(-passo, tecla=True)
         elif k == wx.WXK_RIGHT:
             pular(passo, tecla=True)
+        elif k in (wx.WXK_UP, wx.WXK_DOWN) and not evt.HasModifiers() \
+                and dlg.FindFocus() is volume_ctrl:
+            # o controle do Windows faz o contrario do esperado: cima sobe
+            passo_v = max(1, volume_ctrl.GetLineSize())
+            novo = volume_ctrl.GetValue() + (passo_v if k == wx.WXK_UP
+                                             else -passo_v)
+            volume_ctrl.SetValue(max(0, min(100, novo)))
+            volume_mudou(None)
         elif k == wx.WXK_HOME:
             mo.ir_para(0)
             dizer()
