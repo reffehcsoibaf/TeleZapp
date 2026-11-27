@@ -6075,7 +6075,8 @@ class Janela(wx.Frame):
                 "chamadas em grupo do WhatsApp em Configurações, Recursos "
                 "experimentais.", interromper=True)
             return
-        camera = (self.cfg.get("chamada_camera") or "")             if video_em_grupo else None
+        camera = ((self.cfg.get("chamada_camera") or "")
+                  if video_em_grupo else None)
         if video_em_grupo:
             self._registrar_destino_de_video(p)
         em_andamento = self._chamada_em_andamento_de(conv)
