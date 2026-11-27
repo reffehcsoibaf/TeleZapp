@@ -1260,6 +1260,175 @@ def test_copiar_transcricao_ou_descricao_tem_slot_de_atalho(j, monkeypatch):
     assert copiados[-1] == ("um gato", "Descrição copiada.")
 
 
+def test_transcrever_ou_descrever_tem_slot_de_atalho(
+        j, monkeypatch, tmp_path):
+    chave = "transcrever_descrever"
+    assert chave in j.atalhos.acoes
+    assert j.atalhos.efetivo(chave) == ""
+    j._aplicar_opcao("atalhos", {chave: "Ctrl+Alt+Y"})
+    assert j.itens[chave].rotulo.endswith("\tCtrl+Alt+Y")
+
+    x, _ = _ia_pronta(j, monkeypatch, tmp_path)
+    j.lista_msgs.SetSelection(j.mapa.index("7"))
+    feitos = []
+    monkeypatch.setattr(j, "_ia_processar",
+                        lambda y: feitos.append(("processar", y.id)))
+    monkeypatch.setattr(j, "_ia_ver",
+                        lambda y: feitos.append(("ver", y.id)))
+    j._transcrever_descrever()
+    assert feitos == [("processar", "7")]
+    m.atualizar_extras(x, ia={"texto": "ola, tudo bem?", "genero": "audio"})
+    j._transcrever_descrever()
+    assert feitos[-1] == ("ver", "7")
+
+    monkeypatch.setattr(j, "_mensagem_selecionada", lambda: None)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j._transcrever_descrever()
+    assert "Nenhuma mensagem selecionada" in ditas[-1]
+
+
+def _preparar_fila_de_ia(j, monkeypatch, mensagens):
+    """Deixa as mensagens prontas para a fila, sem chamar provedor de verdade."""
+    _abrir_com_caixa(j)
+    j.b.publicar(ev.MensagensCarregadas("t1", "20", mensagens))
+    jm.wx.mensagens.clear()
+    monkeypatch.setattr(j, "_ia_tem_provedor", lambda g: True)
+    monkeypatch.setattr(j, "_externo_para", lambda g: None)
+    monkeypatch.setattr(j, "_consentir_midias", lambda ms: True)
+    monkeypatch.setattr(j, "_ia_resultado", lambda *a, **k: None)
+    j.fala.falar = lambda t, interromper=False: None
+
+
+def test_transcrever_em_fila_as_mensagens_marcadas(j, monkeypatch):
+    a, b = [m.Mensagem("t1", "20", i, tipo=m.VOZ, autor="Ana")
+            for i in ("6", "7")]
+    _preparar_fila_de_ia(j, monkeypatch, [a, b])
+    feitos = []
+
+    def processar(x):
+        feitos.append(x.id)
+        j._ia_ocupadas.add(x.chave)
+    monkeypatch.setattr(j, "_ia_processar", processar)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.modo_msg, j.marc_msg = True, {a.id, b.id}
+    j.lista_msgs.SetFocus()
+
+    j._transcrever_descrever()
+    assert feitos == ["6"]   # a segunda espera a primeira acabar
+    assert not j.marc_msg and not j.modo_msg
+    assert "2 mensagens na fila" in ditas[0]
+
+    pronto = types.SimpleNamespace(texto="oi", provedor="p", modelo="q")
+    j._ia_pronto(a, "audio", pronto, None)
+    assert feitos == ["6", "7"]
+    assert j._fila_ia is not None
+    j._ia_pronto(b, "audio", pronto, None)
+    assert j._fila_ia is None
+    assert "2 de 2 processadas." in ditas[-1]
+    assert jm.wx.mensagens == ["2 de 2 processadas."]
+
+
+def test_fila_de_transcricao_falhas_geram_um_unico_aviso_no_fim(
+        j, monkeypatch):
+    a, b = [m.Mensagem("t1", "20", i, tipo=m.VOZ, autor="Ana")
+            for i in ("6", "7")]
+    _preparar_fila_de_ia(j, monkeypatch, [a, b])
+    feitos = []
+
+    def processar(x):
+        feitos.append(x.id)
+        j._ia_ocupadas.add(x.chave)
+    monkeypatch.setattr(j, "_ia_processar", processar)
+    j.modo_msg, j.marc_msg = True, {a.id, b.id}
+    j.lista_msgs.SetFocus()
+
+    j._transcrever_descrever()
+    j._ia_pronto(a, "audio", None, "falhou a primeira")
+    assert jm.wx.mensagens == []        # segue sem caixa modal no meio
+    assert feitos == ["6", "7"]
+    j._ia_pronto(b, "audio", None, "falhou a segunda")
+    assert j._fila_ia is None
+    assert jm.wx.mensagens == ["0 de 2 processadas; 2 falharam."]
+
+
+def test_fila_de_transcricao_pula_as_que_ja_tem_texto_e_sem_midia(
+        j, monkeypatch):
+    a, b = [m.Mensagem("t1", "20", i, tipo=m.VOZ, autor="Ana")
+            for i in ("6", "7")]
+    texto = msg("8", "oi", conversa="20")
+    _preparar_fila_de_ia(j, monkeypatch, [a, b, texto])
+    m.atualizar_extras(a, ia={"genero": "audio", "texto": "pronta"})
+    feitos = []
+
+    def processar(x):
+        feitos.append(x.id)
+        j._ia_ocupadas.add(x.chave)
+    monkeypatch.setattr(j, "_ia_processar", processar)
+    ditas = []
+    j.fala.falar = lambda t, interromper=False: ditas.append(t)
+    j.modo_msg, j.marc_msg = True, {a.id, b.id, texto.id}
+    j.lista_msgs.SetFocus()
+
+    j._transcrever_descrever()
+    assert feitos == ["7"]
+    assert "1 mensagem na fila" in ditas[0]
+    assert "1 mensagem já tinha texto" in ditas[0]
+    assert "1 mensagem sem mídia" in ditas[0]
+    j._ia_pronto(b, "audio", types.SimpleNamespace(
+        texto="oi", provedor="p", modelo="q"), None)
+
+
+def test_opcao_do_menu_de_selecao_transcreve_sem_exigir_foco(j, monkeypatch):
+    a, b = [m.Mensagem("t1", "20", i, tipo=m.VOZ, autor="Ana")
+            for i in ("6", "7")]
+    _preparar_fila_de_ia(j, monkeypatch, [a, b])
+    feitos = []
+
+    def processar(x):
+        feitos.append(x.id)
+        j._ia_ocupadas.add(x.chave)
+    monkeypatch.setattr(j, "_ia_processar", processar)
+    j.modo_msg, j.marc_msg = True, {a.id, b.id}
+    j.lista_conv.SetFocus()          # o popup tira o foco da lista de mensagens
+
+    opcoes = [o for o in j._opcoes_em_massa_msg()
+              if o[0].startswith("Transcrever")]
+    assert len(opcoes) == 1 and opcoes[0][0] == \
+        "Transcrever ou descrever 2 mensagens"
+    opcoes[0][1]()
+    assert feitos == ["6"]
+
+
+def test_fila_de_transcricao_segue_apos_download_com_erro(j, monkeypatch):
+    a, b = [m.Mensagem("t1", "20", i, tipo=m.VOZ, autor="Ana")
+            for i in ("6", "7")]
+    _preparar_fila_de_ia(j, monkeypatch, [a, b])
+    feitos = []
+
+    def processar(x):
+        feitos.append(x.id)
+        if len(feitos) == 1:
+            j._ia_pendentes[x.chave] = (x, False)
+        else:
+            j._ia_ocupadas.add(x.chave)
+    monkeypatch.setattr(j, "_ia_processar", processar)
+    j.modo_msg, j.marc_msg = True, {a.id, b.id}
+    j.lista_msgs.SetFocus()
+
+    j._transcrever_descrever()
+    assert feitos == ["6"]
+    j.b.publicar(ev.MidiaBaixada("t1", "20", "6", erro="sem rede"))
+    assert feitos == ["6", "7"]
+    assert j._fila_ia is not None
+    assert jm.wx.mensagens == []     # erro de download nao abre caixa pela fila
+    j._ia_pronto(b, "audio", types.SimpleNamespace(
+        texto="oi", provedor="p", modelo="q"), None)
+    assert j._fila_ia is None
+    assert jm.wx.mensagens == ["1 de 2 processadas; 1 falhou."]
+
+
 def test_detalhes_pedem_ao_provedor_o_nome_de_quem_recebeu(j, monkeypatch):
     j.lista_conv.SetSelection(0)
     j._char_hook(Tecla(wx_falso.WXK_RETURN))
@@ -3521,6 +3690,83 @@ def test_grupo_limpar_conversa_apaga_mensagens_e_mantem_na_lista(j):
     assert chave in j.indice
 
 
+class _DlgFavoritas:
+    """wx.MessageDialog falso para _escolher_sobre_favoritas: resposta e
+    textos sao de classe, para o teste configurar antes de chamar."""
+    resposta = None
+    textos = []
+
+    def __init__(self, pai, texto, titulo, estilo):
+        _DlgFavoritas.textos.append(texto)
+
+    def SetYesNoCancelLabels(self, *a):
+        pass
+
+    def ShowModal(self):
+        return _DlgFavoritas.resposta
+
+    def Destroy(self):
+        pass
+
+
+def _com_dialogo_favoritas(monkeypatch, resposta):
+    _DlgFavoritas.resposta = resposta
+    _DlgFavoritas.textos = []
+    monkeypatch.setattr(jm.wx, "MessageDialog", _DlgFavoritas, raising=False)
+    return _DlgFavoritas
+
+
+def test_limpar_conversa_mantem_as_favoritas_escolhendo_manter(j, monkeypatch):
+    _abrir_com_caixa(j)
+    chave = ("t1", "20")
+    fav = m.Mensagem("t1", "20", "5", texto="oi", data=AGORA)
+    m.atualizar_extras(fav, favorita=True)
+    comum = m.Mensagem("t1", "20", "6", texto="tchau", data=AGORA)
+    j.banco.salvar_mensagens([fav, comum])
+    dlg = _com_dialogo_favoritas(monkeypatch, jm.wx.ID_YES)
+    j._limpar_conversa(j.indice[chave])
+    assert "mensagens favoritas" in dlg.textos[-1]
+    restantes = j.banco.mensagens("t1", "20")
+    assert [x.id for x in restantes] == ["5"]
+    assert chave in j.indice
+
+
+def test_limpar_conversa_escolhendo_apagar_tudo_leva_as_favoritas_junto(
+        j, monkeypatch):
+    _abrir_com_caixa(j)
+    chave = ("t1", "20")
+    fav = m.Mensagem("t1", "20", "5", texto="oi", data=AGORA)
+    m.atualizar_extras(fav, favorita=True)
+    j.banco.salvar_mensagens([fav])
+    _com_dialogo_favoritas(monkeypatch, jm.wx.ID_NO)
+    j._limpar_conversa(j.indice[chave])
+    assert j.banco.mensagens("t1", "20") == []
+
+
+def test_limpar_conversa_com_favorita_pergunta_mesmo_sem_pergunta_ligada(
+        j, monkeypatch):
+    _abrir_com_caixa(j)
+    chave = ("t1", "20")
+    fav = m.Mensagem("t1", "20", "5", texto="oi", data=AGORA)
+    m.atualizar_extras(fav, favorita=True)
+    j.banco.salvar_mensagens([fav])
+    j.cfg.set("confirmar_limpar_conversa", False)   # "sem pergunta" ligada
+    _com_dialogo_favoritas(monkeypatch, jm.wx.ID_CANCEL)
+    j._limpar_conversa(j.indice[chave])
+    assert [x.id for x in j.banco.mensagens("t1", "20")] == ["5"]  # desistiu
+
+
+def test_limpar_conversa_com_a_opcao_desligada_apaga_as_favoritas_tambem(j):
+    _abrir_com_caixa(j)
+    chave = ("t1", "20")
+    fav = m.Mensagem("t1", "20", "5", texto="oi", data=AGORA)
+    m.atualizar_extras(fav, favorita=True)
+    j.banco.salvar_mensagens([fav])
+    j.cfg.set("limpar_manter_favoritas", False)
+    j._limpar_conversa(j.indice[chave])
+    assert j.banco.mensagens("t1", "20") == []
+
+
 def test_limpar_conversa_zera_as_nao_lidas_na_lista_na_hora(j):
     _abrir_com_caixa(j)
     chave = ("t1", "20")
@@ -3569,12 +3815,64 @@ def test_limpar_conversa_escolhendo_celular_lembra_e_manda(j, monkeypatch):
     assert not j.banco.mensagens("t1", "20", 1)
 
 
+def test_apagar_conversa_com_favorita_pergunta_antes(j, monkeypatch):
+    chave = ("t1", "10")
+    fav = m.Mensagem("t1", "10", "5", texto="oi", data=AGORA)
+    m.atualizar_extras(fav, favorita=True)
+    j.banco.salvar_mensagens([fav])
+    dlg = _com_dialogo_favoritas(monkeypatch, jm.wx.ID_CANCEL)
+    j._apagar_conversa(j.indice[chave])
+    assert chave in j.indice            # desistiu no aviso de favoritas
+    assert "mensagens favoritas" in dlg.textos[-1]
+
+
+def test_apagar_conversa_escolhendo_manter_favoritas_vira_limpar(
+        j, monkeypatch):
+    chave = ("t1", "10")
+    fav = m.Mensagem("t1", "10", "5", texto="oi", data=AGORA)
+    m.atualizar_extras(fav, favorita=True)
+    comum = m.Mensagem("t1", "10", "6", texto="tchau", data=AGORA)
+    j.banco.salvar_mensagens([fav, comum])
+    _com_dialogo_favoritas(monkeypatch, jm.wx.ID_YES)
+    j._apagar_conversa(j.indice[chave])
+    assert chave in j.indice                   # nao apagou a conversa
+    assert [x.id for x in j.banco.mensagens("t1", "10")] == ["5"]
+
+
+def test_apagar_conversa_escolhendo_apagar_tudo(j, monkeypatch):
+    chave = ("t1", "10")
+    fav = m.Mensagem("t1", "10", "5", texto="oi", data=AGORA)
+    m.atualizar_extras(fav, favorita=True)
+    j.banco.salvar_mensagens([fav])
+    _com_dialogo_favoritas(monkeypatch, jm.wx.ID_NO)
+    wx_falso.resposta_messagebox[0] = wx_falso.YES    # confirma o apagar
+    j._apagar_conversa(j.indice[chave])
+    assert chave not in j.indice
+    wx_falso.resposta_messagebox[0] = wx_falso.NO
+
+
+def test_apagar_conversa_com_a_opcao_desligada_nao_pergunta(j, monkeypatch):
+    chave = ("t1", "10")
+    fav = m.Mensagem("t1", "10", "5", texto="oi", data=AGORA)
+    m.atualizar_extras(fav, favorita=True)
+    j.banco.salvar_mensagens([fav])
+    j.cfg.set("limpar_manter_favoritas", False)
+
+    def sem_dialogo(*a, **k):
+        raise AssertionError("nao devia perguntar com a opcao desligada")
+    monkeypatch.setattr(jm.wx, "MessageDialog", sem_dialogo, raising=False)
+    wx_falso.resposta_messagebox[0] = wx_falso.YES    # confirma o apagar
+    j._apagar_conversa(j.indice[chave])
+    assert chave not in j.indice
+    wx_falso.resposta_messagebox[0] = wx_falso.NO
+
+
 def test_grupo_apagar_pergunta_a_acao_e_encaminha(j, monkeypatch):
     conv = j.indice[("t1", "20")]
     conv.tipo = "grupo"
     chamadas = []
     j._limpar_conversa = lambda c: chamadas.append(("limpar", c.id))
-    j._sair_do_grupo = lambda c, p, ap, cel=False: chamadas.append(
+    j._sair_do_grupo = lambda c, p, ap, cel=False, pt=False: chamadas.append(
         ("sair", ap))
     for acao in ("limpar", "sair_apagar", None):
         monkeypatch.setattr(jm.dialogos, "escolher_acao_grupo",
@@ -9572,6 +9870,55 @@ def _com_celular(j, monkeypatch):
     return pedidos
 
 
+def test_onde_tambem_depende_do_servico(j):
+    tele = j.indice[("t1", "20")]
+    zap = m.Conversa("w1", "30", "Zap", "whatsapp", "privada", data=AGORA)
+    assert j._onde_tambem([tele]) == "na conta do Telegram"
+    assert j._onde_tambem([zap]) == "no celular"
+    assert j._onde_tambem([tele, zap]) == "na conta"
+
+
+def test_lembrar_celular_pula_o_aviso_so_com_telegram(j, monkeypatch):
+    tele = j.indice[("t1", "20")]
+    zap = m.Conversa("w1", "30", "Zap", "whatsapp", "privada", data=AGORA)
+    avisos = []
+    monkeypatch.setattr(jm.wx, "MessageBox",
+                        lambda *a, **k: avisos.append(a) or jm.wx.OK)
+    assert j._lembrar_celular(convs=[tele]) is True
+    assert avisos == []                       # so Telegram: sem aviso
+    assert j._lembrar_celular(convs=[tele, zap]) is True
+    assert len(avisos) == 1                   # tem WhatsApp: avisa
+
+
+def test_perguntar_para_todos_so_pergunta_quando_o_servico_deixa(
+        j, monkeypatch):
+    tele = j.indice[("t1", "20")]
+    zap = m.Conversa("w1", "30", "Zap", "whatsapp", "privada", data=AGORA)
+    prov_t1 = j.contas.provedor("t1")
+    prov_t1.APAGA_PARA_TODOS = False
+    assert j._perguntar_para_todos([zap]) is False   # whatsapp nunca pergunta
+    chamadas = []
+    monkeypatch.setattr(jm.wx, "MessageBox",
+                        lambda *a, **k: chamadas.append(a) or jm.wx.YES)
+    prov_t1.APAGA_PARA_TODOS = True
+    assert j._perguntar_para_todos([tele]) is True
+    assert len(chamadas) == 1
+    assert "administrador" not in chamadas[0][0]   # privada: sem o aviso
+    tele_grupo = m.Conversa("t1", "21", "Grupo", "telegram", "grupo",
+                            data=AGORA)
+    chamadas.clear()
+    assert j._perguntar_para_todos([tele_grupo]) is True
+    assert "administrador" in chamadas[0][0]
+
+
+def test_kw_para_todos_so_manda_ao_servico_que_aceita(j):
+    prov_t1 = j.contas.provedor("t1")
+    prov_t1.APAGA_PARA_TODOS = True
+    assert j._kw_para_todos(prov_t1, True) == {"para_todos": True}
+    prov_t1.APAGA_PARA_TODOS = False
+    assert j._kw_para_todos(prov_t1, True) == {}
+
+
 def test_item_limpar_a_conversa_fica_no_menu_conversas_e_age_na_em_foco(
         j, monkeypatch):
     assert "limpar_conversa" in j.itens
@@ -9650,7 +9997,8 @@ def test_limpar_varias_conversas_marcadas_com_uma_pergunta_so(j, monkeypatch):
     assert not j.banco.mensagens("t1", "20", 1)
     assert not j.banco.mensagens("t1", "21", 1)
     assert c1.chave in j.indice and c2.chave in j.indice   # seguem na lista
-    assert "2 conversas limpadas" in falas[-1] and "celular" in falas[-1]
+    assert "2 conversas limpadas" in falas[-1]
+    assert "na conta do Telegram" in falas[-1]
 
 
 def test_dados_das_contas_em_gerenciar_contas(j, monkeypatch, tmp_path):

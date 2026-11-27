@@ -1,7 +1,7 @@
 # Primeiros passos
 O TeleZapp reúne o WhatsApp e o Telegram numa só janela do Windows, pensada para quem usa leitores de tela. Todos os controles são os do próprio Windows, sem telas desenhadas à mão, e por isso os leitores de tela os leem normalmente.
 
-Os avisos que o TeleZapp fala por conta própria, como mensagem nova e resultado da inteligência artificial, são testados com o NVDA. Com outros leitores de tela, boa parte deles aparece na barra de situação.
+Os avisos que o TeleZapp fala por conta própria, como mensagem nova e resultado da inteligência artificial, são testados com o NVDA e o JAWS. Com outros leitores de tela, boa parte deles aparece na barra de situação.
 
 Para começar, use Menu, Novo, Nova conta. Veja os assuntos Conta do Telegram e Conta do WhatsApp.
 
@@ -42,7 +42,7 @@ Novo: tudo o que se cria. Nova mensagem, Nova chamada, Nova enquete, Novo contat
 Ir para: a lista de conversas, a lista de mensagens, o campo editável (onde se escreve a mensagem), os filtros de serviço ou conta e de tipo de conversa, o submenu Tipo de conversa, que escolhe um tipo direto, e a mensagem respondida.
 Mensagens, Conversas, Contatos, Chamadas e Mídias: os comandos de cada assunto.
 Exibir: o que as listas mostram e o que é falado.
-Ferramentas: Gerenciar contas, Reconectar as contas, Editar o meu perfil, Fazer backup, Restaurar backup, Configurações, Instalar, Criar cópia portátil, Desinstalar, Personalizar os atalhos, Minimizar a janela e continuar em segundo plano e Sair.
+Ferramentas: Gerenciar contas, Reconectar as contas, Editar o meu perfil, Fazer backup, Restaurar backup, Configurações, Instalar, Criar cópia portátil, Desinstalar, Personalizar os atalhos, Minimizar a janela e continuar em segundo plano, Reiniciar o TeleZapp e Sair.
 Ajuda: Guia de uso, Teclas de atalho, Novidades desta versão, Página do projeto na internet, Feedback, Entrar no grupo de suporte no WhatsApp, Verificar atualizações, Exportar logs, Abrir a pasta de logs, Abrir a pasta de sons, o submenu Depurar e Sobre o TeleZapp.
 
 Para sair do programa, há também o botão Sair, logo depois do campo de busca, e Ctrl+Q.
@@ -97,10 +97,13 @@ Uma conversa que não recebeu nenhuma mensagem atrasada não dispara a busca. Pa
 # Gerenciar contas
 Em Ferramentas, Gerenciar contas mostra a lista das contas, cada uma com uma caixa. Marcada, a conta fica conectada; desmarcada, ela não conecta e só mostra o que já está guardado. Espaço marca e desmarca.
 
-Com uma conta em foco, Tab leva aos botões Excluir e Renomear.
+Tab leva aos botões Nova conta, Excluir, Renomear e Fechar.
 
+Nova conta: abre a mesma janela de Menu, Novo, Nova conta.
 Excluir: apaga a sessão e as conversas guardadas daquela conta neste computador. Nada é apagado nos serviços.
 Renomear: dá à conta um nome seu, que vale nas listas e nos filtros.
+
+Mais abaixo, a caixa "Guardar os dados de cada conta em uma pasta separada" e o campo da pasta: com mais de uma conta, cada uma pode ficar numa pasta própria em vez de todas no mesmo lugar. "Escolher a pasta..." abre a janela de pastas do Windows. Vazio, usa a pasta padrão. Essa mudança só vale depois de reiniciar o TeleZapp (ele oferece reiniciar na hora, ao fechar esta janela).
 
 # Editar o meu perfil
 Ferramentas, "Editar o meu perfil" lê o perfil da conta e abre uma janela com o nome, o recado e, no Telegram, o sobrenome. Se houver mais de uma conta conectada, você escolhe qual.
@@ -298,7 +301,7 @@ Para que só Ctrl+Enter envie e Enter faça uma nova linha, desmarque "Enter na 
 
 Esc fecha a conversa, e o que você digitou e não enviou fica guardado como rascunho.
 
-Para responder a uma mensagem, selecione-a e use Ctrl+Shift+R. Esc cancela a resposta.
+Para responder a uma mensagem, selecione-a e use Responder, no menu Mensagem (a tecla pode ter sido trocada em Atalhos). Esc cancela a resposta.
 
 Em grupos, digitar @ no começo da mensagem ou depois de um espaço abre a lista de membros para mencionar. Digite para filtrar, e Enter escolhe.
 
@@ -541,7 +544,7 @@ O limite é 2 GB. Se a caixa de digitação tem texto, ele vai como legenda de f
 
 Enquanto envia, a mensagem aparece como "enviando" na lista. Ao terminar, o TeleZapp toca o som de enviada; se falhar, fala o motivo. A mídia enviada fica guardada no programa e abre sem baixar.
 
-Com uma resposta em andamento (Ctrl+Shift+R), a mídia enviada cita a mensagem respondida.
+Com uma resposta em andamento, a mídia enviada cita a mensagem respondida.
 
 # Gravar voz e som
 Há dois jeitos de gravar.
@@ -805,6 +808,8 @@ O último provedor da lista é o personalizado, para qualquer serviço compatív
 Nenhum arquivo sai do computador antes de você usar a ação numa mensagem e confirmar o envio, na primeira vez, para aquele provedor.
 
 No menu de contexto de uma mensagem de voz, áudio, foto, figurinha, vídeo ou PDF aparece a ação, como Transcrever o áudio. A mídia é baixada antes, se preciso.
+
+No menu Mensagens há "Transcrever o áudio ou descrever a mídia selecionada", que faz o mesmo pela mensagem em foco: se o texto já existir, abre; se não existir, transcreve ou descreve. Ele nasce sem tecla; escolha uma em Configurações, Atalhos. Com mais de uma mensagem marcada no modo de seleção (Control Espaço), a ação vale para todas: as que ainda não têm texto entram numa fila e são processadas uma por vez, na ordem da lista; se alguma falhar, a fila segue sem abrir caixa de erro por item e, no fim, uma única janela e a fala dizem quantas de quantas foram processadas. As que já têm texto e as que não são mídia são ignoradas, e o aviso inicial diz quantas. A autorização para enviar arquivos aos provedores é pedida uma vez para o conjunto. A mesma ação aparece no menu da seleção múltipla.
 
 O texto fica guardado na mensagem. A linha mostra o começo; Ver a transcrição, a descrição ou o texto do PDF abre o texto inteiro, com Copiar e Salvar em arquivo; e Copiar copia só ele. Para refazer, use a ação de novo.
 
