@@ -4198,12 +4198,14 @@ class Janela(wx.Frame):
             else:
                 try:
                     anexo = envio.preparar(
-                        item.caminho, voz=item.tipo_midia == m.VOZ)
+                        item.caminho, voz=item.tipo_midia == m.VOZ,
+                        nome=item.nome_arquivo)
                 except envio.ErroEnvio:
                     if item.tipo_midia != m.VOZ:
                         raise
                     # voz que nao e Ogg/Opus: segue como arquivo
-                    anexo = envio.preparar(item.caminho)
+                    anexo = envio.preparar(item.caminho,
+                                           nome=item.nome_arquivo)
                 prov.enviar_arquivo(conversa_id, anexo, item.texto)
             return "ok", None
         except Exception as e:
@@ -11680,7 +11682,8 @@ class Janela(wx.Frame):
             else:
                 try:
                     anexo = envio.preparar(item.caminho,
-                                           voz=item.tipo_midia == m.VOZ)
+                                           voz=item.tipo_midia == m.VOZ,
+                                           nome=item.nome_arquivo)
                 except envio.ErroEnvio as e:
                     motivo = str(e)
         if item is None or (item.tipo == "arquivo" and anexo is None):

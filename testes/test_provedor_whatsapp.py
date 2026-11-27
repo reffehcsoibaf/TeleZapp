@@ -4948,6 +4948,22 @@ def test_confirmar_telefone_so_diz_que_nao_existe_se_nenhuma_forma_existe():
     assert id_ == "" and "não está registrado no WhatsApp" in motivo
 
 
+def test_consulta_com_endereco_interno_guarda_o_lid_para_enviar():
+    """27/11: ao enviar a quem nao esta salvo, "<telefone>@s.whatsapp.net"
+    falhava com "no LID found"; a consulta devolve o LID e o envio o usa."""
+    p, _ = _prov_com_consulta([])
+    lid = jid("123931415584828", "lid")
+    p.cliente.is_on_whatsapp = lambda *numeros: [N.IsOnWhatsAppResponse(
+        Query="+5551988887777", IsIn=True, JID=lid)]
+    # o telefone segue sendo o id da conversa (nunca "+<LID>")
+    assert p.confirmar_telefone("+5551988887777") == (
+        "5551988887777@s.whatsapp.net", "")
+    destino = p._jid("5551988887777@s.whatsapp.net")
+    assert (destino.User, destino.Server) == ("123931415584828", "lid")
+    outro = p._jid("5551999990000@s.whatsapp.net")      # nao consultado
+    assert (outro.User, outro.Server) == ("5551999990000", "s.whatsapp.net")
+
+
 def test_confirmar_telefone_com_erro_na_rede_vale_o_digitado():
     p, _ = _prov_com_consulta([], erro=RuntimeError("rede"))
     assert p.confirmar_telefone("+5562983220258") == (

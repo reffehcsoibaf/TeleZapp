@@ -987,7 +987,8 @@ class ControleDetalhes:
                 botoes.append(("Ver a &foto do grupo", self.ver_foto))
                 botoes.append(("&Descrever a foto do grupo",
                                self.descrever_foto))
-            if d.get("comunidade"):
+            if d.get("comunidade") or (d.get("da_comunidade") and
+                                       d.get("subgrupos")):
                 botoes.append(("&Grupos da comunidade", self.subgrupos))
             if d.get("sou_admin"):
                 botoes.append(("&Administrar grupo", self.administrar_grupo))

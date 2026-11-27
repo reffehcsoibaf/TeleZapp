@@ -555,6 +555,16 @@ def test_encaminhar_prepara_texto_midia_baixada_e_explica_o_resto(tmp_path):
     assert enc.preparar(apagada, lambda x: None)[0] is None
 
 
+def test_encaminhar_usa_o_nome_original_do_arquivo(tmp_path):
+    from telezapp.nucleo import encaminhar as enc
+    doc = tmp_path / "1_relatorio.pdf"
+    doc.write_bytes(b"PDF")
+    item, _ = enc.preparar(
+        msg(id="1", tipo=m.DOCUMENTO, nome_arquivo="relatorio.pdf"),
+        lambda x: str(doc))
+    assert item.nome_arquivo == "relatorio.pdf"
+
+
 def test_encaminhar_destinos_so_de_contas_conectadas_sem_repetir():
     from telezapp.nucleo import encaminhar as enc
     conversas = [m.Conversa("a", "1", "Bia"), m.Conversa("a", "2", "Ana"),

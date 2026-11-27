@@ -2998,12 +2998,19 @@ class ProvedorWhatsApp(Provedor):
         if info.OwnerPN.User:
             dono = self._nome_contato(info.OwnerPN)
         subgrupos = []
+        # na comunidade, os subgrupos; num grupo da comunidade, os irmaos
+        # (a mesma lista, pedida pelo grupo-pai)
+        pai = None
         if info.GroupParent.IsParent:
+            pai = _jid_obj(usuario, servidor)
+        elif info.GroupLinkedParent.LinkedParentJID.User:
+            pai = info.GroupLinkedParent.LinkedParentJID
+        if pai is not None:
             try:
-                for alvo in self.cliente.get_sub_groups(
-                        _jid_obj(usuario, servidor)):
-                    subgrupos.append((jid_texto(alvo.JID),
-                                      alvo.GroupName.Name or "Grupo"))
+                for alvo in self.cliente.get_sub_groups(pai):
+                    if jid_texto(alvo.JID) != conversa_id:
+                        subgrupos.append((jid_texto(alvo.JID),
+                                          alvo.GroupName.Name or "Grupo"))
             except Exception:
                 log.info("sem a lista de grupos da comunidade")
         ajustes = None
@@ -4659,6 +4666,11 @@ class ProvedorWhatsApp(Provedor):
                 # TeleZapp abriu a conversa como "+<LID de 15 digitos>")
                 if getattr(r.JID, "Server", "s.whatsapp.net")                         != "s.whatsapp.net" and consulta:
                     registrados[consulta] = consulta
+                    # 27/11: o envio a "<telefone>@s.whatsapp.net" de quem
+                    # nao esta salvo falha com "no LID found"; o endereco
+                    # interno que a consulta devolveu serve de destino
+                    self.__dict__.setdefault("_lids_consultados", {})[
+                        consulta] = (r.JID.User, r.JID.Server)
                     log.info("a consulta do telefone voltou com endereço "
                              "interno (%s, %d dígitos); vale o telefone "
                              "consultado", r.JID.Server, len(r.JID.User))
@@ -6675,6 +6687,10 @@ class ProvedorWhatsApp(Provedor):
     def _jid(self, conversa_id):
         from neonize.utils.jid import build_jid
         usuario, servidor = conversa_id.split("@", 1)
+        if servidor == "s.whatsapp.net":
+            lid = self.__dict__.get("_lids_consultados", {}).get(usuario)
+            if lid is not None:
+                return build_jid(*lid)
         return build_jid(usuario, servidor)
 
     def _mencoes_no_texto(self, texto, mencoes):
