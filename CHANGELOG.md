@@ -7,7 +7,9 @@ Antes de escrever aqui, confira a versão em vigor: `git fetch --tags` e
 `gh release list -L 3` (a Latest é a publicada). O que veio depois dela vai em
 "Próxima versão (ainda sem número)".
 
-## Próxima versão (ainda sem número)
+## 2026.11.27.0
+
+Vídeo nas chamadas em grupo do WhatsApp (experimental, pedido dele, 27/11): nova caixa `chamada_grupo_video_whatsapp` em Recursos experimentais (desligada), que precisa das caixas das chamadas em grupo e de entrar em chamadas em andamento. Com ela, "Ligar com vídeo" numa conversa de grupo e o convite de chamada de vídeo em grupo levam a câmera, e o vídeo de cada pessoa chega numa imagem só, em grade (`ChamadasWhatsApp`, `Janela._ligar_para_grupo`, `suporta_video_em_grupo`). Sem a caixa, pedir vídeo em grupo só avisa e não liga. Veio do branch `video-em-grupo`, mesclado em 27/11 com a main dentro; os dois testes de janela que falhavam eram do teste (provedor falso sem o parâmetro `camera`; teste do tempo do "grupo só voz") e foram corrigidos. A DLL atual pode recusar vídeo em grupo (431 do servidor). **Sem teste ao vivo.**
 
 Contatos apagados voltavam (relato do Valderi, 27/11, versão 23.1, com log; o log só tinha a rede, mas a causa está no código): "Obter os contatos das contas ao abrir" vem ligada e, a cada conexão, `trazer_contatos.salvar` copiava de novo para a agenda todo contato da conta que não estava nela, inclusive os que a pessoa removera em Contatos. Nova tabela `contatos_removidos` (conta, id): `Banco.remover_contato` anota o contato, `salvar_contato` (a pessoa adicionou de novo) tira a anotação, e `salvar` pula os anotados. Testes em `test_banco.py` e `test_nucleo.py`. Quem já apagou antes desta versão precisa apagar uma vez mais.
 
