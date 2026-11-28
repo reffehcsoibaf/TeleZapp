@@ -6,6 +6,7 @@ vem o Tab para os botoes Sim e Nao."""
 import wx
 
 from telezapp import NOME
+from telezapp.interface import colaborar
 
 
 def texto_da_atualizacao(lanc, atual, pode_instalar, pasta_dados):
@@ -42,7 +43,8 @@ def texto_da_atualizacao(lanc, atual, pode_instalar, pasta_dados):
 class DialogoAtualizacao(wx.Dialog):
     """`escolha` fica "instalar", "pagina" ou "nao"."""
 
-    def __init__(self, pai, lanc, atual, pode_instalar, pasta_dados):
+    def __init__(self, pai, lanc, atual, pode_instalar, pasta_dados,
+                 fala=None):
         super().__init__(pai, title="Versão nova do %s" % NOME,
                          size=(640, 520),
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
@@ -56,6 +58,11 @@ class DialogoAtualizacao(wx.Dialog):
             name=rotulo, style=wx.TE_MULTILINE | wx.TE_READONLY)
         lay.Add(self.texto, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
         linha = wx.BoxSizer(wx.HORIZONTAL)
+        # entre o texto das novidades e o Sim: o Tab chega aqui primeiro
+        self.colaborar = wx.Button(self, label=colaborar.ROTULO_BOTAO)
+        self.colaborar.Bind(
+            wx.EVT_BUTTON, lambda e: colaborar.mostrar(self, fala))
+        linha.Add(self.colaborar, 0, wx.RIGHT, 16)
         if pode_instalar:
             self.principal = wx.Button(self, wx.ID_YES, "&Sim")
             self.secundario = wx.Button(self, wx.ID_NO, "&Não")

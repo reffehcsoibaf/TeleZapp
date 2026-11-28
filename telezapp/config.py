@@ -176,6 +176,11 @@ def definir_cfg(cfg):
     _cfg_de_contas = cfg
 
 
+def cfg_ativa():
+    """A configuracao ativa (None antes de o TeleZapp abrir)."""
+    return _cfg_de_contas
+
+
 def contas_separadas():
     """True quando cada conta guarda os dados em uma pasta propria (o
     banco de conversas, as sessoes e as midias). False (opcao
@@ -1558,6 +1563,24 @@ OPCOES = OPCOES + (
           "Pergunta antes de remover alguém dos contatos do TeleZapp, de "
           "remover um participante de um grupo e de recusar pedidos de "
           "entrada. Desmarcada, faz na hora.", grupo="Confirmações"),
+    Opcao("abrir_links_em", "Ao abrir um link", "Interface", "interno",
+          "Por onde abrir os links http e https das mensagens, dos botões e "
+          "dos robôs. Navegador interno: a janela do TeleZapp, como sempre. "
+          "Navegador padrão: o que está definido no Windows. Perguntar: abre "
+          "uma lista com o navegador interno, o padrão e os navegadores "
+          "instalados no computador, e você escolhe a cada link (nela dá "
+          "para marcar Lembrar). Navegador escolhido: sempre o que você "
+          "marcou para lembrar na pergunta. Os links do Telegram e do "
+          "WhatsApp continuam sendo abertos pelo TeleZapp.",
+          escolhas=(("interno", "Navegador interno do TeleZapp"),
+                    ("padrao", "Navegador padrão do Windows"),
+                    ("perguntar", "Perguntar a cada link"),
+                    ("escolhido", "Sempre o navegador que escolhi na "
+                     "pergunta"))),
+    Opcao("abrir_links_navegador", "Navegador escolhido para os links",
+          "Interface", "",
+          "Caminho do navegador lembrado na pergunta de por onde abrir os "
+          "links.", texto=True),
     Opcao("navegador_lembrar_sites",
           "Navegador interno: lembrar o que foi feito em cada site",
           "Interface", True,
@@ -1621,8 +1644,13 @@ def buscar_opcoes(texto):
     return achadas
 
 
-# Opcoes que ficam na janela Gerenciar contas, nao em Configuracoes
-OPCOES_DE_GERENCIAR_CONTAS = ("contas_em_pastas", "contas_pasta")
+# Opcoes que ficam em outra janela (Gerenciar contas e Contatos), nao em
+# Configuracoes. Continuam em OPCOES para ter o padrao e ser gravadas.
+OPCOES_DE_GERENCIAR_CONTAS = ("contas_em_pastas", "contas_pasta",
+                              "trazer_contatos_ao_abrir",
+                              "ocultar_contatos_duplicados",
+                              # guardada pela pergunta de por onde abrir links
+                              "abrir_links_navegador")
 
 
 PADROES = {o.chave: o.padrao for o in OPCOES}

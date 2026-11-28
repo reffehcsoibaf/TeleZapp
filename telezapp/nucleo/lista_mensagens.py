@@ -14,7 +14,7 @@ ITENS = (
     ("autor", "Nome de quem enviou"),
     ("hora", "Hora ou data da mensagem"),
     ("conteudo", "Conteúdo (texto, tipo da mídia e legenda)"),
-    ("marcas", "Marcas: editada, apagada pelo autor, favorita, fixada, temporária"),
+    ("marcas", "Marcas: encaminhada, editada, apagada pelo autor, favorita, fixada, temporária"),
     ("links", "Aviso de links, botões e opções (Tab)"),
     ("previa", "Prévia do link"),
     ("ia", "Transcrição ou descrição feita pela IA"),

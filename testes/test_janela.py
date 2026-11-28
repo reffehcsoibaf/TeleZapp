@@ -6255,7 +6255,7 @@ class _DialogoDeAtualizacao:
     abertas = 0
     escolha = "nao"
 
-    def __init__(self, pai, lanc, atual, pode, pasta):
+    def __init__(self, pai, lanc, atual, pode, pasta, fala=None):
         type(self).abertas += 1
         self.escolha = type(self).escolha
 

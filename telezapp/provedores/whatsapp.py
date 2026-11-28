@@ -114,8 +114,13 @@ TEXTO_SESSAO_COM_DEFEITO = (
     "desconecte o TeleZapp. Depois, conecte esta conta de novo em Ferramentas, "
     "Gerenciar contas.")
 MAX_GUARDADAS = 2000
-# Sem o aviso de fim da sincronia, os avisos voltam depois deste tempo
+# Sem o aviso de fim da sincronia, os avisos voltam depois deste tempo sem
+# chegar mensagem, ou no teto abaixo
 TEMPO_MAX_SINCRONIA = 45
+# Ja chegando mensagem acumulada: espera o aviso de fim do WhatsApp por mais
+# tempo (so uma rede de seguranca, o normal e o aviso encerrar)
+TEMPO_OCIOSO_COM_FILA = 600
+TETO_SINCRONIA = 1800
 # Oferta de chamada que veio na fila de quando o app estava fechado: mais velha
 # que isto (s) ja nao esta tocando. So vale antes do fim da fila, para um
 # relogio errado no computador nao calar as chamadas de verdade
@@ -463,6 +468,16 @@ def _contexto(interna):
         except (ValueError, AttributeError):
             continue
     return None
+
+
+def _encaminhada(ctx):
+    """O contexto da mensagem diz que ela foi encaminhada (ou muito
+    encaminhada)?"""
+    try:
+        return ctx is not None and bool(
+            ctx.isForwarded or int(ctx.forwardingScore or 0) > 0)
+    except (TypeError, ValueError, AttributeError):
+        return False
 
 
 def _prazo(ctx):
@@ -1347,6 +1362,8 @@ def converter(evento, conta_id, conversa_id, autor=""):
                      original=original_com_acoes(interna_, acoes_),
                      previa=previa_do_whatsapp(interna_))
     enquete_ = enquete_do_whatsapp(interna_)
+    if _encaminhada(ctx):
+        m.atualizar_extras(msg, encaminhada=True)
     if enquete_:
         if conversa_id.endswith("@newsletter") and info.ServerID:
             # o voto em canal precisa do id que o servidor deu a enquete
@@ -1532,6 +1549,8 @@ def converter_historico(wmi, conta_id, conversa_id, autor=""):
                      original=original_com_acoes(interna_, acoes_),
                      previa=previa_do_whatsapp(interna_))
     enquete_ = enquete_do_whatsapp(interna_)
+    if _encaminhada(ctx):
+        m.atualizar_extras(msg, encaminhada=True)
     if enquete_:
         m.atualizar_extras(msg, enquete=enquete_)
     if wmi.starred:
@@ -1706,6 +1725,8 @@ class ProvedorWhatsApp(Provedor):
         self._auto_resumo = None   # conversas/novas da rodada de buscas
         self._fila_anunciada = None   # mensagens na fila offline (aviso)
         self._recebidas_na_sincronia = 0
+        self._sincronia_geracao = 0     # cada conexao tem o seu vigia
+        self._sincronia_inicio = self._sincronia_ultima = 0.0
         self._trava = threading.RLock()
 
     # ----------------------------------------------------------- execucao
@@ -2110,10 +2131,10 @@ class ProvedorWhatsApp(Provedor):
         with self._trava:
             self._sincronizando = True
             self._recebidas_na_sincronia = 0
-        relogio = threading.Timer(TEMPO_MAX_SINCRONIA,
-                                  lambda: self._ao_fim_sincronia(None, None))
-        relogio.daemon = True
-        relogio.start()
+            self._sincronia_geracao += 1
+            self._sincronia_inicio = self._sincronia_ultima = agora
+            geracao = self._sincronia_geracao
+        self._vigiar_sincronia(geracao)
         nome, telefone = self.conta.nome, self.conta.telefone
         try:
             eu = self.cliente.get_me()
@@ -2399,6 +2420,32 @@ class ProvedorWhatsApp(Provedor):
                      e.Receipts, e.AppDataChanges)
         except Exception:
             log.exception("erro ao ler o aviso da fila offline")
+
+    def _vigiar_sincronia(self, geracao):
+        """Sem o aviso de fim do WhatsApp, a sincronia acaba quando passam
+        TEMPO_MAX_SINCRONIA s sem chegar mensagem (e no maximo em
+        TETO_SINCRONIA s). Antes era um prazo fixo: com a fila grande ele
+        vencia no meio e o resto chegava tocando um som por mensagem."""
+        def conferir():
+            with self._trava:
+                if geracao != self._sincronia_geracao or \
+                        not self._sincronizando:
+                    return
+                agora = time.monotonic()
+                # Chegando mensagem acumulada, so o aviso de fim encerra o
+                # silencio (o resto e rede de seguranca contra aviso perdido)
+                espera = (TEMPO_OCIOSO_COM_FILA
+                          if self._recebidas_na_sincronia
+                          else TEMPO_MAX_SINCRONIA)
+                acabou = (agora - self._sincronia_ultima >= espera
+                          or agora - self._sincronia_inicio >= TETO_SINCRONIA)
+            if acabou:
+                self._ao_fim_sincronia(None, None)
+            else:
+                self._vigiar_sincronia(geracao)
+        relogio = threading.Timer(5, conferir)
+        relogio.daemon = True
+        relogio.start()
 
     def _ao_fim_sincronia(self, cliente, e):
         with self._trava:
@@ -5630,6 +5677,7 @@ class ProvedorWhatsApp(Provedor):
                 self._remetentes[msg.id] = (remetente, msg.texto)
                 silenciosa = self._sincronizando
                 if silenciosa:
+                    self._sincronia_ultima = time.monotonic()
                     ancora_s = (msg.id, msg.minha,
                                 "" if msg.minha else remetente, msg.data)
                     antiga = self._ancoras_da_sincronia.get(cid)

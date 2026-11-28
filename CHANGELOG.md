@@ -7,6 +7,22 @@ Antes de escrever aqui, confira a versão em vigor: `git fetch --tags` e
 `gh release list -L 3` (a Latest é a publicada). O que veio depois dela vai em
 "Próxima versão (ainda sem número)".
 
+## Próxima versão (ainda sem número)
+
+(nada ainda)
+
+## 2026.11.28.0
+
+Por onde abrir os links (pedido de 28/11): opção `abrir_links_em` (Configurações, Interface, "Ao abrir um link": navegador interno, padrão do Windows, perguntar, ou um navegador escolhido) e `abrir_links_navegador` (oculta, guarda o programa). `dialogos.abrir_link` despacha pelo modo; `_perguntar_destino` é a janela "Abrir link" com a caixa "Lembrar desta escolha". `nucleo/navegadores.py` lê os navegadores do registro (`SOFTWARE\Clients\StartMenuInternet`, HKLM e HKCU). Navegador escolhido que sumiu cai no padrão do Windows. Testes em `test_abrir_links_em.py`.
+
+Sincronia inicial do WhatsApp sem rajada de sons (relato de 28/11): o silêncio dura até o `OfflineSyncCompletedEv`; com fila chegando, o vigia só encerra após `TEMPO_OCIOSO_COM_FILA` (600 s) sem mensagem ou `TETO_SINCRONIA` (1800 s); sem mensagens continua em 45 s. Ao fim, um só bipe + a fala de resumo. Telegram sem alteração. Testes em `test_sincronia_longa.py`.
+
+Marca "(encaminhada)" nas mensagens recebidas encaminhadas (só na exibição; não altera o texto guardado). Testes em `test_encaminhada.py`.
+
+Caixas de contatos saíram de Configurações, Interface e ficam só na janela Contatos.
+
+Colaborar financeiramente (pedido dele, 27/11): `interface/colaborar.py` mostra a chave Pix (celular, nome e banco) num texto somente leitura, com o botão "Copiar a chave Pix" (a fala confirma). Entradas: Ajuda, "Colaborar financeiramente..."; botão na janela de versão nova, entre o texto das novidades e o Sim (`DialogoAtualizacao` ganhou o parâmetro `fala`); seção no `site/index.html` com botão de copiar. Testes em `test_colaborar.py`. **Sem teste dele no app real; novidades ainda sem texto aprovado.**
+
 ## 2026.11.27.1
 
 Instalador sem numpy (relato de 27/11, 27.0): `import numpy` no topo de `acessibilidade/fala.py` (commit 3ba7e88) quebrava o instalador, que exclui numpy, telethon, neonize, cv2, soundfile, sounddevice, PIL e emoji, porque o `config` importa a fala ao carregar. O import saiu do topo (`outdata.clip`), e `test_instalador_sem_pacotes_pesados.py` importa os módulos do instalador com esses pacotes bloqueados.

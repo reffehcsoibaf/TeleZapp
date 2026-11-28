@@ -136,6 +136,15 @@ footer { border-top: 1px solid var(--linha); margin-top: 3rem; padding: 1.5rem 0
     </ul>
   </section>
 
+  <section aria-labelledby="colaborar">
+    <h2 id="colaborar">Colaborar financeiramente</h2>
+    <p>O TeleZapp é gratuito, sem anúncios, e é feito por uma pessoa só. Se ele te ajuda e você quiser colaborar, qualquer valor é bem-vindo, por Pix. É totalmente opcional e não muda nada no programa.</p>
+    <p>Chave Pix (celular): <code id="chave-pix">51989404175</code><br>Nome: Fabio Scheffer Moraes<br>Banco: Caixa Econômica Federal</p>
+    <p><button type="button" class="botao" id="botao-copiar-pix">Copiar a chave Pix</button></p>
+    <p class="resultado" id="resultado-pix" role="status"></p>
+    <p class="nota">Confira que o nome mostrado pelo seu banco é o acima antes de confirmar o Pix.</p>
+  </section>
+
   <section aria-labelledby="mais">
     <h2 id="mais">Mais informações</h2>
     <ul>
@@ -151,6 +160,19 @@ footer { border-top: 1px solid var(--linha); margin-top: 3rem; padding: 1.5rem 0
   </div>
 </footer>
 <script>
+// Copia a chave Pix. Sem acesso à área de transferência, mostra a chave no aviso.
+(function () {
+  var botao = document.getElementById("botao-copiar-pix");
+  var aviso = document.getElementById("resultado-pix");
+  var chave = document.getElementById("chave-pix").textContent;
+  botao.addEventListener("click", function () {
+    function ok() { aviso.textContent = "Chave Pix copiada: " + chave; }
+    function falhou() { aviso.textContent = "Não foi possível copiar. A chave é " + chave; }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(chave).then(ok, falhou);
+    } else { falhou(); }
+  });
+})();
 // Aponta o botão para o zip da versão mais nova, inclusive pré-lançamentos
 // (o endereço /releases/latest ignora pré-lançamentos). Sem JavaScript ou sem
 // resposta do GitHub, o botão leva à lista de versões.

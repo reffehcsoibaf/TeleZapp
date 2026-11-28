@@ -215,6 +215,7 @@ def extras_de(msg):
             "acoes": list(dados.get("acoes") or []),
             "original": dados.get("original") or "",
             "editada": bool(dados.get("editada")),
+            "encaminhada": bool(dados.get("encaminhada")),
             "apagada": bool(dados.get("apagada")),
             "apagada_pelo_autor": bool(dados.get("apagada_pelo_autor")),
             "ouvida": bool(dados.get("ouvida")),
@@ -949,6 +950,8 @@ def formatar(m, estilo, anterior=None, agora=None, respondida=None,
 
     def bloco_marcas():
         texto = ""
+        if extras_de(m)["encaminhada"]:
+            texto = _juntar(texto, "(encaminhada)")
         if extras_de(m)["editada"]:
             texto = _juntar(texto, "(editada)")
         if extras_de(m)["apagada_pelo_autor"]:
@@ -1278,6 +1281,8 @@ def detalhes(m, nome_conversa, agora=None, recibos=None, nomes=None,
         "Tipo: %s" % nome_do_tipo(m),
     ]
     extras_m = extras_de(m)
+    if extras_m["encaminhada"]:
+        linhas.append("Encaminhada: sim")
     if extras_m["editada"]:
         linhas.append("Editada: sim")
     if extras_m["apagada"]:
