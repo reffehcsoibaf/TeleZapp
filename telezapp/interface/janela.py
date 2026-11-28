@@ -23,9 +23,11 @@ import wx
 from telezapp import (GRUPO_DE_SUPORTE, NOME, PAGINA_DO_PROJETO, VERSAO,
                       config)
 from telezapp.acessibilidade.fala import (Fala, intervalo_do_tom_de_chamada,
-                                          INTERVALO_TOQUE_MS, bipe,
+                                          INTERVALO_TOQUE_MS,
+                                          PAUSA_ENTRE_TOQUES_MS, bipe,
                                           definir_sem_cortar, definir_sons,
-                                          definir_tom_de_chamada)
+                                          definir_tom_de_chamada,
+                                          duracao_do_som)
 from telezapp.interface import colagem, dialogos, robos, visualizadores
 from telezapp.interface import salvar as ui_salvar
 from telezapp.nucleo import agendamento as ag_nucleo
@@ -5870,9 +5872,10 @@ class Janela(wx.Frame):
             self.fala.falar(a.fala, interromper=True)
         toque = a.som in ("toque", "chamando")
         if a.som:
-            bipe(a.som, servico=self._servico_da_conta(c.conta_id))
+            servico = self._servico_da_conta(c.conta_id)
+            bipe(a.som, servico=servico)
             if toque:
-                self._repetir_toque(c, c.estado, a.som)
+                self._repetir_toque(c, c.estado, a.som, servico)
         self._atualizar_dialogo_chamada(c)
         if c.estado == ch.ENCERRADA:
             self.chamada = None
@@ -5900,14 +5903,26 @@ class Janela(wx.Frame):
         wx.CallLater(ch.ATRASO_DA_FALA_AO_ATENDER_MS
                      + ch.INTERVALO_DO_LEMBRETE_MS, lambda: lembrar(1))
 
-    def _repetir_toque(self, c, estado, som):
-        """Repete o som enquanto a chamada continua no mesmo estado."""
+    def _repetir_toque(self, c, estado, som, servico=""):
+        """Repete o toque enquanto a chamada continua no mesmo estado, so
+        depois de o som terminar (um arquivo escolhido pode ser longo). Uma so
+        cadeia por chamada: atualizar a janela nao acrescenta outra repeticao."""
+        anterior = getattr(self, "_timer_toque", None)
+        if anterior is not None:
+            anterior.Cancel()
+        self._timer_toque = None
+
         def de_novo():
+            self._timer_toque = None
             if self.chamada is c and c.estado == estado:
-                bipe(som, servico=self._servico_da_conta(c.conta_id))
-                self._repetir_toque(c, estado, som)
-        wx.CallLater(intervalo_do_tom_de_chamada() if som == "chamando"
-                     else INTERVALO_TOQUE_MS, de_novo)
+                bipe(som, servico=servico)
+                self._repetir_toque(c, estado, som, servico)
+
+        intervalo = (intervalo_do_tom_de_chamada() if som == "chamando"
+                     else INTERVALO_TOQUE_MS)
+        ms = max(intervalo, int(1000 * duracao_do_som(som, servico)
+                                + PAUSA_ENTRE_TOQUES_MS))
+        self._timer_toque = wx.CallLater(ms, de_novo)
 
     def _atualizar_dialogo_chamada(self, c):
         if self.dlg_chamada is not None and self.dlg_chamada.chamada is c:

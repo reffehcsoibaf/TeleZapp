@@ -623,7 +623,7 @@ Desligar: Ctrl+Shift+H.
 
 Fechar o TeleZapp com uma chamada aberta pede confirmação.
 
-O som de chamada pode ser desligado em Configurações, categoria Sons, desativando os eventos "toque de chamada recebida" e "tom de chamada feita". A fala continua avisando.
+O som de chamada pode ser desligado em Configurações, categoria Sons, desativando os eventos "toque de chamada recebida" e "tom de chamada feita". A fala continua avisando. Se você escolher um arquivo para o toque recebido, ele toca inteiro antes de repetir; os bips padrão continuam no ritmo de sempre.
 
 # Chamadas de vídeo
 No WhatsApp e no Telegram, em conversas com uma pessoa, Chamadas, "Ligar com vídeo" liga com a sua câmera ligada. Ele vem sem tecla de fábrica; dê uma em Configurações, Atalhos.

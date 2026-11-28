@@ -8465,6 +8465,30 @@ def test_tom_de_chamada_feita_repete_pelo_tom_escolhido_e_o_toque_a_cada_3s(
     assert prazos == [4000, 6000, 3000]
 
 
+def test_toque_espera_o_fim_do_som_e_nao_repete_duas_cadeias(j, monkeypatch):
+    timers = []
+
+    def call_later(ms, func, *args):
+        t = types.SimpleNamespace(ms=ms, cancelado=False)
+        t.Cancel = lambda: setattr(t, "cancelado", True)
+        timers.append(t)
+        return t
+
+    monkeypatch.setattr(jm.wx, "CallLater", call_later, raising=False)
+    monkeypatch.setattr(jm, "duracao_do_som", lambda tipo, servico="": 9.0)
+    j._repetir_toque(object(), "tocando", "toque", "whatsapp")
+    assert timers[0].ms == 9500          # 9 s de som + 500 ms de pausa
+
+    # Uma nova atualizacao da janela cancela o timer anterior.
+    j._repetir_toque(object(), "tocando", "toque", "whatsapp")
+    assert timers[0].cancelado and not timers[1].cancelado
+
+    # Som curto mantem o intervalo de fabrica.
+    monkeypatch.setattr(jm, "duracao_do_som", lambda tipo, servico="": 0.48)
+    j._repetir_toque(object(), "tocando", "toque")
+    assert timers[2].ms == jm.INTERVALO_TOQUE_MS
+
+
 def test_telefone_fora_do_whatsapp_diz_o_motivo_certo(j):
     from telezapp.nucleo import nova_mensagem as nm
     j.cfg.salvar_conta({"id": "w1", "servico": "whatsapp", "nome": "Zap"})

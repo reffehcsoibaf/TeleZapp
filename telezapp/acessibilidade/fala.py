@@ -192,6 +192,9 @@ TONS_DE_CHAMADA = {
 TOM_DE_CHAMADA_PADRAO = "europa"
 _tom_de_chamada = TOM_DE_CHAMADA_PADRAO
 INTERVALO_TOQUE_MS = 3000        # o toque de quem recebe repete mais rapido
+# Um toque escolhido pelo usuario pode ser mais longo que os bips: espera o
+# som terminar e ainda da essa pausa antes de repetir.
+PAUSA_ENTRE_TOQUES_MS = 500
 
 
 def tom_padrao(tipo):
@@ -419,6 +422,26 @@ NOTAS = {
 }
 NOTAS_PADRAO = ((300, 200),)
 TAXA_SINTETICA = 44100
+
+
+def duracao_do_som(tipo, servico=""):
+    """Segundos que o som escolhido para `tipo` dura (0 se desligado). O
+    toque repetido espera esse tempo antes de tocar de novo."""
+    if tipo == "chamando":
+        return TONS_DE_CHAMADA[_tom_de_chamada][1] / 1000.0
+    if servico:
+        tipo = tipo_do_servico(tipo, servico)
+    acao, caminho = acao_do_som(tipo)
+    if acao == "nenhum":
+        return 0.0
+    if acao == "arquivo":
+        try:
+            import soundfile as sf
+            return min(sf.info(caminho).duration, LIMITE_SEGUNDOS_ARQUIVO)
+        except Exception:
+            return 0.0
+    notas = NOTAS.get(tom_padrao(tipo), NOTAS_PADRAO)
+    return sum(ms for _, ms in notas) / 1000.0
 
 
 def _indice_dos_avisos():

@@ -9,7 +9,7 @@ Antes de escrever aqui, confira a versão em vigor: `git fetch --tags` e
 
 ## Próxima versão (ainda sem número)
 
-(nada ainda)
+Toque de chamada espera o som terminar (relato de 28/11): o intervalo de repetição passou a ser o maior entre o de fábrica (3 s no toque recebido, 4 s/6 s no tom de chamada feita) e a duração do som escolhido mais `PAUSA_ENTRE_TOQUES_MS` (500 ms). `fala.duracao_do_som` lê a duração do arquivo com `soundfile` (limitada a 15 s, como na reprodução) ou soma as notas do bip; som desligado vale 0. `janela._repetir_toque` guarda o `CallLater` e cancela o anterior, para atualizar a janela ou os participantes não começarem uma segunda cadeia de toques. Testes em `test_sons.py` e `test_janela.py`.
 
 ## 2026.11.28.0
 

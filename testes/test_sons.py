@@ -227,6 +227,22 @@ def test_tom_de_chamada_do_eua_junta_as_duas_frequencias():
     assert np.abs(onda).max() <= 0.31
 
 
+def test_duracao_do_som_para_repetir_o_toque(tmp_path):
+    assert fala.duracao_do_som("toque") == pytest.approx(0.48)
+    assert fala.duracao_do_som("chamando") == pytest.approx(1.0)
+    fala.definir_tom_de_chamada("eua")
+    assert fala.duracao_do_som("chamando") == pytest.approx(2.0)
+    fala.definir_tom_de_chamada("europa")
+    longo = wav(tmp_path / "toque.wav", segundos=4, taxa=8000)
+    curto = wav(tmp_path / "toque_whatsapp.wav", segundos=2, taxa=8000)
+    fala.definir_sons({"toque": longo, "toque_whatsapp": curto})
+    assert fala.duracao_do_som("toque") == pytest.approx(4.0)
+    assert fala.duracao_do_som("toque", "whatsapp") == pytest.approx(2.0)
+    fala.definir_sons({"toque": "desligado"})
+    assert fala.duracao_do_som("toque") == 0.0
+    fala.definir_sons({})
+
+
 def test_chamando_nao_e_mais_um_evento_de_som_do_pacote():
     assert "chamando" not in {n for n, _, _ in config.EVENTOS_SOM}
 
