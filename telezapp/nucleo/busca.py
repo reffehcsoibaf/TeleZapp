@@ -70,6 +70,7 @@ CARACTERISTICAS = (
     ("com_reacao", "Com reações"),
     ("cita_voce", "Cita ou responde a você"),
     ("editada", "Editada"),
+    ("encaminhada", "Encaminhada"),
     ("apagada", "Apagada pelo remetente"),
     ("ouvida", "Áudio ou voz já ouvido"),
     ("nao_ouvida", "Áudio ou voz ainda não ouvido"),
@@ -258,6 +259,8 @@ def _caracteristica(nome, x, extras):
         return extras["citou_voce"]
     if nome == "editada":
         return extras["editada"]
+    if nome == "encaminhada":
+        return extras["encaminhada"]
     if nome == "apagada":
         return extras["apagada"]
     if nome == "ouvida":

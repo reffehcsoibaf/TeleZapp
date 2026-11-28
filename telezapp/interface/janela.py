@@ -1066,6 +1066,7 @@ class Janela(wx.Frame):
         item(m_aj, "ajuda", "&Teclas de atalho\tShift+F1")
         item(m_aj, "novidades", "&Novidades desta versão")
         item(m_aj, "pagina_projeto", "&Página do projeto na internet")
+        item(m_aj, "colaborar", "Colaborar &financeiramente...")
         item(m_aj, "feedback", "&Feedback: relatar um problema ou sugerir "
                                "algo...")
         item(m_aj, "grupo_suporte", "Entrar no gr&upo de suporte no "
@@ -1305,6 +1306,7 @@ class Janela(wx.Frame):
             "novidades": lambda e: self._abrir_pagina("novidades.html"),
             "pagina_projeto": lambda e: self._abrir_na_internet(
                 PAGINA_DO_PROJETO),
+            "colaborar": lambda e: self._colaborar(),
             "feedback": lambda e: self._feedback(),
             "uso_dados": lambda e: self._ver_uso(),
             "grupo_suporte": lambda e: self._entrar_no_grupo_de_suporte(),
@@ -13596,6 +13598,10 @@ class Janela(wx.Frame):
             return
         controle.SetFocus()
 
+    def _colaborar(self):
+        from telezapp.interface import colaborar
+        colaborar.mostrar(self, self.fala)
+
     def _abrir_pagina(self, nome):
         """Pagina de novidades, no navegador padrao."""
         caminho = paginas.gerar(nome, config.pasta_temporaria())
@@ -14207,7 +14213,7 @@ class Janela(wx.Frame):
         pode = bool(getattr(sys, "frozen", False) and lanc.url_zip
                     and lanc.url_hash)
         dlg = DialogoAtualizacao(self, lanc, VERSAO, pode,
-                                 config.pasta_dados())
+                                 config.pasta_dados(), self.fala)
         try:
             dlg.ShowModal()
             escolha = dlg.escolha

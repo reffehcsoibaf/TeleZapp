@@ -671,6 +671,8 @@ def converter(msg, conta_id, conversa_id, lidas_ate=0, nome_padrao=""):
     enquete = enquete_do_telegram(msg)
     if enquete:
         m.atualizar_extras(nova, enquete=enquete)
+    if getattr(msg, "fwd_from", None) is not None:
+        m.atualizar_extras(nova, encaminhada=True)
     if comentavel:
         # post de canal com comentarios (o canal tem grupo de discussao)
         m.atualizar_extras(nova, comentavel=True, comentarios=int(

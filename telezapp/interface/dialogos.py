@@ -132,11 +132,81 @@ def abrir_link(url):
         return PELO_TELEZAPP
     if not url.lower().startswith(("http://", "https://")):
         return False
-    from telezapp.interface import navegador
-    if navegador.disponivel():
-        navegador.JanelaNavegador(None, url)
-        return PELO_TELEZAPP
+    from telezapp import config
+    from telezapp.nucleo import navegadores
+    cfg = config.cfg_ativa()
+    modo = cfg.get("abrir_links_em") if cfg is not None else "interno"
+    destino = ("interno", None)
+    if modo == "padrao":
+        destino = ("padrao", None)
+    elif modo == "escolhido":
+        exe = cfg.get("abrir_links_navegador")
+        if exe and os.path.isfile(exe):
+            destino = ("exe", exe)
+    elif modo == "perguntar":
+        destino = _perguntar_destino(cfg)
+        if destino is None:
+            return PELO_TELEZAPP       # desistiu: nao ha o que avisar
+    if destino[0] == "exe":
+        if navegadores.abrir(destino[1], url):
+            return True
+        destino = ("padrao", None)
+    if destino[0] == "interno":
+        from telezapp.interface import navegador
+        if navegador.disponivel():
+            navegador.JanelaNavegador(None, url)
+            return PELO_TELEZAPP
     return wx.LaunchDefaultBrowser(url)
+
+
+def _perguntar_destino(cfg):
+    """Lista por onde abrir o link. Devolve ("interno"|"padrao", None),
+    ("exe", caminho) ou None se a pessoa desistiu."""
+    from telezapp.nucleo import navegadores
+    opcoes = [("Navegador interno do TeleZapp", ("interno", None)),
+              ("Navegador padrão do Windows", ("padrao", None))]
+    for nome, exe in navegadores.listar():
+        opcoes.append((nome, ("exe", exe)))
+    dlg = wx.Dialog(wx.GetActiveWindow(), title="Abrir link",
+                    style=wx.DEFAULT_DIALOG_STYLE)
+    rot = wx.StaticText(dlg, label="Abrir o link em:")
+    lista = wx.ListBox(dlg, choices=[o[0] for o in opcoes],
+                       name="Abrir o link em")
+    lista.SetSelection(0)
+    lembrar = wx.CheckBox(
+        dlg, label="&Lembrar desta escolha e não perguntar mais")
+    ok = wx.Button(dlg, wx.ID_OK, "&Abrir")
+    ok.SetDefault()
+    cancelar = wx.Button(dlg, wx.ID_CANCEL, "&Cancelar")
+    lay = wx.BoxSizer(wx.VERTICAL)
+    lay.Add(rot, 0, wx.ALL, 8)
+    lay.Add(lista, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
+    lay.Add(lembrar, 0, wx.ALL, 8)
+    botoes = wx.BoxSizer(wx.HORIZONTAL)
+    botoes.Add(ok, 0, wx.RIGHT, 6)
+    botoes.Add(cancelar)
+    lay.Add(botoes, 0, wx.ALL | wx.ALIGN_RIGHT, 8)
+    dlg.SetSizerAndFit(lay)
+    dlg.SetMinSize((360, 260))
+    dlg.SetSize((400, 300))
+    lista.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: dlg.EndModal(wx.ID_OK))
+    lista.SetFocus()
+    try:
+        if dlg.ShowModal() != wx.ID_OK:
+            return None
+        i = lista.GetSelection()
+        if i == wx.NOT_FOUND:
+            return None
+        destino = opcoes[i][1]
+        if lembrar.GetValue():
+            if destino[0] == "exe":
+                cfg.set("abrir_links_navegador", destino[1])
+                cfg.set("abrir_links_em", "escolhido")
+            else:
+                cfg.set("abrir_links_em", destino[0])
+        return destino
+    finally:
+        dlg.Destroy()
 
 
 def rotulo_mencao(men):
